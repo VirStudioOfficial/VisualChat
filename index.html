@@ -3,50 +3,318 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>چت‌بات هوشمند</title>
+    <title>Visual Chat - چت‌بات هوشمند</title>
+    <!-- استفاده از فونت وزیرمتن و آیکون‌های FontAwesome -->
+    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Tahoma, sans-serif; }
-        body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-        .chat-container { width: 100%; max-width: 600px; background-color: #1e293b; border-radius: 16px; display: flex; flex-direction: column; height: 80vh; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-        .chat-header { background-color: #0284c7; padding: 15px; text-align: center; font-weight: bold; font-size: 1.2rem; }
-        .chat-box { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-        .message { padding: 10px 15px; border-radius: 12px; max-width: 80%; line-height: 1.5; word-wrap: break-word; }
-        .user { background-color: #0369a1; align-self: flex-start; border-bottom-right-radius: 2px; }
-        .bot { background-color: #334155; align-self: flex-end; border-bottom-left-radius: 2px; }
-        .input-area { display: flex; padding: 10px; background-color: #0f172a; gap: 10px; }
-        input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #334155; background-color: #1e293b; color: white; outline: none; }
-        button { padding: 12px 20px; border-radius: 8px; border: none; background-color: #0284c7; color: white; cursor: pointer; font-weight: bold; }
-        button:hover { background-color: #0369a1; }
+        :root {
+            --bg-main: #0f172a;
+            --bg-sidebar: #1e293b;
+            --bg-chat: #0f172a;
+            --bg-card: #1e293b;
+            --accent: #0284c7;
+            --accent-hover: #0369a1;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --user-msg: #0284c7;
+            --bot-msg: #1e293b;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Vazirmatn', sans-serif; }
+        body { background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+
+        /* سایدبار تاریخچه */
+        .sidebar {
+            width: 260px;
+            background-color: var(--bg-sidebar);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .brand-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .new-chat-btn {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+        .new-chat-btn:hover { background-color: var(--accent-hover); }
+
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .history-item {
+            padding: 10px 12px;
+            background-color: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .history-item:hover, .history-item.active { background-color: rgba(255, 255, 255, 0.08); color: white; }
+
+        /* بخش اصلی چت */
+        .main-content { flex: 1; display: flex; flex-direction: column; height: 100%; position: relative; }
+
+        .chat-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--bg-sidebar);
+        }
+
+        .chat-box {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            word-wrap: break-word;
+            position: relative;
+            animation: fadeIn 0.2s ease-in-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .message.user {
+            align-self: flex-start;
+            background-color: var(--user-msg);
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+
+        .message.bot {
+            align-self: flex-end;
+            background-color: var(--bot-msg);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 2px;
+        }
+
+        .msg-tools {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 5px;
+            gap: 8px;
+            font-size: 0.8rem;
+            opacity: 0.6;
+        }
+        .msg-tools i { cursor: pointer; }
+        .msg-tools i:hover { opacity: 1; }
+
+        /* پیش‌نمایش فایل */
+        .file-preview {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background-color: var(--bg-sidebar);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 0 20px;
+            width: fit-content;
+        }
+        .file-preview img { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
+
+        /* ورودی پیام */
+        .input-container { padding: 15px 20px; background-color: var(--bg-sidebar); border-top: 1px solid var(--border); }
+        .input-area { display: flex; align-items: center; background-color: var(--bg-main); border: 1px solid var(--border); border-radius: 10px; padding: 5px 10px; gap: 10px; }
+        
+        textarea {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: white;
+            outline: none;
+            resize: none;
+            height: 45px;
+            padding: 10px 0;
+            font-size: 0.95rem;
+        }
+
+        .icon-btn { color: var(--text-muted); background: none; border: none; font-size: 1.1rem; cursor: pointer; padding: 8px; transition: 0.2s; }
+        .icon-btn:hover { color: #38bdf8; }
+        .send-btn { color: var(--accent); }
+
+        /* تنظیمات سیستم (لحن) */
+        .persona-select {
+            background-color: var(--bg-main);
+            color: white;
+            border: 1px solid var(--border);
+            padding: 6px 12px;
+            border-radius: 6px;
+            outline: none;
+        }
     </style>
 </head>
 <body>
 
-<div class="chat-container">
-    <div class="chat-header">🤖 چت‌بات هوشمند اختصاصی</div>
-    <div class="chat-box" id="chatBox">
-        <div class="message bot">سلام! چطور می‌تونم کمکت کنم؟</div>
+    <!-- سایدبار -->
+    <div class="sidebar">
+        <div class="brand-title">
+            <i class="fa-solid fa-eye"></i> Visual Chat
+        </div>
+        <button class="new-chat-btn" onclick="startNewChat()">
+            <i class="fa-solid fa-plus"></i> گفتگو جدید
+        </button>
+        <div class="history-list" id="historyList"></div>
     </div>
-    <div class="input-area">
-        <input type="text" id="userInput" placeholder="پیام خود را بنویسید..." onkeypress="if(event.key === 'Enter') sendMessage()">
-        <button onclick="sendMessage()">ارسال</button>
+
+    <!-- بخش چت -->
+    <div class="main-content">
+        <div class="chat-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span>لحن پاسخگویی:</span>
+                <select class="persona-select" id="personaSelect">
+                    <option value="default">استاندارد و هوشمند</option>
+                    <option value="friendly">صمیمی و خودمانی</option>
+                    <option value="coder">متخصص برنامه‌نویسی</option>
+                    <option value="formal">کاملاً رسمی و اداری</option>
+                </select>
+            </div>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">پشتیبانی شده توسط Gemini 3.6 Flash</span>
+        </div>
+
+        <div class="chat-box" id="chatBox">
+            <div class="message bot">
+                سلام! به Visual Chat خوش آمدید. چطور می‌توانم به شما کمک کنم؟
+            </div>
+        </div>
+
+        <!-- پیش نمایش تصویر یا فایل آپلود شده -->
+        <div class="file-preview" id="filePreview">
+            <img id="previewImg" src="" alt="preview">
+            <span id="fileName" style="font-size: 0.85rem;"></span>
+            <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()"></i>
+        </div>
+
+        <!-- ورودی -->
+        <div class="input-container">
+            <div class="input-area">
+                <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
+                <button class="icon-btn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل/تصویر">
+                    <i class="fa-solid fa-paperclip"></i>
+                </button>
+                <textarea id="userInput" placeholder="پیامی بنویسید..." onkeydown="handleKeyDown(event)"></textarea>
+                <button class="icon-btn send-btn" onclick="sendMessage()" title="ارسال">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
     </div>
-</div>
 
 <script>
+    let currentChatId = Date.now();
+    let chats = JSON.parse(localStorage.getItem('visual_chat_history')) || {};
+    let selectedFileData = null;
+
+    window.onload = () => {
+        renderHistory();
+    };
+
+    function handleKeyDown(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            selectedFileData = {
+                name: file.name,
+                type: file.type,
+                base64: e.target.result
+            };
+            document.getElementById('fileName').innerText = file.name;
+            if(file.type.startsWith('image/')) {
+                document.getElementById('previewImg').src = e.target.result;
+                document.getElementById('previewImg').style.display = 'block';
+            } else {
+                document.getElementById('previewImg').style.display = 'none';
+            }
+            document.getElementById('filePreview').style.display = 'flex';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function removeFile() {
+        selectedFileData = null;
+        document.getElementById('fileInput').value = '';
+        document.getElementById('filePreview').style.display = 'none';
+    }
+
     async function sendMessage() {
         const inputField = document.getElementById("userInput");
         const chatBox = document.getElementById("chatBox");
         const text = inputField.value.trim();
+        const persona = document.getElementById("personaSelect").value;
 
-        if (!text) return;
+        if (!text && !selectedFileData) return;
 
-        chatBox.innerHTML += `<div class="message user">${text}</div>`;
+        // نمایش پیام کاربر
+        let userContentHtml = text;
+        if (selectedFileData && selectedFileData.type.startsWith('image/')) {
+            userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width: 100%; border-radius: 8px; margin-top: 8px;">`;
+        }
+
+        appendMessage('user', userContentHtml);
         inputField.value = "";
-        chatBox.scrollTop = chatBox.scrollHeight;
+        
+        const currentPayloadFile = selectedFileData;
+        removeFile();
 
+        // پیام در حال پاسخ
         const loadingDiv = document.createElement("div");
         loadingDiv.className = "message bot";
-        loadingDiv.innerText = "در حال پاسخگویی...";
+        loadingDiv.innerText = "در حال پردازش...";
         chatBox.appendChild(loadingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
 
@@ -54,25 +322,40 @@
             const response = await fetch('/api/chat', {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: text })
+                body: JSON.stringify({ 
+                    text: text, 
+                    persona: persona,
+                    file: currentPayloadFile 
+                })
             });
 
             const data = await response.json();
             
-            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+            if (data.candidates && data.candidates[0]?.content) {
                 const reply = data.candidates[0].content.parts[0].text;
-                loadingDiv.innerText = reply;
+                loadingDiv.innerHTML = formatReply(reply);
             } else if (data.error) {
-                loadingDiv.innerText = "⚠️ خطا: " + (data.error.message || JSON.stringify(data.error));
+                loadingDiv.innerText = "⚠️ خطا: " + (data.error.message || "خطای نا مشخص");
             } else {
                 loadingDiv.innerText = "خطا در دریافت پاسخ از هوش مصنوعی!";
             }
         } catch (error) {
             loadingDiv.innerText = "خطا در برقراری ارتباط با سرور!";
         }
+
+        chatBox.scrollTop = chatBox.scrollHeight;
+        saveCurrentChat();
+    }
+
+    function appendMessage(sender, content) {
+        const chatBox = document.getElementById("chatBox");
+        const msgDiv = document.createElement("div");
+        msgDiv.className = `message ${sender}`;
+        msgDiv.innerHTML = content + (sender === 'bot' ? `<div class="msg-tools"><i class="fa-regular fa-copy" onclick="copyText(this)"></i></div>` : '');
+        chatBox.appendChild(msgDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
-</script>
 
-</body>
-</html>
+    function formatReply(text) {
+        // تبدیل کدهای داخل علامت ``` به تگ pre برای نمایش بهتر
+        let formatted = text.replace(/
