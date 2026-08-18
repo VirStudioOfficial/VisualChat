@@ -1,3 +1,37 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>چت‌بات هوشمند</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Tahoma, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .chat-container { width: 100%; max-width: 600px; background-color: #1e293b; border-radius: 16px; display: flex; flex-direction: column; height: 80vh; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .chat-header { background-color: #0284c7; padding: 15px; text-align: center; font-weight: bold; font-size: 1.2rem; }
+        .chat-box { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .message { padding: 10px 15px; border-radius: 12px; max-width: 80%; line-height: 1.5; word-wrap: break-word; }
+        .user { background-color: #0369a1; align-self: flex-start; border-bottom-right-radius: 2px; }
+        .bot { background-color: #334155; align-self: flex-end; border-bottom-left-radius: 2px; }
+        .input-area { display: flex; padding: 10px; background-color: #0f172a; gap: 10px; }
+        input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #334155; background-color: #1e293b; color: white; outline: none; }
+        button { padding: 12px 20px; border-radius: 8px; border: none; background-color: #0284c7; color: white; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header">🤖 چت‌بات هوشمند اختصاصی</div>
+    <div class="chat-box" id="chatBox">
+        <div class="message bot">سلام! چطور می‌تونم کمکت کنم؟</div>
+    </div>
+    <div class="input-area">
+        <input type="text" id="userInput" placeholder="پیام خود را بنویسید..." onkeypress="if(event.key === 'Enter') sendMessage()">
+        <button onclick="sendMessage()">ارسال</button>
+    </div>
+</div>
+
 <script>
     async function sendMessage() {
         const inputField = document.getElementById("userInput");
@@ -29,10 +63,9 @@
                 const reply = data.candidates[0].content.parts[0].text;
                 loadingDiv.innerText = reply;
             } else if (data.error) {
-                // نمایش مستقیم ارور اصلی گوگل یا سرور
                 loadingDiv.innerText = "⚠️ خطا: " + (data.error.message || JSON.stringify(data.error));
             } else {
-                loadingDiv.innerText = "خطا در دریافت پاسخ! (پاسخ معتبر دریافت نشد)";
+                loadingDiv.innerText = "خطا در دریافت پاسخ از هوش مصنوعی!";
             }
         } catch (error) {
             loadingDiv.innerText = "خطا در برقراری ارتباط با سرور!";
@@ -40,3 +73,6 @@
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 </script>
+
+</body>
+</html>
