@@ -1,27 +1,41 @@
 // تابع تشخیص هوشمند و سخت‌گیرانه
+// نکته مهم: این تابع باید فقط روی متن خام و اصلی کاربر اجرا بشه، نه روی
+// پرامپت نهایی که شامل system instruction و اطلاعات زمان/تاریخ هم هست.
+// چون اگر متن کامل رو چک کنیم، رشته‌ی «امروز» که همیشه توی contextInfo
+// فرانت‌اند وجود داره باعث می‌شه هر پیامی (حتی «سلام») مجوز سرچ بگیره.
 function shouldSearchWeb(userText) {
     if (!userText) return false;
-    
+
     // پاک‌سازی کامل متن
     const cleanText = userText.trim().toLowerCase();
 
-    // ۱. اگر متن فقط سلام یا احوال‌پُرسی ساده باشه
-    const ignoreList = ['سلام', 'سلامم', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'عصر بخیر', 'شب بخیر', 'ممنون', 'مرسی', 'چخبر'];
-    
-    // چک کردن اولین کلمه متن
-    const firstWord = cleanText.split(' ')[0];
-    if (ignoreList.includes(cleanText) || ignoreList.includes(firstWord) || cleanText.length < 3) {
-        return false; // کاملاً متوقف کن
+    if (cleanText.length < 3) return false;
+
+    // ۱. اگر متن فقط سلام یا احوال‌پُرسی ساده باشه، حتی اگر با علامت یا فاصله همراه باشه
+    const ignoreList = [
+        'سلام', 'سلامم', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'عصر بخیر',
+        'شب بخیر', 'ممنون', 'مرسی', 'چخبر', 'خداحافظ', 'بای', 'اوکی', 'باشه'
+    ];
+
+    // پاک کردن علامت‌های نگارشی رایج برای مقایسه دقیق‌تر
+    const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
+    const firstWord = normalized.split(' ')[0];
+
+    // فقط وقتی کل پیام یه احوال‌پرسی کوتاهه (نه وقتی وسط یه جمله‌ی بلندتر اومده) متوقفش کن
+    const wordCount = normalized.split(' ').filter(Boolean).length;
+    if (wordCount <= 3 && (ignoreList.includes(normalized) || ignoreList.includes(firstWord))) {
+        return false;
     }
 
-    // ۲. فقط کلمات کلیدی خاص مجوز سرچ دارند
+    // ۲. فقط کلمات کلیدی خاص مجوز سرچ دارند (این‌ها باید واقعاً نیت جستجو رو نشون بدن،
+    // نه کلماتی که ممکنه به‌طور اتفاقی توی متن‌های دیگه هم پیدا بشن)
     const allowedKeywords = [
         'سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن',
         'قیمت', 'چنده', 'نرخ', 'دلار', 'طلا', 'سکه', 'ارز', 'بیت کوین', 'پلی استیشن',
-        'امروز', 'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین'
+        'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین', 'جدیدترین'
     ];
 
-    return allowedKeywords.some(kw => cleanText.includes(kw));
+    return allowedKeywords.some(kw => normalized.includes(kw));
 }
 
 // تابع سرچ چندکاناله با چرخش روی کلیدهای Tavily
@@ -30,7 +44,7 @@ async function fetchTavilyResults(query, tavilyKeys) {
 
     for (let i = 0; i < tavilyKeys.length; i++) {
         const currentKey = tavilyKeys[i];
-        
+
         try {
             const res = await fetch('https://api.tavily.com/search', {
                 method: 'POST',
@@ -62,9 +76,15 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: { message: 'Method not allowed' } });
     }
 
-    const { text, persona, file, webSearch, history } = req.body || {};
+    // rawText: متن خام و اصلی کاربر، بدون system instruction و بدون اطلاعات زمان/تاریخ.
+    // این همون چیزیه که باید برای تشخیص نیاز به سرچ و ساخت کوئری استفاده بشه.
+    // text: پرامپت کامل و تقویت‌شده‌ای که به Gemini فرستاده می‌شه.
+    const { text, rawText, file, webSearch, history } = req.body || {};
 
-    console.log("👉 EXACT TEXT FROM FRONTEND:", text); // حتماً در لاگ ورسل چک کن
+    // اگر به هر دلیلی rawText نیومد (مثلاً درخواست از یه نسخه قدیمی‌تر فرانت)، از text استفاده کن
+    const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : text;
+
+    console.log("👉 RAW USER TEXT:", rawText);
 
     const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
     const geminiKeys = rawGeminiKeys.split(',').map(k => k.trim()).filter(Boolean);
@@ -92,30 +112,18 @@ export default async function handler(req, res) {
 
     // تبدیل محکم webSearch به بولین
     const isWebSearchActive = webSearch === true || webSearch === 'true';
-    const isSearchNeeded = isWebSearchActive && shouldSearchWeb(text);
+    const isSearchNeeded = isWebSearchActive && shouldSearchWeb(searchQueryBase);
 
-    if (isSearchNeeded && text) {
-        console.log(`🔍 Executing Tavily Search for: "${text}"`);
-        const searchResults = await fetchTavilyResults(text, tavilyKeys);
+    if (isSearchNeeded && searchQueryBase) {
+        console.log(`🔍 Executing Tavily Search for: "${searchQueryBase}"`);
+        const searchResults = await fetchTavilyResults(searchQueryBase, tavilyKeys);
         const lastIndex = contents.length - 1;
-        
+
         if (searchResults && contents[lastIndex].role === 'user') {
             contents[lastIndex].parts[0].text += `\n\n[نتایج جستجوی زنده وب برای این پرسش]:\n${searchResults}\n\n[دستورالعمل: با استفاده از اطلاعات بالا، پاسخ دقیق و به روز ارائه بده.]`;
         }
     } else {
-        console.log(`⏩ SKIPPED SEARCH FOR: "${text}"`);
-    }
-
-    if (persona && contents.length > 0) {
-        let prefix = "";
-        if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
-        if (persona === 'coder') prefix = "[پاسخ را دقیق و با تمرکز بر کدنویسی بده] ";
-        if (persona === 'formal') prefix = "[پاسخ را کاملا رسمی بده] ";
-        
-        const lastIndex = contents.length - 1;
-        if (contents[lastIndex].role === 'user' && contents[lastIndex].parts[0]) {
-            contents[lastIndex].parts[0].text = prefix + contents[lastIndex].parts[0].text;
-        }
+        console.log(`⏩ SKIPPED SEARCH FOR: "${searchQueryBase}"`);
     }
 
     if (file && file.base64 && contents.length > 0) {
@@ -129,6 +137,10 @@ export default async function handler(req, res) {
         });
     }
 
+    // این فیلد به فرانت‌اند اضافه می‌شه تا خود کلاینت هم بدونه سرچ واقعاً انجام شده یا نه
+    // (اختیاریه، اگه لازم نداری می‌تونی حذفش کنی)
+    res.setHeader('X-Search-Performed', String(isSearchNeeded));
+
     const MODEL_NAME = 'gemini-3.5-flash-lite';
     let lastError = null;
 
@@ -137,7 +149,7 @@ export default async function handler(req, res) {
         try {
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`, {
                 method: 'POST',
-                headers: { 
+                headers: {
                     'Content-Type': 'application/json',
                     'x-goog-api-key': currentKey
                 },
