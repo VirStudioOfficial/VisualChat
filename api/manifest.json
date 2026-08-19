@@ -1,0 +1,16 @@
+{
+  "name": "Virtual Bot",
+  "short_name": "VirtualBot",
+  "description": "Virtual Bot AI Assistant",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0d19",
+  "theme_color": "#0b0d19",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
