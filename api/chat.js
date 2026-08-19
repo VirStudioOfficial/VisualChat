@@ -12,7 +12,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
-    // ۱. ساخت تاریخچه پیام‌ها
+    // ۱. آماده‌سازی تاریخچه پیام‌ها
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // ۳. افزودن فایل/عکس
+    // ۳. افزودن فایل (عکس)
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -52,14 +52,11 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۴. تعیین مدل و ابزار سرچ
-    // اگر سرچ روشن باشد از 2.5-flash استفاده می‌شود تا ارور ندهد
-    const selectedModel = webSearch ? 'gemini-2.5-flash' : 'gemini-3.5-flash-lite';
-
+    // ۴. ساخت بدنه درخواست
     const requestBody = { contents: contents };
 
     if (webSearch) {
-        requestBody.tools = [{ google_search: {} }]; // فرمت صحیح سرچ وب برای Gemini
+        requestBody.tools = [{ googleSearch: {} }];
     }
 
     let lastError = null;
@@ -68,7 +65,8 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`, {
+            // استفاده از همان مدل دقیق خودت که 404 ندهد
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -85,7 +83,7 @@ export default async function handler(req, res) {
                 continue; 
             }
 
-            console.log(`✅ Successfully responded using Key #${i + 1} with model ${selectedModel}`);
+            console.log(`✅ Successfully responded using Key #${i + 1}`);
             return res.status(200).json(data);
 
         } catch (err) {
