@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.yourcompany.virtualbot",
+      "package_name": "app.vercel.virtual_chat_eta.twa",
       "sha256_cert_fingerprints": [
-        "اینجا باید SHA256 کی‌استورتو بزاری"
+        "9C:50:E3:9E:0A:CA:A9:BE:D4:DF:94:73:1D:CD:ED:71:95:B0:9E:3E:73:91:FA:CD:D1:24:D4:AD:4C:F7:B1:41"
       ]
     }
   }
