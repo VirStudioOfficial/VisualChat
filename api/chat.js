@@ -37,19 +37,22 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
+            // ارسال کلید در هدر x-goog-api-key برای پشتیبانی کامل از تمام فرمت‌های کلید
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': currentKey
+                },
                 body: JSON.stringify({ contents: [{ parts: parts }] })
             });
 
             const data = await response.json();
 
-            // اگر کلید غیرفعال یا اشتباه بود (401) یا لیمیت شده بود (429)
             if (response.status === 401 || response.status === 429) {
-                console.warn(`⚠️ Key #${i + 1} bypassed (Status ${response.status}). Trying next key...`);
+                console.warn(`⚠️ Key #${i + 1} status ${response.status}. Switching to next key...`);
                 lastError = data;
-                continue; // بلافاصله کلید بعدی را امتحان کن
+                continue;
             }
 
             if (!response.ok) {
@@ -69,7 +72,7 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
         error: {
-            message: 'تمامی کلیدهای API ناموفق بودند (بررسی کنید کلید معتبر باشد).',
+            message: 'برقرار ارتباط با کلیدهای تنظیم شده ناموفق بود. لطفاً کلیدها را بررسی کنید.',
             details: lastError
         }
     });
