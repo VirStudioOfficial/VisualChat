@@ -399,6 +399,7 @@
         .msg-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 4px; }
         .msg-footer .speak-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; transition: color 0.2s; }
         .msg-footer .speak-btn:hover { color: var(--accent-2); }
+        .msg-footer .speak-btn.playing { color: var(--accent-2); animation: glowPulse 1.4s infinite; }
 
         .typing-dots { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
         .typing-dots span {
@@ -861,12 +862,6 @@
         loadSettings();
         initSpeechRecognition();
 
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.onvoiceschanged = () => {
-                window.speechSynthesis.getVoices();
-            };
-        }
-
         if (window.innerWidth <= 768) {
             document.documentElement.style.setProperty('--mobile-close', 'block');
         }
@@ -1097,6 +1092,19 @@
         sendMessage();
     }
 
+    function shouldSearchWeb(userText) {
+        if (!userText) return false;
+        const cleanText = userText.trim().toLowerCase();
+        if (cleanText.length < 3) return false;
+
+        const ignoreList = ['سلام', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'ممنون', 'خداحافظ'];
+        const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
+        if (ignoreList.includes(normalized)) return false;
+
+        const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'قیمت', 'اخبار', 'خبر', 'امشب'];
+        return allowedKeywords.some(kw => normalized.includes(kw));
+    }
+
     function toggleSearch() {
         if (isGenerating) return;
         isSearchEnabled = !isSearchEnabled;
@@ -1110,97 +1118,166 @@
         }
     }
 
+    let voiceInputBaseText = '';
+    let recognitionGotResult = false;
+
     function initSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const micBtn = document.getElementById('micBtn');
 
+        // اگه سایت روی HTTPS نباشه (و localhost هم نباشه) مرورگرها اصلاً اجازه دسترسی به میکروفون نمی‌دن
+        const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        if (!isSecure) {
+            console.warn('⚠️ سایت روی HTTPS نیست؛ تشخیص صدا در اکثر مرورگرها کار نخواهد کرد.');
+        }
+
         if (SpeechRecognition) {
-            try {
-                recognition = new SpeechRecognition();
-                recognition.lang = 'fa-IR';
-                recognition.continuous = false;
-                recognition.interimResults = false;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'fa-IR';
+            recognition.continuous = false;
+            recognition.interimResults = true;   // نتایج موقت را هم بگیر تا تشخیص در طول صحبت هم دیده بشه
+            recognition.maxAlternatives = 1;
 
-                recognition.onstart = () => {
-                    isRecording = true;
-                    if (micBtn) {
-                        micBtn.classList.add('recording');
-                        micBtn.title = "در حال ضبط... (برای توقف کلیک کنید)";
-                    }
-                };
+            recognition.onstart = () => {
+                recognitionGotResult = false;
+                const inputField = document.getElementById('userInput');
+                voiceInputBaseText = inputField.value || '';
+            };
 
-                recognition.onresult = (event) => {
-                    const transcript = event.results[0][0].transcript;
-                    const inputField = document.getElementById('userInput');
-                    if (inputField.value.length > 0 && !inputField.value.endsWith(' ')) {
-                        inputField.value += ' ' + transcript;
+            recognition.onresult = (event) => {
+                recognitionGotResult = true;
+                let finalTranscript = '';
+                let interimTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
                     } else {
-                        inputField.value += transcript;
+                        interimTranscript += transcript;
                     }
-                    autoResizeTextarea(inputField);
-                };
+                }
 
-                recognition.onerror = (e) => {
-                    console.error("Speech Rec Error:", e.error);
-                    if (e.error === 'not-allowed') {
-                        alert('دسترسی به میکروفون مجاز نیست. لطفاً در تنظیمات مرورگر مجوز را بدهید.');
-                    }
-                    stopVoiceInput();
-                };
+                const inputField = document.getElementById('userInput');
+                const sep = (voiceInputBaseText.length > 0 && !voiceInputBaseText.endsWith(' ')) ? ' ' : '';
+                inputField.value = voiceInputBaseText + sep + (finalTranscript || interimTranscript);
+                autoResizeTextarea(inputField);
 
-                recognition.onend = () => {
-                    stopVoiceInput();
-                };
-            } catch(e) {
-                console.error("Speech recognition init failed:", e);
-            }
+                if (finalTranscript) {
+                    voiceInputBaseText = inputField.value;
+                }
+            };
+
+            recognition.onerror = (e) => {
+                console.error('Speech recognition error:', e.error);
+                switch (e.error) {
+                    case 'not-allowed':
+                    case 'permission-denied':
+                        alert('دسترسی به میکروفون مجاز نیست. لطفاً در تنظیمات مرورگر (کنار آدرس سایت) دسترسی میکروفون را فعال کن.');
+                        break;
+                    case 'audio-capture':
+                        alert('میکروفونی پیدا نشد. لطفاً اتصال میکروفون دستگاه را بررسی کن.');
+                        break;
+                    case 'network':
+                        alert('مشکل در اتصال اینترنت برای تشخیص صدا. لطفاً اتصال اینترنت (و فیلترشکن/VPN در صورت وجود) را بررسی کن.');
+                        break;
+                    case 'no-speech':
+                        // صدایی شنیده نشد؛ نیازی به alert مزاحم نیست، فقط در کنسول لاگ می‌شه
+                        console.warn('صدایی تشخیص داده نشد.');
+                        break;
+                    case 'service-not-allowed':
+                        alert('سرویس تشخیص گفتار توسط مرورگر مسدود شده است.');
+                        break;
+                    default:
+                        break;
+                }
+                stopVoiceInput();
+            };
+
+            recognition.onend = () => {
+                if (!recognitionGotResult) {
+                    console.warn('ضبط بدون نتیجه پایان یافت (احتمالاً صدایی دریافت نشد یا صحبت خیلی کوتاه بود).');
+                }
+                stopVoiceInput();
+            };
         } else {
             if (micBtn) {
                 micBtn.style.display = 'none';
-                console.warn('مرورگر شما از تشخیص صدا پشتیبانی نمیکند.');
+                console.warn('مرورگر شما از تشخیص صدا پشتیبانی نمیکند. (این قابلیت روی سافاری آیفون و اکثر مرورگرهای موبایل غیرکروم پشتیبانی نمی‌شود)');
             }
         }
     }
 
     function toggleVoiceInput() {
         if (isGenerating || !recognition) return;
+        const micBtn = document.getElementById('micBtn');
 
         if (!isRecording) {
             try {
                 recognition.start();
+                isRecording = true;
+                micBtn.classList.add('recording');
+                micBtn.title = "در حال ضبط...";
             } catch (err) {
-                console.error("Start error:", err);
                 stopVoiceInput();
+                if(err.name === 'NotAllowedError'){
+                    alert('دسترسی به میکروفون مسدود شده است.');
+                }
             }
         } else {
-            try {
-                recognition.stop();
-            } catch(err) {
-                stopVoiceInput();
-            }
+            recognition.stop();
+            stopVoiceInput();
         }
     }
 
     function stopVoiceInput() {
+        const wasRecording = isRecording;
         isRecording = false;
         const micBtn = document.getElementById('micBtn');
         if (micBtn) {
             micBtn.classList.remove('recording');
             micBtn.title = "تبدیل صدا به متن";
         }
+        // فقط اگه هنوز در حال ضبط بودیم abort کن (جلوگیری از فراخوانی اضافه در onend)
+        if (recognition && wasRecording) {
+            try { recognition.abort(); } catch (e) {}
+        }
+    }
+
+    let currentSpeakingBtn = null;
+
+    function setSpeakBtnIcon(btn, playing) {
+        if (!btn) return;
+        const icon = btn.querySelector('i');
+        if (!icon) return;
+        if (playing) {
+            icon.className = 'fa-solid fa-circle-stop';
+            btn.classList.add('playing');
+            btn.title = 'توقف پخش';
+        } else {
+            icon.className = 'fa-solid fa-volume-high';
+            btn.classList.remove('playing');
+            btn.title = 'پخش صدا';
+        }
     }
 
     function speakText(btnElement) {
         if (!('speechSynthesis' in window)) {
-            alert('مرورگر شما از پخش صدا پشتیبانی نمی‌کند.');
+            alert('مرورگر شما از پخش صدا (Text-to-Speech) پشتیبانی نمی‌کند.');
             return;
         }
 
-        const icon = btnElement.querySelector('i');
+        const wasSameButton = currentSpeakingBtn === btnElement;
 
-        if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.cancel();
-            if (icon) icon.className = 'fa-solid fa-volume-high';
+        // هر حالت پخش قبلی رو متوقف و آیکونش رو ریست کن
+        window.speechSynthesis.cancel();
+        if (currentSpeakingBtn) {
+            setSpeakBtnIcon(currentSpeakingBtn, false);
+        }
+        currentSpeakingBtn = null;
+
+        // اگه روی همون دکمه‌ای که در حال پخش بود دوباره کلیک شد، فقط متوقفش کن (toggle off)
+        if (wasSameButton) {
             return;
         }
 
@@ -1208,33 +1285,24 @@
         const msgBody = wrapper ? wrapper.querySelector('.message') : null;
         if (!msgBody) return;
 
-        let cleanText = msgBody.innerText
-            .replace(/```[\s\S]*?```/g, 'کد برنامه‌نویسی')
-            .replace(/<[^>]*>/g, '')
-            .trim();
-
+        let cleanText = msgBody.innerText.replace(/```[\s\S]*?```/g, 'کد برنامه‌نویسی').trim();
         if (!cleanText) return;
 
-        window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(cleanText);
         utterance.lang = 'fa-IR';
         utterance.rate = 1.0;
 
-        const voices = window.speechSynthesis.getVoices();
-        const faVoice = voices.find(v => v.lang && (v.lang.includes('fa') || v.lang.includes('FA')));
-        if (faVoice) {
-            utterance.voice = faVoice;
-        }
-
-        if (icon) icon.className = 'fa-solid fa-square';
-
-        utterance.onend = () => {
-            if (icon) icon.className = 'fa-solid fa-volume-high';
+        utterance.onstart = () => {
+            currentSpeakingBtn = btnElement;
+            setSpeakBtnIcon(btnElement, true);
         };
-
-        utterance.onerror = (e) => {
-            console.error('TTS Error:', e);
-            if (icon) icon.className = 'fa-solid fa-volume-high';
+        utterance.onend = () => {
+            setSpeakBtnIcon(btnElement, false);
+            if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
+        };
+        utterance.onerror = () => {
+            setSpeakBtnIcon(btnElement, false);
+            if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
         };
 
         window.speechSynthesis.speak(utterance);
@@ -1408,7 +1476,7 @@
 
         const loadingDiv = document.createElement("div");
         loadingDiv.className = "message bot";
-        const willSearch = isSearchEnabled;
+        const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
         loadingDiv.innerHTML = willSearch
             ? `<span style="color:var(--text-muted); font-size:0.85rem;">در حال جستجو در وب...</span> <span class="typing-dots"><span></span><span></span><span></span></span>`
             : `<span class="typing-dots"><span></span><span></span><span></span></span>`;
