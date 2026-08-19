@@ -3,7 +3,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: { message: 'Method not allowed' } });
     }
 
-    const { text, persona, file } = req.body || {};
+    const { text, persona, file, webSearch, history } = req.body || {};
 
     const rawKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
     const apiKeys = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
@@ -12,10 +12,27 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
-    const parts = [];
-    if (file && file.base64) {
+    // ۱. ساخت آرایه contents از روی history فرستاده شده از فرانت‌اند
+    let contents = [];
+
+    if (history && Array.isArray(history) && history.length > 0) {
+        contents = history.map(item => ({
+            role: item.role === 'user' ? 'user' : 'model',
+            parts: [{ text: item.text }]
+        }));
+    } else {
+        // اگر هیستوری نبود، فقط پیام فعلی رو قرار بده
+        contents = [{
+            role: 'user',
+            parts: [{ text: text || "" }]
+        }];
+    }
+
+    // ۲. اگر فایلی (عکس) در پیام آخر ارسال شده، به آخرین پیام اضافه شو
+    if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.split(',')[1];
-        parts.push({
+        const lastIndex = contents.length - 1;
+        contents[lastIndex].parts.unshift({
             inline_data: {
                 mime_type: file.type || 'image/jpeg',
                 data: base64Data
@@ -23,12 +40,8 @@ export default async function handler(req, res) {
         });
     }
 
-    let promptText = text || "";
-    if (persona === 'friendly') promptText = "[پاسخ را صمیمی و دوستانه بده] " + promptText;
-    if (persona === 'coder') promptText = "[پاسخ را دقیق و با تمرکز بر کدنویسی بده] " + promptText;
-    if (persona === 'formal') promptText = "[پاسخ را کاملا رسمی بده] " + promptText;
-
-    if (promptText) parts.push({ text: promptText });
+    // ۳. ابزار سرچ وب گوگل
+    const tools = webSearch ? [{ googleSearch: {} }] : [];
 
     let lastError = null;
 
@@ -36,14 +49,16 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            // ست شده روی gemini-3.5-flash-lite همراه با هدر x-goog-api-key برای کلیدهای AQ
-            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
                     'x-goog-api-key': currentKey
                 },
-                body: JSON.stringify({ contents: [{ parts: parts }] })
+                body: JSON.stringify({ 
+                    contents: contents, // فرستادن کل تاریخچه
+                    tools: tools        // سرچ فعال یا غیرفعال
+                })
             });
 
             const data = await response.json();
@@ -51,7 +66,7 @@ export default async function handler(req, res) {
             if (!response.ok) {
                 console.warn(`⚠️ Key #${i + 1} failed with status ${response.status}. Error:`, JSON.stringify(data));
                 lastError = data;
-                continue; // سوئیچ به کلید بعدی در صورت ارور
+                continue; 
             }
 
             console.log(`✅ Successfully responded using Key #${i + 1}`);
