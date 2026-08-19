@@ -3,30 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visual Chat - چت‌بات هوشمند</title>
-    <!-- استفاده از فونت وزیرمتن و آیکون‌های FontAwesome -->
+    <title>Visual Chat</title>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <style>
         :root {
-            --bg-main: #0f172a;
-            --bg-sidebar: #1e293b;
-            --bg-chat: #0f172a;
-            --bg-card: #1e293b;
-            --accent: #0284c7;
-            --accent-hover: #0369a1;
-            --text-main: #f8fafc;
+            --bg-main: #0e1217;
+            --bg-sidebar: #171c23;
+            --bg-card: #1c232d;
+            --bg-input: #1e2631;
+            --accent: #38bdf8;
+            --accent-hover: #0284c7;
+            --text-main: #f1f5f9;
             --text-muted: #94a3b8;
-            --border: #334155;
-            --user-msg: #0284c7;
-            --bot-msg: #1e293b;
+            --border: #2e3744;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Vazirmatn', sans-serif; }
         body { background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
 
-        /* سایدبار تاریخچه */
+        /* سایدبار */
         .sidebar {
             width: 260px;
             background-color: var(--bg-sidebar);
@@ -34,13 +31,13 @@
             display: flex;
             flex-direction: column;
             padding: 15px;
-            transition: all 0.3s ease;
+            z-index: 10;
         }
 
         .brand-title {
-            font-size: 1.3rem;
+            font-size: 1.2rem;
             font-weight: bold;
-            color: #38bdf8;
+            color: var(--accent);
             display: flex;
             align-items: center;
             gap: 10px;
@@ -48,20 +45,19 @@
         }
 
         .new-chat-btn {
-            background-color: var(--accent);
-            color: white;
-            border: none;
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid var(--border);
             padding: 12px;
-            border-radius: 8px;
+            border-radius: 12px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 8px;
-            font-weight: bold;
+            gap: 10px;
+            font-weight: 500;
             transition: 0.2s;
         }
-        .new-chat-btn:hover { background-color: var(--accent-hover); }
+        .new-chat-btn:hover { background-color: var(--border); }
 
         .history-list {
             flex: 1;
@@ -69,100 +65,126 @@
             margin-top: 15px;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
 
         .history-item {
             padding: 10px 12px;
-            background-color: rgba(255, 255, 255, 0.03);
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 0.85rem;
             color: var(--text-muted);
             cursor: pointer;
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 8px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .history-item:hover, .history-item.active { background-color: rgba(255, 255, 255, 0.08); color: white; }
+        .history-item:hover, .history-item.active { background-color: var(--bg-card); color: var(--text-main); }
 
-        /* بخش اصلی چت */
-        .main-content { flex: 1; display: flex; flex-direction: column; height: 100%; position: relative; }
+        /* بخش اصلی */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            position: relative;
+            background-color: var(--bg-main);
+        }
 
+        /* هدر */
         .chat-header {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border);
+            padding: 15px 25px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            background-color: var(--bg-sidebar);
         }
 
-        .chat-box {
+        .persona-select {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            padding: 6px 12px;
+            border-radius: 8px;
+            outline: none;
+            font-size: 0.85rem;
+        }
+
+        /* صفحه شروع (Welcoming / Home Screen) */
+        .home-screen {
             flex: 1;
-            padding: 20px;
-            overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            justify-content: center;
+            align-items: center;
+            gap: 25px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .home-title {
+            font-size: 2.2rem;
+            font-weight: 600;
+            color: #e2e8f0;
+            letter-spacing: -0.5px;
+        }
+
+        /* باکس چت */
+        .chat-box {
+            flex: 1;
+            padding: 20px 15%;
+            overflow-y: auto;
+            display: none; /* در حالت اولیه مخفی است */
+            flex-direction: column;
+            gap: 20px;
         }
 
         .message {
-            max-width: 75%;
-            padding: 12px 16px;
-            border-radius: 12px;
-            line-height: 1.6;
+            max-width: 80%;
+            padding: 14px 18px;
+            border-radius: 16px;
+            line-height: 1.7;
             word-wrap: break-word;
-            position: relative;
-            animation: fadeIn 0.2s ease-in-out;
+            font-size: 0.95rem;
         }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
         .message.user {
             align-self: flex-start;
-            background-color: var(--user-msg);
-            color: white;
-            border-bottom-right-radius: 2px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            border-bottom-right-radius: 4px;
         }
 
         .message.bot {
             align-self: flex-end;
-            background-color: var(--bot-msg);
+            background-color: transparent;
+            color: var(--text-main);
+            padding-right: 0;
+        }
+
+        /* اینپوت کانتینر اصلی */
+        .input-wrapper {
+            width: 100%;
+            max-width: 750px;
+            margin: 0 auto;
+            padding: 0 20px 20px 20px;
+        }
+
+        .input-box {
+            background-color: var(--bg-input);
             border: 1px solid var(--border);
-            border-bottom-left-radius: 2px;
-        }
-
-        .msg-tools {
+            border-radius: 28px;
+            padding: 8px 16px;
             display: flex;
-            justify-content: flex-end;
-            margin-top: 5px;
-            gap: 8px;
-            font-size: 0.8rem;
-            opacity: 0.6;
-        }
-        .msg-tools i { cursor: pointer; }
-        .msg-tools i:hover { opacity: 1; }
-
-        /* پیش‌نمایش فایل */
-        .file-preview {
-            display: none;
             align-items: center;
             gap: 10px;
-            padding: 8px 12px;
-            background-color: var(--bg-sidebar);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            margin: 0 20px;
-            width: fit-content;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            transition: border-color 0.2s;
         }
-        .file-preview img { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
+        .input-box:focus-within { border-color: var(--accent); }
 
-        /* ورودی پیام */
-        .input-container { padding: 15px 20px; background-color: var(--bg-sidebar); border-top: 1px solid var(--border); }
-        .input-area { display: flex; align-items: center; background-color: var(--bg-main); border: 1px solid var(--border); border-radius: 10px; padding: 5px 10px; gap: 10px; }
-        
         textarea {
             flex: 1;
             background: transparent;
@@ -170,24 +192,42 @@
             color: white;
             outline: none;
             resize: none;
-            height: 45px;
-            padding: 10px 0;
+            height: 24px;
+            max-height: 150px;
             font-size: 0.95rem;
+            padding: 2px 0;
         }
 
-        .icon-btn { color: var(--text-muted); background: none; border: none; font-size: 1.1rem; cursor: pointer; padding: 8px; transition: 0.2s; }
-        .icon-btn:hover { color: #38bdf8; }
+        .icon-btn {
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            font-size: 1.1rem;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+        }
+        .icon-btn:hover { color: var(--text-main); background-color: rgba(255,255,255,0.05); }
         .send-btn { color: var(--accent); }
 
-        /* تنظیمات سیستم (لحن) */
-        .persona-select {
-            background-color: var(--bg-main);
-            color: white;
+        /* پیش‌نمایش فایل */
+        .file-preview {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background-color: var(--bg-card);
             border: 1px solid var(--border);
-            padding: 6px 12px;
-            border-radius: 6px;
-            outline: none;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            width: fit-content;
         }
+        .file-preview img { width: 35px; height: 35px; border-radius: 6px; object-fit: cover; }
     </style>
 </head>
 <body>
@@ -195,50 +235,51 @@
     <!-- سایدبار -->
     <div class="sidebar">
         <div class="brand-title">
-            <i class="fa-solid fa-eye"></i> Visual Chat
+            <i class="fa-solid fa-sparkles"></i> Visual Chat
         </div>
         <button class="new-chat-btn" onclick="startNewChat()">
-            <i class="fa-solid fa-plus"></i> گفتگو جدید
+            <i class="fa-solid fa-plus"></i> چت جدید
         </button>
         <div class="history-list" id="historyList"></div>
     </div>
 
-    <!-- بخش چت -->
+    <!-- بخش اصلی چت -->
     <div class="main-content">
         <div class="chat-header">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span>لحن پاسخگویی:</span>
+            <div>
                 <select class="persona-select" id="personaSelect">
-                    <option value="default">استاندارد و هوشمند</option>
-                    <option value="friendly">صمیمی و خودمانی</option>
-                    <option value="coder">متخصص برنامه‌نویسی</option>
-                    <option value="formal">کاملاً رسمی و اداری</option>
+                    <option value="default">حالت استاندارد</option>
+                    <option value="friendly">صمیمی و دوستانه</option>
+                    <option value="coder">برنامه‌نویس و کدنویسی</option>
+                    <option value="formal">رسمی</option>
                 </select>
             </div>
-            <span style="font-size: 0.85rem; color: var(--text-muted);">پشتیبانی شده توسط Gemini 3.6 Flash</span>
         </div>
 
-        <div class="chat-box" id="chatBox">
-            <div class="message bot">
-                سلام! به Visual Chat خوش آمدید. چطور می‌توانم به شما کمک کنم؟
+        <!-- صفحه اول / چت جدید (Gemini Style) -->
+        <div class="home-screen" id="homeScreen">
+            <h1 class="home-title">از کجا شروع کنیم؟</h1>
+        </div>
+
+        <!-- باکس نمایش پیام‌ها -->
+        <div class="chat-box" id="chatBox"></div>
+
+        <!-- ورودی پیام -->
+        <div class="input-wrapper">
+            <div class="file-preview" id="filePreview">
+                <img id="previewImg" src="" alt="preview">
+                <span id="fileName" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+                <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()"></i>
             </div>
-        </div>
 
-        <!-- پیش نمایش تصویر یا فایل آپلود شده -->
-        <div class="file-preview" id="filePreview">
-            <img id="previewImg" src="" alt="preview">
-            <span id="fileName" style="font-size: 0.85rem;"></span>
-            <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()"></i>
-        </div>
-
-        <!-- ورودی -->
-        <div class="input-container">
-            <div class="input-area">
+            <div class="input-box">
                 <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
                 <button class="icon-btn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل/تصویر">
-                    <i class="fa-solid fa-paperclip"></i>
+                    <i class="fa-solid fa-plus"></i>
                 </button>
-                <textarea id="userInput" placeholder="پیامی بنویسید..." onkeydown="handleKeyDown(event)"></textarea>
+                
+                <textarea id="userInput" placeholder="پرسیدن از Visual Chat..." rows="1" onkeydown="handleKeyDown(event)"></textarea>
+                
                 <button class="icon-btn send-btn" onclick="sendMessage()" title="ارسال">
                     <i class="fa-solid fa-paper-plane"></i>
                 </button>
@@ -250,6 +291,7 @@
     let currentChatId = Date.now();
     let chats = JSON.parse(localStorage.getItem('visual_chat_history')) || {};
     let selectedFileData = null;
+    let isFirstMessage = true;
 
     window.onload = () => {
         renderHistory();
@@ -294,15 +336,23 @@
     async function sendMessage() {
         const inputField = document.getElementById("userInput");
         const chatBox = document.getElementById("chatBox");
+        const homeScreen = document.getElementById("homeScreen");
         const text = inputField.value.trim();
         const persona = document.getElementById("personaSelect").value;
 
         if (!text && !selectedFileData) return;
 
-        // نمایش پیام کاربر
+        // سوئیچ از صفحه هوم به حالت چت
+        if (isFirstMessage) {
+            homeScreen.style.display = 'none';
+            chatBox.style.display = 'flex';
+            isFirstMessage = false;
+        }
+
+        // ساخت پیام کاربر
         let userContentHtml = text;
         if (selectedFileData && selectedFileData.type.startsWith('image/')) {
-            userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width: 100%; border-radius: 8px; margin-top: 8px;">`;
+            userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width: 100%; max-height: 250px; border-radius: 8px; margin-top: 8px;">`;
         }
 
         appendMessage('user', userContentHtml);
@@ -311,10 +361,10 @@
         const currentPayloadFile = selectedFileData;
         removeFile();
 
-        // پیام در حال پاسخ
+        // لودینگ پاسخ
         const loadingDiv = document.createElement("div");
         loadingDiv.className = "message bot";
-        loadingDiv.innerText = "در حال پردازش...";
+        loadingDiv.innerText = "در حال تفکر...";
         chatBox.appendChild(loadingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
 
@@ -331,16 +381,18 @@
 
             const data = await response.json();
             
-            if (data.candidates && data.candidates[0]?.content) {
+            if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
                 const reply = data.candidates[0].content.parts[0].text;
                 loadingDiv.innerHTML = formatReply(reply);
+            } else if (data.reply) { // اگر از API سفارشی استفاده می‌کنی
+                loadingDiv.innerHTML = formatReply(data.reply);
             } else if (data.error) {
-                loadingDiv.innerText = "⚠️ خطا: " + (data.error.message || "خطای نا مشخص");
+                loadingDiv.innerText = "⚠️ خطا: " + (data.error.message || "مشکلی پیش آمد.");
             } else {
                 loadingDiv.innerText = "خطا در دریافت پاسخ از هوش مصنوعی!";
             }
         } catch (error) {
-            loadingDiv.innerText = "خطا در برقراری ارتباط با سرور!";
+            loadingDiv.innerText = "خطا در ارتباط با سرور!";
         }
 
         chatBox.scrollTop = chatBox.scrollHeight;
@@ -351,11 +403,56 @@
         const chatBox = document.getElementById("chatBox");
         const msgDiv = document.createElement("div");
         msgDiv.className = `message ${sender}`;
-        msgDiv.innerHTML = content + (sender === 'bot' ? `<div class="msg-tools"><i class="fa-regular fa-copy" onclick="copyText(this)"></i></div>` : '');
+        msgDiv.innerHTML = content;
         chatBox.appendChild(msgDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
     function formatReply(text) {
-        // تبدیل کدهای داخل علامت ``` به تگ pre برای نمایش بهتر
-        let formatted = text.replace(/
+        let formatted = text.replace(/```([\s\S]*?)```/g, '<pre style="background:#171c23; padding:12px; border-radius:8px; overflow-x:auto; margin-top:8px;"><code>$1</code></pre>');
+        return formatted.replace(/\n/g, '<br>');
+    }
+
+    function startNewChat() {
+        currentChatId = Date.now();
+        isFirstMessage = true;
+        document.getElementById("chatBox").innerHTML = "";
+        document.getElementById("chatBox").style.display = 'none';
+        document.getElementById("homeScreen").style.display = 'flex';
+        renderHistory();
+    }
+
+    function saveCurrentChat() {
+        const chatBox = document.getElementById("chatBox");
+        const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
+        chats[currentChatId] = {
+            title: firstUserMsg.substring(0, 25) + "...",
+            html: chatBox.innerHTML
+        };
+        localStorage.setItem('visual_chat_history', JSON.stringify(chats));
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const list = document.getElementById("historyList");
+        list.innerHTML = "";
+        Object.keys(chats).reverse().forEach(id => {
+            const item = document.createElement("div");
+            item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
+            item.innerHTML = `<i class="fa-regular fa-message"></i> <span>${chats[id].title}</span>`;
+            item.onclick = () => loadChat(id);
+            list.appendChild(item);
+        });
+    }
+
+    function loadChat(id) {
+        currentChatId = id;
+        isFirstMessage = false;
+        document.getElementById("homeScreen").style.display = 'none';
+        document.getElementById("chatBox").style.display = 'flex';
+        document.getElementById("chatBox").innerHTML = chats[id].html;
+        renderHistory();
+    }
+</script>
+</body>
+</html>
