@@ -166,6 +166,12 @@
             40% { transform: translateY(-4px); opacity: 1; }
         }
 
+        @keyframes pulseMic {
+            0% { transform: scale(1); color: var(--danger); }
+            50% { transform: scale(1.15); color: #ef4444; }
+            100% { transform: scale(1); color: var(--danger); }
+        }
+
         .sidebar-overlay {
             display: none;
             position: fixed;
@@ -456,6 +462,11 @@
             padding-right: 15px;
         }
 
+        .msg-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 4px; }
+        .msg-footer .speak-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; transition: color 0.2s; }
+        .msg-footer .speak-btn:hover { color: var(--accent-2); }
+        .msg-footer .speak-btn.playing { color: var(--accent-2); animation: glowPulse 1.4s infinite; }
+
         .typing-dots { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
         .typing-dots span {
             width: 6px; height: 6px; border-radius: 50%;
@@ -465,6 +476,8 @@
         .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
         .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
 
+        .sticker-img { width: 120px; height: 120px; object-fit: contain; }
+
         .input-wrapper {
             width: 100%;
             max-width: 800px;
@@ -472,6 +485,25 @@
             padding: 10px 15px 16px 15px;
             position: relative;
         }
+
+        .sticker-picker {
+            display: none;
+            position: absolute;
+            bottom: 78px;
+            right: 20px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 16px;
+            padding: 12px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            box-shadow: 0 10px 30px var(--shadow-b);
+            z-index: 30;
+            animation: fadeIn 0.2s ease;
+        }
+        .sticker-picker.active { display: grid; }
+        .sticker-item { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; padding: 4px; transition: transform 0.15s, background 0.15s; }
+        .sticker-item:hover { transform: scale(1.12); background-color: var(--bg-input); }
 
         .input-box {
             background-color: var(--bg-input);
@@ -505,6 +537,20 @@
             box-shadow: none !important;
         }
 
+        textarea#userInput::-webkit-resizer,
+        textarea#userInput::-webkit-scrollbar-corner {
+            display: none !important;
+            opacity: 0 !important;
+        }
+
+        textarea#userInput:-webkit-autofill,
+        textarea#userInput:-webkit-autofill:hover,
+        textarea#userInput:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--text-main) !important;
+            -webkit-box-shadow: 0 0 0px 1000px var(--bg-input) inset !important;
+            transition: background-color 5000s ease-in-out 0s !important;
+        }
+
         textarea::placeholder { color: var(--text-muted) !important; }
         textarea:disabled { opacity: 0.55; cursor: not-allowed; }
 
@@ -528,6 +574,8 @@
             color: var(--accent-2) !important;
             background-color: rgba(34, 211, 238, 0.14) !important;
         }
+
+        .icon-btn.recording { animation: pulseMic 1.2s infinite; }
 
         .action-btn {
             background: var(--accent-grad);
@@ -681,24 +729,9 @@
         .switch input:checked + .switch-slider { background: var(--accent-grad); border-color: transparent; }
         .switch input:checked + .switch-slider::before { transform: translateX(-18px); }
 
-        .sticker-picker {
-            display: none;
-            position: absolute;
-            bottom: 78px;
-            right: 20px;
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 16px;
-            padding: 12px;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            box-shadow: 0 10px 30px var(--shadow-b);
-            z-index: 30;
-            animation: fadeIn 0.2s ease;
+        @media (max-width: 900px) {
+            .chat-box { padding: 15px 5%; }
         }
-        .sticker-picker.active { display: grid; }
-        .sticker-item { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; padding: 4px; transition: transform 0.15s, background 0.15s; }
-        .sticker-item:hover { transform: scale(1.12); background-color: var(--bg-input); }
 
         @media (max-width: 768px) {
             .menu-btn { display: block; }
@@ -713,9 +746,6 @@
             .home-title { font-size: 1.4rem; }
             .input-wrapper { padding: 8px 10px 10px 10px; }
             .sticker-picker { right: 10px; left: 10px; grid-template-columns: repeat(4, 1fr); justify-items: center; }
-            .chat-box { padding: 15px 5%; }
-            .model-selector .model-name { display: none; }
-            .model-dropdown { min-width: 140px; left: auto; right: 0; transform: none; }
         }
     </style>
 </head>
@@ -816,6 +846,17 @@
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
+            <div class="sticker-picker" id="stickerPicker">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f917/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f389/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+            </div>
+
             <div class="file-preview" id="filePreview">
                 <img id="previewImg" src="" alt="preview">
                 <span id="fileName"></span>
@@ -830,8 +871,16 @@
 
                 <textarea id="userInput" placeholder="از Virtual Bot بپرس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
+                <button class="icon-btn" id="micBtn" onclick="toggleVoiceInput()" title="تبدیل صدا به متن">
+                    <i class="fa-solid fa-microphone"></i>
+                </button>
+
                 <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
                     <i class="fa-solid fa-globe"></i>
+                </button>
+
+                <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
+                    <i class="fa-regular fa-face-smile"></i>
                 </button>
 
                 <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
@@ -932,7 +981,7 @@
     });
 
     // =====================================================
-    // بقیه کدها
+    // بقیه کدها (همه قابلیت‌ها)
     // =====================================================
 
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
@@ -945,27 +994,12 @@
     let isSearchEnabled = false;
     let currentAbortController = null;
     let typeWriterInterval = null;
-    
-    const UploadLogger = {
-        logs: [],
-        add(step, data) {
-            const entry = { timestamp: new Date().toISOString(), step, data };
-            this.logs.push(entry);
-            console.log(`[${step}]`, data);
-            this.showOnScreen(entry);
-        },
-        showOnScreen(entry) {
-            const statusEl = document.getElementById('fileStatus');
-            if (statusEl) {
-                const msg = `${entry.step}: ${typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data).substring(0, 40)}`;
-                statusEl.textContent = msg;
-                statusEl.className = 'file-status loading';
-                if (entry.step.includes('✅')) statusEl.className = 'file-status success';
-                else if (entry.step.includes('❌')) statusEl.className = 'file-status error';
-            }
-        },
-        getAll() { return this.logs; }
-    };
+
+    // ===== صدا =====
+    let recognition = null;
+    let isRecording = false;
+    let currentAudio = null;
+    let currentSpeakingBtn = null;
 
     window.onload = () => {
         const savedModel = localStorage.getItem('virtual_selected_model');
@@ -980,11 +1014,218 @@
         
         checkSavedUser();
         loadSettings();
+        initSpeechRecognition();
 
         if (window.innerWidth <= 768) {
             document.documentElement.style.setProperty('--mobile-close', 'block');
         }
     };
+
+    // ===== توابع صدا =====
+    function initSpeechRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = document.getElementById('micBtn');
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'fa-IR';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                const inputField = document.getElementById('userInput');
+                if (inputField.value.length > 0 && !inputField.value.endsWith(' ')) {
+                    inputField.value += ' ' + transcript;
+                } else {
+                    inputField.value += transcript;
+                }
+                autoResizeTextarea(inputField);
+            };
+
+            recognition.onerror = (e) => {
+                if(e.error === 'not-allowed') {
+                    alert('دسترسی به میکروفون مجاز نیست.');
+                }
+                stopVoiceInput();
+            };
+            recognition.onend = () => stopVoiceInput();
+        } else {
+            if (micBtn) micBtn.style.display = 'none';
+        }
+    }
+
+    function toggleVoiceInput() {
+        if (isGenerating || !recognition) return;
+        const micBtn = document.getElementById('micBtn');
+
+        if (!isRecording) {
+            try {
+                recognition.start();
+                isRecording = true;
+                micBtn.classList.add('recording');
+                micBtn.title = "در حال ضبط...";
+            } catch (err) {
+                stopVoiceInput();
+                if(err.name === 'NotAllowedError'){
+                    alert('دسترسی به میکروفون مسدود شده است.');
+                }
+            }
+        } else {
+            recognition.stop();
+            stopVoiceInput();
+        }
+    }
+
+    function stopVoiceInput() {
+        isRecording = false;
+        const micBtn = document.getElementById('micBtn');
+        if (micBtn) {
+            micBtn.classList.remove('recording');
+            micBtn.title = "تبدیل صدا به متن";
+        }
+        if (recognition) {
+            try { recognition.abort(); } catch (e) {}
+        }
+    }
+
+    // ===== تابع پخش صدا با Google TTS =====
+    function speakText(btnElement) {
+        const wrapper = btnElement.closest('.message-wrapper');
+        const msgBody = wrapper ? wrapper.querySelector('.message') : null;
+        if (!msgBody) return;
+
+        let cleanText = msgBody.innerText;
+        cleanText = cleanText.replace(/```[\s\S]*?```/g, 'کد برنامه نویسی');
+        cleanText = cleanText.replace(/[\u{1F600}-\u{1F9FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F1E0}-\u{1F1FF}\u{FE0F}\u{200D}]/gu, '');
+        cleanText = cleanText.trim();
+        
+        if (!cleanText) return;
+
+        const wasSameButton = (currentSpeakingBtn === btnElement);
+
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+        }
+        window.speechSynthesis.cancel();
+
+        if (currentSpeakingBtn) {
+            setSpeakBtnIcon(currentSpeakingBtn, false);
+        }
+
+        if (wasSameButton) {
+            currentSpeakingBtn = null;
+            return;
+        }
+
+        currentSpeakingBtn = btnElement;
+        setSpeakBtnIcon(btnElement, true);
+
+        const truncatedText = cleanText.substring(0, 200);
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(truncatedText)}&tl=fa&client=tw-ob`;
+
+        const audio = new Audio(ttsUrl);
+        currentAudio = audio;
+
+        audio.play().catch(() => {
+            fallbackSpeak(btnElement, cleanText);
+        });
+
+        audio.onended = () => {
+            setSpeakBtnIcon(btnElement, false);
+            currentSpeakingBtn = null;
+            currentAudio = null;
+        };
+
+        const timeoutId = setTimeout(() => {
+            if (currentAudio && !currentAudio.played) {
+                audio.pause();
+                audio.currentTime = 0;
+                fallbackSpeak(btnElement, cleanText);
+            }
+        }, 5000);
+
+        audio.addEventListener('play', () => {
+            clearTimeout(timeoutId);
+        });
+    }
+
+    function fallbackSpeak(btnElement, cleanText) {
+        if (!('speechSynthesis' in window)) {
+            setSpeakBtnIcon(btnElement, false);
+            currentSpeakingBtn = null;
+            currentAudio = null;
+            return;
+        }
+
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = 'ar-SA';
+        utterance.rate = 0.9;
+        utterance.pitch = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+            const faVoice = voices.find(v => v.lang.startsWith('fa') || v.lang.startsWith('ar') || v.lang.includes('IR'));
+            if (faVoice) {
+                utterance.voice = faVoice;
+                utterance.lang = faVoice.lang;
+            }
+        } else {
+            window.speechSynthesis.onvoiceschanged = () => {
+                const newVoices = window.speechSynthesis.getVoices();
+                const faVoice = newVoices.find(v => v.lang.startsWith('fa') || v.lang.startsWith('ar') || v.lang.includes('IR'));
+                if (faVoice) {
+                    utterance.voice = faVoice;
+                    utterance.lang = faVoice.lang;
+                }
+                window.speechSynthesis.speak(utterance);
+            };
+            setTimeout(() => {
+                window.speechSynthesis.speak(utterance);
+            }, 300);
+            return;
+        }
+
+        utterance.onstart = () => {
+            setSpeakBtnIcon(btnElement, true);
+            currentSpeakingBtn = btnElement;
+            currentAudio = null;
+        };
+
+        utterance.onend = () => {
+            setSpeakBtnIcon(btnElement, false);
+            if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
+        };
+
+        utterance.onerror = () => {
+            setSpeakBtnIcon(btnElement, false);
+            if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
+            if (utterance.lang !== 'en-US') {
+                utterance.lang = 'en-US';
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
+        window.speechSynthesis.speak(utterance);
+    }
+
+    function setSpeakBtnIcon(btn, playing) {
+        if (!btn) return;
+        const icon = btn.querySelector('i');
+        if (!icon) return;
+        if (playing) {
+            icon.className = 'fa-solid fa-circle-stop';
+            btn.classList.add('playing');
+            btn.title = 'توقف پخش';
+        } else {
+            icon.className = 'fa-solid fa-volume-high';
+            btn.classList.remove('playing');
+            btn.title = 'پخش صدا';
+        }
+    }
 
     function autoResizeTextarea(textarea) {
         textarea.style.height = 'auto';
@@ -1222,6 +1463,26 @@
         document.getElementById('sidebarOverlay').classList.toggle('active');
     }
 
+    function toggleStickerPicker() {
+        if (isGenerating) return;
+        document.getElementById('stickerPicker').classList.toggle('active');
+    }
+
+    function sendSticker(stickerUrl) {
+        if (isGenerating) return;
+        toggleStickerPicker();
+        const stickerHtml = `<img src="${stickerUrl}" class="sticker-img" alt="sticker">`;
+        appendMessage('user', stickerHtml);
+
+        if (isFirstMessage) {
+            document.getElementById("homeScreen").style.display = 'none';
+            document.getElementById("chatBox").style.display = 'flex';
+            isFirstMessage = false;
+        }
+
+        sendToGemini("کاربر یک استیکر ارسال کرد.");
+    }
+
     function handleKeyDown(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -1249,6 +1510,78 @@
                     ctx.drawImage(img, 0, 0, width, height);
                     resolve(canvas.toDataURL('image/jpeg', quality));
                 };
+            };
+        });
+    }
+
+    // ===== فشرده‌سازی ویدیو =====
+    function compressVideo(file, targetWidth = 480, bitrate = 500000) {
+        return new Promise((resolve, reject) => {
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            video.muted = true;
+            video.playsInline = true;
+
+            video.onloadedmetadata = () => {
+                let width = video.videoWidth;
+                let height = video.videoHeight;
+                if (width > targetWidth) {
+                    height = Math.round((height * targetWidth) / width);
+                    width = targetWidth;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+
+                const stream = canvas.captureStream(25);
+                
+                let mimeType = 'video/webm';
+                if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+                    mimeType = 'video/webm;codecs=vp8';
+                }
+
+                const mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: mimeType,
+                    videoBitsPerSecond: bitrate
+                });
+
+                const chunks = [];
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) chunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        URL.revokeObjectURL(video.src);
+                        resolve(reader.result);
+                    };
+                    reader.readAsDataURL(blob);
+                };
+
+                video.play();
+                mediaRecorder.start();
+
+                function drawFrame() {
+                    if (video.paused || video.ended) {
+                        if (mediaRecorder.state === 'recording') {
+                            mediaRecorder.stop();
+                        }
+                        return;
+                    }
+                    ctx.drawImage(video, 0, 0, width, height);
+                    requestAnimationFrame(drawFrame);
+                }
+
+                drawFrame();
+            };
+
+            video.onerror = (err) => {
+                URL.revokeObjectURL(video.src);
+                reject(err);
             };
         });
     }
@@ -1282,8 +1615,10 @@
         statusEl.textContent = 'در حال پردازش...';
         statusEl.className = 'file-status loading';
 
+        const MAX_DIRECT_SIZE = 4 * 1024 * 1024;
+
         try {
-            const isVideo = /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name);
+            const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name);
             const isImage = file.type.startsWith('image/');
 
             if (isImage) {
@@ -1294,15 +1629,23 @@
                 statusEl.textContent = 'تصویر آماده';
                 statusEl.className = 'file-status success';
             } else if (isVideo) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const base64 = e.target.result;
-                    selectedFileData = { name: file.name, type: 'video/mp4', base64: base64 };
-                    previewImg.style.display = 'none';
-                    statusEl.textContent = 'ویدیو آماده';
-                    statusEl.className = 'file-status success';
-                };
-                reader.readAsDataURL(file);
+                let videoBase64 = '';
+                
+                if (file.size > MAX_DIRECT_SIZE) {
+                    statusEl.textContent = 'در حال فشرده‌سازی ویدیو...';
+                    videoBase64 = await compressVideo(file, 480, 500000);
+                } else {
+                    videoBase64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.readAsDataURL(file);
+                    });
+                }
+
+                selectedFileData = { name: file.name, type: 'video/webm', base64: videoBase64 };
+                previewImg.style.display = 'none';
+                statusEl.textContent = 'ویدیو آماده';
+                statusEl.className = 'file-status success';
             } else {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -1337,11 +1680,15 @@
         const actionBtn = document.getElementById("actionBtn");
         const actionIcon = document.getElementById("actionIcon");
         const attachBtn = document.getElementById("attachBtn");
+        const stickerBtn = document.getElementById("stickerBtn");
         const searchBtn = document.getElementById("searchToggleBtn");
+        const micBtn = document.getElementById("micBtn");
 
         inputField.disabled = generating;
         attachBtn.disabled = generating;
+        stickerBtn.disabled = generating;
         searchBtn.disabled = generating;
+        if (micBtn) micBtn.disabled = generating;
 
         if (generating) {
             actionBtn.classList.add("stop-mode");
@@ -1408,6 +1755,12 @@
         
         loadingDiv.innerHTML = `${statusMsg} <span class="typing-dots"><span></span><span></span><span></span></span>`;
         wrapperDiv.appendChild(loadingDiv);
+
+        const footerDiv = document.createElement("div");
+        footerDiv.className = "msg-footer";
+        footerDiv.innerHTML = `<button class="speak-btn" onclick="speakText(this)" title="پخش صدا"><i class="fa-solid fa-volume-high"></i></button>`;
+        wrapperDiv.appendChild(footerDiv);
+
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
 
@@ -1505,6 +1858,14 @@
         msgDiv.className = `message ${sender}`;
         msgDiv.innerHTML = content;
         wrapperDiv.appendChild(msgDiv);
+
+        if (sender === 'bot') {
+            const footerDiv = document.createElement("div");
+            footerDiv.className = "msg-footer";
+            footerDiv.innerHTML = `<button class="speak-btn" onclick="speakText(this)" title="پخش صدا"><i class="fa-solid fa-volume-high"></i></button>`;
+            wrapperDiv.appendChild(footerDiv);
+        }
+
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
