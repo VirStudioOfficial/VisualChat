@@ -1,34 +1,36 @@
-// ۱. تابع تشخیص هوشمند نیاز به سرچ زنده (فیلتر سلام و کلمات عمومی)
+// تابع تشخیص هوشمند نیاز به سرچ زنده
 function shouldSearchWeb(userText) {
     if (!userText) return false;
+    
+    // ۱. نرمال‌سازی متن (حذف فاصله‌های اضافی و کوچک کردن کلمات)
     const text = userText.trim().toLowerCase();
 
-    // فیلتر کامل سلام، احوال‌پُرسی و کلمات کوتاه
-    const greetings = [
+    // ۲. فیلتر کلمات کوتاه یا پیام‌های سلام/احوال‌پرسی (قطعاً نباید سرچ شوند)
+    const simpleGreetings = [
         'سلام', 'سلامم', 'سلام خوبی', 'درود', 'چطوری', 'خوبی', 
         'صبح بخیر', 'عصر بخیر', 'شب بخیر', 'ممنون', 'مرسی', 
-        'سلام مخلصم', 'سلام علیکم', 'چخبر', 'چه خبر'
+        'سلام مخلصم', 'سلام علیکم', 'چخبر', 'چه خبر', 'باشه', 'اوکی'
     ];
-    
-    if (greetings.includes(text) || text.length < 3) {
+
+    if (simpleGreetings.includes(text) || text.length < 4) {
         return false;
     }
 
-    // کلیدواژه‌های صریح درخواست سرچ
-    const explicitKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن'];
-    const hasExplicitRequest = explicitKeywords.some(kw => text.includes(kw));
-
-    // کلیدواژه‌های موضوعاتی که حتماً دیتای زنده می‌خواهند
-    const realTimeKeywords = [
-        'قیمت', 'چنده', 'نرخ', 'امروز', 'دلار', 'طلا', 'سکه', 'ارز',
-        'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین'
+    // ۳. لیست صریح موضوعاتی که حتماً نیازمند دیتای زنده/سرچ هستند
+    const searchTriggers = [
+        // درخواست مستقیم
+        'سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن',
+        // قیمت و بازار
+        'قیمت', 'چنده', 'نرخ', 'دلار', 'طلا', 'سکه', 'ارز', 'بیت کوین', 'پلی استیشن',
+        // زمان و اخبار
+        'امروز', 'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین'
     ];
-    const hasRealTimeContext = realTimeKeywords.some(kw => text.includes(kw));
 
-    return hasExplicitRequest || hasRealTimeContext;
+    // فقط اگر حداقل یکی از کلمات کلیدی بالا در متن کاربر وجود داشت، مجوز سرچ صادر می‌شود
+    return searchTriggers.some(trigger => text.includes(trigger));
 }
 
-// ۲. تابع سرچ چندکاناله با چرخش روی کلیدهای Tavily
+// تابع سرچ چرخشی با کلیدهای Tavily
 async function fetchTavilyResults(query, tavilyKeys) {
     if (!tavilyKeys || tavilyKeys.length === 0) return null;
 
@@ -73,7 +75,6 @@ export default async function handler(req, res) {
 
     const { text, persona, file, webSearch, history } = req.body || {};
 
-    // خواندن کلیدهای Gemini و Tavily از Secrets
     const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
     const geminiKeys = rawGeminiKeys.split(',').map(k => k.trim()).filter(Boolean);
 
@@ -84,7 +85,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلید Gemini در تنظیمات ورسل یافت نشد!' } });
     }
 
-    // ۱. ساخت آرایه تاریخچه
+    // ۱. آماده‌سازی تاریخچه چت
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -99,7 +100,8 @@ export default async function handler(req, res) {
         }];
     }
 
-    // ۲. بررسی هوشمند نیاز به سرچ (حتی اگر کره زمین روشن باشد)
+    // ۲. ارزیابی دقیق شرط سرچ
+    // سرچ فقط در صورتی اجرا می‌شود که هم دکمه سرچ روشن باشد هم تابع تشخیص دهد متن نیازمند سرچ است
     const isSearchNeeded = Boolean(webSearch) && shouldSearchWeb(text);
 
     if (isSearchNeeded && text) {
@@ -139,7 +141,7 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۵. ارسال به مدل Gemini 3.5 Flash Lite با چرخش کلیدها
+    // ۵. ارسال به مدل Gemini 3.5 Flash Lite
     const MODEL_NAME = 'gemini-3.5-flash-lite';
     let lastError = null;
 
