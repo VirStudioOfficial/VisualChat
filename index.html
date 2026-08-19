@@ -30,8 +30,7 @@
             -webkit-tap-highlight-color: transparent;
         }
         
-        /* نابودکننده کامل و قطعی کادر سفید و فلش‌های نیتیو مرورگر */
-        select, input, textarea, button {
+        select, input, button {
             -webkit-appearance: none !important;
             -moz-appearance: none !important;
             appearance: none !important;
@@ -75,7 +74,6 @@
         }
         .sidebar-overlay.active { display: block; }
 
-        /* سایدبار */
         .sidebar {
             width: 270px;
             background-color: var(--bg-sidebar);
@@ -153,7 +151,6 @@
         }
         .history-item:hover, .history-item.active { background-color: var(--bg-card); color: var(--text-main); }
 
-        /* بخش اصلی */
         .main-content {
             flex: 1;
             display: flex;
@@ -184,11 +181,8 @@
             padding: 5px;
         }
 
-        /* استایل اختصاصی برای منوی کشویی تمیز و بدون مربع سفید (اصلاح شده) */
         .persona-select {
-            appearance: auto !important;
-            -webkit-appearance: auto !important;
-            background-color: var(--bg-card) !important;
+            background: var(--bg-card) !important;
             color: var(--text-main) !important;
             border: 1px solid var(--border) !important;
             padding: 6px 30px 6px 12px !important;
@@ -199,7 +193,7 @@
             background-repeat: no-repeat !important;
             background-position: left 8px center !important;
             background-size: 14px !important;
-            padding-left: 30px !important;
+            box-shadow: none !important;
         }
 
         .home-screen {
@@ -257,7 +251,6 @@
             object-fit: contain;
         }
 
-        /* بخش ورودی */
         .input-wrapper {
             width: 100%;
             max-width: 800px;
@@ -305,14 +298,19 @@
         }
         .input-box:focus-within { border-color: var(--accent); }
 
+        /* ★★★ مهم‌ترین تغییر: حذف کامل دستگیره تغییر سایز textarea ★★★ */
         textarea {
             flex: 1;
             color: white;
-            resize: none;
+            resize: none !important; /* این خط باعث میشه دستگیره تغییر سایز (اون مربع سفید) ناپدید بشه */
+            overflow: hidden !important; /* جلوگیری از اسکرول بار مزاحم */
             height: 24px;
             max-height: 120px;
             font-size: 0.95rem;
             padding: 2px 0;
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
         }
 
         textarea:disabled {
@@ -336,7 +334,6 @@
         .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: rgba(255,255,255,0.08); }
         .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        /* دکمه ارسال / استاپ */
         .action-btn { color: var(--accent); }
         .action-btn.stop-mode {
             color: var(--danger);
