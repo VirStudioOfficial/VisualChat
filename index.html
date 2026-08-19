@@ -30,14 +30,18 @@
             -webkit-tap-highlight-color: transparent;
         }
         
-        /* حذف کامل هرگونه کادر سفید، فلش و استایل پیش‌فرض مرورگرها */
-        input, select, textarea, button {
+        /* نابودکننده کامل و قطعی کادر سفید و فلش‌های نیتیو مرورگر */
+        select, input, textarea, button {
             -webkit-appearance: none !important;
             -moz-appearance: none !important;
             appearance: none !important;
             outline: none !important;
             border: none;
             background: none;
+        }
+
+        select::-ms-expand {
+            display: none !important;
         }
 
         input::-webkit-outer-spin-button,
@@ -180,14 +184,19 @@
             padding: 5px;
         }
 
+        /* استایل اختصاصی برای منوی کشویی تمیز و بدون مربع سفید */
         .persona-select {
-            background-color: var(--bg-card);
-            color: var(--text-main);
-            border: 1px solid var(--border);
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            cursor: pointer;
+            background-color: var(--bg-card) !important;
+            color: var(--text-main) !important;
+            border: 1px solid var(--border) !important;
+            padding: 6px 30px 6px 12px !important;
+            border-radius: 8px !important;
+            font-size: 0.85rem !important;
+            cursor: pointer !important;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") !important;
+            background-repeat: no-repeat !important;
+            background-position: left 8px center !important;
+            background-size: 14px !important;
         }
 
         .home-screen {
@@ -344,7 +353,6 @@
         }
         .file-preview img { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
 
-        /* بهینه‌سازی تبلت و موبایل */
         @media (max-width: 900px) {
             .chat-box { padding: 15px 5%; }
         }
@@ -683,7 +691,6 @@
         chatBox.appendChild(loadingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
 
-        // پرامپت اختصاصی جهت تنظیم هویت هوش مصنوعی (Visual Bot) و کنترل شدت استیکرها
         const systemInstruction = "دستورالعمل مهم: نام تو Visual Bot است. اگر هر کسی درباره هویت، نام، مدل یا سازنده تو پرسید، تحت هیچ شرایطی نباید نام Gemini یا Google را ببری و باید بگویی نام من Visual Bot است. همچنین در استفاده از ایموجی زیاده‌روی نکن و حداکثر ۱ تا ۲ ایموجی ملایم در کل متن استفاده کن.";
         const fullPrompt = systemInstruction + "\n\nمتن کاربر: " + (textPrompt || '');
 
