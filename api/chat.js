@@ -1,45 +1,61 @@
-// تابع کمکی برای سرچ رایگان در DuckDuckGo (بدون نیاز به API Key و بدون لیمیت)
-async function fetchDuckDuckGoResults(query) {
-    try {
-        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+// تابع سرچ هوشمند با Tavily یا DuckDuckGo JSON
+async function fetchWebResults(query, tavilyKey) {
+    // روش اول: استفاده از API قدرتمند Tavily (اگر کلیدش رو توی Vercel بذاری)
+    if (tavilyKey) {
+        try {
+            const res = await fetch('https://api.tavily.com/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    api_key: tavilyKey,
+                    query: query,
+                    search_depth: "basic",
+                    max_results: 3
+                })
+            });
+            const data = await res.json();
+            if (data.results && data.results.length > 0) {
+                return data.results.map(r => `${r.title}: ${r.content}`).join("\n\n");
             }
-        });
-        const html = await response.text();
-        
-        // استخراج خلاصه‌ها از ساختار HTML
-        const matches = [...html.matchAll(/<a class="result__snippet[^>]*>(.*?)<\/a>/g)];
-        const snippets = matches
-            .slice(0, 4)
-            .map(m => m[1].replace(/<[^>]+>/g, '').trim())
-            .filter(Boolean);
-            
-        return snippets.join("\n---\n");
-    } catch (err) {
-        console.error("DuckDuckGo Search Error:", err);
-        return null;
+        } catch (e) {
+            console.error("Tavily Error:", e);
+        }
     }
+
+    // روش دوم: استفاده از API متنی DuckDuckGo Lite
+    try {
+        const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`);
+        const data = await res.json();
+        let textResults = [];
+        if (data.AbstractText) textResults.push(data.AbstractText);
+        if (data.RelatedTopics && data.RelatedTopics.length > 0) {
+            data.RelatedTopics.slice(0, 3).forEach(t => {
+                if (t.Text) textResults.push(t.Text);
+            });
+        }
+        if (textResults.length > 0) return textResults.join("\n---\n");
+    } catch (err) {
+        console.error("DuckDuckGo API Error:", err);
+    }
+
+    return null;
 }
 
 export default async function handler(req, res) {
-    // ۱. بررسی متد درخواست
     if (req.method !== 'POST') {
         return res.status(405).json({ error: { message: 'Method not allowed' } });
     }
 
-    // ۲. دریافت ورودی‌ها از فرانت‌اند
     const { text, persona, file, webSearch, history } = req.body || {};
 
-    // ۳. خواندن API Keyها از تنظیمات Vercel
     const rawKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
     const apiKeys = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
+    const tavilyKey = process.env.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 || ""; // کلید سرچ اختیاری
 
     if (apiKeys.length === 0) {
-        return res.status(400).json({ error: { message: 'هیچ کلید API در تنظیمات Vercel یافت نشد!' } });
+        return res.status(400).json({ error: { message: 'هیچ کلید API یافت نشد!' } });
     }
 
-    // ۴. ساخت ساختار تاریخچه چت (Contents)
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -54,18 +70,19 @@ export default async function handler(req, res) {
         }];
     }
 
-    // ۵. انجام سرچ وب مستقل و چسباندن نتایج به پیام کاربر
+    // انجام سرچ و تزریق اطلاعات به هوش مصنوعی
     if (webSearch && text) {
-        const searchResults = await fetchDuckDuckGoResults(text);
-        if (searchResults && searchResults.length > 0) {
-            const lastIndex = contents.length - 1;
-            if (contents[lastIndex].role === 'user') {
-                contents[lastIndex].parts[0].text += `\n\n[اطلاعات زنده دریافت شده از سرچ وب]:\n${searchResults}`;
-            }
+        const searchResults = await fetchWebResults(text, tavilyKey);
+        const lastIndex = contents.length - 1;
+        
+        if (searchResults) {
+            contents[lastIndex].parts[0].text += `\n\n[اطلاعات واقعی و زنده از اینترنت - با استفاده از این داده‌ها به کاربر پاسخ دقیق بده]:\n${searchResults}`;
+        } else {
+            // اگر سرچ چیزی نیاورد، دستور بده که بر اساس آخرین تخمین یا قیمت‌های عمومی پاسخ دهد
+            contents[lastIndex].parts[0].text += `\n\n[توجه: نتایج سرچ زنده در دسترس نیست، اما تا حد امکان پاسخ کاربر را راهنمایی کن و از دادن پاسخ‌های کلیشه‌ای مثل "به اینترنت دسترسی ندارم" خودداری کن].`;
         }
     }
 
-    // ۶. اعمال پرسونا روی پیام کاربر
     if (persona && contents.length > 0) {
         let prefix = "";
         if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
@@ -78,7 +95,6 @@ export default async function handler(req, res) {
         }
     }
 
-    // ۷. افزودن تصویر در صورت وجود به آخرین پیام
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -90,14 +106,11 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۸. مدل دقیق Gemini 3.5 Flash Lite
     const MODEL_NAME = 'gemini-3.5-flash-lite';
     let lastError = null;
 
-    // ۹. چرخش روی کلیدها برای جلوگیری از ارور
     for (let i = 0; i < apiKeys.length; i++) {
         const currentKey = apiKeys[i];
-        
         try {
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`, {
                 method: 'POST',
@@ -111,25 +124,16 @@ export default async function handler(req, res) {
             const data = await response.json();
 
             if (!response.ok) {
-                console.warn(`⚠️ Key #${i + 1} failed:`, JSON.stringify(data));
                 lastError = data;
-                continue; // سوئیچ به کلید بعدی
+                continue;
             }
 
-            console.log(`✅ Success with Key #${i + 1}`);
             return res.status(200).json(data);
 
         } catch (err) {
-            console.error(`Error with Key #${i + 1}:`, err);
             lastError = err;
         }
     }
 
-    // ۱۰. بازگرداندن خطا در صورت ناموفق بودن همه کلیدها
-    return res.status(500).json({
-        error: {
-            message: 'ارتباط با API گوگل برقرار نشد.',
-            details: lastError
-        }
-    });
+    return res.status(500).json({ error: { message: 'خطا در ارتباط با API', details: lastError } });
 }
