@@ -12,27 +12,39 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
-    // ۱. ساخت آرایه contents از روی history فرستاده شده از فرانت‌اند
+    // ۱. آماده‌سازی تاریخچه پیام‌ها به فرمت استاندارد
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
         contents = history.map(item => ({
             role: item.role === 'user' ? 'user' : 'model',
-            parts: [{ text: item.text }]
+            parts: [{ text: item.text || "" }]
         }));
     } else {
-        // اگر هیستوری نبود، فقط پیام فعلی رو قرار بده
         contents = [{
             role: 'user',
             parts: [{ text: text || "" }]
         }];
     }
 
-    // ۲. اگر فایلی (عکس) در پیام آخر ارسال شده، به آخرین پیام اضافه شو
+    // ۲. اعمال Persona روی آخرین پیام کاربر
+    if (persona && contents.length > 0) {
+        let prefix = "";
+        if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
+        if (persona === 'coder') prefix = "[پاسخ را دقیق و با تمرکز بر کدنویسی بده] ";
+        if (persona === 'formal') prefix = "[پاسخ را کاملا رسمی بده] ";
+        
+        const lastUserIndex = contents.length - 1;
+        if (contents[lastUserIndex].role === 'user') {
+            contents[lastUserIndex].parts[0].text = prefix + contents[lastUserIndex].parts[0].text;
+        }
+    }
+
+    // ۳. اضافه کردن فایل (عکس) به آخرین پیام در صورت وجود
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.split(',')[1];
         const lastIndex = contents.length - 1;
-        contents[lastIndex].parts.unshift({
+        contents[lastIndex].parts.push({
             inline_data: {
                 mime_type: file.type || 'image/jpeg',
                 data: base64Data
@@ -40,7 +52,7 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۳. ابزار سرچ وب گوگل
+    // ۴. قابلیت سرچ وب
     const tools = webSearch ? [{ googleSearch: {} }] : [];
 
     let lastError = null;
@@ -49,15 +61,15 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
                     'x-goog-api-key': currentKey
                 },
                 body: JSON.stringify({ 
-                    contents: contents, // فرستادن کل تاریخچه
-                    tools: tools        // سرچ فعال یا غیرفعال
+                    contents: contents,
+                    tools: tools.length > 0 ? tools : undefined
                 })
             });
 
