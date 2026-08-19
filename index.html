@@ -815,10 +815,6 @@
     </div>
 
 <script>
-    // =====================================================
-    // 🔥 سیستم ردیابی آپلود فایل
-    // =====================================================
-    
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
     let currentUser = null;
     let chats = {};
@@ -841,13 +837,12 @@
             };
             this.logs.push(entry);
             console.log(`📁 [${step}]`, data);
-            // نمایش توی صفحه برای دیباگ
             this.showOnScreen(entry);
         },
         showOnScreen(entry) {
             const statusEl = document.getElementById('fileStatus');
             if (statusEl) {
-                const msg = `📁 ${entry.step}: ${typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data).substring(0, 50)}`;
+                const msg = `${entry.step}: ${typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data).substring(0, 50)}`;
                 statusEl.textContent = msg;
                 statusEl.className = 'file-status loading';
                 if (entry.step.includes('✅')) {
@@ -1193,7 +1188,81 @@
     }
 
     // =====================================================
-    // 🔥 تابع اصلی آپلود فایل با لاگ کامل
+    // 🔥 تابع جدید فشرده‌سازی ویدیو
+    // =====================================================
+    function compressVideo(file, targetWidth = 480, bitrate = 500000) {
+        return new Promise((resolve, reject) => {
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            video.muted = true;
+            video.playsInline = true;
+
+            video.onloadedmetadata = () => {
+                let width = video.videoWidth;
+                let height = video.videoHeight;
+                if (width > targetWidth) {
+                    height = Math.round((height * targetWidth) / width);
+                    width = targetWidth;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+
+                const stream = canvas.captureStream(25);
+                
+                let mimeType = 'video/webm';
+                if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+                    mimeType = 'video/webm;codecs=vp8';
+                }
+
+                const mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: mimeType,
+                    videoBitsPerSecond: bitrate
+                });
+
+                const chunks = [];
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) chunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        URL.revokeObjectURL(video.src);
+                        resolve(reader.result);
+                    };
+                    reader.readAsDataURL(blob);
+                };
+
+                video.play();
+                mediaRecorder.start();
+
+                function drawFrame() {
+                    if (video.paused || video.ended) {
+                        if (mediaRecorder.state === 'recording') {
+                            mediaRecorder.stop();
+                        }
+                        return;
+                    }
+                    ctx.drawImage(video, 0, 0, width, height);
+                    requestAnimationFrame(drawFrame);
+                }
+
+                drawFrame();
+            };
+
+            video.onerror = (err) => {
+                URL.revokeObjectURL(video.src);
+                reject(err);
+            };
+        });
+    }
+
+    // =====================================================
+    // 🔥 تابع پردازش آپلود فایل (با فشرده‌سازی هوشمند)
     // =====================================================
     async function handleFileSelect(event) {
         UploadLogger.add('📂 رویداد آپلود فعال شد', { 
@@ -1214,7 +1283,7 @@
 
         UploadLogger.add('📄 فایل انتخاب شد', {
             name: file.name,
-            size: file.size + ' bytes',
+            size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
             type: file.type,
             lastModified: new Date(file.lastModified).toISOString()
         });
@@ -1229,8 +1298,9 @@
         statusEl.textContent = '⏳ در حال پردازش...';
         statusEl.className = 'file-status loading';
 
+        const MAX_DIRECT_SIZE = 4 * 1024 * 1024; // ۴ مگابایت
+
         try {
-            // تشخیص نوع فایل
             const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name);
             const isImage = file.type.startsWith('image/');
             
@@ -1245,7 +1315,7 @@
                 const compressedBase64 = await compressImage(file, 1024, 0.7);
                 selectedFileData = { 
                     name: file.name, 
-                    type: file.type || 'image/jpeg', 
+                    type: 'image/jpeg', 
                     base64: compressedBase64 
                 };
                 previewImg.src = compressedBase64;
@@ -1256,21 +1326,49 @@
                     name: file.name,
                     base64Length: compressedBase64.length
                 });
+            } else if (isVideo) {
+                let videoBase64 = '';
+                
+                if (file.size > MAX_DIRECT_SIZE) {
+                    UploadLogger.add('🎬 آغاز فشرده‌سازی خودکار ویدیو...', { originalSizeMB: (file.size / (1024 * 1024)).toFixed(2) });
+                    statusEl.textContent = '🎬 در حال فشرده‌سازی ویدیو...';
+                    videoBase64 = await compressVideo(file, 480, 500000);
+                } else {
+                    UploadLogger.add('🎬 خواندن ویدیو بدون فشرده‌سازی...', {});
+                    videoBase64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.readAsDataURL(file);
+                    });
+                }
+
+                selectedFileData = { 
+                    name: file.name, 
+                    type: 'video/webm', 
+                    base64: videoBase64 
+                };
+                previewImg.style.display = 'none';
+                statusEl.textContent = '✅ ویدیو آماده ارسال';
+                statusEl.className = 'file-status success';
+                UploadLogger.add('✅ ویدیو آماده گردید', {
+                    name: file.name,
+                    type: selectedFileData.type,
+                    compressedBase64Length: videoBase64.length
+                });
             } else {
-                // ویدیو یا فایل دیگه
                 UploadLogger.add('📁 خواندن فایل به صورت Base64...', {});
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const base64 = e.target.result;
                     selectedFileData = { 
                         name: file.name, 
-                        type: file.type || this.guessMimeType(file.name), 
+                        type: file.type || guessMimeType(file.name), 
                         base64: base64 
                     };
                     previewImg.style.display = 'none';
-                    statusEl.textContent = `✅ ${isVideo ? 'ویدیو' : 'فایل'} آماده ارسال`;
+                    statusEl.textContent = '✅ فایل آماده ارسال';
                     statusEl.className = 'file-status success';
-                    UploadLogger.add(`✅ ${isVideo ? 'ویدیو' : 'فایل'} پردازش شد`, {
+                    UploadLogger.add('✅ فایل پردازش شد', {
                         name: file.name,
                         type: selectedFileData.type,
                         base64Length: base64.length
@@ -1288,27 +1386,15 @@
         }
     }
 
-    // حدس MIME Type از پسوند فایل
     function guessMimeType(filename) {
         const ext = filename.split('.').pop().toLowerCase();
         const mimeMap = {
-            'mp4': 'video/mp4',
-            'mov': 'video/quicktime',
-            'webm': 'video/webm',
-            'avi': 'video/x-msvideo',
-            'mpeg': 'video/mpeg',
-            'wmv': 'video/x-ms-wmv',
-            '3gpp': 'video/3gpp',
-            'flv': 'video/x-flv',
-            'mkv': 'video/x-matroska',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'gif': 'image/gif',
-            'webp': 'image/webp',
-            'pdf': 'application/pdf',
-            'txt': 'text/plain',
-            'doc': 'application/msword',
+            'mp4': 'video/mp4', 'mov': 'video/quicktime', 'webm': 'video/webm',
+            'avi': 'video/x-msvideo', 'mpeg': 'video/mpeg', 'wmv': 'video/x-ms-wmv',
+            '3gpp': 'video/3gpp', 'flv': 'video/x-flv', 'mkv': 'video/x-matroska',
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+            'gif': 'image/gif', 'webp': 'image/webp', 'pdf': 'application/pdf',
+            'txt': 'text/plain', 'doc': 'application/msword',
             'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         };
         return mimeMap[ext] || 'application/octet-stream';
@@ -1435,7 +1521,6 @@
             chatHistoryData[currentChatId] = [];
         }
         
-        // ذخیره تاریخچه (بدون فایل برای جلوگیری از حجم بالا)
         chatHistoryData[currentChatId].push({ 
             role: 'user', 
             text: textPrompt || '[فایل ارسال شده]' 
