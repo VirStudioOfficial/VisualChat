@@ -7,7 +7,7 @@
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    
+
     <style>
         :root {
             --bg-main: #0e1217;
@@ -29,7 +29,7 @@
             font-family: 'Vazirmatn', sans-serif;
             -webkit-tap-highlight-color: transparent;
         }
-        
+
         select, input, button {
             -webkit-appearance: none !important;
             -moz-appearance: none !important;
@@ -39,9 +39,7 @@
             background: none;
         }
 
-        select::-ms-expand {
-            display: none !important;
-        }
+        select::-ms-expand { display: none !important; }
 
         input::-webkit-outer-spin-button,
         input::-webkit-inner-spin-button {
@@ -298,12 +296,11 @@
         }
         .input-box:focus-within { border-color: var(--accent); }
 
-        /* ★★★ مهم‌ترین تغییر: حذف کامل دستگیره تغییر سایز textarea ★★★ */
         textarea {
             flex: 1;
             color: white;
-            resize: none !important; /* این خط باعث میشه دستگیره تغییر سایز (اون مربع سفید) ناپدید بشه */
-            overflow: hidden !important; /* جلوگیری از اسکرول بار مزاحم */
+            resize: none !important;
+            overflow: hidden !important;
             height: 24px;
             max-height: 120px;
             font-size: 0.95rem;
@@ -333,6 +330,12 @@
         }
         .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: rgba(255,255,255,0.08); }
         .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* استایل حالت فعال بودن سرچ وب */
+        .icon-btn.search-active {
+            color: var(--accent) !important;
+            background-color: rgba(56, 189, 248, 0.15) !important;
+        }
 
         .action-btn { color: var(--accent); }
         .action-btn.stop-mode {
@@ -441,13 +444,18 @@
                 <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
                     <i class="fa-solid fa-plus"></i>
                 </button>
-                
+
                 <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
                     <i class="fa-regular fa-face-smile"></i>
                 </button>
 
+                <!-- دکمه جدید فعال/غیرفعال‌سازی جستجوی وب -->
+                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب (گوگل)">
+                    <i class="fa-solid fa-globe"></i>
+                </button>
+
                 <textarea id="userInput" placeholder="پرسیدن از Visual Bot..." rows="1" onkeydown="handleKeyDown(event)"></textarea>
-                
+
                 <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
                     <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
                 </button>
@@ -462,16 +470,17 @@
     let selectedFileData = null;
     let isFirstMessage = true;
     let isGenerating = false;
+    let isSearchEnabled = false; // وضعیت سرچ وب
     let currentAbortController = null;
     let typeWriterInterval = null;
 
     window.onload = () => {
         checkSavedUser();
         renderHistory();
-        
+
         const storageKey = currentUser ? `visual_chat_${currentUser.email}` : 'visual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
-        
+
         if (chats[currentChatId]) {
             loadChat(currentChatId);
         }
@@ -480,6 +489,19 @@
             document.documentElement.style.setProperty('--mobile-close', 'block');
         }
     };
+
+    function toggleSearch() {
+        if (isGenerating) return;
+        isSearchEnabled = !isSearchEnabled;
+        const btn = document.getElementById("searchToggleBtn");
+        if (isSearchEnabled) {
+            btn.classList.add("search-active");
+            btn.title = "جستجوی وب: فعال";
+        } else {
+            btn.classList.remove("search-active");
+            btn.title = "جستجوی وب: غیرفعال";
+        }
+    }
 
     function handleCredentialResponse(response) {
         const responsePayload = parseJwt(response.credential);
@@ -537,7 +559,7 @@
         toggleStickerPicker();
         const stickerHtml = `<img src="${stickerUrl}" class="sticker-img" alt="sticker">`;
         appendMessage('user', stickerHtml);
-        
+
         if (isFirstMessage) {
             document.getElementById("homeScreen").style.display = 'none';
             document.getElementById("chatBox").style.display = 'flex';
@@ -628,10 +650,12 @@
         const actionIcon = document.getElementById("actionIcon");
         const attachBtn = document.getElementById("attachBtn");
         const stickerBtn = document.getElementById("stickerBtn");
+        const searchBtn = document.getElementById("searchToggleBtn");
 
         inputField.disabled = generating;
         attachBtn.disabled = generating;
         stickerBtn.disabled = generating;
+        searchBtn.disabled = generating;
 
         if (generating) {
             actionBtn.classList.add("stop-mode");
@@ -673,7 +697,7 @@
 
         appendMessage('user', userContentHtml);
         inputField.value = "";
-        
+
         const payloadFile = selectedFileData;
         removeFile();
 
@@ -687,7 +711,7 @@
 
         const loadingDiv = document.createElement("div");
         loadingDiv.className = "message bot";
-        loadingDiv.innerText = "در حال پاسخ...";
+        loadingDiv.innerText = isSearchEnabled ? "در حال جستجو در وب و پاسخ..." : "در حال پاسخ...";
         chatBox.appendChild(loadingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
 
@@ -700,12 +724,17 @@
             const response = await fetch('/api/chat', {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: fullPrompt, persona: persona, file: payloadFile }),
+                body: JSON.stringify({ 
+                    text: fullPrompt, 
+                    persona: persona, 
+                    file: payloadFile,
+                    webSearch: isSearchEnabled // ارسال متغیر سرچ به بک‌اند
+                }),
                 signal: currentAbortController.signal
             });
 
             const data = await response.json();
-            
+
             if (response.status === 429) {
                 loadingDiv.innerHTML = "⏳ **محدودیت درخواست!** لطفاً چند لحظه صبر کنید.";
                 setGeneratingState(false);
@@ -736,7 +765,7 @@
         element.innerHTML = "";
         let i = 0;
         const formatted = formatReply(text);
-        
+
         typeWriterInterval = setInterval(() => {
             if (i < formatted.length) {
                 element.innerHTML = formatted.substring(0, i + 1);
@@ -779,9 +808,9 @@
     function saveCurrentChat() {
         const chatBox = document.getElementById("chatBox");
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
-        
+
         const storageKey = currentUser ? `visual_chat_${currentUser.email}` : 'visual_chat_history';
-        
+
         chats[currentChatId] = {
             title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
