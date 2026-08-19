@@ -630,8 +630,95 @@
         .switch input:checked + .switch-slider { background: var(--accent-grad); border-color: transparent; }
         .switch input:checked + .switch-slider::before { transform: translateX(-18px); }
 
+        /* ===== منوی انتخاب مدل ===== */
+        .model-selector {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 4px 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            position: relative;
+        }
+        .model-selector:hover {
+            border-color: rgba(139,92,246,0.4);
+            color: var(--text-main);
+        }
+        .model-selector .model-icon {
+            font-size: 0.9rem;
+        }
+        .model-selector .model-name {
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .model-selector .model-chevron {
+            font-size: 0.65rem;
+            margin-right: 2px;
+        }
+
+        /* ===== منوی کشویی مدل‌ها ===== */
+        .model-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            padding: 6px;
+            min-width: 200px;
+            box-shadow: 0 12px 40px var(--shadow-b);
+            z-index: 100;
+            animation: fadeIn 0.2s ease;
+        }
+        .model-dropdown.active {
+            display: block;
+        }
+        .model-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .model-dropdown-item:hover {
+            background: var(--bg-card);
+            color: var(--text-main);
+        }
+        .model-dropdown-item.active {
+            background: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid rgba(139,92,246,0.3);
+        }
+        .model-dropdown-item .item-icon {
+            font-size: 1rem;
+        }
+        .model-dropdown-item .item-name {
+            font-weight: 600;
+        }
+        .model-dropdown-item .item-desc {
+            font-size: 0.65rem;
+            opacity: 0.6;
+        }
+        .model-dropdown-item .item-check {
+            margin-right: auto;
+            color: var(--accent-2);
+        }
+
         @media (max-width: 900px) {
             .chat-box { padding: 15px 5%; }
+            .model-selector .model-name { display: none; }
+            .model-dropdown { min-width: 160px; left: auto; right: 0; transform: none; }
         }
 
         @media (max-width: 768px) {
@@ -647,6 +734,7 @@
             .home-title { font-size: 1.4rem; }
             .input-wrapper { padding: 8px 10px 10px 10px; }
             .sticker-picker { right: 10px; left: 10px; grid-template-columns: repeat(4, 1fr); justify-items: center; }
+            .model-dropdown { min-width: 140px; left: auto; right: 0; transform: none; }
         }
     </style>
 </head>
@@ -695,6 +783,38 @@
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
+                <!-- ===== منوی انتخاب مدل ===== -->
+                <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
+                    <span class="model-icon" id="modelIcon">⚡</span>
+                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.1</span>
+                    <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+                    <div class="model-dropdown" id="modelDropdown">
+                        <div class="model-dropdown-item active" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, '⚡', 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
+                            <span class="item-icon">⚡</span>
+                            <span>
+                                <div class="item-name">Virtual Bot 1.1</div>
+                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item" data-model="gemini-3.6-flash" onclick="selectModel(this, '🚀', 'Virtual Bot 1.5', 'gemini-3.6-flash')">
+                            <span class="item-icon">🚀</span>
+                            <span>
+                                <div class="item-name">Virtual Bot 1.5</div>
+                                <div class="item-desc">جدیدترین مدل</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, '🧠', 'Virtual Bot 1.3', 'gemini-3.1-pro')">
+                            <span class="item-icon">🧠</span>
+                            <span>
+                                <div class="item-name">Virtual Bot 1.3</div>
+                                <div class="item-desc">مناسب کدنویسی</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
@@ -815,6 +935,55 @@
     </div>
 
 <script>
+    // =====================================================
+    // 🔥 سیستم انتخاب مدل
+    // =====================================================
+    let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.5-flash-lite';
+    let currentModelDisplay = {
+        'gemini-3.5-flash-lite': { icon: '⚡', name: 'Virtual Bot 1.1' },
+        'gemini-3.6-flash': { icon: '🚀', name: 'Virtual Bot 1.5' },
+        'gemini-3.1-pro': { icon: '🧠', name: 'Virtual Bot 1.3' }
+    };
+
+    function toggleModelDropdown() {
+        const dropdown = document.getElementById('modelDropdown');
+        dropdown.classList.toggle('active');
+    }
+
+    function selectModel(element, icon, displayName, modelValue) {
+        // بستن منو
+        document.getElementById('modelDropdown').classList.remove('active');
+        
+        // بروزرسانی آیتم‌های منو
+        document.querySelectorAll('.model-dropdown-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        element.classList.add('active');
+        
+        // بروزرسانی هدر
+        document.getElementById('modelIcon').textContent = icon;
+        document.getElementById('modelDisplayName').textContent = displayName;
+        
+        // ذخیره مدل انتخاب شده
+        currentModel = modelValue;
+        localStorage.setItem('virtual_selected_model', currentModel);
+        
+        console.log('🔄 مدل تغییر کرد به:', currentModel);
+    }
+
+    // بستن منو با کلیک خارج از آن
+    document.addEventListener('click', function(e) {
+        const selector = document.getElementById('modelSelector');
+        const dropdown = document.getElementById('modelDropdown');
+        if (!selector.contains(e.target)) {
+            dropdown.classList.remove('active');
+        }
+    });
+
+    // =====================================================
+    // 🔥 بقیه کدها (همون قبلی)
+    // =====================================================
+
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
     let currentUser = null;
     let chats = {};
@@ -826,7 +995,6 @@
     let currentAbortController = null;
     let typeWriterInterval = null;
     
-    // ===== لاگر مخصوص آپلود فایل =====
     const UploadLogger = {
         logs: [],
         add(step, data) {
@@ -858,6 +1026,22 @@
     };
 
     window.onload = () => {
+        // بازیابی مدل انتخاب شده
+        const savedModel = localStorage.getItem('virtual_selected_model');
+        if (savedModel && currentModelDisplay[savedModel]) {
+            currentModel = savedModel;
+            const info = currentModelDisplay[savedModel];
+            document.getElementById('modelIcon').textContent = info.icon;
+            document.getElementById('modelDisplayName').textContent = info.name;
+            // فعال کردن آیتم منو
+            document.querySelectorAll('.model-dropdown-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.model === savedModel) {
+                    item.classList.add('active');
+                }
+            });
+        }
+        
         checkSavedUser();
         loadSettings();
 
@@ -867,10 +1051,12 @@
         
         UploadLogger.add('🚀 برنامه بارگذاری شد', { 
             userAgent: navigator.userAgent,
-            platform: navigator.platform
+            platform: navigator.platform,
+            selectedModel: currentModel
         });
     };
 
+    // ===== توابع کمکی =====
     function autoResizeTextarea(textarea) {
         textarea.style.height = 'auto';
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
@@ -1187,9 +1373,6 @@
         });
     }
 
-    // =====================================================
-    // 🔥 تابع جدید فشرده‌سازی ویدیو
-    // =====================================================
     function compressVideo(file, targetWidth = 480, bitrate = 500000) {
         return new Promise((resolve, reject) => {
             const video = document.createElement('video');
@@ -1261,9 +1444,6 @@
         });
     }
 
-    // =====================================================
-    // 🔥 تابع پردازش آپلود فایل (با فشرده‌سازی هوشمند)
-    // =====================================================
     async function handleFileSelect(event) {
         UploadLogger.add('📂 رویداد آپلود فعال شد', { 
             eventType: event.type,
@@ -1298,7 +1478,7 @@
         statusEl.textContent = '⏳ در حال پردازش...';
         statusEl.className = 'file-status loading';
 
-        const MAX_DIRECT_SIZE = 4 * 1024 * 1024; // ۴ مگابایت
+        const MAX_DIRECT_SIZE = 4 * 1024 * 1024;
 
         try {
             const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name);
@@ -1458,7 +1638,8 @@
             textLength: text?.length || 0,
             hasFile: !!selectedFileData,
             fileName: selectedFileData?.name || null,
-            fileType: selectedFileData?.type || null
+            fileType: selectedFileData?.type || null,
+            model: currentModel
         });
 
         if (!text && !selectedFileData) {
@@ -1493,6 +1674,9 @@
         await sendToGemini(text, payloadFile);
     }
 
+    // =====================================================
+    // 🔥 تابع ارسال به Gemini با مدل انتخاب شده
+    // =====================================================
     async function sendToGemini(textPrompt, payloadFile = null) {
         setGeneratingState(true);
         const chatBox = document.getElementById("chatBox");
@@ -1504,10 +1688,12 @@
         loadingDiv.className = "message bot";
         const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
         
-        let statusMsg = willSearch ? '🔍 در حال جستجو در وب...' : '🤔 در حال فکر کردن...';
+        // نمایش مدل فعال در وضعیت بارگذاری
+        const modelInfo = currentModelDisplay[currentModel] || { icon: '🤖', name: 'Virtual Bot' };
+        let statusMsg = willSearch ? '🔍 در حال جستجو در وب...' : `🤖 ${modelInfo.icon} ${modelInfo.name} در حال فکر کردن...`;
         if (payloadFile) {
             const fileType = payloadFile.type?.startsWith('video/') ? '🎬 ویدیو' : '🖼️ تصویر';
-            statusMsg = `📤 ارسال ${fileType} (${payloadFile.name})...`;
+            statusMsg = `📤 ارسال ${fileType} (${payloadFile.name}) با ${modelInfo.name}...`;
         }
         
         loadingDiv.innerHTML = `${statusMsg} <span class="typing-dots"><span></span><span></span><span></span></span>`;
@@ -1535,14 +1721,16 @@
                 rawText: textPrompt,
                 file: payloadFile,
                 webSearch: isSearchEnabled,
-                history: chatHistoryData[currentChatId]
+                history: chatHistoryData[currentChatId],
+                model: currentModel  // ← مدل انتخاب شده ارسال میشه
             };
             
             UploadLogger.add('📡 ارسال درخواست به سرور', {
                 hasFile: !!payloadFile,
                 fileName: payloadFile?.name || null,
                 fileType: payloadFile?.type || null,
-                base64Length: payloadFile?.base64?.length || 0
+                base64Length: payloadFile?.base64?.length || 0,
+                model: currentModel
             });
 
             const response = await fetch('/api/chat', {
@@ -1581,7 +1769,8 @@
                 const reply = data.candidates[0].content.parts[0].text;
                 chatHistoryData[currentChatId].push({ role: 'model', text: reply });
                 UploadLogger.add('✅ پاسخ دریافت شد', {
-                    replyLength: reply.length
+                    replyLength: reply.length,
+                    model: currentModel
                 });
 
                 if (getSettings().typewriter) {
