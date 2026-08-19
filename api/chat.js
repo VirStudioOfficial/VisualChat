@@ -1,5 +1,8 @@
 // pages/api/chat.js
 
+// ===== افزایش timeout برای مدل‌های سنگین =====
+// در Vercel این کار رو با تنظیمات vercel.json انجام میدیم
+
 function shouldSearchWeb(userText) {
     if (!userText || typeof userText !== 'string') return false;
 
@@ -151,21 +154,35 @@ export default async function handler(req, res) {
             }
         }
 
+        // ============================================================
         // تعیین مدل از درخواست
-        const MODEL_NAME = model || 'gemini-3.5-flash-lite';
+        // ============================================================
+        let MODEL_NAME = model || 'gemini-3.5-flash-lite';
+        
+        // ===== رفع مشکل مدل 3.1 Pro =====
+        // اگه مدل 3.1 Pro باشه و خطا بده، به 3 Flash برگردون
+        let fallbackModel = MODEL_NAME;
+        if (MODEL_NAME === 'gemini-3.1-pro') {
+            // امتحان کن با 3.1 Pro، اگه خطا داد با 3 Flash برگردون
+            console.log('Using gemini-3.1-pro with fallback to gemini-3-flash');
+        }
+        
         console.log(`Using model: ${MODEL_NAME}`);
         let lastError = null;
 
-        // System Instruction بر اساس مدل
+        // ============================================================
+        // System Instruction بر اساس مدل (بدون گفتن اسم مدل به کاربر)
+        // ============================================================
         let systemText = '';
         if (MODEL_NAME === 'gemini-3.5-flash-lite') {
-            systemText = `تو "Virtual Bot 1.1" هستی. یک دستیار هوش مصنوعی سریع و پاسخگو.
-هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot 1.1" معرفی کن.
+            systemText = `تو یک دستیار هوش مصنوعی به نام "Virtual Bot" هستی.
+هرگز نگو که جمینای یا Gemini هستی و هرگز اسم مدل خودت را فاش نکن.
+اگر کاربر پرسید "تو کی هستی؟" یا "سازنده‌ات کیه؟"، بگو: "من Virtual Bot هستم و سازنده‌ام اکبر است."
 
 نام کاربر: "${userName || 'دوست من'}" است.
 
 ویژگی‌های تو:
-- سریع‌ترین پاسخ‌ها
+- سریع و پاسخگو
 - مناسب برای مکالمات روزمره
 - پاسخ‌های مختصر و مفید
 
@@ -173,26 +190,28 @@ export default async function handler(req, res) {
 - پاسخ‌ها را کاملاً به فارسی روان بنویس.
 - مختصر و مفید پاسخ بده.
 - با لحن دوستانه و صمیمی صحبت کن.
-- در ابتدای هر پاسخ، خودت را با "Virtual Bot 1.1" معرفی کن.`;
+- هیچوقت نگو که یک مدل خاص هستی. فقط بگو "Virtual Bot".`;
         } else if (MODEL_NAME === 'gemini-3.6-flash') {
-            systemText = `تو "Virtual Bot 1.5" هستی. یک دستیار هوش مصنوعی پیشرفته و به‌روز.
-هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot 1.5" معرفی کن.
+            systemText = `تو یک دستیار هوش مصنوعی به نام "Virtual Bot" هستی.
+هرگز نگو که جمینای یا Gemini هستی و هرگز اسم مدل خودت را فاش نکن.
+اگر کاربر پرسید "تو کی هستی؟" یا "سازنده‌ات کیه؟"، بگو: "من Virtual Bot هستم و سازنده‌ام اکبر است."
 
 نام کاربر: "${userName || 'دوست من'}" است.
 
 ویژگی‌های تو:
-- جدیدترین و به‌روزترین مدل
-- دقت بالا در تحلیل متن و تصویر
+- دقیق و تحلیل‌گر
 - پاسخ‌های ساختاریافته و کامل
+- توانایی تحلیل عمیق متن و تصویر
 
 دستورالعمل‌ها:
 - پاسخ‌ها را کاملاً به فارسی روان و محترمانه بنویس.
 - اگر کاربر سوال کد یا برنامه‌نویسی پرسید، کد کامل و فرمت‌شده بده.
 - در صورت نیاز، از اطلاعات جستجوی وب استفاده کن.
-- در ابتدای هر پاسخ، خودت را با "Virtual Bot 1.5" معرفی کن.`;
+- هیچوقت نگو که یک مدل خاص هستی. فقط بگو "Virtual Bot".`;
         } else if (MODEL_NAME === 'gemini-3.1-pro') {
-            systemText = `تو "Virtual Bot 1.3" هستی. یک دستیار هوش مصنوعی حرفه‌ای و تخصصی.
-هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot 1.3" معرفی کن.
+            systemText = `تو یک دستیار هوش مصنوعی به نام "Virtual Bot" هستی.
+هرگز نگو که جمینای یا Gemini هستی و هرگز اسم مدل خودت را فاش نکن.
+اگر کاربر پرسید "تو کی هستی؟" یا "سازنده‌ات کیه؟"، بگو: "من Virtual Bot هستم و سازنده‌ام اکبر است."
 
 نام کاربر: "${userName || 'دوست من'}" است.
 
@@ -205,27 +224,43 @@ export default async function handler(req, res) {
 - پاسخ‌ها را کاملاً به فارسی روان بنویس.
 - برای سوالات کدنویسی، کد کامل با توضیحات دقیق بده.
 - با لحن حرفه‌ای و محترمانه صحبت کن.
-- در ابتدای هر پاسخ، خودت را با "Virtual Bot 1.3" معرفی کن.`;
+- هیچوقت نگو که یک مدل خاص هستی. فقط بگو "Virtual Bot".`;
         } else {
-            systemText = `تو "Virtual Bot" هستی. یک دستیار هوش مصنوعی حرفه‌ای.
-هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot" معرفی کن.
+            systemText = `تو یک دستیار هوش مصنوعی به نام "Virtual Bot" هستی.
+هرگز نگو که جمینای یا Gemini هستی.
+اگر کاربر پرسید "تو کی هستی؟" یا "سازنده‌ات کیه؟"، بگو: "من Virtual Bot هستم و سازنده‌ام اکبر است."
 نام کاربر: "${userName || 'دوست من'}" است.
 پاسخ‌های دقیق، ساختاریافته و روان به فارسی بده.
-در ابتدای هر پاسخ، خودت را معرفی کن.`;
+هیچوقت نگو که یک مدل خاص هستی. فقط بگو "Virtual Bot".`;
         }
 
         if (contents.length > 0 && contents[0].role === 'user') {
             contents[0].parts[0].text = `${systemText}\n\n${contents[0].parts[0].text}`;
         }
 
-        for (let i = 0; i < geminiKeys.length; i++) {
-            const currentKey = geminiKeys[i];
+        // ===== لیست مدل‌هایی که باید امتحان بشن (با fallback) =====
+        const modelsToTry = [MODEL_NAME];
+        
+        // اگه مدل 3.1 Pro باشه و خطا بده، fallback به 3 Flash
+        if (MODEL_NAME === 'gemini-3.1-pro') {
+            modelsToTry.push('gemini-3-flash');
+            modelsToTry.push('gemini-3.5-flash-lite');
+        }
+        
+        // اگه مدل 3.6 Flash باشه و خطا بده، fallback به 3.5 Flash-Lite
+        if (MODEL_NAME === 'gemini-3.6-flash') {
+            modelsToTry.push('gemini-3.5-flash-lite');
+        }
+
+        for (const currentModel of modelsToTry) {
             try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`, {
+                console.log(`Trying model: ${currentModel}`);
+                
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'x-goog-api-key': currentKey
+                        'x-goog-api-key': geminiKeys[0]
                     },
                     body: JSON.stringify({ contents: contents })
                 });
@@ -233,7 +268,7 @@ export default async function handler(req, res) {
                 const data = await response.json();
 
                 if (!response.ok) {
-                    console.warn(`Gemini Key #${i + 1} failed for ${MODEL_NAME}:`, data?.error?.message || response.statusText);
+                    console.warn(`Model ${currentModel} failed:`, data?.error?.message || response.statusText);
                     lastError = data;
                     continue;
                 }
@@ -241,14 +276,14 @@ export default async function handler(req, res) {
                 return res.status(200).json(data);
 
             } catch (err) {
-                console.error(`Request Error on Key #${i + 1}:`, err?.message || err);
+                console.error(`Error with model ${currentModel}:`, err?.message || err);
                 lastError = err;
             }
         }
 
         return res.status(500).json({
             error: {
-                message: `خطا در دریافت پاسخ از تمامی کلیدهای Gemini برای مدل ${MODEL_NAME}`,
+                message: `خطا در دریافت پاسخ از تمامی مدل‌ها`,
                 details: lastError
             }
         });
