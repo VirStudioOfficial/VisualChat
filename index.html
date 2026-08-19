@@ -857,6 +857,10 @@
     let recognition = null;
     let isRecording = false;
 
+    // ===== متغیرهای جدید برای صدا (گوگل ترنسلیت) =====
+    let currentAudio = null;
+    let currentSpeakingBtn = null;
+
     window.onload = () => {
         checkSavedUser();
         loadSettings();
@@ -1241,32 +1245,61 @@
         }
     }
 
-    let currentSpeakingBtn = null;
-    let cachedVoices = [];
+    // ===== تابع جدید پخش صدا با Google Translate TTS =====
+    function speakText(btnElement) {
+        const wrapper = btnElement.closest('.message-wrapper');
+        const msgBody = wrapper ? wrapper.querySelector('.message') : null;
+        if (!msgBody) return;
 
-    function loadVoices() {
-        if ('speechSynthesis' in window) {
-            cachedVoices = window.speechSynthesis.getVoices();
+        // پاکسازی متن از کدها و ایموجی‌ها
+        let cleanText = msgBody.innerText;
+        cleanText = cleanText.replace(/```[\s\S]*?```/g, 'کد برنامه نویسی');
+        cleanText = cleanText.replace(/[\u{1F600}-\u{1F9FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F1E0}-\u{1F1FF}\u{FE0F}\u{200D}]/gu, '');
+        cleanText = cleanText.trim();
+        
+        if (!cleanText) return;
+
+        const wasSameButton = (currentSpeakingBtn === btnElement);
+
+        // توقف پخش قبلی
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
         }
-    }
-    if ('speechSynthesis' in window) {
-        loadVoices();
-        window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
 
-    function getFarsiVoice() {
-        if (!cachedVoices.length) loadVoices();
-        const faVoices = cachedVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith('fa'));
-        if (!faVoices.length) return null;
-        const natural = faVoices.find(v => /google|online|natural|microsoft/i.test(v.name));
-        return natural || faVoices[0];
-    }
+        // ریست آیکون دکمه قبلی
+        if (currentSpeakingBtn) {
+            setSpeakBtnIcon(currentSpeakingBtn, false);
+        }
 
-    function stripForSpeech(text) {
-        return text
-            .replace(/```[\s\S]*?```/g, 'کد برنامه‌نویسی')
-            .replace(/[\u{1F1E6}-\u{1FFFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\uFE0F\u200D]/gu, '')
-            .trim();
+        // اگه روی همان دکمه کلیک شد، فقط متوقف کن
+        if (wasSameButton) {
+            currentSpeakingBtn = null;
+            return;
+        }
+
+        // محدود کردن متن به 200 کاراکتر (برای سرعت و جلوگیری از خطا)
+        const truncatedText = cleanText.substring(0, 200);
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(truncatedText)}&tl=fa&client=tw-ob`;
+
+        const audio = new Audio(ttsUrl);
+        currentAudio = audio;
+        currentSpeakingBtn = btnElement;
+        setSpeakBtnIcon(btnElement, true);
+
+        audio.play().catch(err => {
+            console.error("Audio playback error:", err);
+            alert("خطا در پخش آنلاین صدا. اتصال اینترنت را بررسی کن.");
+            setSpeakBtnIcon(btnElement, false);
+            currentSpeakingBtn = null;
+            currentAudio = null;
+        });
+
+        audio.onended = () => {
+            setSpeakBtnIcon(btnElement, false);
+            currentSpeakingBtn = null;
+            currentAudio = null;
+        };
     }
 
     function setSpeakBtnIcon(btn, playing) {
@@ -1282,73 +1315,6 @@
             btn.classList.remove('playing');
             btn.title = 'پخش صدا';
         }
-    }
-
-    function speakText(btnElement) {
-        if (!('speechSynthesis' in window)) {
-            alert('مرورگر شما از پخش صدا پشتیبانی نمی‌کند.');
-            return;
-        }
-
-        const wasSameButton = currentSpeakingBtn === btnElement;
-
-        window.speechSynthesis.cancel();
-        if (currentSpeakingBtn) {
-            setSpeakBtnIcon(currentSpeakingBtn, false);
-        }
-        currentSpeakingBtn = null;
-
-        if (wasSameButton) {
-            return;
-        }
-
-        const wrapper = btnElement.closest('.message-wrapper');
-        const msgBody = wrapper ? wrapper.querySelector('.message') : null;
-        if (!msgBody) return;
-
-        const cleanText = stripForSpeech(msgBody.innerText);
-        if (!cleanText) return;
-
-        const farsiVoice = getFarsiVoice();
-        if (!farsiVoice) {
-            alert('روی این دستگاه هیچ صدای فارسی نصب نیست.');
-            return;
-        }
-
-        setTimeout(() => {
-            const utterance = new SpeechSynthesisUtterance(cleanText);
-            utterance.voice = farsiVoice;
-            utterance.lang = farsiVoice.lang;
-            utterance.rate = 0.95;
-            utterance.pitch = 1.0;
-
-            let started = false;
-            const startTimeout = setTimeout(() => {
-                if (!started) {
-                    setSpeakBtnIcon(btnElement, false);
-                    if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
-                }
-            }, 1500);
-
-            utterance.onstart = () => {
-                started = true;
-                clearTimeout(startTimeout);
-                currentSpeakingBtn = btnElement;
-                setSpeakBtnIcon(btnElement, true);
-            };
-            utterance.onend = () => {
-                clearTimeout(startTimeout);
-                setSpeakBtnIcon(btnElement, false);
-                if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
-            };
-            utterance.onerror = () => {
-                clearTimeout(startTimeout);
-                setSpeakBtnIcon(btnElement, false);
-                if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
-            };
-
-            window.speechSynthesis.speak(utterance);
-        }, 80);
     }
 
     function toggleSidebar() {
