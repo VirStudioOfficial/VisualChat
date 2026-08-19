@@ -49,11 +49,11 @@ async function fetchTavilyResults(query, tavilyKeys) {
 
             const data = await res.json();
             if (data.results && data.results.length > 0) {
-                console.log(`✅ Tavily search succeeded using Key #${i + 1}`);
+                console.log(`Tavily search succeeded using Key #${i + 1}`);
                 return data.results.map(r => `عنوان: ${r.title}\nمنبع: ${r.url}\nمحتوا: ${r.content}`).join("\n\n---\n\n");
             }
         } catch (e) {
-            console.error(`❌ Error with Tavily Key #${i + 1}:`, e?.message || e);
+            console.error(`Error with Tavily Key #${i + 1}:`, e?.message || e);
         }
     }
     return null;
@@ -73,7 +73,6 @@ export default async function handler(req, res) {
     }
 
     try {
-        // ===== 🔥 دریافت مدل از درخواست =====
         const { userName, text, rawText, file, webSearch, history, model } = req.body || {};
         const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : (text || "");
 
@@ -110,12 +109,12 @@ export default async function handler(req, res) {
         res.setHeader('X-Search-Performed', String(isSearchNeeded));
 
         if (isSearchNeeded && searchQueryBase) {
-            console.log(`🔍 Executing Tavily Search for: "${searchQueryBase}"`);
+            console.log(`Executing Tavily Search for: "${searchQueryBase}"`);
             const searchResults = await fetchTavilyResults(searchQueryBase, tavilyKeys);
             const lastIndex = contents.length - 1;
 
             if (searchResults && lastIndex >= 0 && contents[lastIndex].role === 'user') {
-                contents[lastIndex].parts[0].text += `\n\n[نتایج زنده جستجوی وب]:\n${searchResults}\n\n[دستورالعمل: با کمک اطلاعات فوق پاسخ دقیق، به روز و روان ارائه بده.]`;
+                contents[lastIndex].parts[0].text += `\n\n[نتایج جستجوی وب]:\n${searchResults}\n\n[دستورالعمل: با کمک اطلاعات فوق پاسخ دقیق و به روز ارائه بده.]`;
             }
         }
 
@@ -140,7 +139,7 @@ export default async function handler(req, res) {
                         'mkv': 'video/x-matroska'
                     };
                     mimeType = mimeMap[ext] || 'video/mp4';
-                    console.log('🎬 Video detected:', file.name, '->', mimeType);
+                    console.log('Video detected:', file.name, '->', mimeType);
                 }
                 
                 contents[lastIndex].parts.push({
@@ -152,58 +151,67 @@ export default async function handler(req, res) {
             }
         }
 
-        // ============================================================
-        // 🔥 مدل رو از درخواست میگیریم (اگه نباشه، پیش‌فرض)
-        // ============================================================
+        // تعیین مدل از درخواست
         const MODEL_NAME = model || 'gemini-3.5-flash-lite';
-        console.log(`🤖 Using model: ${MODEL_NAME}`);
+        console.log(`Using model: ${MODEL_NAME}`);
         let lastError = null;
 
-        // ===== System Instruction (پویا بر اساس مدل) =====
+        // System Instruction بر اساس مدل
         let systemText = '';
         if (MODEL_NAME === 'gemini-3.5-flash-lite') {
-            systemText = `تو Virtual Bot 1.1 هستی، یک هوش مصنوعی سریع و پاسخگو با مدل Gemini 3.5 Flash-Lite.
+            systemText = `تو "Virtual Bot 1.1" هستی. یک دستیار هوش مصنوعی سریع و پاسخگو.
+هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot 1.1" معرفی کن.
+
 نام کاربر: "${userName || 'دوست من'}" است.
 
-⚡ ویژگی‌های تو:
+ویژگی‌های تو:
 - سریع‌ترین پاسخ‌ها
 - مناسب برای مکالمات روزمره
 - پاسخ‌های مختصر و مفید
 
-📌 دستورالعمل‌ها:
+دستورالعمل‌ها:
 - پاسخ‌ها را کاملاً به فارسی روان بنویس.
 - مختصر و مفید پاسخ بده.
-- با لحن دوستانه و صمیمی صحبت کن.`;
+- با لحن دوستانه و صمیمی صحبت کن.
+- در ابتدای هر پاسخ، خودت را با "Virtual Bot 1.1" معرفی کن.`;
         } else if (MODEL_NAME === 'gemini-3.6-flash') {
-            systemText = `تو Virtual Bot 1.5 هستی، یک هوش مصنوعی پیشرفته با مدل Gemini 3.6 Flash.
+            systemText = `تو "Virtual Bot 1.5" هستی. یک دستیار هوش مصنوعی پیشرفته و به‌روز.
+هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot 1.5" معرفی کن.
+
 نام کاربر: "${userName || 'دوست من'}" است.
 
-🚀 ویژگی‌های تو:
+ویژگی‌های تو:
 - جدیدترین و به‌روزترین مدل
 - دقت بالا در تحلیل متن و تصویر
 - پاسخ‌های ساختاریافته و کامل
 
-📌 دستورالعمل‌ها:
+دستورالعمل‌ها:
 - پاسخ‌ها را کاملاً به فارسی روان و محترمانه بنویس.
-- اگر کاربر سوال کد/برنامه‌نویسی پرسید، کد کامل و فرمت‌شده بده.
-- در صورت نیاز، از اطلاعات جستجوی وب استفاده کن.`;
+- اگر کاربر سوال کد یا برنامه‌نویسی پرسید، کد کامل و فرمت‌شده بده.
+- در صورت نیاز، از اطلاعات جستجوی وب استفاده کن.
+- در ابتدای هر پاسخ، خودت را با "Virtual Bot 1.5" معرفی کن.`;
         } else if (MODEL_NAME === 'gemini-3.1-pro') {
-            systemText = `تو Virtual Bot 1.3 هستی، یک هوش مصنوعی حرفه‌ای با مدل Gemini 3.1 Pro.
+            systemText = `تو "Virtual Bot 1.3" هستی. یک دستیار هوش مصنوعی حرفه‌ای و تخصصی.
+هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot 1.3" معرفی کن.
+
 نام کاربر: "${userName || 'دوست من'}" است.
 
-🧠 ویژگی‌های تو:
+ویژگی‌های تو:
 - تخصص در کدنویسی و مسائل فنی
 - استدلال عمیق و دقیق
 - مناسب برای پروژه‌های پیچیده
 
-📌 دستورالعمل‌ها:
+دستورالعمل‌ها:
 - پاسخ‌ها را کاملاً به فارسی روان بنویس.
 - برای سوالات کدنویسی، کد کامل با توضیحات دقیق بده.
-- با لحن حرفه‌ای و محترمانه صحبت کن.`;
+- با لحن حرفه‌ای و محترمانه صحبت کن.
+- در ابتدای هر پاسخ، خودت را با "Virtual Bot 1.3" معرفی کن.`;
         } else {
-            systemText = `تو Virtual Bot هستی، یک هوش مصنوعی حرفه‌ای.
+            systemText = `تو "Virtual Bot" هستی. یک دستیار هوش مصنوعی حرفه‌ای.
+هرگز نگو که جمینای یا Gemini هستی. فقط خودت را با اسم "Virtual Bot" معرفی کن.
 نام کاربر: "${userName || 'دوست من'}" است.
-پاسخ‌های دقیق، ساختاریافته و روان به فارسی بده.`;
+پاسخ‌های دقیق، ساختاریافته و روان به فارسی بده.
+در ابتدای هر پاسخ، خودت را معرفی کن.`;
         }
 
         if (contents.length > 0 && contents[0].role === 'user') {
@@ -225,7 +233,7 @@ export default async function handler(req, res) {
                 const data = await response.json();
 
                 if (!response.ok) {
-                    console.warn(`⚠️ Gemini Key #${i + 1} failed for ${MODEL_NAME}:`, data?.error?.message || response.statusText);
+                    console.warn(`Gemini Key #${i + 1} failed for ${MODEL_NAME}:`, data?.error?.message || response.statusText);
                     lastError = data;
                     continue;
                 }
@@ -233,7 +241,7 @@ export default async function handler(req, res) {
                 return res.status(200).json(data);
 
             } catch (err) {
-                console.error(`❌ Request Error on Key #${i + 1}:`, err?.message || err);
+                console.error(`Request Error on Key #${i + 1}:`, err?.message || err);
                 lastError = err;
             }
         }
@@ -246,7 +254,7 @@ export default async function handler(req, res) {
         });
 
     } catch (globalError) {
-        console.error("💥 Server Error:", globalError);
+        console.error("Server Error:", globalError);
         return res.status(500).json({ error: { message: 'خطای داخلی سرور', details: globalError.message } });
     }
 }
