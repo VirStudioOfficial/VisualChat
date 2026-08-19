@@ -1,8 +1,26 @@
-// تابع سرچ چندکاناله با چرخش روی کلیدهای Tavily
+// ۱. تابع تشخیص هوشمند نیاز به سرچ زنده
+function shouldSearchWeb(userText) {
+    if (!userText) return false;
+    const text = userText.toLowerCase();
+
+    // کلیدواژه‌های مستقیم درخواست سرچ
+    const explicitKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن'];
+    const hasExplicitRequest = explicitKeywords.some(kw => text.includes(kw));
+
+    // کلیدواژه‌های موضوعاتی که نیازمند دیتای آنلاین هستند
+    const realTimeKeywords = [
+        'قیمت', 'چنده', 'نرخ', 'امروز', 'دلار', 'طلا', 'سکه', 'ارز',
+        'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب'
+    ];
+    const hasRealTimeContext = realTimeKeywords.some(kw => text.includes(kw));
+
+    return hasExplicitRequest || hasRealTimeContext;
+}
+
+// ۲. تابع سرچ چندکاناله با چرخش روی کلیدهای Tavily
 async function fetchTavilyResults(query, tavilyKeys) {
     if (!tavilyKeys || tavilyKeys.length === 0) return null;
 
-    // چرخش روی کلیدها در صورت اتمام سهمیه (429/401) یا بروز خطا
     for (let i = 0; i < tavilyKeys.length; i++) {
         const currentKey = tavilyKeys[i];
         
@@ -20,7 +38,7 @@ async function fetchTavilyResults(query, tavilyKeys) {
 
             if (!res.ok) {
                 console.warn(`⚠️ Tavily Key #${i + 1} failed with status ${res.status}. Trying next key...`);
-                continue; // سوئیچ به کلید بعدی
+                continue;
             }
 
             const data = await res.json();
@@ -44,27 +62,18 @@ export default async function handler(req, res) {
 
     const { text, persona, file, webSearch, history } = req.body || {};
 
-    // دریافت کلیدهای Gemini از Environment Variables
+    // خواندن کلیدهای Gemini و Tavily از Secrets
     const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
     const geminiKeys = rawGeminiKeys.split(',').map(k => k.trim()).filter(Boolean);
 
-    // ۳ کلید وصل‌شده‌ی Tavily (هم به صورت هاردکد هم پشتیبانی از Env)
-    const defaultTavilyKeys = [
-        "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",
-        "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",
-        "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"
-    ];
-
-    const rawTavilyEnv = process.env.TAVILY_API_KEYS || process.env.TAVILY_API_KEY || "";
-    const tavilyKeys = rawTavilyEnv 
-        ? rawTavilyEnv.split(',').map(k => k.trim()).filter(Boolean)
-        : defaultTavilyKeys;
+    const rawTavilyKeys = process.env.TAVILY_API_KEYS || process.env.TAVILY_API_KEY || "";
+    const tavilyKeys = rawTavilyKeys.split(',').map(k => k.trim()).filter(Boolean);
 
     if (geminiKeys.length === 0) {
-        return res.status(400).json({ error: { message: 'هیچ کلید Gemini یافت نشد!' } });
+        return res.status(400).json({ error: { message: 'هیچ کلید Gemini در تنظیمات ورسل یافت نشد!' } });
     }
 
-    // ۱. آماده‌سازی تاریخچه پیام‌ها
+    // ساخت آرایه تاریخچه چت
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -79,8 +88,10 @@ export default async function handler(req, res) {
         }];
     }
 
-    // ۲. اجرای سرچ زنده با ۳ کلید متصل
-    if (webSearch && text) {
+    // چک کردن هوشمند: اگر کره زمین روشن بود AND پیام کاربر نیاز به سرچ داشت
+    const isSearchNeeded = webSearch && shouldSearchWeb(text);
+
+    if (isSearchNeeded && text) {
         const searchResults = await fetchTavilyResults(text, tavilyKeys);
         const lastIndex = contents.length - 1;
         
@@ -89,7 +100,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // ۳. اعمال پرسونا
+    // اعمال پرسونا
     if (persona && contents.length > 0) {
         let prefix = "";
         if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
@@ -102,7 +113,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // ۴. افزودن تصویر در صورت وجود
+    // افزودن تصویر
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -114,7 +125,7 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۵. ارسال به مدل Gemini 3.5 Flash Lite
+    // ارسال به مدل Gemini 3.5 Flash Lite
     const MODEL_NAME = 'gemini-3.5-flash-lite';
     let lastError = null;
 
