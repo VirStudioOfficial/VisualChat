@@ -1222,6 +1222,7 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     text: fullPrompt,
+                    rawText: textPrompt,
                     file: payloadFile,
                     webSearch: isSearchEnabled,
                     history: chatHistoryData[currentChatId] // ارسال کل تاریخچه چت برای حافظه‌دار شدن
