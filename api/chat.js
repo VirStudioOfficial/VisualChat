@@ -114,7 +114,14 @@ export default async function handler(req, res) {
             const lastIndex = contents.length - 1;
 
             if (searchResults && lastIndex >= 0 && contents[lastIndex].role === 'user') {
-                contents[lastIndex].parts[0].text += `\n\n[نتایج جستجوی وب]:\n${searchResults}\n\n[دستورالعمل: با کمک اطلاعات فوق پاسخ دقیق و به روز ارائه بده.]`;
+                const textPart = contents[lastIndex].parts.find(p => p.text !== undefined);
+                if (textPart) {
+                    textPart.text += `\n\n[نتایج جستجوی وب]:\n${searchResults}\n\n[دستورالعمل: با کمک اطلاعات فوق پاسخ دقیق و به روز ارائه بده.]`;
+                } else {
+                    contents[lastIndex].parts.push({
+                        text: `\n\n[نتایج جستجوی وب]:\n${searchResults}\n\n[دستورالعمل: با کمک اطلاعات فوق پاسخ دقیق و به روز ارائه بده.]`
+                    });
+                }
             }
         }
 
@@ -178,10 +185,6 @@ export default async function handler(req, res) {
 پاسخ‌های دقیق و روان به فارسی بده.`;
         }
 
-        if (contents.length > 0 && contents[0].role === 'user') {
-            contents[0].parts[0].text = `${systemText}\n\n${contents[0].parts[0].text}`;
-        }
-
         const modelsToTry = [MODEL_NAME];
         if (MODEL_NAME === 'gemini-3.1-pro') {
             modelsToTry.push('gemini-3-flash');
@@ -192,37 +195,45 @@ export default async function handler(req, res) {
         }
 
         for (const currentModel of modelsToTry) {
-            try {
-                console.log(`Trying model: ${currentModel}`);
-                
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-goog-api-key': geminiKeys[0]
-                    },
-                    body: JSON.stringify({ contents: contents })
-                });
+            for (let k = 0; k < geminiKeys.length; k++) {
+                const currentKey = geminiKeys[k];
+                try {
+                    console.log(`Trying model: ${currentModel} with Key #${k + 1}`);
+                    
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-goog-api-key': currentKey
+                        },
+                        body: JSON.stringify({
+                            system_instruction: {
+                                parts: [{ text: systemText }]
+                            },
+                            contents: contents
+                        })
+                    });
 
-                const data = await response.json();
+                    const data = await response.json();
 
-                if (!response.ok) {
-                    console.warn(`Model ${currentModel} failed:`, data?.error?.message || response.statusText);
-                    lastError = data;
-                    continue;
+                    if (!response.ok) {
+                        console.warn(`Model ${currentModel} with Key #${k + 1} failed:`, data?.error?.message || response.statusText);
+                        lastError = data;
+                        continue;
+                    }
+
+                    return res.status(200).json(data);
+
+                } catch (err) {
+                    console.error(`Error with model ${currentModel} and Key #${k + 1}:`, err?.message || err);
+                    lastError = err;
                 }
-
-                return res.status(200).json(data);
-
-            } catch (err) {
-                console.error(`Error with model ${currentModel}:`, err?.message || err);
-                lastError = err;
             }
         }
 
         return res.status(500).json({
             error: {
-                message: `خطا در دریافت پاسخ از تمامی مدل‌ها`,
+                message: `خطا در دریافت پاسخ از تمامی مدل‌ها و کلیدها`,
                 details: lastError
             }
         });
