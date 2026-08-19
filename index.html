@@ -93,14 +93,6 @@
             background: none;
         }
 
-        select::-ms-expand { display: none !important; }
-
-        input::-webkit-outer-spin-button,
-        input::-webkit-inner-spin-button {
-            -webkit-appearance: none !important;
-            margin: 0;
-        }
-
         html, body {
             height: 100%;
             height: 100dvh;
@@ -170,12 +162,6 @@
         @keyframes dotBounce {
             0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
             40% { transform: translateY(-4px); opacity: 1; }
-        }
-
-        @keyframes pulseMic {
-            0% { transform: scale(1); color: var(--danger); }
-            50% { transform: scale(1.15); color: #ef4444; }
-            100% { transform: scale(1); color: var(--danger); }
         }
 
         .sidebar-overlay {
@@ -396,11 +382,6 @@
             padding-right: 15px;
         }
 
-        .msg-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 4px; }
-        .msg-footer .speak-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; transition: color 0.2s; }
-        .msg-footer .speak-btn:hover { color: var(--accent-2); }
-        .msg-footer .speak-btn.playing { color: var(--accent-2); animation: glowPulse 1.4s infinite; }
-
         .typing-dots { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
         .typing-dots span {
             width: 6px; height: 6px; border-radius: 50%;
@@ -471,20 +452,6 @@
             box-shadow: none !important;
         }
 
-        textarea#userInput::-webkit-resizer,
-        textarea#userInput::-webkit-scrollbar-corner {
-            display: none !important;
-            opacity: 0 !important;
-        }
-
-        textarea#userInput:-webkit-autofill,
-        textarea#userInput:-webkit-autofill:hover,
-        textarea#userInput:-webkit-autofill:focus {
-            -webkit-text-fill-color: var(--text-main) !important;
-            -webkit-box-shadow: 0 0 0px 1000px var(--bg-input) inset !important;
-            transition: background-color 5000s ease-in-out 0s !important;
-        }
-
         textarea::placeholder { color: var(--text-muted) !important; }
         textarea:disabled { opacity: 0.55; cursor: not-allowed; }
 
@@ -508,8 +475,6 @@
             color: var(--accent-2) !important;
             background-color: rgba(34, 211, 238, 0.14) !important;
         }
-
-        .icon-btn.recording { animation: pulseMic 1.2s infinite; }
 
         .action-btn {
             background: var(--accent-grad);
@@ -558,8 +523,6 @@
             box-shadow: 0 20px 60px var(--shadow-b);
             overflow-y: auto;
         }
-        .settings-modal::-webkit-scrollbar { width: 5px; }
-        .settings-modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
         .settings-modal.active { display: block; animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 
         .settings-header {
@@ -769,10 +732,6 @@
 
                 <textarea id="userInput" placeholder="از Virtual Bot بپرس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
-                <button class="icon-btn" id="micBtn" onclick="toggleVoiceInput()" title="تبدیل صدا به متن">
-                    <i class="fa-solid fa-microphone"></i>
-                </button>
-
                 <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب (گوگل)">
                     <i class="fa-solid fa-globe"></i>
                 </button>
@@ -854,17 +813,9 @@
     let currentAbortController = null;
     let typeWriterInterval = null;
 
-    let recognition = null;
-    let isRecording = false;
-
-    // ===== متغیرهای جدید برای صدا (گوگل ترنسلیت) =====
-    let currentAudio = null;
-    let currentSpeakingBtn = null;
-
     window.onload = () => {
         checkSavedUser();
         loadSettings();
-        initSpeechRecognition();
 
         if (window.innerWidth <= 768) {
             document.documentElement.style.setProperty('--mobile-close', 'block');
@@ -876,8 +827,13 @@
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
     }
 
-    function extractNameFromEmail(email) {
+    // استخراج اسم به نحو احسن از ایمیل و گوگل
+    function extractNameFromEmail(email, googleName = '') {
+        if (googleName && googleName.trim() && !googleName.includes('@')) {
+            return googleName.trim();
+        }
         if (!email) return 'دوست من';
+        
         const handle = email.split('@')[0].toLowerCase();
         const clean = handle.replace(/[0-9_.-]/g, '');
         return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'دوست من';
@@ -885,10 +841,10 @@
 
     function handleCredentialResponse(response) {
         const responsePayload = parseJwt(response.credential);
-        const autoExtractedName = extractNameFromEmail(responsePayload.email);
+        const autoExtractedName = extractNameFromEmail(responsePayload.email, responsePayload.name);
 
         currentUser = {
-            name: responsePayload.name || autoExtractedName,
+            name: autoExtractedName,
             customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
             email: responsePayload.email,
             picture: responsePayload.picture
@@ -914,7 +870,7 @@
         if (saved) {
             currentUser = JSON.parse(saved);
             if (!currentUser.customName) {
-                currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email);
+                currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email, currentUser.name);
             }
             overlay.classList.remove('active');
             initUserData();
@@ -941,10 +897,12 @@
     function updateUserUI() {
         if (!currentUser) return;
         const profileDiv = document.getElementById('userProfile');
+        const nameToDisplay = currentUser.customName || currentUser.name;
+        
         profileDiv.innerHTML = `
             <img src="${currentUser.picture}" class="user-avatar" alt="User">
             <div class="user-info">
-                <div class="user-name">${currentUser.customName || currentUser.name}</div>
+                <div class="user-name">${nameToDisplay}</div>
             </div>
             <div class="user-actions">
                 <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب کاربری">
@@ -957,9 +915,9 @@
         `;
         const titleEl = document.getElementById('welcomeHomeTitle');
         if (titleEl) {
-            titleEl.innerText = `سلام ${currentUser.customName || currentUser.name}! امروز چطور می‌تونم کمکت کنم؟`;
+            titleEl.innerText = `سلام ${nameToDisplay}! امروز چطور می‌تونم کمکت کنم؟`;
         }
-        document.getElementById('customUserNameInput').value = currentUser.customName || currentUser.name;
+        document.getElementById('customUserNameInput').value = nameToDisplay;
     }
 
     function logoutUser() {
@@ -1122,201 +1080,6 @@
         }
     }
 
-    let voiceInputBaseText = '';
-    let recognitionGotResult = false;
-
-    function initSpeechRecognition() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const micBtn = document.getElementById('micBtn');
-
-        const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-        if (!isSecure) {
-            console.warn('⚠️ سایت روی HTTPS نیست؛ تشخیص صدا در اکثر مرورگرها کار نخواهد کرد.');
-        }
-
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.lang = 'fa-IR';
-            recognition.continuous = false;
-            recognition.interimResults = true;
-            recognition.maxAlternatives = 1;
-
-            recognition.onstart = () => {
-                recognitionGotResult = false;
-                const inputField = document.getElementById('userInput');
-                voiceInputBaseText = inputField.value || '';
-            };
-
-            recognition.onresult = (event) => {
-                recognitionGotResult = true;
-                let finalTranscript = '';
-                let interimTranscript = '';
-
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    const transcript = event.results[i][0].transcript;
-                    if (event.results[i].isFinal) {
-                        finalTranscript += transcript;
-                    } else {
-                        interimTranscript += transcript;
-                    }
-                }
-
-                const inputField = document.getElementById('userInput');
-                const sep = (voiceInputBaseText.length > 0 && !voiceInputBaseText.endsWith(' ')) ? ' ' : '';
-                inputField.value = voiceInputBaseText + sep + (finalTranscript || interimTranscript);
-                autoResizeTextarea(inputField);
-
-                if (finalTranscript) {
-                    voiceInputBaseText = inputField.value;
-                }
-            };
-
-            recognition.onerror = (e) => {
-                console.error('Speech recognition error:', e.error);
-                switch (e.error) {
-                    case 'not-allowed':
-                    case 'permission-denied':
-                        alert('دسترسی به میکروفون مجاز نیست. لطفاً در تنظیمات مرورگر (کنار آدرس سایت) دسترسی میکروفون را فعال کن.');
-                        break;
-                    case 'audio-capture':
-                        alert('میکروفونی پیدا نشد. لطفاً اتصال میکروفون دستگاه را بررسی کن.');
-                        break;
-                    case 'network':
-                        alert('مشکل در اتصال اینترنت برای تشخیص صدا. لطفاً اتصال اینترنت (و فیلترشکن/VPN در صورت وجود) را بررسی کن.');
-                        break;
-                    case 'no-speech':
-                        console.warn('صدایی تشخیص داده نشد.');
-                        break;
-                    case 'service-not-allowed':
-                        alert('سرویس تشخیص گفتار توسط مرورگر مسدود شده است.');
-                        break;
-                    default:
-                        break;
-                }
-                stopVoiceInput();
-            };
-
-            recognition.onend = () => {
-                if (!recognitionGotResult) {
-                    console.warn('ضبط بدون نتیجه پایان یافت.');
-                }
-                stopVoiceInput();
-            };
-        } else {
-            if (micBtn) {
-                micBtn.style.display = 'none';
-                console.warn('مرورگر شما از تشخیص صدا پشتیبانی نمیکند.');
-            }
-        }
-    }
-
-    function toggleVoiceInput() {
-        if (isGenerating || !recognition) return;
-        const micBtn = document.getElementById('micBtn');
-
-        if (!isRecording) {
-            try {
-                recognition.start();
-                isRecording = true;
-                micBtn.classList.add('recording');
-                micBtn.title = "در حال ضبط...";
-            } catch (err) {
-                stopVoiceInput();
-                if(err.name === 'NotAllowedError'){
-                    alert('دسترسی به میکروفون مسدود شده است.');
-                }
-            }
-        } else {
-            recognition.stop();
-            stopVoiceInput();
-        }
-    }
-
-    function stopVoiceInput() {
-        const wasRecording = isRecording;
-        isRecording = false;
-        const micBtn = document.getElementById('micBtn');
-        if (micBtn) {
-            micBtn.classList.remove('recording');
-            micBtn.title = "تبدیل صدا به متن";
-        }
-        if (recognition && wasRecording) {
-            try { recognition.abort(); } catch (e) {}
-        }
-    }
-
-    // ===== تابع جدید پخش صدا با Google Translate TTS =====
-    function speakText(btnElement) {
-        const wrapper = btnElement.closest('.message-wrapper');
-        const msgBody = wrapper ? wrapper.querySelector('.message') : null;
-        if (!msgBody) return;
-
-        // پاکسازی متن از کدها و ایموجی‌ها
-        let cleanText = msgBody.innerText;
-        cleanText = cleanText.replace(/```[\s\S]*?```/g, 'کد برنامه نویسی');
-        cleanText = cleanText.replace(/[\u{1F600}-\u{1F9FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F1E0}-\u{1F1FF}\u{FE0F}\u{200D}]/gu, '');
-        cleanText = cleanText.trim();
-        
-        if (!cleanText) return;
-
-        const wasSameButton = (currentSpeakingBtn === btnElement);
-
-        // توقف پخش قبلی
-        if (currentAudio) {
-            currentAudio.pause();
-            currentAudio = null;
-        }
-
-        // ریست آیکون دکمه قبلی
-        if (currentSpeakingBtn) {
-            setSpeakBtnIcon(currentSpeakingBtn, false);
-        }
-
-        // اگه روی همان دکمه کلیک شد، فقط متوقف کن
-        if (wasSameButton) {
-            currentSpeakingBtn = null;
-            return;
-        }
-
-        // محدود کردن متن به 200 کاراکتر (برای سرعت و جلوگیری از خطا)
-        const truncatedText = cleanText.substring(0, 200);
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(truncatedText)}&tl=fa&client=tw-ob`;
-
-        const audio = new Audio(ttsUrl);
-        currentAudio = audio;
-        currentSpeakingBtn = btnElement;
-        setSpeakBtnIcon(btnElement, true);
-
-        audio.play().catch(err => {
-            console.error("Audio playback error:", err);
-            alert("خطا در پخش آنلاین صدا. اتصال اینترنت را بررسی کن.");
-            setSpeakBtnIcon(btnElement, false);
-            currentSpeakingBtn = null;
-            currentAudio = null;
-        });
-
-        audio.onended = () => {
-            setSpeakBtnIcon(btnElement, false);
-            currentSpeakingBtn = null;
-            currentAudio = null;
-        };
-    }
-
-    function setSpeakBtnIcon(btn, playing) {
-        if (!btn) return;
-        const icon = btn.querySelector('i');
-        if (!icon) return;
-        if (playing) {
-            icon.className = 'fa-solid fa-circle-stop';
-            btn.classList.add('playing');
-            btn.title = 'توقف پخش';
-        } else {
-            icon.className = 'fa-solid fa-volume-high';
-            btn.classList.remove('playing');
-            btn.title = 'پخش صدا';
-        }
-    }
-
     function toggleSidebar() {
         document.getElementById('sidebar').classList.toggle('open');
         document.getElementById('sidebarOverlay').classList.toggle('active');
@@ -1424,13 +1187,11 @@
         const attachBtn = document.getElementById("attachBtn");
         const stickerBtn = document.getElementById("stickerBtn");
         const searchBtn = document.getElementById("searchToggleBtn");
-        const micBtn = document.getElementById("micBtn");
 
         inputField.disabled = generating;
         attachBtn.disabled = generating;
         stickerBtn.disabled = generating;
         searchBtn.disabled = generating;
-        if (micBtn) micBtn.disabled = generating;
 
         if (generating) {
             actionBtn.classList.add("stop-mode");
@@ -1491,24 +1252,15 @@
             : `<span class="typing-dots"><span></span><span></span><span></span></span>`;
 
         wrapperDiv.appendChild(loadingDiv);
-
-        const footerDiv = document.createElement("div");
-        footerDiv.className = "msg-footer";
-        footerDiv.innerHTML = `<button class="speak-btn" onclick="speakText(this)" title="پخش صدا"><i class="fa-solid fa-volume-high"></i></button>`;
-        wrapperDiv.appendChild(footerDiv);
-
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
 
         const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
 
-        const systemInstruction = `نام تو Virtual Bot است. مخاطب تو "${uName}" است. با او صمیمی و محترمانه گفتگو کن.`;
-        const fullPrompt = systemInstruction + "\n\nمتن کاربر: " + (textPrompt || '');
-
         if (!chatHistoryData[currentChatId]) {
             chatHistoryData[currentChatId] = [];
         }
-        chatHistoryData[currentChatId].push({ role: 'user', text: fullPrompt });
+        chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '' });
 
         currentAbortController = new AbortController();
 
@@ -1517,7 +1269,8 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    text: fullPrompt,
+                    userName: uName,
+                    text: textPrompt,
                     rawText: textPrompt,
                     file: payloadFile,
                     webSearch: isSearchEnabled,
@@ -1601,13 +1354,6 @@
         msgDiv.className = `message ${sender}`;
         msgDiv.innerHTML = content;
         wrapperDiv.appendChild(msgDiv);
-
-        if (sender === 'bot') {
-            const footerDiv = document.createElement("div");
-            footerDiv.className = "msg-footer";
-            footerDiv.innerHTML = `<button class="speak-btn" onclick="speakText(this)" title="پخش صدا"><i class="fa-solid fa-volume-high"></i></button>`;
-            wrapperDiv.appendChild(footerDiv);
-        }
 
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
