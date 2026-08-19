@@ -78,7 +78,6 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        /* پاک‌سازی فلش‌ها و استایلهای نیتیو مرورگر روی تمام ورودی‌ها */
         select, input, button {
             -webkit-appearance: none !important;
             -moz-appearance: none !important;
@@ -88,7 +87,6 @@
             background: none;
         }
         
-        /* باگ عجیب textarea رو با این جداگانه حل میکنیم تا مربع سفید بره */
         textarea {
             outline: none !important;
             border: none;
@@ -456,11 +454,10 @@
             box-shadow: 0 0 0 3px rgba(139,92,246,0.12), 0 6px 24px var(--shadow-a);
         }
 
-        /* ★★★ رفع کامل باگ مربع سفید کنار دکمه ارسال (اصلاح شده) ★★★ */
         textarea#userInput {
             flex: 1;
             color: var(--text-main) !important;
-            -webkit-appearance: auto !important; /* این خط باعث میشه مرورگر کادر سفید رو نشون نده */
+            -webkit-appearance: auto !important;
             resize: none !important;
             overflow: hidden !important;
             height: 24px;
@@ -679,7 +676,6 @@
 </head>
 <body>
 
-    <!-- مودال لاگین گوگل -->
     <div id="authOverlay">
         <div class="auth-card">
             <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
@@ -687,7 +683,7 @@
             <p>برای شروع گفتگو و ذخیره ایمن اطلاعات، لطفاً با حساب گوگل خود وارد شوید.</p>
             <div class="google-btn-wrapper">
                 <div id="g_id_onload"
-                    data-client_id="820812673874-35oc9gs6vf2hm43gv8k4a64t9gsf2alu.apps.googleusercontent.com"
+                    data-client_id="456624147681-8kiuefcbn37d0sfrmfa5vp51ujqj07ci.apps.googleusercontent.com"
                     data-callback="handleCredentialResponse"
                     data-auto_prompt="false">
                 </div>
@@ -1131,7 +1127,6 @@
             recognition.continuous = false;
             recognition.interimResults = false;
 
-            /* ★★★ این بخش اصلاح شد تا متن تشخیص داده شده با یک فاصله به متن اضافه شود ★★★ */
             recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
                 const inputField = document.getElementById('userInput');
