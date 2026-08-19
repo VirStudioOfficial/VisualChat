@@ -2,201 +2,1358 @@
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Input</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Virtual Chat</title>
+    <script>
+        (function () {
+            try {
+                var saved = JSON.parse(localStorage.getItem('virtual_settings') || '{}');
+                var mode = saved.theme || 'auto';
+                var resolved = mode === 'auto'
+                    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+                    : mode;
+                document.documentElement.setAttribute('data-theme', resolved);
+                if (saved.c1 && saved.c2) {
+                    document.documentElement.style.setProperty('--accent-1', saved.c1);
+                    document.documentElement.style.setProperty('--accent-2', saved.c2);
+                }
+                if (saved.fontSize) {
+                    var sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
+                    document.documentElement.style.setProperty('--msg-font-size', sizes[saved.fontSize] || sizes.normal);
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
     <style>
-        /* 1. Reset و استایل‌های اصلی کانتینر چت */
+        :root {
+            --bg-main: #0a0c12;
+            --bg-sidebar: #10131c;
+            --bg-card: #161a24;
+            --bg-card-hover: #1c2130;
+            --bg-input: #191e29;
+            --accent-1: #8b5cf6;
+            --accent-2: #22d3ee;
+            --accent-grad: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+            --danger: #f87171;
+            --text-main: #f4f6fb;
+            --text-muted: #838da3;
+            --border: #232838;
+            --border-soft: rgba(255,255,255,0.06);
+            --shadow-a: rgba(0,0,0,0.3);
+            --shadow-b: rgba(0,0,0,0.55);
+            --msg-font-size: 0.92rem;
+        }
+
+        :root[data-theme="light"] {
+            --bg-main: #f6f7fb;
+            --bg-sidebar: #ffffff;
+            --bg-card: #f0f2f8;
+            --bg-card-hover: #e6e9f3;
+            --bg-input: #ffffff;
+            --text-main: #1a1d29;
+            --text-muted: #6b7280;
+            --border: #e2e5ef;
+            --border-soft: rgba(15,23,42,0.08);
+            --shadow-a: rgba(30,41,59,0.10);
+            --shadow-b: rgba(30,41,59,0.16);
+        }
+
+        :root[data-theme="light"] body {
+            background-image:
+                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.10), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.08), transparent 40%);
+        }
+
+        :root[data-theme="light"] textarea { color: #1a1d29 !important; }
+
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
+            font-family: 'Vazirmatn', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        select, input, button {
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+            outline: none !important;
+            border: none;
+            background: none;
+        }
+
+        select::-ms-expand { display: none !important; }
+
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none !important;
+            margin: 0;
+        }
+
+        html, body {
+            height: 100%;
+            height: 100dvh;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            overflow: hidden;
         }
 
         body {
-            background-color: #0f172a;
-            font-family: sans-serif;
             display: flex;
+            position: relative;
+            background-image:
+                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.16), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.10), transparent 40%);
+        }
+
+        /* --- مودال لاگین --- */
+        #authOverlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(10, 12, 18, 0.88);
+            backdrop-filter: blur(12px);
+            z-index: 9999;
+            display: none;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+        }
+        #authOverlay.active {
+            display: flex !important;
         }
 
-        .chat-input-container {
+        .auth-card {
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 20px;
+            padding: 36px 28px;
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 20px 50px var(--shadow-b);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .auth-card .home-mark {
+            margin: 0 auto 18px auto;
+        }
+
+        .auth-card h2 {
+            font-size: 1.3rem;
+            font-weight: 800;
+            margin-bottom: 8px;
+            color: var(--text-main);
+        }
+
+        .auth-card p {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .google-btn-wrapper {
+            display: flex;
+            justify-content: center;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes messageIn {
+            from { opacity: 0; transform: translateY(10px) scale(0.985); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
+            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        @keyframes glowPulse {
+            0%, 100% { opacity: 0.55; }
+            50% { opacity: 1; }
+        }
+
+        @keyframes dotBounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+            40% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        @keyframes pulseMic {
+            0% { transform: scale(1); color: var(--danger); }
+            50% { transform: scale(1.15); color: #ef4444; }
+            100% { transform: scale(1); color: var(--danger); }
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 15;
+        }
+        .sidebar-overlay.active { display: block; }
+
+        .sidebar {
+            width: 272px;
+            background-color: var(--bg-sidebar);
+            border-left: 1px solid var(--border-soft);
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            z-index: 20;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .brand-title {
+            font-size: 1.15rem;
+            font-weight: 800;
             display: flex;
             align-items: center;
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 24px;
-            padding: 8px 16px;
-            width: 90%;
-            max-width: 700px;
-            gap: 12px;
+            justify-content: space-between;
+            margin-bottom: 18px;
+            padding: 0 2px;
+            letter-spacing: -0.02em;
+        }
+        .brand-title .brand-name {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+        }
+        .brand-mark {
+            width: 26px;
+            height: 26px;
+            border-radius: 8px;
+            background: var(--accent-grad);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            color: #fff;
+            flex-shrink: 0;
+            box-shadow: 0 0 18px rgba(139,92,246,0.45);
+        }
+        .brand-text {
+            background: var(--accent-grad);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
         }
 
-        /* 2. حل کامل مشکل textarea، پس‌زمینه سفید و فلش کروم */
-        .chat-input {
-            flex: 1;
-            background: transparent !important;
-            color: #ffffff !important;
-            border: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-            resize: none !important; /* حذف فلش تغییر اندازه */
-            font-size: 14px;
-            line-height: 1.5;
-            max-height: 120px;
-            height: 24px;
+        .user-profile {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            padding: 10px 12px;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 56px;
         }
+        .user-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+        .user-info { flex: 1; overflow: hidden; }
+        .user-name { font-size: 0.9rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
+        .user-actions { display: flex; gap: 4px; align-items: center; }
+        .user-actions .icon-btn { width: 28px; height: 28px; font-size: 0.8rem; }
 
-        /* مخفی‌سازی آیکون ریسایز کروم */
-        .chat-input::-webkit-resizer {
-            display: none !important;
-        }
-
-        /* رفع مشکل Autofill سفید در کروم */
-        .chat-input:-webkit-autofill,
-        .chat-input:-webkit-autofill:hover,
-        .chat-input:-webkit-autofill:focus {
-            -webkit-text-fill-color: #ffffff !important;
-            -webkit-box-shadow: 0 0 0px 1000px #1e293b inset !important;
-            transition: background-color 5000s ease-in-out 0s !important;
-        }
-
-        .chat-input::placeholder {
-            color: #94a3b8 !important;
-        }
-
-        /* 3. استایل دکمه‌ها و حالت انیمیشن ضبط صدا */
-        .icon-btn {
-            background: transparent;
-            border: none;
-            color: #94a3b8;
+        .new-chat-btn {
+            background: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid var(--border-soft);
+            padding: 12px;
+            border-radius: 12px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 6px;
-            border-radius: 50%;
+            gap: 9px;
+            font-weight: 600;
+            font-size: 0.9rem;
             transition: all 0.2s ease;
         }
+        .new-chat-btn:hover {
+            background-color: var(--bg-card-hover);
+            border-color: rgba(139,92,246,0.4);
+        }
+        .new-chat-btn i { color: var(--accent-2); }
 
-        .icon-btn:hover {
-            color: #38bdf8;
-            background: rgba(255, 255, 255, 0.05);
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .history-list::-webkit-scrollbar { width: 5px; }
+        .history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        .history-item {
+            padding: 10px 12px;
+            border-radius: 9px;
+            font-size: 0.84rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: 0.15s;
+            border: 1px solid transparent;
+        }
+        .history-item i { font-size: 0.75rem; flex-shrink: 0; }
+        .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
+        .history-item.active {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border-color: rgba(139,92,246,0.35);
+        }
+        .history-item.active i { color: var(--accent-2); }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            height: 100dvh;
+            position: relative;
+            overflow: hidden;
         }
 
-        /* افکت چشمک‌زن موقع ضبط صدا */
+        .chat-header {
+            padding: 14px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-soft);
+            z-index: 5;
+        }
+
+        .header-left { display: flex; align-items: center; gap: 12px; }
+
+        .menu-btn {
+            display: none;
+            color: var(--text-main);
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        .header-right { display: flex; align-items: center; gap: 8px; }
+
+        .home-screen {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 26px;
+            padding: 20px;
+            text-align: center;
+            animation: fadeIn 0.35s ease-out;
+        }
+
+        .home-mark {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: var(--accent-grad);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: #fff;
+            box-shadow: 0 0 40px rgba(139,92,246,0.35);
+            animation: glowPulse 3.5s ease-in-out infinite;
+        }
+
+        .home-text {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+        .home-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--text-main);
+            letter-spacing: -0.02em;
+            line-height: 1.4;
+            max-width: 480px;
+        }
+        .home-subtitle {
+            font-size: 0.92rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        .suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            max-width: 520px;
+        }
+        .suggestion-chip {
+            padding: 9px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 20px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .suggestion-chip:hover {
+            color: var(--text-main);
+            border-color: rgba(139,92,246,0.4);
+            background: var(--bg-card-hover);
+        }
+
+        .chat-box {
+            flex: 1;
+            padding: 22px 15%;
+            overflow-y: auto;
+            display: none;
+            flex-direction: column;
+            gap: 18px;
+            scroll-behavior: smooth;
+        }
+        .chat-box::-webkit-scrollbar { width: 6px; }
+        .chat-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        .message-wrapper {
+            display: flex;
+            flex-direction: column;
+            max-width: 85%;
+        }
+        .message-wrapper.user { align-self: flex-start; }
+        .message-wrapper.bot { align-self: flex-end; }
+
+        .message {
+            padding: 13px 17px;
+            border-radius: 16px;
+            line-height: 1.7;
+            word-wrap: break-word;
+            font-size: var(--msg-font-size);
+            animation: messageIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            transform-origin: bottom;
+            position: relative;
+        }
+
+        .message.user {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            color: var(--text-main);
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.bot {
+            background: linear-gradient(180deg, rgba(139,92,246,0.06), transparent 40%);
+            border-right: 2px solid;
+            border-image: var(--accent-grad) 1;
+            color: var(--text-main);
+            border-radius: 4px 14px 14px 4px;
+            padding-right: 15px;
+        }
+
+        .msg-footer {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 4px;
+            padding: 0 4px;
+        }
+        .msg-footer .speak-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: color 0.2s;
+        }
+        .msg-footer .speak-btn:hover { color: var(--accent-2); }
+
+        .typing-dots {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+            padding: 4px 0;
+        }
+        .typing-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-2);
+            animation: dotBounce 1.2s infinite;
+        }
+        .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+        .sticker-img {
+            width: 120px;
+            height: 120px;
+            object-fit: contain;
+        }
+
+        .input-wrapper {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 10px 15px 16px 15px;
+            position: relative;
+        }
+
+        .sticker-picker {
+            display: none;
+            position: absolute;
+            bottom: 78px;
+            right: 20px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 16px;
+            padding: 12px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            box-shadow: 0 10px 30px var(--shadow-b);
+            z-index: 30;
+            animation: fadeIn 0.2s ease;
+        }
+        .sticker-picker.active { display: grid; }
+        .sticker-item {
+            width: 48px;
+            height: 48px;
+            cursor: pointer;
+            border-radius: 8px;
+            padding: 4px;
+            transition: transform 0.15s, background 0.15s;
+        }
+        .sticker-item:hover { transform: scale(1.12); background-color: var(--bg-input); }
+
+        .input-box {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-soft);
+            border-radius: 22px;
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 6px 24px var(--shadow-a);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .input-box:focus-within {
+            border-color: rgba(139,92,246,0.55);
+            box-shadow: 0 0 0 3px rgba(139,92,246,0.12), 0 6px 24px var(--shadow-a);
+        }
+
+        /* حل مشکل textarea، پس‌زمینه، آیکون ریسایز و Autofill سفید کروم */
+        textarea#userInput {
+            flex: 1;
+            color: var(--text-main) !important;
+            resize: none !important;
+            overflow-y: auto !important;
+            height: 24px;
+            max-height: 120px;
+            font-size: 0.94rem;
+            padding: 4px 2px;
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+        }
+
+        textarea#userInput::-webkit-resizer {
+            display: none !important;
+        }
+
+        textarea#userInput:-webkit-autofill,
+        textarea#userInput:-webkit-autofill:hover,
+        textarea#userInput:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--text-main) !important;
+            -webkit-box-shadow: 0 0 0px 1000px var(--bg-input) inset !important;
+            transition: background-color 5000s ease-in-out 0s !important;
+        }
+
+        textarea::placeholder { color: var(--text-muted) !important; }
+
+        textarea:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .icon-btn {
+            color: var(--text-muted);
+            font-size: 1.05rem;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all 0.2s;
+        }
+        .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); }
+        .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .icon-btn.search-active {
+            color: var(--accent-2) !important;
+            background-color: rgba(34, 211, 238, 0.14) !important;
+        }
+
         .icon-btn.recording {
-            color: #ef4444;
-            animation: pulse 1.2s infinite;
+            animation: pulseMic 1.2s infinite;
         }
 
-        @keyframes pulse {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.15); opacity: 0.7; }
-            100% { transform: scale(1); opacity: 1; }
+        .action-btn {
+            background: var(--accent-grad);
+            color: #fff !important;
+        }
+        .action-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+            background-color: transparent !important;
+        }
+        .action-btn.stop-mode {
+            background: var(--danger);
+            animation: fadeIn 0.2s ease;
+        }
+
+        .file-preview {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 12px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 10px;
+            margin-bottom: 8px;
+            width: fit-content;
+        }
+        .file-preview img { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
+        .file-preview span { font-size: 0.8rem; color: var(--text-muted); }
+
+        .settings-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(6px);
+            z-index: 40;
+        }
+        .settings-overlay.active { display: block; }
+
+        .settings-modal {
+            display: none;
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 92%;
+            max-width: 420px;
+            max-height: 85vh;
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 20px;
+            padding: 22px;
+            z-index: 41;
+            box-shadow: 0 20px 60px var(--shadow-b);
+            overflow-y: auto;
+        }
+        .settings-modal::-webkit-scrollbar { width: 5px; }
+        .settings-modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        .settings-modal.active {
+            display: block;
+            animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+
+        .settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            position: sticky;
+            top: 0;
+            background: var(--bg-sidebar);
+            z-index: 2;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-soft);
+        }
+        .settings-header h2 {
+            font-size: 1.05rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .settings-header h2 i { color: var(--accent-2); font-size: 0.95rem; }
+
+        .settings-section { margin-bottom: 22px; }
+        .settings-section:last-child { margin-bottom: 0; }
+        .settings-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+
+        .settings-input-text {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 10px 14px;
+            color: var(--text-main);
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+        }
+        .settings-input-text:focus {
+            border-color: var(--accent-1);
+        }
+
+        .segmented {
+            display: flex;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 3px;
+            gap: 3px;
+        }
+        .segmented-btn {
+            flex: 1;
+            padding: 8px 6px;
+            border-radius: 9px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .segmented-btn:hover { color: var(--text-main); }
+        .segmented-btn.active {
+            background: var(--accent-grad);
+            color: #fff;
+        }
+
+        .accent-swatches { display: flex; gap: 10px; }
+        .accent-swatch {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .accent-swatch:hover { transform: scale(1.08); }
+        .accent-swatch.active { border-color: var(--text-main); }
+
+        .settings-toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .settings-toggle-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; }
+
+        .switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; cursor: pointer; }
+        .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .switch-slider {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 999px;
+            transition: background 0.2s;
+        }
+        .switch-slider::before {
+            content: "";
+            position: absolute;
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: #fff;
+            top: 2px; right: 2px;
+            transition: transform 0.2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .switch input:checked + .switch-slider { background: var(--accent-grad); border-color: transparent; }
+        .switch input:checked + .switch-slider::before { transform: translateX(-18px); }
+
+        @media (max-width: 900px) {
+            .chat-box { padding: 15px 5%; }
+        }
+
+        @media (max-width: 768px) {
+            .menu-btn { display: block; }
+            .sidebar {
+                position: fixed;
+                top: 0; right: 0; bottom: 0;
+                transform: translateX(100%);
+                box-shadow: -5px 0 25px rgba(0,0,0,0.5);
+            }
+            .sidebar.open { transform: translateX(0); }
+            .message-wrapper { max-width: 90%; }
+            .home-title { font-size: 1.4rem; }
+            .input-wrapper { padding: 8px 10px 10px 10px; }
+            .sticker-picker { right: 10px; left: 10px; grid-template-columns: repeat(4, 1fr); justify-items: center; }
         }
     </style>
 </head>
 <body>
 
-    <div class="chat-input-container">
-        <!-- دکمه ارسال -->
-        <button class="icon-btn" id="send-btn" title="ارسال">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-        </button>
-
-        <!-- ورودی متن -->
-        <textarea class="chat-input" id="chat-input" placeholder="از Virtual Bot بپرسید..." rows="1"></textarea>
-
-        <!-- دکمه ضبط صدا -->
-        <button class="icon-btn" id="mic-btn" title="ضبط صدا">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-        </button>
-
-        <!-- دکمه تست خواندن متن با صدا -->
-        <button class="icon-btn" id="speak-btn" title="تست پخش صدا">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-        </button>
+    <!-- مودال لاگین گوگل -->
+    <div id="authOverlay">
+        <div class="auth-card">
+            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
+            <h2>ورود به Virtual Chat</h2>
+            <p>برای شروع گفتگو و ذخیره ایمن اطلاعات، لطفاً با حساب گوگل خود وارد شوید.</p>
+            <div class="google-btn-wrapper">
+                <div id="g_id_onload"
+                    data-client_id="820812673874-35oc9gs6vf2hm43gv8k4a64t9gsf2alu.apps.googleusercontent.com"
+                    data-callback="handleCredentialResponse"
+                    data-auto_prompt="false">
+                </div>
+                <div class="g_id_signin" data-type="standard" data-size="large" data-theme="filled_black" data-shape="pill"></div>
+            </div>
+        </div>
     </div>
 
-    <script>
-        const chatInput = document.getElementById('chat-input');
-        const micBtn = document.getElementById('mic-btn');
-        const speakBtn = document.getElementById('speak-btn');
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
-        // ۱. تنظیم ارتفاع خودکار textarea با تایپ متن
-        chatInput.addEventListener('input', () => {
-            chatInput.style.height = 'auto';
-            chatInput.style.height = chatInput.scrollHeight + 'px';
-        });
+    <div class="sidebar" id="sidebar">
+        <div class="brand-title">
+            <div class="brand-name">
+                <span class="brand-mark"><i class="fa-solid fa-sparkles"></i></span>
+                <span class="brand-text">Virtual Chat</span>
+            </div>
+            <i class="fa-solid fa-xmark icon-btn" onclick="toggleSidebar()" style="display: var(--mobile-close, none);"></i>
+        </div>
 
-        // ۲. منطق ضبط صدا (Voice-to-Text)
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        <div class="user-profile" id="userProfile">
+            <span style="font-size:0.8rem; color:var(--text-muted);">در حال ورود...</span>
+        </div>
 
-        if (SpeechRecognition) {
-            const recognition = new SpeechRecognition();
-            recognition.lang = 'fa-IR'; // تنظیم روی زبان فارسی
-            recognition.continuous = false;
-            recognition.interimResults = false;
+        <button class="new-chat-btn" id="newChatBtn" onclick="startNewChat()">
+            <i class="fa-solid fa-plus"></i> گفتگوی تازه
+        </button>
+        <div class="history-list" id="historyList"></div>
+    </div>
 
-            let isRecording = false;
+    <div class="main-content">
+        <div class="chat-header">
+            <div class="header-left">
+                <button class="menu-btn" onclick="toggleSidebar()" title="منو">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+            </div>
+            <div class="header-right">
+                <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+            </div>
+        </div>
 
-            micBtn.addEventListener('click', () => {
-                if (!isRecording) {
-                    try {
-                        recognition.start();
-                        micBtn.classList.add('recording');
-                        isRecording = true;
-                    } catch (err) {
-                        console.error('خطا در شروع ضبط:', err);
-                    }
-                } else {
-                    recognition.stop();
-                    micBtn.classList.remove('recording');
-                    isRecording = false;
-                }
-            });
+        <div class="home-screen" id="homeScreen">
+            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
+            <div class="home-text">
+                <h1 class="home-title" id="welcomeHomeTitle">سلام! امروز چطور می‌تونم کمکت کنم؟</h1>
+                <p class="home-subtitle">یه سؤال بپرس، فایل بفرست یا یکی از پیشنهادها رو انتخاب کن</p>
+            </div>
+            <div class="suggestion-chips">
+                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده برای عنوان پست اینستاگرام بده</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">این متن رو خلاصه کن</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">یه قطعه کد پایتون بنویس</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">امروز اخبار مهم چیه؟</div>
+            </div>
+        </div>
 
-            recognition.onresult = (event) => {
-                const text = event.results[0][0].transcript;
-                chatInput.value += (chatInput.value ? ' ' : '') + text;
-                chatInput.dispatchEvent(new Event('input')); // به‌روزرسانی ارتفاع
-            };
+        <div class="chat-box" id="chatBox"></div>
 
-            recognition.onerror = (e) => {
-                console.error('خطای تشخیص صدا:', e.error);
-                micBtn.classList.remove('recording');
-                isRecording = false;
-            };
+        <div class="input-wrapper">
+            <div class="sticker-picker" id="stickerPicker">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f917/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f389/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+            </div>
 
-            recognition.onend = () => {
-                micBtn.classList.remove('recording');
-                isRecording = false;
-            };
-        } else {
-            micBtn.style.display = 'none';
-            console.warn('مرورگر شما از قابلیت تبدیل صدا به متن پشتیبانی نمی‌کند.');
+            <div class="file-preview" id="filePreview">
+                <img id="previewImg" src="" alt="preview">
+                <span id="fileName"></span>
+                <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"></i>
+            </div>
+
+            <div class="input-box">
+                <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
+                <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+
+                <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
+                    <i class="fa-regular fa-face-smile"></i>
+                </button>
+
+                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب (گوگل)">
+                    <i class="fa-solid fa-globe"></i>
+                </button>
+
+                <!-- دکمه میکروفون اضافه شده -->
+                <button class="icon-btn" id="micBtn" onclick="toggleVoiceInput()" title="تبدیل صدا به متن">
+                    <i class="fa-solid fa-microphone"></i>
+                </button>
+
+                <textarea id="userInput" placeholder="از Virtual Bot بپرس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
+
+                <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
+                    <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
+    <div class="settings-modal" id="settingsModal">
+        <div class="settings-header">
+            <h2><i class="fa-solid fa-sliders"></i> تنظیمات و شخصی‌سازی</h2>
+            <i class="fa-solid fa-xmark icon-btn" onclick="closeSettings()"></i>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-label">نام شما در چت (جهت صدا زدن ربات)</div>
+            <input type="text" class="settings-input-text" id="customUserNameInput" placeholder="مثلاً: ارشیا" onchange="updateCustomName(this.value)">
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-label">حالت نمایش</div>
+            <div class="segmented" id="themeSegmented">
+                <button class="segmented-btn" data-value="light"><i class="fa-solid fa-sun"></i> روشن</button>
+                <button class="segmented-btn" data-value="dark"><i class="fa-solid fa-moon"></i> تاریک</button>
+                <button class="segmented-btn" data-value="auto"><i class="fa-solid fa-circle-half-stroke"></i> خودکار</button>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-label">رنگ اصلی</div>
+            <div class="accent-swatches" id="accentSwatches">
+                <button class="accent-swatch" data-c1="#8b5cf6" data-c2="#22d3ee" style="background: linear-gradient(135deg,#8b5cf6,#22d3ee);" title="بنفش و فیروزه‌ای"></button>
+                <button class="accent-swatch" data-c1="#f97316" data-c2="#ec4899" style="background: linear-gradient(135deg,#f97316,#ec4899);" title="نارنجی و صورتی"></button>
+                <button class="accent-swatch" data-c1="#10b981" data-c2="#3b82f6" style="background: linear-gradient(135deg,#10b981,#3b82f6);" title="سبز و آبی"></button>
+                <button class="accent-swatch" data-c1="#ef4444" data-c2="#f59e0b" style="background: linear-gradient(135deg,#ef4444,#f59e0b);" title="قرمز و کهربایی"></button>
+                <button class="accent-swatch" data-c1="#6366f1" data-c2="#a855f7" style="background: linear-gradient(135deg,#6366f1,#a855f7);" title="نیلی و بنفش"></button>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-label">اندازه‌ی متن گفتگو</div>
+            <div class="segmented" id="fontSegmented">
+                <button class="segmented-btn" data-value="small">کوچک</button>
+                <button class="segmented-btn" data-value="normal">معمولی</button>
+                <button class="segmented-btn" data-value="large">بزرگ</button>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-label">حرکت تایپ‌مانند پاسخ‌ها</div>
+            <div class="settings-toggle-row">
+                <span class="settings-toggle-desc">نمایش پاسخ ربات به‌صورت تدریجی و حرف‌به‌حرف</span>
+                <label class="switch">
+                    <input type="checkbox" id="typewriterToggle" checked onchange="saveSettings()">
+                    <span class="switch-slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+<script>
+    let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
+    let currentUser = null;
+    let chats = {};
+    let chatHistoryData = {};
+    let selectedFileData = null;
+    let isFirstMessage = true;
+    let isGenerating = false;
+    let isSearchEnabled = false;
+    let currentAbortController = null;
+    let typeWriterInterval = null;
+
+    // متغیرهای مربوط به ضبط و پخش صدا
+    let recognition = null;
+    let isRecording = false;
+
+    window.onload = () => {
+        checkSavedUser();
+        loadSettings();
+        initSpeechRecognition();
+
+        if (window.innerWidth <= 768) {
+            document.documentElement.style.setProperty('--mobile-close', 'block');
         }
+    };
 
-        // ۳. منطق خواندن متن توسط هوش مصنوعی (Text-to-Speech)
-        function speakText(text) {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel(); // متوقف کردن صداهای قبلی
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'fa-IR';
-                utterance.rate = 1.0;
-                window.speechSynthesis.speak(utterance);
-            } else {
-                alert('مرورگر شما از پخش صدا پشتیبانی نمی‌کند.');
+    function autoResizeTextarea(textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+    }
+
+    function extractNameFromEmail(email) {
+        if (!email) return 'دوست من';
+        const handle = email.split('@')[0].toLowerCase();
+
+        const nameMap = {
+            'arshia': 'ارشیا',
+            'ali': 'علی',
+            'reza': 'رضا',
+            'mahan': 'ماهان',
+            'amir': 'امیر',
+            'mohammad': 'محمد',
+            'sara': 'سارا',
+            'mehdi': 'مهدی'
+        };
+
+        for (let key in nameMap) {
+            if (handle.startsWith(key)) {
+                return nameMap[key];
             }
         }
 
-        // دکمه تست خواندن متن موجود در input
-        speakBtn.addEventListener('click', () => {
-            const textToSpeak = chatInput.value || "محتوایی برای خواندن وجود ندارد.";
-            speakText(textToSpeak);
+        const clean = handle.replace(/[0-9_.-]/g, '');
+        return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'دوست من';
+    }
+
+    function handleCredentialResponse(response) {
+        const responsePayload = parseJwt(response.credential);
+        const autoExtractedName = extractNameFromEmail(responsePayload.email);
+
+        currentUser = {
+            name: responsePayload.name || autoExtractedName,
+            customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
+            email: responsePayload.email,
+            picture: responsePayload.picture
+        };
+
+        localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
+        document.getElementById('authOverlay').classList.remove('active');
+
+        initUserData();
+    }
+
+    function parseJwt(token) {
+        var base64Url = token.split('.')[1];
+        var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    }
+
+    function checkSavedUser() {
+        const saved = localStorage.getItem('virtual_chat_user');
+        const overlay = document.getElementById('authOverlay');
+        if (saved) {
+            currentUser = JSON.parse(saved);
+            if (!currentUser.customName) {
+                currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email);
+            }
+            overlay.classList.remove('active');
+            initUserData();
+        } else {
+            overlay.classList.add('active');
+        }
+    }
+
+    function initUserData() {
+        updateUserUI();
+        renderHistory();
+
+        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
+
+        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+        chatHistoryData = JSON.parse(localStorage.getItem(historyKey)) || {};
+
+        if (chats[currentChatId]) {
+            loadChat(currentChatId, true);
+        }
+    }
+
+    function updateUserUI() {
+        if (!currentUser) return;
+        const profileDiv = document.getElementById('userProfile');
+        profileDiv.innerHTML = `
+            <img src="${currentUser.picture}" class="user-avatar" alt="User">
+            <div class="user-info">
+                <div class="user-name">${currentUser.customName || currentUser.name}</div>
+            </div>
+            <div class="user-actions">
+                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب کاربری">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+                <button class="icon-btn" onclick="logoutUser()" title="خروج از حساب">
+                    <i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i>
+                </button>
+            </div>
+        `;
+        const titleEl = document.getElementById('welcomeHomeTitle');
+        if (titleEl) {
+            titleEl.innerText = `سلام ${currentUser.customName || currentUser.name}! امروز چطور می‌تونم کمکت کنم؟`;
+        }
+        document.getElementById('customUserNameInput').value = currentUser.customName || currentUser.name;
+    }
+
+    function logoutUser() {
+        if (confirm('آیا می‌خواهی از حساب کاربری خارج بشی؟')) {
+            localStorage.removeItem('virtual_chat_user');
+            currentUser = null;
+            document.getElementById('authOverlay').classList.add('active');
+            if (window.google && google.accounts && google.accounts.id) {
+                google.accounts.id.disableAutoSelect();
+            }
+        }
+    }
+
+    function switchAccount() {
+        localStorage.removeItem('virtual_chat_user');
+        currentUser = null;
+        document.getElementById('authOverlay').classList.add('active');
+        if (window.google && google.accounts && google.accounts.id) {
+            google.accounts.id.disableAutoSelect();
+            google.accounts.id.prompt();
+        }
+    }
+
+    function updateCustomName(val) {
+        if (!val.trim()) return;
+        const name = val.trim();
+        if (currentUser) {
+            currentUser.customName = name;
+            localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
+        }
+        localStorage.setItem('virtual_user_custom_name', name);
+        updateUserUI();
+    }
+
+    /* --- تنظیمات و شخصی‌سازی --- */
+    const defaultSettings = { theme: 'auto', c1: '#8b5cf6', c2: '#22d3ee', fontSize: 'normal', typewriter: true };
+
+    function getSettings() {
+        try {
+            return { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') };
+        } catch (e) { return { ...defaultSettings }; }
+    }
+
+    function loadSettings() {
+        const s = getSettings();
+        applySettings(s);
+        renderSettingsUI(s);
+
+        if (window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+                const current = getSettings();
+                if (current.theme === 'auto') applySettings(current);
+            });
+        }
+    }
+
+    function applySettings(s) {
+        const resolvedTheme = s.theme === 'auto'
+            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+            : s.theme;
+        document.documentElement.setAttribute('data-theme', resolvedTheme);
+        document.documentElement.style.setProperty('--accent-1', s.c1);
+        document.documentElement.style.setProperty('--accent-2', s.c2);
+        const sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
+        document.documentElement.style.setProperty('--msg-font-size', sizes[s.fontSize] || sizes.normal);
+    }
+
+    function renderSettingsUI(s) {
+        document.querySelectorAll('#themeSegmented .segmented-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.value === s.theme);
         });
-    </script>
-</body>
-</html>
+        document.querySelectorAll('#fontSegmented .segmented-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.value === s.fontSize);
+        });
+        document.querySelectorAll('#accentSwatches .accent-swatch').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.c1 === s.c1 && btn.dataset.c2 === s.c2);
+        });
+        document.getElementById('typewriterToggle').checked = s.typewriter;
+    }
+
+    function saveSettings() {
+        const s = getSettings();
+        s.typewriter = document.getElementById('typewriterToggle').checked;
+        localStorage.setItem('virtual_settings', JSON.stringify(s));
+        applySettings(s);
+    }
+
+    document.getElementById('themeSegmented').addEventListener('click', (e) => {
+        const btn = e.target.closest('.segmented-btn');
+        if (!btn) return;
+        const s = getSettings();
+        s.theme = btn.dataset.value;
+        localStorage.setItem('virtual_settings', JSON.stringify(s));
+        applySettings(s);
+        renderSettingsUI(s);
+    });
+
+    document.getElementById('fontSegmented').addEventListener('click', (e) => {
+        const btn = e.target.closest('.segmented-btn');
+        if (!btn) return;
+        const s = getSettings();
+        s.fontSize = btn.dataset.value;
+        localStorage.setItem('virtual_settings', JSON.stringify(s));
+        applySettings(s);
+        renderSettingsUI(s);
+    });
+
+    document.getElementById('accentSwatches').addEventListener('click', (e) => {
+        const btn = e.target.closest('.accent-swatch');
+        if (!btn) return;
+        const s = getSettings();
+        s.c1 = btn.dataset.c1;
+        s.c2 = btn.dataset.c2;
+        localStorage.setItem('virtual_settings', JSON.stringify(s));
+        applySettings(s);
+        renderSettingsUI(s);
+    });
+
+    function openSettings() {
+        renderSettingsUI(getSettings());
+        document.getElementById('settingsOverlay').classList.add('active');
+        document.getElementById('settingsModal').classList.add('active');
+    }
+
+    function closeSettings() {
+        document.getElementById('settingsOverlay').classList.remove('active');
+        document.getElementById('settingsModal').classList.remove('active');
+    }
+
+    function useSuggestion(el) {
+        if (isGenerating) return;
+        const inputField = document.getElementById('userInput');
+        inputField.value = el.innerText;
+        autoResizeTextarea(inputField);
+        sendMessage();
+    }
+
+    function shouldSearchWeb(userText) {
+        if (!userText) return false;
+        const cleanText = userText.trim().toLowerCase();
+        if (cleanText.length < 3) return false;
+
+        const ignoreList = [
+            'سلام', 'سلامم', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'عصر بخیر',
+            'شب بخیر', 'ممنون', 'مرسی', 'چخبر', 'خداحافظ', 'بای', 'اوکی', 'باشه'
+        ];
+        const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
+        const firstWord = normalized.split(' ')[0];
+        const wordCount = normalized.split(' ').filter(Boolean).length;
+        if (wordCount <= 3 && (ignoreList.includes(normalized) || ignoreList.includes(firstWord))) {
+            return false;
+        }
+
+        const allowedKeywords = [
+            'سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن',
+            'قیمت', 'چنده', 'نرخ', 'دلار', 'طلا', 'سکه', 'ارز', 'بیت کوین', 'پلی استیشن',
+            'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین', 'جدیدترین'
+        ];
+        return allowedKeywords.some(kw => normalized.includes(kw));
+    }
+
+    function toggleSearch() {
+        if (isGenerating) return;
+        isSearchEnabled = !isSearchEnabled;
+        const btn = document.getElementById("searchToggleBtn");
+        if (isSearchEnabled) {
+            btn.classList.add("search-active");
+            btn.title = "جستجوی وب: فعال";
+        } else {
+            btn.classList.remove("search-active");
+            btn.title = "جستجوی وب: غیرفعال";
+        }
+    }
+
+    /* --- قابلیت‌های جدید صدا (Voice-to-Text & Text-to-Speech) --- */
+    function initSpeechRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = document.getElementById('micBtn');
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'fa-IR';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                const inputField = document.getElementById('userInput');
+                inputField.value += (inputField.value ? ' ' : '') + transcript;
+                autoResizeTextarea(inputField);
+            };
+
+            recognition.onerror = (e) => {
+                console.error('خطای شناسایی صدا:', e.error);
+                stopVoiceInput();
+            };
+
+            recognition.onend = () => {
+                stopVoiceInput();
+            };
+        } else {
+            if (micBtn) micBtn.style.display = 'none';
+        }
+    }
+
+    function toggleVoiceInput() {
+        if (isGenerating || !recognition) return;
+        const micBtn = document.getElementById('micBtn');
+
+        if (!isRecording) {
+            try {
+                recognition.start();
+                isRecording = true;
+                micBtn.classList.add('recording');
+                micBtn.title = "در حال ضبط... (برای توقف کلیک کنید)";
+            } catch (err) {
+                console.error('خطا در شروع ضبط:', err);
+            }
+        } else {
+            recognition.stop();
+            stopVoiceInput();
+        }
+    }
+
+    function stopVoiceInput() {
+        isRecording = false;
+        const micBtn = document.getElementById('micBtn');
+        if (micBtn) {
+            micBtn.classList.remove('recording');
+            micBtn.title = "تبدیل صدا به متن";
+        }
+    }
+
+    function speakText(btnElement) {
+        if ('speechSynthesis' in window) {
+            const wrapper = btnElement.closest('.message-wrapper');
+            const msgBody = wrapper ? wrapper.querySelector('.message') : null;
+            if (!msgBody) return;
+
+            // پاک‌سازی کدها و تگ‌های HTML جهت خواندن روان‌تر
+            let cleanText = msgBody.innerText.replace(/```[\s\S]*?
