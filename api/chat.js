@@ -12,22 +12,37 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
-    // ۱. آماده‌سازی تاریخچه پیام‌ها
-    let contents = [];
+    // ۱. ساخت و تمیزکاری هیستوری برای رعایت قوانین سخت‌گیرانه گوگل
+    let rawContents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
-        contents = history.map(item => ({
+        rawContents = history.map(item => ({
             role: item.role === 'user' ? 'user' : 'model',
-            parts: [{ text: String(item.text || "") }]
-        }));
-    } else {
-        contents = [{
-            role: 'user',
-            parts: [{ text: String(text || "") }]
-        }];
+            text: String(item.text || "").trim()
+        })).filter(item => item.text.length > 0); // حذف پیام‌های خالی
     }
 
-    // ۲. اعمال پرسونا
+    // اگر هیستوری خالی بود یا پیام آخر کاربر نبود، پیام فعلی رو اضافه کن
+    if (rawContents.length === 0 || rawContents[rawContents.length - 1].role !== 'user') {
+        if (text && text.trim().length > 0) {
+            rawContents.push({ role: 'user', text: text.trim() });
+        }
+    }
+
+    // ادغام پیام‌های متوالی با نقش یکسان (برای جلوگیری از ارور roles must alternate)
+    let contents = [];
+    for (let item of rawContents) {
+        if (contents.length > 0 && contents[contents.length - 1].role === item.role) {
+            contents[contents.length - 1].parts[0].text += "\n" + item.text;
+        } else {
+            contents.push({
+                role: item.role,
+                parts: [{ text: item.text }]
+            });
+        }
+    }
+
+    // ۲. اعمال پرسونا روی آخرین پیام کاربر
     if (persona && contents.length > 0) {
         let prefix = "";
         if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
@@ -35,12 +50,12 @@ export default async function handler(req, res) {
         if (persona === 'formal') prefix = "[پاسخ را کاملا رسمی بده] ";
         
         const lastIndex = contents.length - 1;
-        if (contents[lastIndex].role === 'user' && contents[lastIndex].parts[0]) {
+        if (contents[lastIndex].role === 'user') {
             contents[lastIndex].parts[0].text = prefix + contents[lastIndex].parts[0].text;
         }
     }
 
-    // ۳. افزودن فایل (عکس)
+    // ۳. افزودن عکس در صورت وجود به آخرین پیام کاربر
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -52,12 +67,15 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۴. ساخت بدنه درخواست
+    // ۴. ساخت بدنه اصلی درخواست
     const requestBody = { contents: contents };
 
     if (webSearch) {
         requestBody.tools = [{ googleSearch: {} }];
     }
+
+    // مدل استاندارد و رسمی گوگل (gemini-1.5-flash)
+    const MODEL_NAME = 'gemini-1.5-flash';
 
     let lastError = null;
 
@@ -65,8 +83,7 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            // استفاده از همان مدل دقیق خودت که 404 ندهد
-            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -78,12 +95,12 @@ export default async function handler(req, res) {
             const data = await response.json();
 
             if (!response.ok) {
-                console.warn(`⚠️ Key #${i + 1} failed with status ${response.status}. Error:`, JSON.stringify(data));
+                console.warn(`⚠️ Key #${i + 1} failed:`, JSON.stringify(data));
                 lastError = data;
                 continue; 
             }
 
-            console.log(`✅ Successfully responded using Key #${i + 1}`);
+            console.log(`✅ Success with Key #${i + 1}`);
             return res.status(200).json(data);
 
         } catch (err) {
@@ -92,10 +109,11 @@ export default async function handler(req, res) {
         }
     }
 
+    // اگر همه کلیدها خطا دادند، متن دقیق ارور گوگل را برگردان
     return res.status(500).json({
         error: {
             message: 'ارتباط با API گوگل برقرار نشد.',
-            details: lastError
+            google_error: lastError
         }
     });
 }
