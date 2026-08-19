@@ -963,6 +963,32 @@
         sendMessage();
     }
 
+    // همون منطق تشخیص نیاز به سرچ که توی بک‌اند (api/chat.js) هست، این‌جا هم کپی شده
+    // تا پیام «در حال جستجو در وب...» فقط وقتی نشون داده بشه که واقعاً قراره سرچ انجام بشه.
+    function shouldSearchWeb(userText) {
+        if (!userText) return false;
+        const cleanText = userText.trim().toLowerCase();
+        if (cleanText.length < 3) return false;
+
+        const ignoreList = [
+            'سلام', 'سلامم', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'عصر بخیر',
+            'شب بخیر', 'ممنون', 'مرسی', 'چخبر', 'خداحافظ', 'بای', 'اوکی', 'باشه'
+        ];
+        const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
+        const firstWord = normalized.split(' ')[0];
+        const wordCount = normalized.split(' ').filter(Boolean).length;
+        if (wordCount <= 3 && (ignoreList.includes(normalized) || ignoreList.includes(firstWord))) {
+            return false;
+        }
+
+        const allowedKeywords = [
+            'سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن',
+            'قیمت', 'چنده', 'نرخ', 'دلار', 'طلا', 'سکه', 'ارز', 'بیت کوین', 'پلی استیشن',
+            'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین', 'جدیدترین'
+        ];
+        return allowedKeywords.some(kw => normalized.includes(kw));
+    }
+
     function toggleSearch() {
         if (isGenerating) return;
         isSearchEnabled = !isSearchEnabled;
@@ -1184,7 +1210,8 @@
 
         const loadingDiv = document.createElement("div");
         loadingDiv.className = "message bot";
-        loadingDiv.innerHTML = isSearchEnabled
+        const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
+        loadingDiv.innerHTML = willSearch
             ? `<span style="color:var(--text-muted); font-size:0.85rem;">در حال جستجو در وب...</span> <span class="typing-dots"><span></span><span></span><span></span></span>`
             : `<span class="typing-dots"><span></span><span></span><span></span></span>`;
         chatBox.appendChild(loadingDiv);
