@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
     if (apiKeys.length === 0) {
         console.error("No API keys found in environment variables.");
-        return res.status(400).json({ error: { message: 'هیچ کلید API یافت نشد!' } });
+        return res.status(400).json({ error: { message: 'هیچ کلید API در ورسل یافت نشد!' } });
     }
 
     const parts = [];
@@ -37,7 +37,6 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            // ارسال کلید در هدر x-goog-api-key برای پشتیبانی کامل از تمام فرمت‌های کلید
             const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
                 method: 'POST',
                 headers: { 
@@ -49,8 +48,9 @@ export default async function handler(req, res) {
 
             const data = await response.json();
 
+            // اگر کلید لیمیت شد یا نامعتبر بود، برو سراغ بعدی
             if (response.status === 401 || response.status === 429) {
-                console.warn(`⚠️ Key #${i + 1} status ${response.status}. Switching to next key...`);
+                console.warn(`⚠️ Key #${i + 1} bypass (Status ${response.status}). Trying next key...`);
                 lastError = data;
                 continue;
             }
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
         error: {
-            message: 'برقرار ارتباط با کلیدهای تنظیم شده ناموفق بود. لطفاً کلیدها را بررسی کنید.',
+            message: 'تمامی کلیدها ناموفق بودند. لطفاً تنظیمات ورسل را بررسی کنید.',
             details: lastError
         }
     });
