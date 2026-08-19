@@ -2,1013 +2,201 @@
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Virtual Chat</title>
-    <script>
-        (function () {
-            try {
-                var saved = JSON.parse(localStorage.getItem('virtual_settings') || '{}');
-                var mode = saved.theme || 'auto';
-                var resolved = mode === 'auto'
-                    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-                    : mode;
-                document.documentElement.setAttribute('data-theme', resolved);
-                if (saved.c1 && saved.c2) {
-                    document.documentElement.style.setProperty('--accent-1', saved.c1);
-                    document.documentElement.style.setProperty('--accent-2', saved.c2);
-                }
-                if (saved.fontSize) {
-                    var sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
-                    document.documentElement.style.setProperty('--msg-font-size', sizes[saved.fontSize] || sizes.normal);
-                }
-            } catch (e) {}
-        })();
-    </script>
-    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Input</title>
     <style>
-        :root {
-            --bg-main: #0a0c12;
-            --bg-sidebar: #10131c;
-            --bg-card: #161a24;
-            --bg-card-hover: #1c2130;
-            --bg-input: #191e29;
-            --accent-1: #8b5cf6;
-            --accent-2: #22d3ee;
-            --accent-grad: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-            --danger: #f87171;
-            --text-main: #f4f6fb;
-            --text-muted: #838da3;
-            --border: #232838;
-            --border-soft: rgba(255,255,255,0.06);
-            --shadow-a: rgba(0,0,0,0.3);
-            --shadow-b: rgba(0,0,0,0.55);
-            --msg-font-size: 0.92rem;
-        }
-
-        :root[data-theme="light"] {
-            --bg-main: #f6f7fb;
-            --bg-sidebar: #ffffff;
-            --bg-card: #f0f2f8;
-            --bg-card-hover: #e6e9f3;
-            --bg-input: #ffffff;
-            --text-main: #1a1d29;
-            --text-muted: #6b7280;
-            --border: #e2e5ef;
-            --border-soft: rgba(15,23,42,0.08);
-            --shadow-a: rgba(30,41,59,0.10);
-            --shadow-b: rgba(30,41,59,0.16);
-        }
-
-        :root[data-theme="light"] body {
-            background-image:
-                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.10), transparent 45%),
-                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.08), transparent 40%);
-        }
-
-        :root[data-theme="light"] textarea { color: #1a1d29; }
-
+        /* 1. Reset و استایل‌های اصلی کانتینر چت */
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Vazirmatn', sans-serif;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        select, input, button {
-            -webkit-appearance: none !important;
-            -moz-appearance: none !important;
-            appearance: none !important;
-            outline: none !important;
-            border: none;
-            background: none;
-        }
-
-        html, body {
-            height: 100%;
-            height: 100dvh;
-            background-color: var(--bg-main);
-            color: var(--text-main);
-            overflow: hidden;
         }
 
         body {
+            background-color: #0f172a;
+            font-family: sans-serif;
             display: flex;
-            position: relative;
-            background-image:
-                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.16), transparent 45%),
-                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.10), transparent 40%);
-        }
-
-        #authOverlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(10, 12, 18, 0.88);
-            backdrop-filter: blur(12px);
-            z-index: 9999;
-            display: none;
             justify-content: center;
             align-items: center;
-            transition: opacity 0.25s ease, visibility 0.25s ease;
-        }
-        #authOverlay.active { display: flex !important; }
-
-        .auth-card {
-            background: var(--bg-sidebar);
-            border: 1px solid var(--border-soft);
-            border-radius: 20px;
-            padding: 36px 28px;
-            width: 90%;
-            max-width: 400px;
-            text-align: center;
-            box-shadow: 0 20px 50px var(--shadow-b);
-            animation: fadeIn 0.3s ease-out;
+            height: 100vh;
         }
 
-        .auth-card .home-mark { margin: 0 auto 18px auto; }
-        .auth-card h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: 8px; color: var(--text-main); }
-        .auth-card p { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px; line-height: 1.6; }
-        .google-btn-wrapper { display: flex; justify-content: center; }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(6px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes messageIn {
-            from { opacity: 0; transform: translateY(10px) scale(0.985); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        @keyframes modalIn {
-            from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
-            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        }
-
-        @keyframes pulseRecording {
-            0% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.6); }
-            70% { box-shadow: 0 0 0 10px rgba(248, 113, 113, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
-        }
-
-        .sidebar-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(4px);
-            z-index: 15;
-        }
-        .sidebar-overlay.active { display: block; }
-
-        .sidebar {
-            width: 272px;
-            background-color: var(--bg-sidebar);
-            border-left: 1px solid var(--border-soft);
-            display: flex;
-            flex-direction: column;
-            padding: 16px;
-            z-index: 20;
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .brand-title {
-            font-size: 1.15rem;
-            font-weight: 800;
+        .chat-input-container {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            margin-bottom: 18px;
-            padding: 0 2px;
-        }
-        .brand-title .brand-name { display: flex; align-items: center; gap: 9px; }
-        .brand-mark {
-            width: 26px; height: 26px;
-            border-radius: 8px;
-            background: var(--accent-grad);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 0.75rem; color: #fff; flex-shrink: 0;
-            box-shadow: 0 0 18px rgba(139,92,246,0.45);
-        }
-        .brand-text { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
-
-        .user-profile {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 14px;
-            padding: 10px 12px;
-            margin-bottom: 14px;
-            display: flex; align-items: center; gap: 10px; min-height: 56px;
-        }
-        .user-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
-        .user-info { flex: 1; overflow: hidden; }
-        .user-name { font-size: 0.9rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
-        .user-actions { display: flex; gap: 4px; align-items: center; }
-        .user-actions .icon-btn { width: 28px; height: 28px; font-size: 0.8rem; }
-
-        .new-chat-btn {
-            background: var(--bg-card);
-            color: var(--text-main);
-            border: 1px solid var(--border-soft);
-            padding: 12px; border-radius: 12px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center; gap: 9px;
-            font-weight: 600; font-size: 0.9rem; transition: all 0.2s ease;
-        }
-        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: rgba(139,92,246,0.4); }
-        .new-chat-btn i { color: var(--accent-2); }
-
-        .history-list { flex: 1; overflow-y: auto; margin-top: 16px; display: flex; flex-direction: column; gap: 4px; }
-        .history-item {
-            padding: 10px 12px; border-radius: 9px; font-size: 0.84rem; color: var(--text-muted);
-            cursor: pointer; display: flex; align-items: center; gap: 9px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: 0.15s; border: 1px solid transparent;
-        }
-        .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
-        .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: rgba(139,92,246,0.35); }
-        .history-item.active i { color: var(--accent-2); }
-
-        .main-content { flex: 1; display: flex; flex-direction: column; height: 100%; height: 100dvh; position: relative; overflow: hidden; }
-
-        .chat-header { padding: 14px 22px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-soft); z-index: 5; }
-        .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; }
-
-        .home-screen { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 26px; padding: 20px; text-align: center; animation: fadeIn 0.35s ease-out; }
-        .home-mark {
-            width: 56px; height: 56px; border-radius: 16px; background: var(--accent-grad);
-            display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: #fff;
-            box-shadow: 0 0 40px rgba(139,92,246,0.35);
-        }
-        .home-title { font-size: 1.6rem; font-weight: 700; color: var(--text-main); }
-        .home-subtitle { font-size: 0.92rem; color: var(--text-muted); }
-
-        .suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 520px; }
-        .suggestion-chip {
-            padding: 9px 16px; background: var(--bg-card); border: 1px solid var(--border-soft);
-            border-radius: 20px; font-size: 0.82rem; color: var(--text-muted); cursor: pointer; transition: all 0.2s;
-        }
-        .suggestion-chip:hover { color: var(--text-main); border-color: rgba(139,92,246,0.4); background: var(--bg-card-hover); }
-
-        .chat-box { flex: 1; padding: 22px 15%; overflow-y: auto; display: none; flex-direction: column; gap: 18px; scroll-behavior: smooth; }
-
-        .message {
-            max-width: 85%; padding: 13px 17px; border-radius: 16px; line-height: 1.7;
-            word-wrap: break-word; font-size: var(--msg-font-size); animation: messageIn 0.38s ease forwards; position: relative;
-        }
-        .message.user { align-self: flex-start; background-color: var(--bg-card); border: 1px solid var(--border-soft); color: var(--text-main); border-bottom-right-radius: 4px; }
-        .message.bot {
-            align-self: flex-end; background: linear-gradient(180deg, rgba(139,92,246,0.06), transparent 40%);
-            border-right: 2px solid; border-image: var(--accent-grad) 1; color: var(--text-main); border-radius: 4px 14px 14px 4px; padding-right: 15px;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 24px;
+            padding: 8px 16px;
+            width: 90%;
+            max-width: 700px;
+            gap: 12px;
         }
 
-        .bot-msg-actions {
-            display: flex; gap: 6px; margin-top: 8px; justify-content: flex-end;
+        /* 2. حل کامل مشکل textarea، پس‌زمینه سفید و فلش کروم */
+        .chat-input {
+            flex: 1;
+            background: transparent !important;
+            color: #ffffff !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            resize: none !important; /* حذف فلش تغییر اندازه */
+            font-size: 14px;
+            line-height: 1.5;
+            max-height: 120px;
+            height: 24px;
         }
-        .tts-btn {
-            font-size: 0.8rem; color: var(--text-muted); cursor: pointer; transition: color 0.2s; background: none; border: none;
+
+        /* مخفی‌سازی آیکون ریسایز کروم */
+        .chat-input::-webkit-resizer {
+            display: none !important;
         }
-        .tts-btn:hover { color: var(--accent-2); }
-        .tts-btn.speaking { color: var(--danger); }
 
-        .typing-dots { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
-        .typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); animation: dotBounce 1.2s infinite; }
-        @keyframes dotBounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.5; } 40% { transform: translateY(-4px); opacity: 1; } }
-
-        .input-wrapper { width: 100%; max-width: 800px; margin: 0 auto; padding: 10px 15px 16px 15px; position: relative; }
-
-        .sticker-picker {
-            display: none; position: absolute; bottom: 78px; right: 20px;
-            background-color: var(--bg-card); border: 1px solid var(--border-soft);
-            border-radius: 16px; padding: 12px; grid-template-columns: repeat(4, 1fr); gap: 10px;
-            box-shadow: 0 10px 30px var(--shadow-b); z-index: 30; animation: fadeIn 0.2s ease;
+        /* رفع مشکل Autofill سفید در کروم */
+        .chat-input:-webkit-autofill,
+        .chat-input:-webkit-autofill:hover,
+        .chat-input:-webkit-autofill:focus {
+            -webkit-text-fill-color: #ffffff !important;
+            -webkit-box-shadow: 0 0 0px 1000px #1e293b inset !important;
+            transition: background-color 5000s ease-in-out 0s !important;
         }
-        .sticker-picker.active { display: grid; }
-        .sticker-item { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; padding: 4px; transition: transform 0.15s; }
-        .sticker-item:hover { transform: scale(1.12); }
 
-        .input-box {
-            background-color: var(--bg-input); border: 1px solid var(--border-soft);
-            border-radius: 22px; padding: 6px 12px; display: flex; align-items: center; gap: 6px;
-            box-shadow: 0 6px 24px var(--shadow-a); transition: border-color 0.2s;
+        .chat-input::placeholder {
+            color: #94a3b8 !important;
         }
-        .input-box:focus-within { border-color: rgba(139,92,246,0.55); }
 
-        textarea { flex: 1; color: white; resize: none !important; height: 24px; max-height: 120px; font-size: 0.94rem; padding: 4px 2px; }
-        textarea::placeholder { color: var(--text-muted); }
-
+        /* 3. استایل دکمه‌ها و حالت انیمیشن ضبط صدا */
         .icon-btn {
-            color: var(--text-muted); font-size: 1.05rem; cursor: pointer; width: 36px; height: 36px;
-            border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s;
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px;
+            border-radius: 50%;
+            transition: all 0.2s ease;
         }
-        .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); }
 
+        .icon-btn:hover {
+            color: #38bdf8;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* افکت چشمک‌زن موقع ضبط صدا */
         .icon-btn.recording {
-            color: #fff !important;
-            background-color: var(--danger) !important;
-            animation: pulseRecording 1.5s infinite;
+            color: #ef4444;
+            animation: pulse 1.2s infinite;
         }
 
-        .icon-btn.search-active { color: var(--accent-2) !important; background-color: rgba(34, 211, 238, 0.14) !important; }
-
-        .action-btn { background: var(--accent-grad); color: #fff !important; }
-        .action-btn.stop-mode { background: var(--danger); }
-
-        .file-preview {
-            display: none; align-items: center; gap: 10px; padding: 6px 12px;
-            background-color: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px; margin-bottom: 8px; width: fit-content;
-        }
-        .file-preview img { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
-
-        .settings-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px); z-index: 40; }
-        .settings-overlay.active { display: block; }
-
-        .settings-modal {
-            display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 92%; max-width: 420px; max-height: 85vh; background: var(--bg-sidebar);
-            border: 1px solid var(--border-soft); border-radius: 20px; padding: 22px; z-index: 41;
-            box-shadow: 0 20px 60px var(--shadow-b); overflow-y: auto;
-        }
-        .settings-modal.active { display: block; animation: modalIn 0.25s forwards; }
-
-        .settings-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid var(--border-soft); padding-bottom: 10px; }
-        .settings-section { margin-bottom: 22px; }
-        .settings-label { font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; }
-
-        .settings-input-text { width: 100%; background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 14px; color: var(--text-main); }
-        .segmented { display: flex; background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 12px; padding: 3px; gap: 3px; }
-        .segmented-btn { flex: 1; padding: 8px 6px; border-radius: 9px; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .segmented-btn.active { background: var(--accent-grad); color: #fff; }
-
-        .accent-swatches { display: flex; gap: 10px; }
-        .accent-swatch { width: 34px; height: 34px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
-        .accent-swatch.active { border-color: var(--text-main); }
-
-        .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-        .switch { position: relative; width: 42px; height: 24px; cursor: pointer; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .switch-slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 999px; }
-        .switch-slider::before { content: ""; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #fff; top: 2px; right: 2px; transition: transform 0.2s; }
-        .switch input:checked + .switch-slider { background: var(--accent-grad); }
-        .switch input:checked + .switch-slider::before { transform: translateX(-18px); }
-
-        @media (max-width: 900px) { .chat-box { padding: 15px 5%; } }
-        @media (max-width: 768px) {
-            .menu-btn { display: block; }
-            .sidebar { position: fixed; top: 0; right: 0; bottom: 0; transform: translateX(100%); }
-            .sidebar.open { transform: translateX(0); }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.15); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
         }
     </style>
 </head>
 <body>
 
-    <div id="authOverlay">
-        <div class="auth-card">
-            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
-            <h2>ورود به Virtual Chat</h2>
-            <p>برای شروع گفتگو و ذخیره ایمن اطلاعات، لطفاً با حساب گوگل خود وارد شوید.</p>
-            <div class="google-btn-wrapper">
-                <div id="g_id_onload"
-                    data-client_id="820812673874-35oc9gs6vf2hm43gv8k4a64t9gsf2alu.apps.googleusercontent.com"
-                    data-callback="handleCredentialResponse"
-                    data-auto_prompt="false">
-                </div>
-                <div class="g_id_signin" data-type="standard" data-size="large" data-theme="filled_black" data-shape="pill"></div>
-            </div>
-        </div>
-    </div>
-
-    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
-
-    <div class="sidebar" id="sidebar">
-        <div class="brand-title">
-            <div class="brand-name">
-                <span class="brand-mark"><i class="fa-solid fa-sparkles"></i></span>
-                <span class="brand-text">Virtual Chat</span>
-            </div>
-            <i class="fa-solid fa-xmark icon-btn" onclick="toggleSidebar()" style="display: var(--mobile-close, none);"></i>
-        </div>
-
-        <div class="user-profile" id="userProfile">
-            <span style="font-size:0.8rem; color:var(--text-muted);">در حال ورود...</span>
-        </div>
-
-        <button class="new-chat-btn" id="newChatBtn" onclick="startNewChat()">
-            <i class="fa-solid fa-plus"></i> گفتگوی تازه
+    <div class="chat-input-container">
+        <!-- دکمه ارسال -->
+        <button class="icon-btn" id="send-btn" title="ارسال">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
         </button>
-        <div class="history-list" id="historyList"></div>
+
+        <!-- ورودی متن -->
+        <textarea class="chat-input" id="chat-input" placeholder="از Virtual Bot بپرسید..." rows="1"></textarea>
+
+        <!-- دکمه ضبط صدا -->
+        <button class="icon-btn" id="mic-btn" title="ضبط صدا">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </button>
+
+        <!-- دکمه تست خواندن متن با صدا -->
+        <button class="icon-btn" id="speak-btn" title="تست پخش صدا">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        </button>
     </div>
 
-    <div class="main-content">
-        <div class="chat-header">
-            <div class="header-left">
-                <button class="menu-btn" onclick="toggleSidebar()" title="منو">
-                    <i class="fa-solid fa-bars"></i>
-                </button>
-            </div>
-            <div class="header-right">
-                <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
-                    <i class="fa-solid fa-gear"></i>
-                </button>
-            </div>
-        </div>
+    <script>
+        const chatInput = document.getElementById('chat-input');
+        const micBtn = document.getElementById('mic-btn');
+        const speakBtn = document.getElementById('speak-btn');
 
-        <div class="home-screen" id="homeScreen">
-            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
-            <div class="home-text">
-                <h1 class="home-title" id="welcomeHomeTitle">سلام! امروز چطور می‌تونم کمکت کنم؟</h1>
-                <p class="home-subtitle">یه سؤال بپرس، ویس بفرست یا یکی از پیشنهادها رو انتخاب کن</p>
-            </div>
-            <div class="suggestion-chips">
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده برای عنوان پست اینستاگرام بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">این متن رو خلاصه کن</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه قطعه کد پایتون بنویس</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">امروز اخبار مهم چیه؟</div>
-            </div>
-        </div>
-
-        <div class="chat-box" id="chatBox"></div>
-
-        <div class="input-wrapper">
-            <div class="sticker-picker" id="stickerPicker">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f917/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f389/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-            </div>
-
-            <div class="file-preview" id="filePreview">
-                <img id="previewImg" src="" alt="preview">
-                <span id="fileName"></span>
-                <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"></i>
-            </div>
-
-            <div class="input-box">
-                <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
-                <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
-                    <i class="fa-solid fa-plus"></i>
-                </button>
-
-                <!-- دکمه ضبط صدا -->
-                <button class="icon-btn" id="voiceMicBtn" onclick="toggleVoiceRecording()" title="ضبط صدا">
-                    <i class="fa-solid fa-microphone"></i>
-                </button>
-
-                <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
-                    <i class="fa-regular fa-face-smile"></i>
-                </button>
-
-                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب (گوگل)">
-                    <i class="fa-solid fa-globe"></i>
-                </button>
-
-                <textarea id="userInput" placeholder="از Virtual Bot بپرس..." rows="1" onkeydown="handleKeyDown(event)"></textarea>
-
-                <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
-                    <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
-    <div class="settings-modal" id="settingsModal">
-        <div class="settings-header">
-            <h2><i class="fa-solid fa-sliders"></i> تنظیمات و شخصی‌سازی</h2>
-            <i class="fa-solid fa-xmark icon-btn" onclick="closeSettings()"></i>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">نام شما در چت (جهت صدا زدن ربات)</div>
-            <input type="text" class="settings-input-text" id="customUserNameInput" placeholder="مثلاً: ارشیا" onchange="updateCustomName(this.value)">
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">حالت نمایش</div>
-            <div class="segmented" id="themeSegmented">
-                <button class="segmented-btn" data-value="light"><i class="fa-solid fa-sun"></i> روشن</button>
-                <button class="segmented-btn" data-value="dark"><i class="fa-solid fa-moon"></i> تاریک</button>
-                <button class="segmented-btn" data-value="auto"><i class="fa-solid fa-circle-half-stroke"></i> خودکار</button>
-            </div>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">رنگ اصلی</div>
-            <div class="accent-swatches" id="accentSwatches">
-                <button class="accent-swatch" data-c1="#8b5cf6" data-c2="#22d3ee" style="background: linear-gradient(135deg,#8b5cf6,#22d3ee);"></button>
-                <button class="accent-swatch" data-c1="#f97316" data-c2="#ec4899" style="background: linear-gradient(135deg,#f97316,#ec4899);"></button>
-                <button class="accent-swatch" data-c1="#10b981" data-c2="#3b82f6" style="background: linear-gradient(135deg,#10b981,#3b82f6);"></button>
-                <button class="accent-swatch" data-c1="#ef4444" data-c2="#f59e0b" style="background: linear-gradient(135deg,#ef4444,#f59e0b);"></button>
-                <button class="accent-swatch" data-c1="#6366f1" data-c2="#a855f7" style="background: linear-gradient(135deg,#6366f1,#a855f7);"></button>
-            </div>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">اندازه‌ی متن گفتگو</div>
-            <div class="segmented" id="fontSegmented">
-                <button class="segmented-btn" data-value="small">کوچک</button>
-                <button class="segmented-btn" data-value="normal">معمولی</button>
-                <button class="segmented-btn" data-value="large">بزرگ</button>
-            </div>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">حرکت تایپ‌مانند پاسخ‌ها</div>
-            <div class="settings-toggle-row">
-                <span class="settings-toggle-desc">نمایش پاسخ ربات به‌صورت تدریجی و حرف‌به‌حرف</span>
-                <label class="switch">
-                    <input type="checkbox" id="typewriterToggle" checked onchange="saveSettings()">
-                    <span class="switch-slider"></span>
-                </label>
-            </div>
-        </div>
-    </div>
-
-<script>
-    let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
-    let currentUser = null;
-    let chats = {};
-    let chatHistoryData = {};
-    let selectedFileData = null;
-    let isFirstMessage = true;
-    let isGenerating = false;
-    let isSearchEnabled = false;
-    let currentAbortController = null;
-    let typeWriterInterval = null;
-
-    // --- ویس / Speech Recognition ---
-    let recognition = null;
-    let isRecording = false;
-
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SpeechRecognition();
-        recognition.lang = 'fa-IR';
-        recognition.continuous = false;
-        recognition.interimResults = true;
-
-        recognition.onresult = (event) => {
-            let transcript = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                transcript += event.results[i][0].transcript;
-            }
-            document.getElementById('userInput').value = transcript;
-        };
-
-        recognition.onerror = () => { stopVoiceRecording(); };
-        recognition.onend = () => { stopVoiceRecording(); };
-    }
-
-    function toggleVoiceRecording() {
-        if (!recognition) {
-            alert("مرورگر شما از قابلیت ضبط صدای وب پشتیبانی نمی‌کند.");
-            return;
-        }
-        if (isRecording) {
-            stopVoiceRecording();
-        } else {
-            startVoiceRecording();
-        }
-    }
-
-    function startVoiceRecording() {
-        if (isGenerating) return;
-        isRecording = true;
-        document.getElementById('voiceMicBtn').classList.add('recording');
-        recognition.start();
-    }
-
-    function stopVoiceRecording() {
-        isRecording = false;
-        const micBtn = document.getElementById('voiceMicBtn');
-        if (micBtn) micBtn.classList.remove('recording');
-        if (recognition) recognition.stop();
-    }
-
-    // --- پخش صوتی پاسخ (Text-to-Speech) ---
-    function speakText(btnElement, text) {
-        if (!('speechSynthesis' in window)) {
-            alert('دستگاه شما از خواندن صوتی پشتیبانی نمی‌کند.');
-            return;
-        }
-
-        if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.cancel();
-            document.querySelectorAll('.tts-btn').forEach(b => b.classList.remove('speaking'));
-            return;
-        }
-
-        const cleanText = text.replace(/<[^>]*>?/gm, '');
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.lang = 'fa-IR';
-
-        btnElement.classList.add('speaking');
-
-        utterance.onend = () => { btnElement.classList.remove('speaking'); };
-        utterance.onerror = () => { btnElement.classList.remove('speaking'); };
-
-        window.speechSynthesis.speak(utterance);
-    }
-
-    window.onload = () => {
-        checkSavedUser();
-        loadSettings();
-        if (window.innerWidth <= 768) {
-            document.documentElement.style.setProperty('--mobile-close', 'block');
-        }
-    };
-
-    function extractNameFromEmail(email) {
-        if (!email) return 'دوست من';
-        const handle = email.split('@')[0].toLowerCase();
-        const nameMap = { 'arshia': 'ارشیا', 'ali': 'علی', 'reza': 'رضا', 'mahan': 'ماهان', 'amir': 'امیر', 'mohammad': 'محمد', 'sara': 'سارا', 'mehdi': 'مهدی' };
-        for (let key in nameMap) { if (handle.startsWith(key)) return nameMap[key]; }
-        const clean = handle.replace(/[0-9_.-]/g, '');
-        return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'دوست من';
-    }
-
-    function handleCredentialResponse(response) {
-        const responsePayload = parseJwt(response.credential);
-        const autoName = extractNameFromEmail(responsePayload.email);
-        currentUser = {
-            name: responsePayload.name || autoName,
-            customName: localStorage.getItem('virtual_user_custom_name') || autoName,
-            email: responsePayload.email,
-            picture: responsePayload.picture
-        };
-        localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
-        document.getElementById('authOverlay').classList.remove('active');
-        initUserData();
-    }
-
-    function parseJwt(token) {
-        var base64Url = token.split('.')[1];
-        var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-        var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
-            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-        }).join(''));
-        return JSON.parse(jsonPayload);
-    }
-
-    function checkSavedUser() {
-        const saved = localStorage.getItem('virtual_chat_user');
-        const overlay = document.getElementById('authOverlay');
-        if (saved) {
-            currentUser = JSON.parse(saved);
-            if (!currentUser.customName) {
-                currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email);
-            }
-            overlay.classList.remove('active');
-            initUserData();
-        } else {
-            overlay.classList.add('active');
-        }
-    }
-
-    function initUserData() {
-        updateUserUI();
-        renderHistory();
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
-        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
-        chatHistoryData = JSON.parse(localStorage.getItem(historyKey)) || {};
-        if (chats[currentChatId]) loadChat(currentChatId, true);
-    }
-
-    function updateUserUI() {
-        if (!currentUser) return;
-        const profileDiv = document.getElementById('userProfile');
-        profileDiv.innerHTML = `
-            <img src="${currentUser.picture}" class="user-avatar" alt="User">
-            <div class="user-info">
-                <div class="user-name">${currentUser.customName || currentUser.name}</div>
-            </div>
-            <div class="user-actions">
-                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب کاربری"><i class="fa-solid fa-arrows-rotate"></i></button>
-                <button class="icon-btn" onclick="logoutUser()" title="خروج از حساب"><i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i></button>
-            </div>
-        `;
-        const titleEl = document.getElementById('welcomeHomeTitle');
-        if (titleEl) titleEl.innerText = `سلام ${currentUser.customName || currentUser.name}! امروز چطور می‌تونم کمکت کنم؟`;
-        document.getElementById('customUserNameInput').value = currentUser.customName || currentUser.name;
-    }
-
-    function logoutUser() {
-        if (confirm('آیا می‌خواهی از حساب کاربری خارج بشی؟')) {
-            localStorage.removeItem('virtual_chat_user');
-            currentUser = null;
-            document.getElementById('authOverlay').classList.add('active');
-            if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
-        }
-    }
-
-    function switchAccount() {
-        localStorage.removeItem('virtual_chat_user');
-        currentUser = null;
-        document.getElementById('authOverlay').classList.add('active');
-        if (window.google && google.accounts && google.accounts.id) {
-            google.accounts.id.disableAutoSelect();
-            google.accounts.id.prompt();
-        }
-    }
-
-    function updateCustomName(val) {
-        if (!val.trim()) return;
-        const name = val.trim();
-        if (currentUser) {
-            currentUser.customName = name;
-            localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
-        }
-        localStorage.setItem('virtual_user_custom_name', name);
-        updateUserUI();
-    }
-
-    const defaultSettings = { theme: 'auto', c1: '#8b5cf6', c2: '#22d3ee', fontSize: 'normal', typewriter: true };
-    function getSettings() { try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') }; } catch (e) { return { ...defaultSettings }; } }
-    function loadSettings() { const s = getSettings(); applySettings(s); renderSettingsUI(s); }
-    function applySettings(s) {
-        const resolvedTheme = s.theme === 'auto' ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : s.theme;
-        document.documentElement.setAttribute('data-theme', resolvedTheme);
-        document.documentElement.style.setProperty('--accent-1', s.c1);
-        document.documentElement.style.setProperty('--accent-2', s.c2);
-        const sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
-        document.documentElement.style.setProperty('--msg-font-size', sizes[s.fontSize] || sizes.normal);
-    }
-    function renderSettingsUI(s) {
-        document.querySelectorAll('#themeSegmented .segmented-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.value === s.theme));
-        document.querySelectorAll('#fontSegmented .segmented-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.value === s.fontSize));
-        document.querySelectorAll('#accentSwatches .accent-swatch').forEach(btn => btn.classList.toggle('active', btn.dataset.c1 === s.c1 && btn.dataset.c2 === s.c2));
-        document.getElementById('typewriterToggle').checked = s.typewriter;
-    }
-    function saveSettings() { const s = getSettings(); s.typewriter = document.getElementById('typewriterToggle').checked; localStorage.setItem('virtual_settings', JSON.stringify(s)); applySettings(s); }
-
-    document.getElementById('themeSegmented').addEventListener('click', (e) => {
-        const btn = e.target.closest('.segmented-btn'); if (!btn) return;
-        const s = getSettings(); s.theme = btn.dataset.value; localStorage.setItem('virtual_settings', JSON.stringify(s)); applySettings(s); renderSettingsUI(s);
-    });
-    document.getElementById('fontSegmented').addEventListener('click', (e) => {
-        const btn = e.target.closest('.segmented-btn'); if (!btn) return;
-        const s = getSettings(); s.fontSize = btn.dataset.value; localStorage.setItem('virtual_settings', JSON.stringify(s)); applySettings(s); renderSettingsUI(s);
-    });
-    document.getElementById('accentSwatches').addEventListener('click', (e) => {
-        const btn = e.target.closest('.accent-swatch'); if (!btn) return;
-        const s = getSettings(); s.c1 = btn.dataset.c1; s.c2 = btn.dataset.c2; localStorage.setItem('virtual_settings', JSON.stringify(s)); applySettings(s); renderSettingsUI(s);
-    });
-
-    function openSettings() { renderSettingsUI(getSettings()); document.getElementById('settingsOverlay').classList.add('active'); document.getElementById('settingsModal').classList.add('active'); }
-    function closeSettings() { document.getElementById('settingsOverlay').classList.remove('active'); document.getElementById('settingsModal').classList.remove('active'); }
-
-    function useSuggestion(el) { if (isGenerating) return; document.getElementById('userInput').value = el.innerText; sendMessage(); }
-    function shouldSearchWeb(userText) {
-        if (!userText) return false;
-        const cleanText = userText.trim().toLowerCase();
-        if (cleanText.length < 3) return false;
-        const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'بررسی کن', 'قیمت', 'اخبار', 'خبر'];
-        return allowedKeywords.some(kw => cleanText.includes(kw));
-    }
-
-    function toggleSearch() {
-        if (isGenerating) return;
-        isSearchEnabled = !isSearchEnabled;
-        const btn = document.getElementById("searchToggleBtn");
-        btn.classList.toggle("search-active", isSearchEnabled);
-    }
-
-    function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('sidebarOverlay').classList.toggle('active'); }
-    function toggleStickerPicker() { if (isGenerating) return; document.getElementById('stickerPicker').classList.toggle('active'); }
-
-    function sendSticker(stickerUrl) {
-        if (isGenerating) return;
-        toggleStickerPicker();
-        appendMessage('user', `<img src="${stickerUrl}" style="width:120px; height:120px; object-fit:contain;">`);
-        if (isFirstMessage) { document.getElementById("homeScreen").style.display = 'none'; document.getElementById("chatBox").style.display = 'flex'; isFirstMessage = false; }
-        sendToGemini("کاربر یک استیکر ارسال کرد.");
-    }
-
-    function handleKeyDown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!isGenerating) sendMessage(); } }
-
-    function compressImage(file, maxDimension = 1024, quality = 0.7) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = (event) => {
-                const img = new Image();
-                img.src = event.target.result;
-                img.onload = () => {
-                    let width = img.width, height = img.height;
-                    if (width > height) { if (width > maxDimension) { height = Math.round((height * maxDimension) / width); width = maxDimension; } }
-                    else { if (height > maxDimension) { width = Math.round((width * maxDimension) / height); height = maxDimension; } }
-                    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-                    const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', quality));
-                };
-            };
+        // ۱. تنظیم ارتفاع خودکار textarea با تایپ متن
+        chatInput.addEventListener('input', () => {
+            chatInput.style.height = 'auto';
+            chatInput.style.height = chatInput.scrollHeight + 'px';
         });
-    }
 
-    async function handleFileSelect(event) {
-        if (isGenerating) return;
-        const file = event.target.files[0]; if (!file) return;
-        const previewImg = document.getElementById('previewImg');
-        document.getElementById('filePreview').style.display = 'flex';
-        document.getElementById('fileName').innerText = file.name;
-        if (file.type.startsWith('image/')) {
-            const compressed = await compressImage(file);
-            selectedFileData = { name: file.name, type: 'image/jpeg', base64: compressed };
-            previewImg.src = compressed; previewImg.style.display = 'block';
-        }
-    }
+        // ۲. منطق ضبط صدا (Voice-to-Text)
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-    function removeFile() { selectedFileData = null; document.getElementById('fileInput').value = ''; document.getElementById('filePreview').style.display = 'none'; }
-    function handleActionClick() { if (isGenerating) stopGeneration(); else sendMessage(); }
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'fa-IR'; // تنظیم روی زبان فارسی
+            recognition.continuous = false;
+            recognition.interimResults = false;
 
-    function setGeneratingState(generating) {
-        isGenerating = generating;
-        const inputField = document.getElementById("userInput");
-        const actionBtn = document.getElementById("actionBtn");
-        const actionIcon = document.getElementById("actionIcon");
-        inputField.disabled = generating;
-        if (generating) { actionBtn.classList.add("stop-mode"); actionIcon.className = "fa-solid fa-square"; }
-        else { actionBtn.classList.remove("stop-mode"); actionIcon.className = "fa-solid fa-paper-plane"; }
-    }
+            let isRecording = false;
 
-    function stopGeneration() {
-        if (currentAbortController) currentAbortController.abort();
-        if (typeWriterInterval) clearInterval(typeWriterInterval);
-        setGeneratingState(false); saveCurrentChat();
-    }
-
-    async function sendMessage() {
-        const inputField = document.getElementById("userInput");
-        const text = inputField.value.trim();
-        if (!text && !selectedFileData) return;
-
-        if (isFirstMessage) { document.getElementById("homeScreen").style.display = 'none'; document.getElementById("chatBox").style.display = 'flex'; isFirstMessage = false; }
-
-        let userContent = text;
-        if (selectedFileData && selectedFileData.type.startsWith('image/')) {
-            userContent += `<br><img src="${selectedFileData.base64}" style="max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 8px;">`;
-        }
-
-        appendMessage('user', userContent);
-        inputField.value = ""; inputField.style.height = '24px';
-        const payloadFile = selectedFileData; removeFile();
-        sendToGemini(text, payloadFile);
-    }
-
-    async function sendToGemini(textPrompt, payloadFile = null) {
-        setGeneratingState(true);
-        const chatBox = document.getElementById("chatBox");
-
-        const loadingDiv = document.createElement("div");
-        loadingDiv.className = "message bot";
-        loadingDiv.innerHTML = `<span class="typing-dots"><span></span><span></span><span></span></span>`;
-        chatBox.appendChild(loadingDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
-
-        const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
-        const systemInstruction = `نام تو Virtual Bot است. نام مخاطب تو "${uName}" است. با لحن صمیمی و طبیعی پاسخ بده.`;
-        const fullPrompt = systemInstruction + "\n\nمتن کاربر: " + (textPrompt || '');
-
-        if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
-        chatHistoryData[currentChatId].push({ role: 'user', text: fullPrompt });
-
-        currentAbortController = new AbortController();
-
-        try {
-            const response = await fetch('/api/chat', {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    text: fullPrompt,
-                    rawText: textPrompt,
-                    file: payloadFile,
-                    webSearch: isSearchEnabled,
-                    history: chatHistoryData[currentChatId]
-                }),
-                signal: currentAbortController.signal
+            micBtn.addEventListener('click', () => {
+                if (!isRecording) {
+                    try {
+                        recognition.start();
+                        micBtn.classList.add('recording');
+                        isRecording = true;
+                    } catch (err) {
+                        console.error('خطا در شروع ضبط:', err);
+                    }
+                } else {
+                    recognition.stop();
+                    micBtn.classList.remove('recording');
+                    isRecording = false;
+                }
             });
 
-            const data = await response.json();
-            if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-                const reply = data.candidates[0].content.parts[0].text;
-                chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+            recognition.onresult = (event) => {
+                const text = event.results[0][0].transcript;
+                chatInput.value += (chatInput.value ? ' ' : '') + text;
+                chatInput.dispatchEvent(new Event('input')); // به‌روزرسانی ارتفاع
+            };
 
-                if (getSettings().typewriter) {
-                    typeWriterEffect(loadingDiv, reply, () => {
-                        addTtsButton(loadingDiv, reply);
-                        setGeneratingState(false); saveCurrentChat();
-                    });
-                } else {
-                    loadingDiv.innerHTML = formatReply(reply);
-                    addTtsButton(loadingDiv, reply);
-                    chatBox.scrollTop = chatBox.scrollHeight;
-                    setGeneratingState(false); saveCurrentChat();
-                }
-            } else {
-                loadingDiv.innerText = "⚠️ پاسخی دریافت نشد. دوباره امتحان کن.";
-                setGeneratingState(false); saveCurrentChat();
-            }
-        } catch (error) {
-            loadingDiv.innerText = error.name === 'AbortError' ? "متوقف شد." : "خطا در ارتباط با سرور.";
-            setGeneratingState(false); saveCurrentChat();
+            recognition.onerror = (e) => {
+                console.error('خطای تشخیص صدا:', e.error);
+                micBtn.classList.remove('recording');
+                isRecording = false;
+            };
+
+            recognition.onend = () => {
+                micBtn.classList.remove('recording');
+                isRecording = false;
+            };
+        } else {
+            micBtn.style.display = 'none';
+            console.warn('مرورگر شما از قابلیت تبدیل صدا به متن پشتیبانی نمی‌کند.');
         }
-    }
 
-    function addTtsButton(msgDiv, text) {
-        const actionContainer = document.createElement('div');
-        actionContainer.className = 'bot-msg-actions';
-        actionContainer.innerHTML = `<button class="tts-btn" onclick="speakText(this, \`${text.replace(/`/g, '\\`')}\`)" title="پخش صوتی"><i class="fa-solid fa-volume-high"></i></button>`;
-        msgDiv.appendChild(actionContainer);
-    }
-
-    function typeWriterEffect(element, text, onComplete) {
-        element.innerHTML = "";
-        let i = 0;
-        const formatted = formatReply(text);
-        typeWriterInterval = setInterval(() => {
-            if (i < formatted.length) {
-                element.innerHTML = formatted.substring(0, i + 1);
-                i++;
-                document.getElementById("chatBox").scrollTop = document.getElementById("chatBox").scrollHeight;
+        // ۳. منطق خواندن متن توسط هوش مصنوعی (Text-to-Speech)
+        function speakText(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); // متوقف کردن صداهای قبلی
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'fa-IR';
+                utterance.rate = 1.0;
+                window.speechSynthesis.speak(utterance);
             } else {
-                clearInterval(typeWriterInterval);
-                if (onComplete) onComplete();
+                alert('مرورگر شما از پخش صدا پشتیبانی نمی‌کند.');
             }
-        }, 12);
-    }
+        }
 
-    function appendMessage(sender, content) {
-        const chatBox = document.getElementById("chatBox");
-        const msgDiv = document.createElement("div");
-        msgDiv.className = `message ${sender}`;
-        msgDiv.innerHTML = content;
-        chatBox.appendChild(msgDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function formatReply(text) {
-        let formatted = text.replace(/```([\s\S]*?)```/g, '<pre style="background:#10131c; padding:10px; border-radius:8px; overflow-x:auto; margin-top:6px;"><code>$1</code></pre>');
-        return formatted.replace(/\n/g, '<br>');
-    }
-
-    function startNewChat() {
-        if (isGenerating) stopGeneration();
-        currentChatId = Date.now();
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        isFirstMessage = true;
-        document.getElementById("chatBox").innerHTML = "";
-        document.getElementById("chatBox").style.display = 'none';
-        document.getElementById("homeScreen").style.display = 'flex';
-        renderHistory();
-        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
-    }
-
-    function saveCurrentChat() {
-        const chatBox = document.getElementById("chatBox");
-        const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
-
-        chats[currentChatId] = { title: firstUserMsg.substring(0, 20) + "...", html: chatBox.innerHTML };
-        localStorage.setItem(storageKey, JSON.stringify(chats));
-        localStorage.setItem(historyKey, JSON.stringify(chatHistoryData));
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        renderHistory();
-    }
-
-    function renderHistory() {
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
-        const list = document.getElementById("historyList");
-        list.innerHTML = "";
-        Object.keys(chats).reverse().forEach(id => {
-            const item = document.createElement("div");
-            item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
-            item.innerHTML = `<i class="fa-regular fa-message"></i> <span>${chats[id].title}</span>`;
-            item.onclick = () => { if (!isGenerating) loadChat(id); };
-            list.appendChild(item);
+        // دکمه تست خواندن متن موجود در input
+        speakBtn.addEventListener('click', () => {
+            const textToSpeak = chatInput.value || "محتوایی برای خواندن وجود ندارد.";
+            speakText(textToSpeak);
         });
-    }
-
-    function loadChat(id, isInitialLoad = false) {
-        if (isGenerating) stopGeneration();
-        currentChatId = id;
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        isFirstMessage = false;
-        const chatBox = document.getElementById("chatBox");
-        document.getElementById("homeScreen").style.display = 'none';
-        chatBox.style.display = 'flex';
-        chatBox.innerHTML = chats[id].html;
-        renderHistory();
-        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
-        chatBox.scrollTop = chatBox.scrollHeight;
-    }
-</script>
+    </script>
 </body>
 </html>
