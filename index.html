@@ -3,146 +3,344 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visual Chat</title>
+    <title>Visual Chat AI</title>
     <style>
-        /* استایل حذف فلش‌های اضافه (Select/Input Spinners) */
-        select, input[type="number"]::-webkit-inner-spin-button, 
-        input[type="number"]::-webkit-outer-spin-button {
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
         }
 
-        /* انیمیشن ظاهر شدن پیام‌ها */
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* حاوی کل چت‌باکس */
+        .chat-card {
+            width: 100%;
+            max-width: 800px;
+            height: 90vh;
+            background-color: #1e293b;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            border: 1px solid #334155;
+        }
+
+        /* هدر */
+        .chat-header {
+            padding: 16px 20px;
+            background-color: #0f172a;
+            border-bottom: 1px solid #334155;
+            border-top-left-radius: 16px;
+            border-top-right-radius: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .clear-btn {
+            background: transparent;
+            border: 1px solid #475569;
+            color: #94a3b8;
+            padding: 6px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+
+        .clear-btn:hover {
+            background-color: #ef4444;
+            color: white;
+            border-color: #ef4444;
+        }
+
+        /* پیام‌ها */
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
         .message {
-            animation: fadeIn 0.3s ease-in-out forwards;
-            opacity: 0;
-            transform: translateY(8px);
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 14px;
+            line-height: 1.6;
+            font-size: 0.95rem;
+            word-break: break-word;
+            animation: popIn 0.25s ease-out forwards;
         }
 
-        @keyframes fadeIn {
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        @keyframes popIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        /* انیمیشن سه‌نقطه موقع در حال تایپ بودن */
-        .typing-indicator span {
+        .message.user {
+            align-self: flex-start;
+            background-color: #0284c7;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.bot {
+            align-self: flex-end;
+            background-color: #334155;
+            color: #f1f5f9;
+            border-bottom-left-radius: 4px;
+            border: 1px solid #475569;
+        }
+
+        /* انیمیشن سه‌نقطه در حال تایپ */
+        .typing-dots span {
             display: inline-block;
             width: 6px;
             height: 6px;
-            background-color: #3b82f6;
+            background-color: #38bdf8;
             border-radius: 50%;
             margin: 0 2px;
-            animation: bounce 1.4s infinite ease-in-out both;
+            animation: dotPulse 1.2s infinite ease-in-out both;
+        }
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes dotPulse {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1.2); opacity: 1; }
         }
 
-        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
-        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        /* فوتر و دکمه ارسال */
+        .chat-footer {
+            padding: 16px;
+            background-color: #0f172a;
+            border-top: 1px solid #334155;
+            border-bottom-left-radius: 16px;
+            border-bottom-right-radius: 16px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
 
-        @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1); }
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .chat-input {
+            width: 100%;
+            padding: 12px 16px;
+            background-color: #1e293b;
+            border: 1px solid #475569;
+            border-radius: 12px;
+            color: white;
+            outline: none;
+            font-size: 0.95rem;
+            transition: border-color 0.2s;
+        }
+
+        .chat-input:focus {
+            border-color: #38bdf8;
+        }
+
+        /* حذف هرگونه فلش، اسپینر یا آیکون مرورگر زشت */
+        select, 
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+            margin: 0;
+        }
+
+        .send-btn {
+            background-color: #0284c7;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+
+        .send-btn:hover {
+            background-color: #0369a1;
+        }
+
+        .send-btn svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
         }
     </style>
 </head>
 <body>
 
-    <!-- بخش چت باکس و کدهای مرتبط -->
+    <div class="chat-card">
+        <div class="chat-header">
+            <div class="chat-title">
+                <span>🤖</span> Visual Chat AI
+            </div>
+            <button class="clear-btn" onclick="clearHistory()">پاک‌کردن چت</button>
+        </div>
+
+        <div class="chat-messages" id="messages-container">
+            <!-- پیام‌ها اینجا قرار می‌گیرند -->
+        </div>
+
+        <div class="chat-footer">
+            <div class="input-wrapper">
+                <input type="text" id="user-input" class="chat-input" placeholder="پیامت رو بنویس..." onkeydown="handleKeyPress(event)">
+            </div>
+            <button class="send-btn" onclick="sendMessage()">
+                <svg viewBox="0 0 24 24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                </svg>
+            </button>
+        </div>
+    </div>
 
     <script>
-        const CHAT_STORAGE_KEY = 'chat_history_v1';
+        const STORAGE_KEY = 'visual_chat_history_v2';
+        const messagesContainer = document.getElementById('messages-container');
+        const userInput = document.getElementById('user-input');
 
-        // ۱. بارگذاری چت‌های قبلی موقع رفرش
+        // بارگذاری سابقه چت هنگام ورود
         document.addEventListener('DOMContentLoaded', () => {
-            loadChatHistory();
+            loadHistory();
         });
 
-        function saveChatHistory(messages) {
-            localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
-        }
-
-        function loadChatHistory() {
-            const saved = localStorage.getItem(CHAT_STORAGE_KEY);
-            if (saved) {
-                const messages = JSON.parse(saved);
-                messages.forEach(msg => renderMessage(msg.text, msg.sender, false));
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
             }
         }
 
-        // ۲. انیمیشن تایپ پیام برای پاسخ بات
-        function typeWriterEffect(element, text, speed = 15) {
-            let i = 0;
-            element.textContent = '';
-            function type() {
-                if (i < text.length) {
-                    element.textContent += text.charAt(i);
-                    i++;
-                    setTimeout(type, speed);
-                }
-            }
-            type();
-        }
-
-        // ۳. ارسال پیام و پرامپت ایموجی
         async function sendMessage() {
-            const inputField = document.getElementById('chat-input');
-            const userText = inputField.value.trim();
-            if (!userText) return;
+            const text = userInput.value.trim();
+            if (!text) return;
 
-            renderMessage(userText, 'user');
-            inputField.value = '';
+            // نمایش پیام کاربر
+            appendMessage(text, 'user');
+            saveToStorage(text, 'user');
+            userInput.value = '';
 
-            // نشانگر تایپ بات
-            const botMessageElem = renderMessage('...', 'bot', true);
+            // نشانگر در حال تایپ
+            const loadingElem = appendLoading();
 
             try {
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        // دستور به الگوریتم برای استفاده منظم از ایموجی و استیکر متنی
-                        text: userText + " (لطفاً در پاسخ خود به صورت صمیمی از ایموجی‌ها و استیکرهای متنی مناسب استفاده کن 😊✨)",
+                        text: text + " (در پاسخ حتماً از ایموجی‌های جذاب، خفن و استیکرهای متنی استفاده کن ✨🔥)",
                         persona: 'friendly'
                     })
                 });
 
                 const data = await response.json();
+                messagesContainer.removeChild(loadingElem);
+
                 const botReply = data?.candidates?.[0]?.content?.parts?.[0]?.text || "مشکلی پیش آمد! 😅";
 
-                // افکت انیمیشن افکت تایپ
-                typeWriterEffect(botMessageElem, botReply);
-
-                // ذخیره در LocalStorage
-                saveToStorage(userText, botReply);
+                // ایجاد عنصر پیام بات و افکت تایپ
+                const botMsgElem = appendMessage('', 'bot');
+                typeText(botMsgElem, botReply, () => {
+                    saveToStorage(botReply, 'bot');
+                });
 
             } catch (err) {
-                botMessageElem.textContent = "خطا در برقراری ارتباط! ❌";
+                messagesContainer.removeChild(loadingElem);
+                appendMessage("ارتباط برقرار نشد! ❌", 'bot');
             }
         }
 
-        function renderMessage(text, sender, isTyping = false) {
-            const chatContainer = document.getElementById('chat-container');
+        function appendMessage(text, sender) {
             const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${sender}-message`;
-            
-            if (isTyping) {
-                msgDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
-            } else {
-                msgDiv.textContent = text;
-            }
-
-            chatContainer.appendChild(msgDiv);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+            msgDiv.className = `message ${sender}`;
+            msgDiv.textContent = text;
+            messagesContainer.appendChild(msgDiv);
+            scrollToBottom();
             return msgDiv;
         }
 
-        function saveToStorage(userText, botText) {
-            const history = JSON.parse(localStorage.getItem(CHAT_STORAGE_KEY) || '[]');
-            history.push({ sender: 'user', text: userText });
-            history.push({ sender: 'bot', text: botText });
-            localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(history));
+        function appendLoading() {
+            const loadDiv = document.createElement('div');
+            loadDiv.className = 'message bot';
+            loadDiv.innerHTML = `<div class="typing-dots"><span></span><span></span><span></span></div>`;
+            messagesContainer.appendChild(loadDiv);
+            scrollToBottom();
+            return loadDiv;
+        }
+
+        // انیمیشن تایپ واقعی کلمه به کلمه
+        function typeText(element, text, onComplete) {
+            let i = 0;
+            const speed = 15; // سرعت تایپ
+            function type() {
+                if (i < text.length) {
+                    element.textContent += text.charAt(i);
+                    i++;
+                    scrollToBottom();
+                    setTimeout(type, speed);
+                } else if (onComplete) {
+                    onComplete();
+                }
+            }
+            type();
+        }
+
+        function scrollToBottom() {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function saveToStorage(text, sender) {
+            const history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            history.push({ text, sender });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+        }
+
+        function loadHistory() {
+            const history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            if (history.length === 0) {
+                appendMessage("سلام داداش! چطور می‌تونم کمکت کنم؟ 🔥🤖", 'bot');
+            } else {
+                history.forEach(item => appendMessage(item.text, item.sender));
+            }
+        }
+
+        function clearHistory() {
+            localStorage.removeItem(STORAGE_KEY);
+            messagesContainer.innerHTML = '';
+            appendMessage("چت پاک شد! پیام جدید بفرست 😉✨", 'bot');
         }
     </script>
 </body>
