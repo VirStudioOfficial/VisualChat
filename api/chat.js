@@ -33,12 +33,10 @@ export default async function handler(req, res) {
 
     let lastError = null;
 
-    // چرخیدن روی کلیدها
     for (let i = 0; i < apiKeys.length; i++) {
         const currentKey = apiKeys[i];
         
         try {
-            // استفاده از مدل استاندارد و پایدار API
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -47,10 +45,11 @@ export default async function handler(req, res) {
 
             const data = await response.json();
 
-            if (response.status === 429) {
-                console.warn(`⚠️ Key #${i + 1} hit rate limit. Switching to next key...`);
+            // اگر کلید غیرفعال یا اشتباه بود (401) یا لیمیت شده بود (429)
+            if (response.status === 401 || response.status === 429) {
+                console.warn(`⚠️ Key #${i + 1} bypassed (Status ${response.status}). Trying next key...`);
                 lastError = data;
-                continue; 
+                continue; // بلافاصله کلید بعدی را امتحان کن
             }
 
             if (!response.ok) {
@@ -59,9 +58,7 @@ export default async function handler(req, res) {
                 continue;
             }
 
-            // ثبت لاگ موفقیت در Vercel
             console.log(`✅ Successfully responded using Key #${i + 1}`);
-
             return res.status(200).json(data);
 
         } catch (err) {
@@ -72,7 +69,7 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
         error: {
-            message: 'تمامی کلیدها ناموفق بودند یا به سقف رسیده‌اند.',
+            message: 'تمامی کلیدهای API ناموفق بودند (بررسی کنید کلید معتبر باشد).',
             details: lastError
         }
     });
