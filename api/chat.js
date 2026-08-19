@@ -1,16 +1,27 @@
-// ۱. تابع تشخیص هوشمند نیاز به سرچ زنده
+// ۱. تابع تشخیص هوشمند نیاز به سرچ زنده (فیلتر سلام و کلمات عمومی)
 function shouldSearchWeb(userText) {
     if (!userText) return false;
-    const text = userText.toLowerCase();
+    const text = userText.trim().toLowerCase();
 
-    // کلیدواژه‌های مستقیم درخواست سرچ
-    const explicitKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن'];
+    // فیلتر کامل سلام، احوال‌پُرسی و کلمات کوتاه
+    const greetings = [
+        'سلام', 'سلامم', 'سلام خوبی', 'درود', 'چطوری', 'خوبی', 
+        'صبح بخیر', 'عصر بخیر', 'شب بخیر', 'ممنون', 'مرسی', 
+        'سلام مخلصم', 'سلام علیکم', 'چخبر', 'چه خبر'
+    ];
+    
+    if (greetings.includes(text) || text.length < 3) {
+        return false;
+    }
+
+    // کلیدواژه‌های صریح درخواست سرچ
+    const explicitKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن'];
     const hasExplicitRequest = explicitKeywords.some(kw => text.includes(kw));
 
-    // کلیدواژه‌های موضوعاتی که نیازمند دیتای آنلاین هستند
+    // کلیدواژه‌های موضوعاتی که حتماً دیتای زنده می‌خواهند
     const realTimeKeywords = [
         'قیمت', 'چنده', 'نرخ', 'امروز', 'دلار', 'طلا', 'سکه', 'ارز',
-        'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب'
+        'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین'
     ];
     const hasRealTimeContext = realTimeKeywords.some(kw => text.includes(kw));
 
@@ -73,7 +84,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلید Gemini در تنظیمات ورسل یافت نشد!' } });
     }
 
-    // ساخت آرایه تاریخچه چت
+    // ۱. ساخت آرایه تاریخچه
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -88,19 +99,22 @@ export default async function handler(req, res) {
         }];
     }
 
-    // چک کردن هوشمند: اگر کره زمین روشن بود AND پیام کاربر نیاز به سرچ داشت
-    const isSearchNeeded = webSearch && shouldSearchWeb(text);
+    // ۲. بررسی هوشمند نیاز به سرچ (حتی اگر کره زمین روشن باشد)
+    const isSearchNeeded = Boolean(webSearch) && shouldSearchWeb(text);
 
     if (isSearchNeeded && text) {
+        console.log(`🔍 Executing Tavily Search for: "${text}"`);
         const searchResults = await fetchTavilyResults(text, tavilyKeys);
         const lastIndex = contents.length - 1;
         
         if (searchResults && contents[lastIndex].role === 'user') {
             contents[lastIndex].parts[0].text += `\n\n[نتایج جستجوی زنده وب برای این پرسش]:\n${searchResults}\n\n[دستورالعمل: با استفاده از اطلاعات بالا، پاسخ دقیق و به روز ارائه بده.]`;
         }
+    } else {
+        console.log(`⏩ Skipping web search for: "${text}"`);
     }
 
-    // اعمال پرسونا
+    // ۳. اعمال پرسونا
     if (persona && contents.length > 0) {
         let prefix = "";
         if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
@@ -113,7 +127,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // افزودن تصویر
+    // ۴. افزودن تصویر
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -125,7 +139,7 @@ export default async function handler(req, res) {
         });
     }
 
-    // ارسال به مدل Gemini 3.5 Flash Lite
+    // ۵. ارسال به مدل Gemini 3.5 Flash Lite با چرخش کلیدها
     const MODEL_NAME = 'gemini-3.5-flash-lite';
     let lastError = null;
 
