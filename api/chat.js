@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     const apiKeys = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
 
     if (apiKeys.length === 0) {
-        return res.status(400).json({ error: { message: 'هیچ کلیدی یافت نشد!' } });
+        return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
     const parts = [];
@@ -36,13 +36,12 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            // ارسال به Endpoint استاندارد v1beta
-            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
+            // ست شده روی gemini-3.5-flash-lite همراه با هدر x-goog-api-key برای کلیدهای AQ
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
-                    'x-goog-api-key': currentKey,
-                    'Authorization': `Bearer ${currentKey}` // برای پشتیبانی کامل از کلیدهای جدید AQ
+                    'x-goog-api-key': currentKey
                 },
                 body: JSON.stringify({ contents: [{ parts: parts }] })
             });
@@ -50,9 +49,9 @@ export default async function handler(req, res) {
             const data = await response.json();
 
             if (!response.ok) {
-                console.warn(`⚠️ Key #${i + 1} status ${response.status}. Error:`, JSON.stringify(data));
+                console.warn(`⚠️ Key #${i + 1} failed with status ${response.status}. Error:`, JSON.stringify(data));
                 lastError = data;
-                continue; // سوئیچ به کلید بعدی
+                continue; // سوئیچ به کلید بعدی در صورت ارور
             }
 
             console.log(`✅ Successfully responded using Key #${i + 1}`);
