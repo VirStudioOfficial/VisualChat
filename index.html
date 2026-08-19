@@ -1245,6 +1245,34 @@
     }
 
     let currentSpeakingBtn = null;
+    let cachedVoices = [];
+
+    function loadVoices() {
+        if ('speechSynthesis' in window) {
+            cachedVoices = window.speechSynthesis.getVoices();
+        }
+    }
+    if ('speechSynthesis' in window) {
+        loadVoices();
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    // بین صداهای فارسی نصب‌شده روی دستگاه، طبیعی‌ترین رو انتخاب کن
+    function getFarsiVoice() {
+        if (!cachedVoices.length) loadVoices();
+        const faVoices = cachedVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith('fa'));
+        if (!faVoices.length) return null;
+        const natural = faVoices.find(v => /google|online|natural|microsoft/i.test(v.name));
+        return natural || faVoices[0];
+    }
+
+    // ایموجی/استیکر رو قبل از خوندن حذف کن تا موتور صدا اسم انگلیسی‌شون رو نخونه
+    function stripForSpeech(text) {
+        return text
+            .replace(/```[\s\S]*?```/g, 'کد برنامه‌نویسی')
+            .replace(/[\u{1F1E6}-\u{1FFFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\uFE0F\u200D]/gu, '')
+            .trim();
+    }
 
     function setSpeakBtnIcon(btn, playing) {
         if (!btn) return;
@@ -1285,27 +1313,52 @@
         const msgBody = wrapper ? wrapper.querySelector('.message') : null;
         if (!msgBody) return;
 
-        let cleanText = msgBody.innerText.replace(/```[\s\S]*?```/g, 'کد برنامه‌نویسی').trim();
+        const cleanText = stripForSpeech(msgBody.innerText);
         if (!cleanText) return;
 
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.lang = 'fa-IR';
-        utterance.rate = 1.0;
+        const farsiVoice = getFarsiVoice();
+        if (!farsiVoice) {
+            alert('روی این دستگاه هیچ صدای فارسی نصب نیست، برای همین صدا پخش نمی‌شه.\nدر ویندوز: Settings > Time & Language > Speech > Add voices > فارسی رو نصب کن و صفحه رو رفرش کن.');
+            return;
+        }
 
-        utterance.onstart = () => {
-            currentSpeakingBtn = btnElement;
-            setSpeakBtnIcon(btnElement, true);
-        };
-        utterance.onend = () => {
-            setSpeakBtnIcon(btnElement, false);
-            if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
-        };
-        utterance.onerror = () => {
-            setSpeakBtnIcon(btnElement, false);
-            if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
-        };
+        // باگ معروف کروم: اگه بلافاصله بعد از cancel() دوباره speak() صدا بزنیم،
+        // بعضی وقتا رویداد onstart اصلاً فایر نمیشه و آیکون گیر می‌کنه. یه تاخیر کوچیک حلش می‌کنه.
+        setTimeout(() => {
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.voice = farsiVoice;
+            utterance.lang = farsiVoice.lang;
+            utterance.rate = 0.95;
+            utterance.pitch = 1.0;
 
-        window.speechSynthesis.speak(utterance);
+            let started = false;
+            const startTimeout = setTimeout(() => {
+                if (!started) {
+                    // اگه بعد از یه مدت هنوز شروع نشده، یعنی پخش شکست خورده؛ آیکون رو ریست کن
+                    setSpeakBtnIcon(btnElement, false);
+                    if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
+                }
+            }, 1500);
+
+            utterance.onstart = () => {
+                started = true;
+                clearTimeout(startTimeout);
+                currentSpeakingBtn = btnElement;
+                setSpeakBtnIcon(btnElement, true);
+            };
+            utterance.onend = () => {
+                clearTimeout(startTimeout);
+                setSpeakBtnIcon(btnElement, false);
+                if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
+            };
+            utterance.onerror = () => {
+                clearTimeout(startTimeout);
+                setSpeakBtnIcon(btnElement, false);
+                if (currentSpeakingBtn === btnElement) currentSpeakingBtn = null;
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }, 80);
     }
 
     function toggleSidebar() {
