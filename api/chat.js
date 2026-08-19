@@ -88,6 +88,7 @@ export default async function handler(req, res) {
 
         let contents = [];
 
+        // ===== ساخت تاریخچه =====
         if (history && Array.isArray(history) && history.length > 0) {
             contents = history.map(item => ({
                 role: item.role === 'user' ? 'user' : 'model',
@@ -104,6 +105,7 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: { message: 'متن ورودی خالی است.' } });
         }
 
+        // ===== جستجوی وب =====
         const isWebSearchActive = webSearch === true || webSearch === 'true';
         const isSearchNeeded = isWebSearchActive && shouldSearchWeb(searchQueryBase);
         res.setHeader('X-Search-Performed', String(isSearchNeeded));
@@ -118,35 +120,58 @@ export default async function handler(req, res) {
             }
         }
 
+        // ===== ✅ ارسال فایل (تصویر/ویدیو) با MIME Type درست =====
         if (file && file.base64 && contents.length > 0) {
             const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
             const lastIndex = contents.length - 1;
             
             if (contents[lastIndex].role === 'user') {
+                // تشخیص MIME Type بر اساس نام فایل
+                let mimeType = file.type || 'image/jpeg';
+                
+                // اگه ویدیو هست، mime_type رو درست کن
+                if (file.name && /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name)) {
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    const mimeMap = {
+                        'mp4': 'video/mp4',
+                        'mov': 'video/quicktime',
+                        'webm': 'video/webm',
+                        'avi': 'video/x-msvideo',
+                        'mpeg': 'video/mpeg',
+                        'wmv': 'video/x-ms-wmv',
+                        '3gpp': 'video/3gpp',
+                        'flv': 'video/x-flv',
+                        'mkv': 'video/x-matroska'
+                    };
+                    mimeType = mimeMap[ext] || 'video/mp4';
+                    console.log('🎬 Video detected:', file.name, '->', mimeType);
+                }
+                
                 contents[lastIndex].parts.push({
                     inline_data: {
-                        mime_type: file.type || 'image/jpeg',
+                        mime_type: mimeType,
                         data: base64Data
                     }
                 });
             }
         }
 
-        // مدل هوش مصنوعی Gemini 3.5 Flash Lite
+        // ===== مدل: gemini-3.5-flash-lite (ساپورت ویدیو داره!) =====
         const MODEL_NAME = 'gemini-3.5-flash-lite';
         let lastError = null;
 
-        // دستورالعمل سیستمی عالی برای تکامل، هوشمندی و درک بالا
-        const systemInstruction = {
-            parts: [{
-                text: `نام تو Virtual Bot است. هوش مصنوعی حرفه‌ای، باهوش و بسیار منطقی هستی.
+        // ===== System Instruction (به روش درست) =====
+        const systemText = `نام تو Virtual Bot است. هوش مصنوعی حرفه‌ای، باهوش و بسیار منطقی هستی.
 نام کاربر: "${userName || 'دوست من'}" است.
 دستورالعمل‌ها:
 ۱. پاسخ‌ها باید دقیق، ساختاریافته، کاملاً روان و به دور از ابهام باشند.
 ۲. اگر کاربر سوال علمی یا کدی پرسید، دقیق‌ترین راه‌حل را به همراه فرمت‌بندی مناسب ارائه‌ده.
-۳. همواره به زبان فارسی صمیمی اما کاملاً محترمانه گفتگو کن.`
-            }]
-        };
+۳. همواره به زبان فارسی صمیمی اما کاملاً محترمانه گفتگو کن.`;
+
+        // ===== اضافه کردن system instruction به اولین پیام =====
+        if (contents.length > 0 && contents[0].role === 'user') {
+            contents[0].parts[0].text = `${systemText}\n\n${contents[0].parts[0].text}`;
+        }
 
         for (let i = 0; i < geminiKeys.length; i++) {
             const currentKey = geminiKeys[i];
@@ -157,10 +182,7 @@ export default async function handler(req, res) {
                         'Content-Type': 'application/json',
                         'x-goog-api-key': currentKey
                     },
-                    body: JSON.stringify({ 
-                        contents: contents,
-                        systemInstruction: systemInstruction 
-                    })
+                    body: JSON.stringify({ contents: contents })
                 });
 
                 const data = await response.json();
