@@ -9,8 +9,7 @@ export default async function handler(req, res) {
     const apiKeys = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
 
     if (apiKeys.length === 0) {
-        console.error("No API keys found in environment variables.");
-        return res.status(400).json({ error: { message: 'هیچ کلید API در ورسل یافت نشد!' } });
+        return res.status(400).json({ error: { message: 'هیچ کلیدی یافت نشد!' } });
     }
 
     const parts = [];
@@ -37,28 +36,23 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            // استفاده از استاندارد رسمی Endpoint همراه با ?key=
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
+            // ارسال به Endpoint استاندارد v1beta
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': currentKey,
+                    'Authorization': `Bearer ${currentKey}` // برای پشتیبانی کامل از کلیدهای جدید AQ
                 },
                 body: JSON.stringify({ contents: [{ parts: parts }] })
             });
 
             const data = await response.json();
 
-            // اگر هر مشکلی مثل 401 (نامعتبر)، 404 (یافت نشدن) یا 429 (لیمیت) پیش آمد، برو کلید بعدی
-            if (response.status === 401 || response.status === 404 || response.status === 429) {
-                console.warn(`⚠️ Key #${i + 1} bypassed (Status ${response.status}). Trying next key...`);
-                lastError = data;
-                continue;
-            }
-
             if (!response.ok) {
-                console.error(`❌ Key #${i + 1} failed with status: ${response.status}`);
+                console.warn(`⚠️ Key #${i + 1} status ${response.status}. Error:`, JSON.stringify(data));
                 lastError = data;
-                continue;
+                continue; // سوئیچ به کلید بعدی
             }
 
             console.log(`✅ Successfully responded using Key #${i + 1}`);
@@ -72,7 +66,7 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
         error: {
-            message: 'هیچ‌کدام از کلیدها پاسخگو نبودند.',
+            message: 'ارتباط با API گوگل برقرار نشد.',
             details: lastError
         }
     });
