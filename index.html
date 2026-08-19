@@ -288,24 +288,6 @@
             padding: 5px;
         }
 
-        .persona-select {
-            background: var(--bg-card) !important;
-            color: var(--text-main) !important;
-            border: 1px solid var(--border-soft) !important;
-            padding: 7px 32px 7px 14px !important;
-            border-radius: 10px !important;
-            font-size: 0.83rem !important;
-            font-weight: 500;
-            cursor: pointer !important;
-            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23838da3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") !important;
-            background-repeat: no-repeat !important;
-            background-position: left 10px center !important;
-            background-size: 13px !important;
-            box-shadow: none !important;
-            transition: border-color 0.2s;
-        }
-        .persona-select:hover { border-color: rgba(139,92,246,0.4) !important; }
-
         .header-right { display: flex; align-items: center; gap: 8px; }
 
         .home-screen {
@@ -735,12 +717,6 @@
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
-                <select class="persona-select" id="personaSelect">
-                    <option value="default">حالت استاندارد</option>
-                    <option value="friendly">صمیمی و دوستانه</option>
-                    <option value="coder">برنامه‌نویس و کدنویسی</option>
-                    <option value="formal">رسمی</option>
-                </select>
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
@@ -1205,7 +1181,6 @@
     async function sendToGemini(textPrompt, payloadFile = null) {
         setGeneratingState(true);
         const chatBox = document.getElementById("chatBox");
-        const persona = document.getElementById("personaSelect").value;
 
         const loadingDiv = document.createElement("div");
         loadingDiv.className = "message bot";
@@ -1221,19 +1196,12 @@
         const dateString = now.toLocaleDateString('fa-IR-u-nu-latn', { timeZone: 'Asia/Tehran', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
         const contextInfo = `[زمان دقیق ایران: امروز ${dateString} | ساعت: ${timeString}]`;
 
-        const personaInstructions = {
-            default: "لحنت طبیعی، روان و محاوره‌ای فارسی امروزیه؛ نه خیلی رسمی، نه بیش‌ازحد شوخ. مثل یه آدم باهوش و بی‌تعارف حرف بزن، نه مثل یه متن ترجمه‌شده یا دفترچه راهنما.",
-            friendly: "لحنت خیلی صمیمی، گرم و رفیق‌وار باشه؛ انگار داری با یه دوست نزدیک چت می‌کنی. از زبان محاوره و اصطلاحات روزمره فارسی راحت استفاده کن، ولی مصنوعی و اغراق‌شده نباش.",
-            coder: "با یه لحن مستقیم، فنی و بدون حاشیه جواب بده؛ روی خود مسئله و راه‌حل تمرکز کن، کد رو تمیز و با توضیح کوتاه بده و از پرحرفی غیرضروری پرهیز کن.",
-            formal: "لحنت مؤدبانه و حرفه‌ای باشه، ولی خشک و رباتیک نشو؛ جمله‌ها رو طبیعی و روان بنویس، نه مثل ترجمه‌ی ماشینی."
-        };
-
         const systemInstruction =
             "نام تو Virtual Bot است. اگر کسی درباره هویت، نام، مدل یا سازنده‌ات پرسید، تحت هیچ شرایطی نباید نام Gemini یا Google را ببری و باید بگویی نام من Virtual Bot است.\n" +
-            "لحن و شخصیت: " + (personaInstructions[persona] || personaInstructions.default) + "\n" +
+            "لحن ثابت و از پیش تعیین‌شده نداشته باش. قبل از جواب دادن، از روی متن و لحن پیام کاربر (رسمی/غیررسمی، شوخ/جدی، فنی/عمومی، احساسی/خشک) تشخیص بده الان باید چطور صحبت کنی، و خودت رو با همون حال‌وهوا هماهنگ کن؛ مثلاً اگه کاربر محاوره‌ای و صمیمی می‌نویسه تو هم صمیمی باش، اگه رسمی و مؤدبانه می‌نویسه تو هم رسمی‌تر جواب بده، اگه سؤال فنی/کدنویسی می‌پرسه مستقیم و فنی برو سر اصل مطلب. این تشخیص باید توی طول گفتگو هم هوشمندانه به‌روز بشه، نه فقط بر اساس اولین پیام.\n" +
             "قوانین کلی گفتگو:\n" +
             "- مثل یه آدم واقعی حرف بزن، نه مثل یه مدل زبانی که خودشو معرفی می‌کنه یا مدام عذرخواهی می‌کنه.\n" +
-            "- جواب‌ها رو با جمله‌های کوتاه و طبیعی بنویس، از جمله‌های پیچیده و رسمی زیاد پرهیز کن.\n" +
+            "- جواب‌ها رو با جمله‌های کوتاه و طبیعی بنویس، از جمله‌های پیچیده و ترجمه‌ای زیاد پرهیز کن.\n" +
             "- به‌جای مقدمه‌چینی و کلی‌گویی، مستقیم برو سر اصل مطلب.\n" +
             "- اگه سؤال کوتاهه، جواب طولانی و پر از سرفصل نده؛ فقط وقتی موضوع واقعاً پیچیده‌ست از توضیح جزئی یا لیست استفاده کن.\n" +
             "- در استفاده از ایموجی زیاده‌روی نکن؛ حداکثر ۱ تا ۲ ایموجی ملایم در کل متن، اونم فقط اگه واقعاً به لحن کمک می‌کنه.\n" +
@@ -1254,7 +1222,6 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     text: fullPrompt,
-                    persona: persona,
                     file: payloadFile,
                     webSearch: isSearchEnabled,
                     history: chatHistoryData[currentChatId] // ارسال کل تاریخچه چت برای حافظه‌دار شدن
