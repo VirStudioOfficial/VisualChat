@@ -37,20 +37,20 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
+            // استفاده از استاندارد رسمی Endpoint همراه با ?key=
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': currentKey
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ contents: [{ parts: parts }] })
             });
 
             const data = await response.json();
 
-            // اگر کلید لیمیت شد یا نامعتبر بود، برو سراغ بعدی
-            if (response.status === 401 || response.status === 429) {
-                console.warn(`⚠️ Key #${i + 1} bypass (Status ${response.status}). Trying next key...`);
+            // اگر هر مشکلی مثل 401 (نامعتبر)، 404 (یافت نشدن) یا 429 (لیمیت) پیش آمد، برو کلید بعدی
+            if (response.status === 401 || response.status === 404 || response.status === 429) {
+                console.warn(`⚠️ Key #${i + 1} bypassed (Status ${response.status}). Trying next key...`);
                 lastError = data;
                 continue;
             }
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
         error: {
-            message: 'تمامی کلیدها ناموفق بودند. لطفاً تنظیمات ورسل را بررسی کنید.',
+            message: 'هیچ‌کدام از کلیدها پاسخگو نبودند.',
             details: lastError
         }
     });
