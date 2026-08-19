@@ -12,37 +12,37 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
-    // ۱. ساخت آرایه contents بر اساس تاریخچه
+    // ۱. ساخت آرایه استاندارد و تمیز برای تاریخچه
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
         contents = history.map(item => ({
             role: item.role === 'user' ? 'user' : 'model',
-            parts: [{ text: item.text || "" }]
+            parts: [{ text: String(item.text || "") }]
         }));
     } else {
         contents = [{
             role: 'user',
-            parts: [{ text: text || "" }]
+            parts: [{ text: String(text || "") }]
         }];
     }
 
-    // ۲. اعمال Persona روی آخرین پیام کاربر
+    // ۲. اعمال Persona
     if (persona && contents.length > 0) {
         let prefix = "";
         if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
         if (persona === 'coder') prefix = "[پاسخ را دقیق و با تمرکز بر کدنویسی بده] ";
         if (persona === 'formal') prefix = "[پاسخ را کاملا رسمی بده] ";
         
-        const lastUserIndex = contents.length - 1;
-        if (contents[lastUserIndex].role === 'user') {
-            contents[lastUserIndex].parts[0].text = prefix + contents[lastUserIndex].parts[0].text;
+        const lastIndex = contents.length - 1;
+        if (contents[lastIndex].role === 'user' && contents[lastIndex].parts[0]) {
+            contents[lastIndex].parts[0].text = prefix + contents[lastIndex].parts[0].text;
         }
     }
 
-    // ۳. افزودن فایل (عکس) در صورت وجود
+    // ۳. افزودن عکس در صورت وجود به آخرین پیام
     if (file && file.base64 && contents.length > 0) {
-        const base64Data = file.base64.split(',')[1];
+        const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
         contents[lastIndex].parts.push({
             inline_data: {
@@ -52,8 +52,13 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۴. ابزار سرچ وب
-    const tools = webSearch ? [{ googleSearch: {} }] : [];
+    // ۴. بدنه اصلی درخواست برای ارسال به گوگل
+    const requestBody = { contents: contents };
+
+    // فعال‌سازی سرچ فقط در صورت فعال بودن
+    if (webSearch) {
+        requestBody.tools = [{ googleSearch: {} }];
+    }
 
     let lastError = null;
 
@@ -61,17 +66,13 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            // دقیقاً ست شده روی gemini-3.5-flash-lite
             const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
                     'x-goog-api-key': currentKey
                 },
-                body: JSON.stringify({ 
-                    contents: contents,
-                    tools: tools.length > 0 ? tools : undefined
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const data = await response.json();
