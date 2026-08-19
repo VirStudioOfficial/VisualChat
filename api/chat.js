@@ -1,34 +1,23 @@
-// تابع تشخیص هوشمند و سخت‌گیرانه
-// نکته مهم: این تابع باید فقط روی متن خام و اصلی کاربر اجرا بشه، نه روی
-// پرامپت نهایی که شامل system instruction و اطلاعات زمان/تاریخ هم هست.
-// چون اگر متن کامل رو چک کنیم، رشته‌ی «امروز» که همیشه توی contextInfo
-// فرانت‌اند وجود داره باعث می‌شه هر پیامی (حتی «سلام») مجوز سرچ بگیره.
+// تابع تشخیص هوشمند نیاز به سرچ وب
 function shouldSearchWeb(userText) {
     if (!userText) return false;
 
-    // پاک‌سازی کامل متن
     const cleanText = userText.trim().toLowerCase();
-
     if (cleanText.length < 3) return false;
 
-    // ۱. اگر متن فقط سلام یا احوال‌پُرسی ساده باشه، حتی اگر با علامت یا فاصله همراه باشه
     const ignoreList = [
         'سلام', 'سلامم', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'عصر بخیر',
         'شب بخیر', 'ممنون', 'مرسی', 'چخبر', 'خداحافظ', 'بای', 'اوکی', 'باشه'
     ];
 
-    // پاک کردن علامت‌های نگارشی رایج برای مقایسه دقیق‌تر
     const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
     const firstWord = normalized.split(' ')[0];
-
-    // فقط وقتی کل پیام یه احوال‌پرسی کوتاهه (نه وقتی وسط یه جمله‌ی بلندتر اومده) متوقفش کن
     const wordCount = normalized.split(' ').filter(Boolean).length;
+
     if (wordCount <= 3 && (ignoreList.includes(normalized) || ignoreList.includes(firstWord))) {
         return false;
     }
 
-    // ۲. فقط کلمات کلیدی خاص مجوز سرچ دارند (این‌ها باید واقعاً نیت جستجو رو نشون بدن،
-    // نه کلماتی که ممکنه به‌طور اتفاقی توی متن‌های دیگه هم پیدا بشن)
     const allowedKeywords = [
         'سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن',
         'قیمت', 'چنده', 'نرخ', 'دلار', 'طلا', 'سکه', 'ارز', 'بیت کوین', 'پلی استیشن',
@@ -38,7 +27,7 @@ function shouldSearchWeb(userText) {
     return allowedKeywords.some(kw => normalized.includes(kw));
 }
 
-// تابع سرچ چندکاناله با چرخش روی کلیدهای Tavily
+// تابع اجرا و چرخش خودکار روی کلیدهای Tavily
 async function fetchTavilyResults(query, tavilyKeys) {
     if (!tavilyKeys || tavilyKeys.length === 0) return null;
 
@@ -71,17 +60,13 @@ async function fetchTavilyResults(query, tavilyKeys) {
     return null;
 }
 
+// هاندر اصلی سرور
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: { message: 'Method not allowed' } });
     }
 
-    // rawText: متن خام و اصلی کاربر، بدون system instruction و بدون اطلاعات زمان/تاریخ.
-    // این همون چیزیه که باید برای تشخیص نیاز به سرچ و ساخت کوئری استفاده بشه.
-    // text: پرامپت کامل و تقویت‌شده‌ای که به Gemini فرستاده می‌شه.
     const { text, rawText, file, webSearch, history } = req.body || {};
-
-    // اگر به هر دلیلی rawText نیومد (مثلاً درخواست از یه نسخه قدیمی‌تر فرانت)، از text استفاده کن
     const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : text;
 
     console.log("👉 RAW USER TEXT:", rawText);
@@ -93,7 +78,7 @@ export default async function handler(req, res) {
     const tavilyKeys = rawTavilyKeys.split(',').map(k => k.trim()).filter(Boolean);
 
     if (geminiKeys.length === 0) {
-        return res.status(400).json({ error: { message: 'هیچ کلید Gemini در تنظیمات ورسل یافت نشد!' } });
+        return res.status(400).json({ error: { message: 'هیچ کلید Gemini یافت نشد!' } });
     }
 
     let contents = [];
@@ -110,7 +95,6 @@ export default async function handler(req, res) {
         }];
     }
 
-    // تبدیل محکم webSearch به بولین
     const isWebSearchActive = webSearch === true || webSearch === 'true';
     const isSearchNeeded = isWebSearchActive && shouldSearchWeb(searchQueryBase);
 
@@ -137,11 +121,9 @@ export default async function handler(req, res) {
         });
     }
 
-    // این فیلد به فرانت‌اند اضافه می‌شه تا خود کلاینت هم بدونه سرچ واقعاً انجام شده یا نه
-    // (اختیاریه، اگه لازم نداری می‌تونی حذفش کنی)
     res.setHeader('X-Search-Performed', String(isSearchNeeded));
 
-    const MODEL_NAME = 'gemini-3.5-flash-lite';
+    const MODEL_NAME = 'gemini-1.5-flash';
     let lastError = null;
 
     for (let i = 0; i < geminiKeys.length; i++) {
