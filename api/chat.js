@@ -1,24 +1,39 @@
-// تابع سرچ هوشمند با Tavily
-async function fetchTavilyResults(query, tavilyKey) {
-    if (!tavilyKey) return null;
-    try {
-        const res = await fetch('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                api_key: tavilyKey,
-                query: query,
-                search_depth: "basic",
-                max_results: 3
-            })
-        });
-        const data = await res.json();
-        if (data.results && data.results.length > 0) {
-            return data.results.map(r => `عنوان: ${r.title}\nمتن: ${r.content}`).join("\n\n---\n\n");
+// تابع سرچ چندکاناله با چرخش روی کلیدهای Tavily
+async function fetchTavilyResults(query, tavilyKeys) {
+    if (!tavilyKeys || tavilyKeys.length === 0) return null;
+
+    // چرخش روی کلیدها در صورت اتمام سهمیه (429/401) یا بروز خطا
+    for (let i = 0; i < tavilyKeys.length; i++) {
+        const currentKey = tavilyKeys[i];
+        
+        try {
+            const res = await fetch('https://api.tavily.com/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    api_key: currentKey,
+                    query: query,
+                    search_depth: "basic",
+                    max_results: 3
+                })
+            });
+
+            if (!res.ok) {
+                console.warn(`⚠️ Tavily Key #${i + 1} failed with status ${res.status}. Trying next key...`);
+                continue; // سوئیچ به کلید بعدی
+            }
+
+            const data = await res.json();
+            if (data.results && data.results.length > 0) {
+                console.log(`✅ Tavily search succeeded using Key #${i + 1}`);
+                return data.results.map(r => `عنوان: ${r.title}\nمتن: ${r.content}`).join("\n\n---\n\n");
+            }
+        } catch (e) {
+            console.error(`Error with Tavily Key #${i + 1}:`, e);
         }
-    } catch (e) {
-        console.error("Tavily Error:", e);
     }
+
+    console.error("❌ All Tavily API keys have failed or reached their limits!");
     return null;
 }
 
@@ -29,17 +44,27 @@ export default async function handler(req, res) {
 
     const { text, persona, file, webSearch, history } = req.body || {};
 
-    const rawKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-    const apiKeys = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
-    
-    // خواندن کلید Tavily مستقیم از Environment Variables یا به عنوان هاردکد در صورت عدم وجود
-    const tavilyKey = process.env.TAVILY_API_KEY || "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";
+    // دریافت کلیدهای Gemini از Environment Variables
+    const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+    const geminiKeys = rawGeminiKeys.split(',').map(k => k.trim()).filter(Boolean);
 
-    if (apiKeys.length === 0) {
-        return res.status(400).json({ error: { message: 'هیچ کلید API یافت نشد!' } });
+    // ۳ کلید وصل‌شده‌ی Tavily (هم به صورت هاردکد هم پشتیبانی از Env)
+    const defaultTavilyKeys = [
+        "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",
+        "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",
+        "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"
+    ];
+
+    const rawTavilyEnv = process.env.TAVILY_API_KEYS || process.env.TAVILY_API_KEY || "";
+    const tavilyKeys = rawTavilyEnv 
+        ? rawTavilyEnv.split(',').map(k => k.trim()).filter(Boolean)
+        : defaultTavilyKeys;
+
+    if (geminiKeys.length === 0) {
+        return res.status(400).json({ error: { message: 'هیچ کلید Gemini یافت نشد!' } });
     }
 
-    // ۱. ساخت آرایه تاریخچه
+    // ۱. آماده‌سازی تاریخچه پیام‌ها
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -54,13 +79,12 @@ export default async function handler(req, res) {
         }];
     }
 
-    // ۲. انجام سرچ زنده با Tavily و تزریق دقیق به پیام کاربر
+    // ۲. اجرای سرچ زنده با ۳ کلید متصل
     if (webSearch && text) {
-        const searchResults = await fetchTavilyResults(text, tavilyKey);
+        const searchResults = await fetchTavilyResults(text, tavilyKeys);
         const lastIndex = contents.length - 1;
         
         if (searchResults && contents[lastIndex].role === 'user') {
-            // چسباندن نتایج سرچ به انتهای پیام کاربر
             contents[lastIndex].parts[0].text += `\n\n[نتایج جستجوی زنده وب برای این پرسش]:\n${searchResults}\n\n[دستورالعمل: با استفاده از اطلاعات بالا، پاسخ دقیق و به روز ارائه بده.]`;
         }
     }
@@ -78,7 +102,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // ۴. افزودن عکس
+    // ۴. افزودن تصویر در صورت وجود
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -90,11 +114,12 @@ export default async function handler(req, res) {
         });
     }
 
+    // ۵. ارسال به مدل Gemini 3.5 Flash Lite
     const MODEL_NAME = 'gemini-3.5-flash-lite';
     let lastError = null;
 
-    for (let i = 0; i < apiKeys.length; i++) {
-        const currentKey = apiKeys[i];
+    for (let i = 0; i < geminiKeys.length; i++) {
+        const currentKey = geminiKeys[i];
         try {
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`, {
                 method: 'POST',
@@ -119,5 +144,5 @@ export default async function handler(req, res) {
         }
     }
 
-    return res.status(500).json({ error: { message: 'خطا در ارتباط با API', details: lastError } });
+    return res.status(500).json({ error: { message: 'خطا در ارتباط با API جمینای', details: lastError } });
 }
