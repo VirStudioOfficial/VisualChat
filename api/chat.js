@@ -1,43 +1,24 @@
-// تابع سرچ هوشمند با Tavily یا DuckDuckGo JSON
-async function fetchWebResults(query, tavilyKey) {
-    // روش اول: استفاده از API قدرتمند Tavily (اگر کلیدش رو توی Vercel بذاری)
-    if (tavilyKey) {
-        try {
-            const res = await fetch('https://api.tavily.com/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    api_key: tavilyKey,
-                    query: query,
-                    search_depth: "basic",
-                    max_results: 3
-                })
-            });
-            const data = await res.json();
-            if (data.results && data.results.length > 0) {
-                return data.results.map(r => `${r.title}: ${r.content}`).join("\n\n");
-            }
-        } catch (e) {
-            console.error("Tavily Error:", e);
-        }
-    }
-
-    // روش دوم: استفاده از API متنی DuckDuckGo Lite
+// تابع سرچ هوشمند با Tavily
+async function fetchTavilyResults(query, tavilyKey) {
+    if (!tavilyKey) return null;
     try {
-        const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`);
+        const res = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                api_key: tavilyKey,
+                query: query,
+                search_depth: "basic",
+                max_results: 3
+            })
+        });
         const data = await res.json();
-        let textResults = [];
-        if (data.AbstractText) textResults.push(data.AbstractText);
-        if (data.RelatedTopics && data.RelatedTopics.length > 0) {
-            data.RelatedTopics.slice(0, 3).forEach(t => {
-                if (t.Text) textResults.push(t.Text);
-            });
+        if (data.results && data.results.length > 0) {
+            return data.results.map(r => `عنوان: ${r.title}\nمتن: ${r.content}`).join("\n\n---\n\n");
         }
-        if (textResults.length > 0) return textResults.join("\n---\n");
-    } catch (err) {
-        console.error("DuckDuckGo API Error:", err);
+    } catch (e) {
+        console.error("Tavily Error:", e);
     }
-
     return null;
 }
 
@@ -50,12 +31,15 @@ export default async function handler(req, res) {
 
     const rawKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
     const apiKeys = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
-    const tavilyKey = process.env.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 || ""; // کلید سرچ اختیاری
+    
+    // خواندن کلید Tavily مستقیم از Environment Variables یا به عنوان هاردکد در صورت عدم وجود
+    const tavilyKey = process.env.TAVILY_API_KEY || "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";
 
     if (apiKeys.length === 0) {
         return res.status(400).json({ error: { message: 'هیچ کلید API یافت نشد!' } });
     }
 
+    // ۱. ساخت آرایه تاریخچه
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -70,19 +54,18 @@ export default async function handler(req, res) {
         }];
     }
 
-    // انجام سرچ و تزریق اطلاعات به هوش مصنوعی
+    // ۲. انجام سرچ زنده با Tavily و تزریق دقیق به پیام کاربر
     if (webSearch && text) {
-        const searchResults = await fetchWebResults(text, tavilyKey);
+        const searchResults = await fetchTavilyResults(text, tavilyKey);
         const lastIndex = contents.length - 1;
         
-        if (searchResults) {
-            contents[lastIndex].parts[0].text += `\n\n[اطلاعات واقعی و زنده از اینترنت - با استفاده از این داده‌ها به کاربر پاسخ دقیق بده]:\n${searchResults}`;
-        } else {
-            // اگر سرچ چیزی نیاورد، دستور بده که بر اساس آخرین تخمین یا قیمت‌های عمومی پاسخ دهد
-            contents[lastIndex].parts[0].text += `\n\n[توجه: نتایج سرچ زنده در دسترس نیست، اما تا حد امکان پاسخ کاربر را راهنمایی کن و از دادن پاسخ‌های کلیشه‌ای مثل "به اینترنت دسترسی ندارم" خودداری کن].`;
+        if (searchResults && contents[lastIndex].role === 'user') {
+            // چسباندن نتایج سرچ به انتهای پیام کاربر
+            contents[lastIndex].parts[0].text += `\n\n[نتایج جستجوی زنده وب برای این پرسش]:\n${searchResults}\n\n[دستورالعمل: با استفاده از اطلاعات بالا، پاسخ دقیق و به روز ارائه بده.]`;
         }
     }
 
+    // ۳. اعمال پرسونا
     if (persona && contents.length > 0) {
         let prefix = "";
         if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
@@ -95,6 +78,7 @@ export default async function handler(req, res) {
         }
     }
 
+    // ۴. افزودن عکس
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
