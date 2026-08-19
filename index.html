@@ -244,17 +244,18 @@
             background-color: var(--bg-card);
             border: 1px solid var(--border-soft);
             border-radius: 14px;
-            padding: 10px;
+            padding: 10px 12px;
             margin-bottom: 14px;
             display: flex;
             align-items: center;
             gap: 10px;
             min-height: 56px;
         }
-        .user-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+        .user-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
         .user-info { flex: 1; overflow: hidden; }
-        .user-name { font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .user-email { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .user-name { font-size: 0.9rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
+        .user-actions { display: flex; gap: 4px; align-items: center; }
+        .user-actions .icon-btn { width: 28px; height: 28px; font-size: 0.8rem; }
 
         .new-chat-btn {
             background: var(--bg-card);
@@ -597,12 +598,13 @@
             display: none;
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.55);
-            backdrop-filter: blur(4px);
+            background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(6px);
             z-index: 40;
         }
         .settings-overlay.active { display: block; }
 
+        /* اصلاح کامل مودال تنظیمات و استایل اسکرول */
         .settings-modal {
             display: none;
             position: fixed;
@@ -611,22 +613,30 @@
             width: 92%;
             max-width: 420px;
             max-height: 85vh;
-            overflow-y: auto;
             background: var(--bg-sidebar);
             border: 1px solid var(--border-soft);
-            border-radius: 18px;
-            padding: 20px;
+            border-radius: 20px;
+            padding: 22px;
             z-index: 41;
             box-shadow: 0 20px 60px var(--shadow-b);
             animation: messageIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            overflow-y: auto;
         }
+        .settings-modal::-webkit-scrollbar { width: 5px; }
+        .settings-modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
         .settings-modal.active { display: block; }
 
         .settings-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 18px;
+            margin-bottom: 20px;
+            position: sticky;
+            top: 0;
+            background: var(--bg-sidebar);
+            z-index: 2;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-soft);
         }
         .settings-header h2 {
             font-size: 1.05rem;
@@ -637,8 +647,8 @@
         }
         .settings-header h2 i { color: var(--accent-2); font-size: 0.95rem; }
 
-        .settings-section { margin-bottom: 20px; }
-        .settings-section:last-child { margin-bottom: 4px; }
+        .settings-section { margin-bottom: 22px; }
+        .settings-section:last-child { margin-bottom: 0; }
         .settings-label {
             font-size: 0.82rem;
             font-weight: 600;
@@ -919,7 +929,7 @@
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
     let currentUser = null;
     let chats = {};
-    let chatHistoryData = {}; // حافظه پیام‌ها برای ارسال به بک‌اند
+    let chatHistoryData = {};
     let selectedFileData = null;
     let isFirstMessage = true;
     let isGenerating = false;
@@ -936,7 +946,6 @@
         }
     };
 
-    // --- الگوریتم تشخیص نام هوشمند از ایمیل ---
     function extractNameFromEmail(email) {
         if (!email) return 'دوست من';
         const handle = email.split('@')[0].toLowerCase();
@@ -1017,6 +1026,7 @@
         }
     }
 
+    // به‌روزرسانی UI بخش کاربر: ایمیل حذف شد، اسم و دکمه‌های خروج/سوییچ اکانت اضافه شد
     function updateUserUI() {
         if (!currentUser) return;
         const profileDiv = document.getElementById('userProfile');
@@ -1024,7 +1034,14 @@
             <img src="${currentUser.picture}" class="user-avatar" alt="User">
             <div class="user-info">
                 <div class="user-name">${currentUser.customName || currentUser.name}</div>
-                <div class="user-email">${currentUser.email}</div>
+            </div>
+            <div class="user-actions">
+                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب کاربری">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+                <button class="icon-btn" onclick="logoutUser()" title="خروج از حساب">
+                    <i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i>
+                </button>
             </div>
         `;
         const titleEl = document.getElementById('welcomeHomeTitle');
@@ -1032,6 +1049,29 @@
             titleEl.innerText = `سلام ${currentUser.customName || currentUser.name}! امروز چطور می‌تونم کمکت کنم؟`;
         }
         document.getElementById('customUserNameInput').value = currentUser.customName || currentUser.name;
+    }
+
+    // خروج از حساب
+    function logoutUser() {
+        if (confirm('آیا می‌خواهی از حساب کاربری خارج بشی؟')) {
+            localStorage.removeItem('virtual_chat_user');
+            currentUser = null;
+            document.getElementById('authOverlay').classList.remove('hidden');
+            if (window.google && google.accounts && google.accounts.id) {
+                google.accounts.id.disableAutoSelect();
+            }
+        }
+    }
+
+    // سوییچ اکانت (تغییر حساب)
+    function switchAccount() {
+        localStorage.removeItem('virtual_chat_user');
+        currentUser = null;
+        document.getElementById('authOverlay').classList.remove('hidden');
+        if (window.google && google.accounts && google.accounts.id) {
+            google.accounts.id.disableAutoSelect();
+            google.accounts.id.prompt();
+        }
     }
 
     function updateCustomName(val) {
