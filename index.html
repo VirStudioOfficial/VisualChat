@@ -29,6 +29,7 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
     <style>
+        /* ===== همه استایل‌های قبلی ===== */
         :root {
             --bg-main: #0a0c12;
             --bg-sidebar: #10131c;
@@ -302,6 +303,79 @@
         .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; }
         .header-right { display: flex; align-items: center; gap: 8px; }
 
+        /* منوی انتخاب مدل */
+        .model-selector {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            position: relative;
+        }
+        .model-selector:hover {
+            border-color: rgba(139,92,246,0.4);
+            color: var(--text-main);
+        }
+        .model-selector .model-name {
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .model-selector .model-chevron {
+            font-size: 0.65rem;
+            margin-right: 2px;
+        }
+
+        .model-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            padding: 6px;
+            min-width: 200px;
+            box-shadow: 0 12px 40px var(--shadow-b);
+            z-index: 100;
+            animation: fadeIn 0.2s ease;
+        }
+        .model-dropdown.active { display: block; }
+        .model-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .model-dropdown-item:hover {
+            background: var(--bg-card);
+            color: var(--text-main);
+        }
+        .model-dropdown-item.active {
+            background: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid rgba(139,92,246,0.3);
+        }
+        .model-dropdown-item .item-name { font-weight: 600; }
+        .model-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
+        .model-dropdown-item .item-check { margin-right: auto; color: var(--accent-2); }
+
+        @media (max-width: 900px) {
+            .model-selector .model-name { display: none; }
+            .model-dropdown { min-width: 160px; left: auto; right: 0; transform: none; }
+        }
+
         .home-screen {
             flex: 1;
             display: flex;
@@ -393,8 +467,6 @@
         .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
         .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
 
-        .sticker-img { width: 120px; height: 120px; object-fit: contain; }
-
         .input-wrapper {
             width: 100%;
             max-width: 800px;
@@ -402,25 +474,6 @@
             padding: 10px 15px 16px 15px;
             position: relative;
         }
-
-        .sticker-picker {
-            display: none;
-            position: absolute;
-            bottom: 78px;
-            right: 20px;
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 16px;
-            padding: 12px;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            box-shadow: 0 10px 30px var(--shadow-b);
-            z-index: 30;
-            animation: fadeIn 0.2s ease;
-        }
-        .sticker-picker.active { display: grid; }
-        .sticker-item { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; padding: 4px; transition: transform 0.15s, background 0.15s; }
-        .sticker-item:hover { transform: scale(1.12); background-color: var(--bg-input); }
 
         .input-box {
             background-color: var(--bg-input);
@@ -630,96 +683,24 @@
         .switch input:checked + .switch-slider { background: var(--accent-grad); border-color: transparent; }
         .switch input:checked + .switch-slider::before { transform: translateX(-18px); }
 
-        /* ===== منوی انتخاب مدل ===== */
-        .model-selector {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 12px;
-            padding: 4px 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            position: relative;
-        }
-        .model-selector:hover {
-            border-color: rgba(139,92,246,0.4);
-            color: var(--text-main);
-        }
-        .model-selector .model-icon {
-            font-size: 0.9rem;
-        }
-        .model-selector .model-name {
-            font-weight: 600;
-            white-space: nowrap;
-        }
-        .model-selector .model-chevron {
-            font-size: 0.65rem;
-            margin-right: 2px;
-        }
-
-        /* ===== منوی کشویی مدل‌ها ===== */
-        .model-dropdown {
+        .sticker-picker {
             display: none;
             position: absolute;
-            top: calc(100% + 8px);
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--bg-sidebar);
+            bottom: 78px;
+            right: 20px;
+            background-color: var(--bg-card);
             border: 1px solid var(--border-soft);
-            border-radius: 14px;
-            padding: 6px;
-            min-width: 200px;
-            box-shadow: 0 12px 40px var(--shadow-b);
-            z-index: 100;
+            border-radius: 16px;
+            padding: 12px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            box-shadow: 0 10px 30px var(--shadow-b);
+            z-index: 30;
             animation: fadeIn 0.2s ease;
         }
-        .model-dropdown.active {
-            display: block;
-        }
-        .model-dropdown-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 14px;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.15s;
-            font-size: 0.8rem;
-            color: var(--text-muted);
-        }
-        .model-dropdown-item:hover {
-            background: var(--bg-card);
-            color: var(--text-main);
-        }
-        .model-dropdown-item.active {
-            background: var(--bg-card);
-            color: var(--text-main);
-            border: 1px solid rgba(139,92,246,0.3);
-        }
-        .model-dropdown-item .item-icon {
-            font-size: 1rem;
-        }
-        .model-dropdown-item .item-name {
-            font-weight: 600;
-        }
-        .model-dropdown-item .item-desc {
-            font-size: 0.65rem;
-            opacity: 0.6;
-        }
-        .model-dropdown-item .item-check {
-            margin-right: auto;
-            color: var(--accent-2);
-        }
-
-        @media (max-width: 900px) {
-            .chat-box { padding: 15px 5%; }
-            .model-selector .model-name { display: none; }
-            .model-dropdown { min-width: 160px; left: auto; right: 0; transform: none; }
-        }
+        .sticker-picker.active { display: grid; }
+        .sticker-item { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; padding: 4px; transition: transform 0.15s, background 0.15s; }
+        .sticker-item:hover { transform: scale(1.12); background-color: var(--bg-input); }
 
         @media (max-width: 768px) {
             .menu-btn { display: block; }
@@ -734,6 +715,8 @@
             .home-title { font-size: 1.4rem; }
             .input-wrapper { padding: 8px 10px 10px 10px; }
             .sticker-picker { right: 10px; left: 10px; grid-template-columns: repeat(4, 1fr); justify-items: center; }
+            .chat-box { padding: 15px 5%; }
+            .model-selector .model-name { display: none; }
             .model-dropdown { min-width: 140px; left: auto; right: 0; transform: none; }
         }
     </style>
@@ -783,30 +766,25 @@
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
-                <!-- ===== منوی انتخاب مدل ===== -->
                 <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
-                    <span class="model-icon" id="modelIcon">⚡</span>
                     <span class="model-name" id="modelDisplayName">Virtual Bot 1.1</span>
                     <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
                     <div class="model-dropdown" id="modelDropdown">
-                        <div class="model-dropdown-item active" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, '⚡', 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
-                            <span class="item-icon">⚡</span>
+                        <div class="model-dropdown-item active" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.1</div>
                                 <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
                             </span>
                             <span class="item-check"><i class="fa-solid fa-check"></i></span>
                         </div>
-                        <div class="model-dropdown-item" data-model="gemini-3.6-flash" onclick="selectModel(this, '🚀', 'Virtual Bot 1.5', 'gemini-3.6-flash')">
-                            <span class="item-icon">🚀</span>
+                        <div class="model-dropdown-item" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.5</div>
                                 <div class="item-desc">جدیدترین مدل</div>
                             </span>
                             <span class="item-check"><i class="fa-solid fa-check"></i></span>
                         </div>
-                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, '🧠', 'Virtual Bot 1.3', 'gemini-3.1-pro')">
-                            <span class="item-icon">🧠</span>
+                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.3</div>
                                 <div class="item-desc">مناسب کدنویسی</div>
@@ -830,31 +808,20 @@
                 <p class="home-subtitle">یه سؤال بپرس، فایل بفرست یا یکی از پیشنهادها رو انتخاب کن</p>
             </div>
             <div class="suggestion-chips">
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده برای عنوان پست اینستاگرام بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">این متن رو خلاصه کن</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه قطعه کد پایتون بنویس</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">امروز اخبار مهم چیه؟</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">ایده برای عنوان پست اینستاگرام</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">خلاصه‌سازی متن</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">کد پایتون بنویس</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">اخبار امروز</div>
             </div>
         </div>
 
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            <div class="sticker-picker" id="stickerPicker">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f917/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f389/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-            </div>
-
             <div class="file-preview" id="filePreview">
                 <img id="previewImg" src="" alt="preview">
                 <span id="fileName"></span>
-                <span class="file-status" id="fileStatus">⏳ در حال پردازش...</span>
+                <span class="file-status" id="fileStatus">در حال پردازش...</span>
                 <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"></i>
             </div>
 
@@ -865,12 +832,8 @@
 
                 <textarea id="userInput" placeholder="از Virtual Bot بپرس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
-                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب (گوگل)">
+                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
                     <i class="fa-solid fa-globe"></i>
-                </button>
-
-                <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
-                    <i class="fa-regular fa-face-smile"></i>
                 </button>
 
                 <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
@@ -889,7 +852,7 @@
         </div>
 
         <div class="settings-section">
-            <div class="settings-label">نام شما در چت (جهت صدا زدن ربات)</div>
+            <div class="settings-label">نام شما در چت</div>
             <input type="text" class="settings-input-text" id="customUserNameInput" placeholder="مثلاً: ارشیا" onchange="updateCustomName(this.value)">
         </div>
 
@@ -936,52 +899,42 @@
 
 <script>
     // =====================================================
-    // 🔥 سیستم انتخاب مدل
+    // سیستم انتخاب مدل
     // =====================================================
     let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.5-flash-lite';
     let currentModelDisplay = {
-        'gemini-3.5-flash-lite': { icon: '⚡', name: 'Virtual Bot 1.1' },
-        'gemini-3.6-flash': { icon: '🚀', name: 'Virtual Bot 1.5' },
-        'gemini-3.1-pro': { icon: '🧠', name: 'Virtual Bot 1.3' }
+        'gemini-3.5-flash-lite': 'Virtual Bot 1.1',
+        'gemini-3.6-flash': 'Virtual Bot 1.5',
+        'gemini-3.1-pro': 'Virtual Bot 1.3'
     };
 
     function toggleModelDropdown() {
-        const dropdown = document.getElementById('modelDropdown');
-        dropdown.classList.toggle('active');
+        document.getElementById('modelDropdown').classList.toggle('active');
     }
 
-    function selectModel(element, icon, displayName, modelValue) {
-        // بستن منو
+    function selectModel(element, displayName, modelValue) {
         document.getElementById('modelDropdown').classList.remove('active');
         
-        // بروزرسانی آیتم‌های منو
         document.querySelectorAll('.model-dropdown-item').forEach(item => {
             item.classList.remove('active');
         });
         element.classList.add('active');
         
-        // بروزرسانی هدر
-        document.getElementById('modelIcon').textContent = icon;
         document.getElementById('modelDisplayName').textContent = displayName;
-        
-        // ذخیره مدل انتخاب شده
         currentModel = modelValue;
         localStorage.setItem('virtual_selected_model', currentModel);
-        
-        console.log('🔄 مدل تغییر کرد به:', currentModel);
     }
 
-    // بستن منو با کلیک خارج از آن
     document.addEventListener('click', function(e) {
         const selector = document.getElementById('modelSelector');
         const dropdown = document.getElementById('modelDropdown');
-        if (!selector.contains(e.target)) {
+        if (selector && !selector.contains(e.target)) {
             dropdown.classList.remove('active');
         }
     });
 
     // =====================================================
-    // 🔥 بقیه کدها (همون قبلی)
+    // بقیه کدها
     // =====================================================
 
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
@@ -998,47 +951,32 @@
     const UploadLogger = {
         logs: [],
         add(step, data) {
-            const entry = {
-                timestamp: new Date().toISOString(),
-                step: step,
-                data: data
-            };
+            const entry = { timestamp: new Date().toISOString(), step, data };
             this.logs.push(entry);
-            console.log(`📁 [${step}]`, data);
+            console.log(`[${step}]`, data);
             this.showOnScreen(entry);
         },
         showOnScreen(entry) {
             const statusEl = document.getElementById('fileStatus');
             if (statusEl) {
-                const msg = `${entry.step}: ${typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data).substring(0, 50)}`;
+                const msg = `${entry.step}: ${typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data).substring(0, 40)}`;
                 statusEl.textContent = msg;
                 statusEl.className = 'file-status loading';
-                if (entry.step.includes('✅')) {
-                    statusEl.className = 'file-status success';
-                } else if (entry.step.includes('❌')) {
-                    statusEl.className = 'file-status error';
-                }
+                if (entry.step.includes('✅')) statusEl.className = 'file-status success';
+                else if (entry.step.includes('❌')) statusEl.className = 'file-status error';
             }
         },
-        getAll() {
-            return this.logs;
-        }
+        getAll() { return this.logs; }
     };
 
     window.onload = () => {
-        // بازیابی مدل انتخاب شده
         const savedModel = localStorage.getItem('virtual_selected_model');
         if (savedModel && currentModelDisplay[savedModel]) {
             currentModel = savedModel;
-            const info = currentModelDisplay[savedModel];
-            document.getElementById('modelIcon').textContent = info.icon;
-            document.getElementById('modelDisplayName').textContent = info.name;
-            // فعال کردن آیتم منو
+            document.getElementById('modelDisplayName').textContent = currentModelDisplay[savedModel];
             document.querySelectorAll('.model-dropdown-item').forEach(item => {
                 item.classList.remove('active');
-                if (item.dataset.model === savedModel) {
-                    item.classList.add('active');
-                }
+                if (item.dataset.model === savedModel) item.classList.add('active');
             });
         }
         
@@ -1048,26 +986,16 @@
         if (window.innerWidth <= 768) {
             document.documentElement.style.setProperty('--mobile-close', 'block');
         }
-        
-        UploadLogger.add('🚀 برنامه بارگذاری شد', { 
-            userAgent: navigator.userAgent,
-            platform: navigator.platform,
-            selectedModel: currentModel
-        });
     };
 
-    // ===== توابع کمکی =====
     function autoResizeTextarea(textarea) {
         textarea.style.height = 'auto';
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
     }
 
     function extractNameFromEmail(email, googleName = '') {
-        if (googleName && googleName.trim() && !googleName.includes('@')) {
-            return googleName.trim();
-        }
+        if (googleName && googleName.trim() && !googleName.includes('@')) return googleName.trim();
         if (!email) return 'دوست من';
-        
         const handle = email.split('@')[0].toLowerCase();
         const clean = handle.replace(/[0-9_.-]/g, '');
         return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'دوست من';
@@ -1076,18 +1004,15 @@
     function handleCredentialResponse(response) {
         const responsePayload = parseJwt(response.credential);
         const autoExtractedName = extractNameFromEmail(responsePayload.email, responsePayload.name);
-
         currentUser = {
             name: autoExtractedName,
             customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
             email: responsePayload.email,
             picture: responsePayload.picture
         };
-
         localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
         document.getElementById('authOverlay').classList.remove('active');
         initUserData();
-        UploadLogger.add('✅ ورود با گوگل موفق', { email: currentUser.email });
     }
 
     function parseJwt(token) {
@@ -1109,51 +1034,35 @@
             }
             overlay.classList.remove('active');
             initUserData();
-            UploadLogger.add('✅ کاربر ذخیره شده بازیابی شد', { email: currentUser.email });
         } else {
             overlay.classList.add('active');
-            UploadLogger.add('⏳ منتظر ورود کاربر...', {});
         }
     }
 
     function initUserData() {
         updateUserUI();
         renderHistory();
-
         const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
-
         const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
         chatHistoryData = JSON.parse(localStorage.getItem(historyKey)) || {};
-
-        if (chats[currentChatId]) {
-            loadChat(currentChatId, true);
-        }
+        if (chats[currentChatId]) loadChat(currentChatId, true);
     }
 
     function updateUserUI() {
         if (!currentUser) return;
         const profileDiv = document.getElementById('userProfile');
         const nameToDisplay = currentUser.customName || currentUser.name;
-        
         profileDiv.innerHTML = `
             <img src="${currentUser.picture}" class="user-avatar" alt="User">
-            <div class="user-info">
-                <div class="user-name">${nameToDisplay}</div>
-            </div>
+            <div class="user-info"><div class="user-name">${nameToDisplay}</div></div>
             <div class="user-actions">
-                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب کاربری">
-                    <i class="fa-solid fa-arrows-rotate"></i>
-                </button>
-                <button class="icon-btn" onclick="logoutUser()" title="خروج از حساب">
-                    <i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i>
-                </button>
+                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="fa-solid fa-arrows-rotate"></i></button>
+                <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i></button>
             </div>
         `;
         const titleEl = document.getElementById('welcomeHomeTitle');
-        if (titleEl) {
-            titleEl.innerText = `سلام ${nameToDisplay}! امروز چطور می‌تونم کمکت کنم؟`;
-        }
+        if (titleEl) titleEl.innerText = `سلام ${nameToDisplay}! امروز چطور می‌تونم کمکت کنم؟`;
         document.getElementById('customUserNameInput').value = nameToDisplay;
     }
 
@@ -1162,9 +1071,7 @@
             localStorage.removeItem('virtual_chat_user');
             currentUser = null;
             document.getElementById('authOverlay').classList.add('active');
-            if (window.google && google.accounts && google.accounts.id) {
-                google.accounts.id.disableAutoSelect();
-            }
+            if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
         }
     }
 
@@ -1192,16 +1099,14 @@
     const defaultSettings = { theme: 'auto', c1: '#8b5cf6', c2: '#22d3ee', fontSize: 'normal', typewriter: true };
 
     function getSettings() {
-        try {
-            return { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') };
-        } catch (e) { return { ...defaultSettings }; }
+        try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') }; }
+        catch (e) { return { ...defaultSettings }; }
     }
 
     function loadSettings() {
         const s = getSettings();
         applySettings(s);
         renderSettingsUI(s);
-
         if (window.matchMedia) {
             window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
                 const current = getSettings();
@@ -1285,9 +1190,8 @@
 
     function useSuggestion(el) {
         if (isGenerating) return;
-        const inputField = document.getElementById('userInput');
-        inputField.value = el.innerText;
-        autoResizeTextarea(inputField);
+        document.getElementById('userInput').value = el.innerText;
+        autoResizeTextarea(document.getElementById('userInput'));
         sendMessage();
     }
 
@@ -1295,11 +1199,9 @@
         if (!userText) return false;
         const cleanText = userText.trim().toLowerCase();
         if (cleanText.length < 3) return false;
-
         const ignoreList = ['سلام', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'ممنون', 'خداحافظ'];
         const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
         if (ignoreList.includes(normalized)) return false;
-
         const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'قیمت', 'اخبار', 'خبر', 'امشب'];
         return allowedKeywords.some(kw => normalized.includes(kw));
     }
@@ -1320,26 +1222,6 @@
     function toggleSidebar() {
         document.getElementById('sidebar').classList.toggle('open');
         document.getElementById('sidebarOverlay').classList.toggle('active');
-    }
-
-    function toggleStickerPicker() {
-        if (isGenerating) return;
-        document.getElementById('stickerPicker').classList.toggle('active');
-    }
-
-    function sendSticker(stickerUrl) {
-        if (isGenerating) return;
-        toggleStickerPicker();
-        const stickerHtml = `<img src="${stickerUrl}" class="sticker-img" alt="sticker">`;
-        appendMessage('user', stickerHtml);
-
-        if (isFirstMessage) {
-            document.getElementById("homeScreen").style.display = 'none';
-            document.getElementById("chatBox").style.display = 'flex';
-            isFirstMessage = false;
-        }
-
-        sendToGemini("کاربر یک استیکر ارسال کرد.");
     }
 
     function handleKeyDown(e) {
@@ -1373,199 +1255,6 @@
         });
     }
 
-    function compressVideo(file, targetWidth = 480, bitrate = 500000) {
-        return new Promise((resolve, reject) => {
-            const video = document.createElement('video');
-            video.src = URL.createObjectURL(file);
-            video.muted = true;
-            video.playsInline = true;
-
-            video.onloadedmetadata = () => {
-                let width = video.videoWidth;
-                let height = video.videoHeight;
-                if (width > targetWidth) {
-                    height = Math.round((height * targetWidth) / width);
-                    width = targetWidth;
-                }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-
-                const stream = canvas.captureStream(25);
-                
-                let mimeType = 'video/webm';
-                if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
-                    mimeType = 'video/webm;codecs=vp8';
-                }
-
-                const mediaRecorder = new MediaRecorder(stream, {
-                    mimeType: mimeType,
-                    videoBitsPerSecond: bitrate
-                });
-
-                const chunks = [];
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data && e.data.size > 0) chunks.push(e.data);
-                };
-
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: 'video/webm' });
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        URL.revokeObjectURL(video.src);
-                        resolve(reader.result);
-                    };
-                    reader.readAsDataURL(blob);
-                };
-
-                video.play();
-                mediaRecorder.start();
-
-                function drawFrame() {
-                    if (video.paused || video.ended) {
-                        if (mediaRecorder.state === 'recording') {
-                            mediaRecorder.stop();
-                        }
-                        return;
-                    }
-                    ctx.drawImage(video, 0, 0, width, height);
-                    requestAnimationFrame(drawFrame);
-                }
-
-                drawFrame();
-            };
-
-            video.onerror = (err) => {
-                URL.revokeObjectURL(video.src);
-                reject(err);
-            };
-        });
-    }
-
-    async function handleFileSelect(event) {
-        UploadLogger.add('📂 رویداد آپلود فعال شد', { 
-            eventType: event.type,
-            filesCount: event.target.files?.length || 0
-        });
-
-        if (isGenerating) {
-            UploadLogger.add('⛔ آپلود رد شد - در حال تولید پاسخ', {});
-            return;
-        }
-        
-        const file = event.target.files[0];
-        if (!file) {
-            UploadLogger.add('❌ فایلی انتخاب نشده', {});
-            return;
-        }
-
-        UploadLogger.add('📄 فایل انتخاب شد', {
-            name: file.name,
-            size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
-            type: file.type,
-            lastModified: new Date(file.lastModified).toISOString()
-        });
-
-        const fileNameSpan = document.getElementById('fileName');
-        const previewImg = document.getElementById('previewImg');
-        const statusEl = document.getElementById('fileStatus');
-        const previewContainer = document.getElementById('filePreview');
-        
-        previewContainer.style.display = 'flex';
-        fileNameSpan.innerText = file.name;
-        statusEl.textContent = '⏳ در حال پردازش...';
-        statusEl.className = 'file-status loading';
-
-        const MAX_DIRECT_SIZE = 4 * 1024 * 1024;
-
-        try {
-            const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name);
-            const isImage = file.type.startsWith('image/');
-            
-            UploadLogger.add('🔍 تشخیص نوع فایل', {
-                isVideo: isVideo,
-                isImage: isImage,
-                detectedType: isVideo ? 'VIDEO' : (isImage ? 'IMAGE' : 'OTHER')
-            });
-
-            if (isImage) {
-                UploadLogger.add('🖼️ پردازش تصویر...', {});
-                const compressedBase64 = await compressImage(file, 1024, 0.7);
-                selectedFileData = { 
-                    name: file.name, 
-                    type: 'image/jpeg', 
-                    base64: compressedBase64 
-                };
-                previewImg.src = compressedBase64;
-                previewImg.style.display = 'block';
-                statusEl.textContent = '✅ تصویر آماده ارسال';
-                statusEl.className = 'file-status success';
-                UploadLogger.add('✅ تصویر پردازش شد', {
-                    name: file.name,
-                    base64Length: compressedBase64.length
-                });
-            } else if (isVideo) {
-                let videoBase64 = '';
-                
-                if (file.size > MAX_DIRECT_SIZE) {
-                    UploadLogger.add('🎬 آغاز فشرده‌سازی خودکار ویدیو...', { originalSizeMB: (file.size / (1024 * 1024)).toFixed(2) });
-                    statusEl.textContent = '🎬 در حال فشرده‌سازی ویدیو...';
-                    videoBase64 = await compressVideo(file, 480, 500000);
-                } else {
-                    UploadLogger.add('🎬 خواندن ویدیو بدون فشرده‌سازی...', {});
-                    videoBase64 = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => resolve(e.target.result);
-                        reader.readAsDataURL(file);
-                    });
-                }
-
-                selectedFileData = { 
-                    name: file.name, 
-                    type: 'video/webm', 
-                    base64: videoBase64 
-                };
-                previewImg.style.display = 'none';
-                statusEl.textContent = '✅ ویدیو آماده ارسال';
-                statusEl.className = 'file-status success';
-                UploadLogger.add('✅ ویدیو آماده گردید', {
-                    name: file.name,
-                    type: selectedFileData.type,
-                    compressedBase64Length: videoBase64.length
-                });
-            } else {
-                UploadLogger.add('📁 خواندن فایل به صورت Base64...', {});
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const base64 = e.target.result;
-                    selectedFileData = { 
-                        name: file.name, 
-                        type: file.type || guessMimeType(file.name), 
-                        base64: base64 
-                    };
-                    previewImg.style.display = 'none';
-                    statusEl.textContent = '✅ فایل آماده ارسال';
-                    statusEl.className = 'file-status success';
-                    UploadLogger.add('✅ فایل پردازش شد', {
-                        name: file.name,
-                        type: selectedFileData.type,
-                        base64Length: base64.length
-                    });
-                };
-                reader.readAsDataURL(file);
-            }
-        } catch (e) {
-            UploadLogger.add('❌ خطا در پردازش فایل', {
-                error: e.message,
-                stack: e.stack
-            });
-            statusEl.textContent = '❌ خطا در پردازش';
-            statusEl.className = 'file-status error';
-        }
-    }
-
     function guessMimeType(filename) {
         const ext = filename.split('.').pop().toLowerCase();
         const mimeMap = {
@@ -1580,21 +1269,68 @@
         return mimeMap[ext] || 'application/octet-stream';
     }
 
+    async function handleFileSelect(event) {
+        if (isGenerating) return;
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const fileNameSpan = document.getElementById('fileName');
+        const previewImg = document.getElementById('previewImg');
+        const statusEl = document.getElementById('fileStatus');
+        const previewContainer = document.getElementById('filePreview');
+        
+        previewContainer.style.display = 'flex';
+        fileNameSpan.innerText = file.name;
+        statusEl.textContent = 'در حال پردازش...';
+        statusEl.className = 'file-status loading';
+
+        try {
+            const isVideo = /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name);
+            const isImage = file.type.startsWith('image/');
+
+            if (isImage) {
+                const compressedBase64 = await compressImage(file, 1024, 0.7);
+                selectedFileData = { name: file.name, type: 'image/jpeg', base64: compressedBase64 };
+                previewImg.src = compressedBase64;
+                previewImg.style.display = 'block';
+                statusEl.textContent = 'تصویر آماده';
+                statusEl.className = 'file-status success';
+            } else if (isVideo) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const base64 = e.target.result;
+                    selectedFileData = { name: file.name, type: 'video/mp4', base64: base64 };
+                    previewImg.style.display = 'none';
+                    statusEl.textContent = 'ویدیو آماده';
+                    statusEl.className = 'file-status success';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const base64 = e.target.result;
+                    selectedFileData = { name: file.name, type: file.type || guessMimeType(file.name), base64: base64 };
+                    previewImg.style.display = 'none';
+                    statusEl.textContent = 'فایل آماده';
+                    statusEl.className = 'file-status success';
+                };
+                reader.readAsDataURL(file);
+            }
+        } catch (e) {
+            statusEl.textContent = 'خطا';
+            statusEl.className = 'file-status error';
+        }
+    }
+
     function removeFile() {
-        UploadLogger.add('🗑️ حذف فایل', { 
-            fileName: selectedFileData?.name || 'unknown' 
-        });
         selectedFileData = null;
         document.getElementById('fileInput').value = '';
         document.getElementById('filePreview').style.display = 'none';
     }
 
     function handleActionClick() {
-        if (isGenerating) {
-            stopGeneration();
-        } else {
-            sendMessage();
-        }
+        if (isGenerating) stopGeneration();
+        else sendMessage();
     }
 
     function setGeneratingState(generating) {
@@ -1603,18 +1339,16 @@
         const actionBtn = document.getElementById("actionBtn");
         const actionIcon = document.getElementById("actionIcon");
         const attachBtn = document.getElementById("attachBtn");
-        const stickerBtn = document.getElementById("stickerBtn");
         const searchBtn = document.getElementById("searchToggleBtn");
 
         inputField.disabled = generating;
         attachBtn.disabled = generating;
-        stickerBtn.disabled = generating;
         searchBtn.disabled = generating;
 
         if (generating) {
             actionBtn.classList.add("stop-mode");
             actionIcon.className = "fa-solid fa-square";
-            actionBtn.title = "توقف پاسخ";
+            actionBtn.title = "توقف";
         } else {
             actionBtn.classList.remove("stop-mode");
             actionIcon.className = "fa-solid fa-paper-plane";
@@ -1632,20 +1366,7 @@
     async function sendMessage() {
         const inputField = document.getElementById("userInput");
         const text = inputField.value.trim();
-        
-        UploadLogger.add('📤 ارسال پیام', {
-            hasText: !!text,
-            textLength: text?.length || 0,
-            hasFile: !!selectedFileData,
-            fileName: selectedFileData?.name || null,
-            fileType: selectedFileData?.type || null,
-            model: currentModel
-        });
-
-        if (!text && !selectedFileData) {
-            UploadLogger.add('⛔ پیام خالی - ارسال نشد', {});
-            return;
-        }
+        if (!text && !selectedFileData) return;
 
         if (isFirstMessage) {
             document.getElementById("homeScreen").style.display = 'none';
@@ -1655,13 +1376,9 @@
 
         let userContentHtml = text || '';
         if (selectedFileData && selectedFileData.type.startsWith('image/')) {
-            userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 8px;">`;
-            UploadLogger.add('🖼️ تصویر به پیام اضافه شد', {});
+            userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
         } else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
-            userContentHtml += `<br><video controls style="max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
-            UploadLogger.add('🎬 ویدیو به پیام اضافه شد', {
-                type: selectedFileData.type
-            });
+            userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
         }
 
         appendMessage('user', userContentHtml);
@@ -1670,13 +1387,9 @@
 
         const payloadFile = selectedFileData;
         removeFile();
-
         await sendToGemini(text, payloadFile);
     }
 
-    // =====================================================
-    // 🔥 تابع ارسال به Gemini با مدل انتخاب شده
-    // =====================================================
     async function sendToGemini(textPrompt, payloadFile = null) {
         setGeneratingState(true);
         const chatBox = document.getElementById("chatBox");
@@ -1688,12 +1401,11 @@
         loadingDiv.className = "message bot";
         const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
         
-        // نمایش مدل فعال در وضعیت بارگذاری
-        const modelInfo = currentModelDisplay[currentModel] || { icon: '🤖', name: 'Virtual Bot' };
-        let statusMsg = willSearch ? '🔍 در حال جستجو در وب...' : `🤖 ${modelInfo.icon} ${modelInfo.name} در حال فکر کردن...`;
+        const modelName = currentModelDisplay[currentModel] || 'Virtual Bot';
+        let statusMsg = willSearch ? 'جستجو در وب...' : `${modelName} در حال پاسخ...`;
         if (payloadFile) {
-            const fileType = payloadFile.type?.startsWith('video/') ? '🎬 ویدیو' : '🖼️ تصویر';
-            statusMsg = `📤 ارسال ${fileType} (${payloadFile.name}) با ${modelInfo.name}...`;
+            const fileType = payloadFile.type?.startsWith('video/') ? 'ویدیو' : 'تصویر';
+            statusMsg = `ارسال ${fileType} (${payloadFile.name})...`;
         }
         
         loadingDiv.innerHTML = `${statusMsg} <span class="typing-dots"><span></span><span></span><span></span></span>`;
@@ -1703,63 +1415,37 @@
 
         const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
 
-        if (!chatHistoryData[currentChatId]) {
-            chatHistoryData[currentChatId] = [];
-        }
-        
-        chatHistoryData[currentChatId].push({ 
-            role: 'user', 
-            text: textPrompt || '[فایل ارسال شده]' 
-        });
+        if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
+        chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
 
         currentAbortController = new AbortController();
 
         try {
-            const requestBody = {
-                userName: uName,
-                text: textPrompt,
-                rawText: textPrompt,
-                file: payloadFile,
-                webSearch: isSearchEnabled,
-                history: chatHistoryData[currentChatId],
-                model: currentModel  // ← مدل انتخاب شده ارسال میشه
-            };
-            
-            UploadLogger.add('📡 ارسال درخواست به سرور', {
-                hasFile: !!payloadFile,
-                fileName: payloadFile?.name || null,
-                fileType: payloadFile?.type || null,
-                base64Length: payloadFile?.base64?.length || 0,
-                model: currentModel
-            });
-
             const response = await fetch('/api/chat', {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(requestBody),
+                body: JSON.stringify({
+                    userName: uName,
+                    text: textPrompt,
+                    rawText: textPrompt,
+                    file: payloadFile,
+                    webSearch: isSearchEnabled,
+                    history: chatHistoryData[currentChatId],
+                    model: currentModel
+                }),
                 signal: currentAbortController.signal
             });
 
-            UploadLogger.add('📥 پاسخ از سرور', {
-                status: response.status,
-                statusText: response.statusText
-            });
-
             if (response.status === 429) {
-                loadingDiv.innerHTML = "⏳ محدودیت درخواست — لطفاً چند لحظه صبر کن و دوباره امتحان کن.";
+                loadingDiv.innerHTML = "محدودیت درخواست — کمی صبر کن.";
                 setGeneratingState(false);
                 saveCurrentChat();
                 return;
             }
 
             let data;
-            try {
-                data = await response.json();
-            } catch (err) {
-                UploadLogger.add('❌ خطا در پارس JSON پاسخ', {
-                    error: err.message
-                });
-                loadingDiv.innerText = "⚠️ پاسخ دریافتی فرمت معتبری ندارد.";
+            try { data = await response.json(); } catch (err) {
+                loadingDiv.innerText = "خطا در دریافت پاسخ.";
                 setGeneratingState(false);
                 saveCurrentChat();
                 return;
@@ -1768,10 +1454,6 @@
             if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
                 const reply = data.candidates[0].content.parts[0].text;
                 chatHistoryData[currentChatId].push({ role: 'model', text: reply });
-                UploadLogger.add('✅ پاسخ دریافت شد', {
-                    replyLength: reply.length,
-                    model: currentModel
-                });
 
                 if (getSettings().typewriter) {
                     typeWriterEffect(loadingDiv, reply, () => {
@@ -1785,22 +1467,15 @@
                     saveCurrentChat();
                 }
             } else {
-                UploadLogger.add('❌ پاسخی در داده وجود ندارد', {
-                    dataKeys: Object.keys(data || {})
-                });
-                loadingDiv.innerText = "⚠️ پاسخی دریافت نشد. دوباره امتحان کن.";
+                loadingDiv.innerText = "پاسخی دریافت نشد.";
                 setGeneratingState(false);
                 saveCurrentChat();
             }
         } catch (error) {
-            UploadLogger.add('❌ خطا در ارتباط با سرور', {
-                error: error.name,
-                message: error.message
-            });
             if (error.name === 'AbortError') {
-                loadingDiv.innerHTML = "⏹️ متوقف شد <span style='color:var(--text-muted); font-size:0.8rem;'>(توسط کاربر)</span>";
+                loadingDiv.innerHTML = "متوقف شد (توسط کاربر)";
             } else {
-                loadingDiv.innerText = "❌ خطا در ارتباط با سرور. اتصال را بررسی کن.";
+                loadingDiv.innerText = "خطا در ارتباط با سرور.";
             }
             setGeneratingState(false);
             saveCurrentChat();
@@ -1811,7 +1486,6 @@
         element.innerHTML = "";
         let i = 0;
         const formatted = formatReply(text);
-
         typeWriterInterval = setInterval(() => {
             if (i < formatted.length) {
                 element.innerHTML = formatted.substring(0, i + 1);
@@ -1822,19 +1496,17 @@
                 clearInterval(typeWriterInterval);
                 if (onComplete) onComplete();
             }
-        }, 12);
+        }, 15);
     }
 
     function appendMessage(sender, content) {
         const chatBox = document.getElementById("chatBox");
         const wrapperDiv = document.createElement("div");
         wrapperDiv.className = `message-wrapper ${sender}`;
-
         const msgDiv = document.createElement("div");
         msgDiv.className = `message ${sender}`;
         msgDiv.innerHTML = content;
         wrapperDiv.appendChild(msgDiv);
-
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
@@ -1859,10 +1531,8 @@
     function saveCurrentChat() {
         const chatBox = document.getElementById("chatBox");
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
-
         const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
-
         chats[currentChatId] = {
             title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
@@ -1876,16 +1546,13 @@
     function renderHistory() {
         const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
-
         const list = document.getElementById("historyList");
         list.innerHTML = "";
         Object.keys(chats).reverse().forEach(id => {
             const item = document.createElement("div");
             item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
             item.innerHTML = `<i class="fa-regular fa-message"></i> <span>${chats[id].title}</span>`;
-            item.onclick = () => {
-                if (!isGenerating) loadChat(id);
-            };
+            item.onclick = () => { if (!isGenerating) loadChat(id); };
             list.appendChild(item);
         });
     }
@@ -1900,10 +1567,7 @@
         chatBox.style.display = 'flex';
         chatBox.innerHTML = chats[id].html;
         renderHistory();
-        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) {
-            toggleSidebar();
-        }
-
+        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
         const scrollToBottom = () => { chatBox.scrollTop = chatBox.scrollHeight; };
         scrollToBottom();
         requestAnimationFrame(scrollToBottom);
