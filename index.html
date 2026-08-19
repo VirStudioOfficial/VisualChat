@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Visual Chat</title>
+    <title>Visual Chat Pro</title>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- اسکریپت ورود با گوگل -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     
     <style>
         :root {
@@ -22,7 +24,6 @@
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Vazirmatn', sans-serif; }
         
-        /* حل باگ ارتفاع در تبلت و موبایل با dynamic viewport height */
         html, body {
             height: 100%;
             height: 100dvh;
@@ -33,7 +34,18 @@
 
         body { display: flex; position: relative; }
 
-        /* لایه تاریک پشت سایدبار در موبایل/تبلت */
+        /* انیمیشن‌های نرم ظهور و افکت‌ها */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 5px rgba(56, 189, 248, 0.2); }
+            50% { box-shadow: 0 0 15px rgba(56, 189, 248, 0.5); }
+            100% { box-shadow: 0 0 5px rgba(56, 189, 248, 0.2); }
+        }
+
         .sidebar-overlay {
             display: none;
             position: fixed;
@@ -44,16 +56,16 @@
         }
         .sidebar-overlay.active { display: block; }
 
-        /* سایدبار ریسپانسیو */
+        /* سایدبار */
         .sidebar {
-            width: 260px;
+            width: 270px;
             background-color: var(--bg-sidebar);
             border-left: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             padding: 15px;
             z-index: 20;
-            transition: transform 0.3s ease;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .brand-title {
@@ -63,8 +75,24 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
+
+        /* کارت پروفایل کاربر */
+        .user-profile {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .user-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+        .user-info { flex: 1; overflow: hidden; }
+        .user-name { font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .user-email { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
         .new-chat-btn {
             background-color: var(--bg-card);
@@ -78,9 +106,9 @@
             justify-content: center;
             gap: 10px;
             font-weight: 500;
-            transition: 0.2s;
+            transition: all 0.2s ease;
         }
-        .new-chat-btn:hover { background-color: var(--border); }
+        .new-chat-btn:hover { background-color: var(--border); transform: translateY(-1px); }
 
         .history-list {
             flex: 1;
@@ -103,10 +131,11 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            transition: 0.2s;
         }
         .history-item:hover, .history-item.active { background-color: var(--bg-card); color: var(--text-main); }
 
-        /* بخش اصلی */
+        /* بخش اصلی چت */
         .main-content {
             flex: 1;
             display: flex;
@@ -118,7 +147,6 @@
             overflow: hidden;
         }
 
-        /* هدر */
         .chat-header {
             padding: 12px 20px;
             display: flex;
@@ -150,7 +178,6 @@
             font-size: 0.85rem;
         }
 
-        /* صفحه شروع */
         .home-screen {
             flex: 1;
             display: flex;
@@ -160,15 +187,12 @@
             gap: 20px;
             padding: 20px;
             text-align: center;
+            animation: fadeIn 0.4s ease-out;
         }
 
-        .home-title {
-            font-size: 1.8rem;
-            font-weight: 600;
-            color: #e2e8f0;
-        }
+        .home-title { font-size: 1.8rem; font-weight: 600; color: #e2e8f0; }
 
-        /* باکس پیام‌ها */
+        /* پیام‌ها و انیمیشن ظهور نرم */
         .chat-box {
             flex: 1;
             padding: 20px 15%;
@@ -176,6 +200,7 @@
             display: none;
             flex-direction: column;
             gap: 16px;
+            scroll-behavior: smooth;
         }
 
         .message {
@@ -185,6 +210,7 @@
             line-height: 1.6;
             word-wrap: break-word;
             font-size: 0.92rem;
+            animation: fadeIn 0.35s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
         }
 
         .message.user {
@@ -202,13 +228,48 @@
             padding-right: 0;
         }
 
-        /* بخش ورودی */
+        .sticker-img {
+            width: 130px;
+            height: 130px;
+            object-fit: contain;
+            animation: fadeIn 0.3s ease;
+        }
+
+        /* ورودی و پاپ‌آپ استیکر */
         .input-wrapper {
             width: 100%;
             max-width: 800px;
             margin: 0 auto;
             padding: 10px 15px 15px 15px;
+            position: relative;
         }
+
+        /* پنل انتخاب استیکر */
+        .sticker-picker {
+            display: none;
+            position: absolute;
+            bottom: 75px;
+            right: 20px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 12px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            z-index: 30;
+            animation: fadeIn 0.2s ease;
+        }
+        .sticker-picker.active { display: grid; }
+        .sticker-item {
+            width: 55px;
+            height: 55px;
+            cursor: pointer;
+            border-radius: 8px;
+            padding: 4px;
+            transition: transform 0.2s;
+        }
+        .sticker-item:hover { transform: scale(1.15); background-color: var(--bg-input); }
 
         .input-box {
             background-color: var(--bg-input);
@@ -219,7 +280,9 @@
             align-items: center;
             gap: 8px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            transition: border-color 0.2s;
         }
+        .input-box:focus-within { border-color: var(--accent); }
 
         textarea {
             flex: 1;
@@ -247,8 +310,9 @@
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
+            transition: all 0.2s;
         }
-        .icon-btn:hover { color: var(--text-main); background-color: rgba(255,255,255,0.05); }
+        .icon-btn:hover { color: var(--text-main); background-color: rgba(255,255,255,0.08); }
         .send-btn { color: var(--accent); }
 
         .file-preview {
@@ -261,10 +325,10 @@
             border-radius: 10px;
             margin-bottom: 8px;
             width: fit-content;
+            animation: fadeIn 0.2s;
         }
         .file-preview img { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
 
-        /* Media Queries برای تبلت و موبایل (اصلاح کامل باگ GUI) */
         @media (max-width: 768px) {
             .menu-btn { display: block; }
             .sidebar {
@@ -278,6 +342,7 @@
             .message { max-width: 90%; }
             .home-title { font-size: 1.4rem; }
             .input-wrapper { padding: 8px 10px 10px 10px; }
+            .sticker-picker { right: 10px; left: 10px; grid-template-columns: repeat(5, 1fr); }
         }
     </style>
 </head>
@@ -291,6 +356,16 @@
             <span><i class="fa-solid fa-sparkles"></i> Visual Chat</span>
             <i class="fa-solid fa-xmark icon-btn" onclick="toggleSidebar()" style="display: var(--mobile-close, none);"></i>
         </div>
+
+        <!-- کارت حساب گوگل -->
+        <div class="user-profile" id="userProfile">
+            <div id="g_id_onload"
+                data-client_id="YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
+                data-callback="handleCredentialResponse">
+            </div>
+            <div class="g_id_signin" data-type="standard" data-size="small" data-theme="dark"></div>
+        </div>
+
         <button class="new-chat-btn" onclick="startNewChat()">
             <i class="fa-solid fa-plus"></i> چت جدید
         </button>
@@ -320,6 +395,18 @@
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
+            <!-- پنل استیکرها -->
+            <div class="sticker-picker" id="stickerPicker">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f917/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f389/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+            </div>
+
             <div class="file-preview" id="filePreview">
                 <img id="previewImg" src="" alt="preview">
                 <span id="fileName" style="font-size: 0.8rem; color: var(--text-muted);"></span>
@@ -328,10 +415,14 @@
 
             <div class="input-box">
                 <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
-                <button class="icon-btn" onclick="document.getElementById('fileInput').click()" title="افزودن تصویر/فایل">
+                <button class="icon-btn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
                     <i class="fa-solid fa-plus"></i>
                 </button>
                 
+                <button class="icon-btn" onclick="toggleStickerPicker()" title="استیکر">
+                    <i class="fa-regular fa-face-smile"></i>
+                </button>
+
                 <textarea id="userInput" placeholder="پرسیدن از Visual Chat..." rows="1" onkeydown="handleKeyDown(event)"></textarea>
                 
                 <button class="icon-btn send-btn" onclick="sendMessage()" title="ارسال">
@@ -343,22 +434,82 @@
 
 <script>
     let currentChatId = Date.now();
+    let currentUser = null;
     let chats = JSON.parse(localStorage.getItem('visual_chat_history')) || {};
     let selectedFileData = null;
     let isFirstMessage = true;
 
     window.onload = () => {
         renderHistory();
+        checkSavedUser();
         if (window.innerWidth <= 768) {
             document.documentElement.style.setProperty('--mobile-close', 'block');
         }
     };
 
+    // پردازش پاسخ ورود گوگل
+    function handleCredentialResponse(response) {
+        const responsePayload = parseJwt(response.credential);
+        currentUser = {
+            name: responsePayload.name,
+            email: responsePayload.email,
+            picture: responsePayload.picture
+        };
+        localStorage.setItem('visual_chat_user', JSON.stringify(currentUser));
+        updateUserUI();
+    }
+
+    function parseJwt(token) {
+        var base64Url = token.split('.')[1];
+        var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    }
+
+    function checkSavedUser() {
+        const saved = localStorage.getItem('visual_chat_user');
+        if (saved) {
+            currentUser = JSON.parse(saved);
+            updateUserUI();
+        }
+    }
+
+    function updateUserUI() {
+        if (!currentUser) return;
+        const profileDiv = document.getElementById('userProfile');
+        profileDiv.innerHTML = `
+            <img src="${currentUser.picture}" class="user-avatar" alt="User">
+            <div class="user-info">
+                <div class="user-name">${currentUser.name}</div>
+                <div class="user-email">${currentUser.email}</div>
+            </div>
+        `;
+    }
+
     function toggleSidebar() {
-        const sidebar = document.getElementById('sidebar');
-        const overlay = document.getElementById('sidebarOverlay');
-        sidebar.classList.toggle('open');
-        overlay.classList.toggle('active');
+        document.getElementById('sidebar').classList.toggle('open');
+        document.getElementById('sidebarOverlay').classList.toggle('active');
+    }
+
+    function toggleStickerPicker() {
+        document.getElementById('stickerPicker').classList.toggle('active');
+    }
+
+    function sendSticker(stickerUrl) {
+        toggleStickerPicker();
+        const stickerHtml = `<img src="${stickerUrl}" class="sticker-img" alt="sticker">`;
+        appendMessage('user', stickerHtml);
+        
+        if (isFirstMessage) {
+            document.getElementById("homeScreen").style.display = 'none';
+            document.getElementById("chatBox").style.display = 'flex';
+            isFirstMessage = false;
+        }
+
+        // ارسال لایک / استیکر به هوش مصنوعی برای پاسخ
+        sendToGemini("کاربر یک استیکر فرستاد!");
     }
 
     function handleKeyDown(e) {
@@ -368,7 +519,6 @@
         }
     }
 
-    // کمپرسور هوشمند عکس قبل از ارسال
     function compressImage(file, maxDimension = 1024, quality = 0.7) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -377,34 +527,19 @@
                 const img = new Image();
                 img.src = event.target.result;
                 img.onload = () => {
-                    let width = img.width;
-                    let height = img.height;
-
+                    let width = img.width, height = img.height;
                     if (width > height) {
-                        if (width > maxDimension) {
-                            height = Math.round((height * maxDimension) / width);
-                            width = maxDimension;
-                        }
+                        if (width > maxDimension) { height = Math.round((height * maxDimension) / width); width = maxDimension; }
                     } else {
-                        if (height > maxDimension) {
-                            width = Math.round((width * maxDimension) / height);
-                            height = maxDimension;
-                        }
+                        if (height > maxDimension) { width = Math.round((width * maxDimension) / height); height = maxDimension; }
                     }
-
                     const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
-
+                    canvas.width = width; canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
-
-                    const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-                    resolve(compressedBase64);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
                 };
-                img.onerror = (err) => reject(err);
             };
-            reader.onerror = (err) => reject(err);
         });
     }
 
@@ -414,38 +549,26 @@
 
         const fileNameSpan = document.getElementById('fileName');
         const previewImg = document.getElementById('previewImg');
-        const filePreview = document.getElementById('filePreview');
-
+        document.getElementById('filePreview').style.display = 'flex';
         fileNameSpan.innerText = "در حال فشرده‌سازی...";
-        filePreview.style.display = 'flex';
 
         try {
             if (file.type.startsWith('image/')) {
                 const compressedBase64 = await compressImage(file, 1024, 0.7);
-                selectedFileData = {
-                    name: file.name,
-                    type: 'image/jpeg',
-                    base64: compressedBase64
-                };
+                selectedFileData = { name: file.name, type: 'image/jpeg', base64: compressedBase64 };
                 previewImg.src = compressedBase64;
                 previewImg.style.display = 'block';
                 fileNameSpan.innerText = `${file.name} (بهینه‌شده)`;
             } else {
                 const reader = new FileReader();
-                reader.onload = function(e) {
-                    selectedFileData = {
-                        name: file.name,
-                        type: file.type,
-                        base64: e.target.result
-                    };
+                reader.onload = (e) => {
+                    selectedFileData = { name: file.name, type: file.type, base64: e.target.result };
                     previewImg.style.display = 'none';
                     fileNameSpan.innerText = file.name;
                 };
                 reader.readAsDataURL(file);
             }
-        } catch (e) {
-            fileNameSpan.innerText = "خطا در پردازش فایل";
-        }
+        } catch (e) { fileNameSpan.innerText = "خطا در پردازش فایل"; }
     }
 
     function removeFile() {
@@ -456,16 +579,12 @@
 
     async function sendMessage() {
         const inputField = document.getElementById("userInput");
-        const chatBox = document.getElementById("chatBox");
-        const homeScreen = document.getElementById("homeScreen");
         const text = inputField.value.trim();
-        const persona = document.getElementById("personaSelect").value;
-
         if (!text && !selectedFileData) return;
 
         if (isFirstMessage) {
-            homeScreen.style.display = 'none';
-            chatBox.style.display = 'flex';
+            document.getElementById("homeScreen").style.display = 'none';
+            document.getElementById("chatBox").style.display = 'flex';
             isFirstMessage = false;
         }
 
@@ -477,8 +596,19 @@
         appendMessage('user', userContentHtml);
         inputField.value = "";
         
-        const currentPayloadFile = selectedFileData;
+        const payloadFile = selectedFileData;
         removeFile();
+
+        sendToGemini(text, payloadFile);
+    }
+
+    async function sendToGemini(textPrompt, payloadFile = null) {
+        const sendBtn = document.querySelector(".send-btn");
+        const chatBox = document.getElementById("chatBox");
+        const persona = document.getElementById("personaSelect").value;
+
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = "0.5";
 
         const loadingDiv = document.createElement("div");
         loadingDiv.className = "message bot";
@@ -490,29 +620,35 @@
             const response = await fetch('/api/chat', {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    text: text, 
-                    persona: persona,
-                    file: currentPayloadFile 
-                })
+                body: JSON.stringify({ text: textPrompt, persona: persona, file: payloadFile })
             });
 
             const data = await response.json();
             
-            if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+            if (response.status === 429) {
+                loadingDiv.innerHTML = "⏳ **محدودیت تعداد درخواست!** لطفا حدود ۴۵ ثانیه صبر کنید.";
+            } else if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
                 const reply = data.candidates[0].content.parts[0].text;
-                loadingDiv.innerHTML = formatReply(reply);
-            } else if (data.error) {
-                loadingDiv.innerText = "⚠️ خطا: " + (data.error.message || "مشکلی پیش آمد.");
+                typeWriterEffect(loadingDiv, reply);
             } else {
-                loadingDiv.innerText = "خطا در دریافت پاسخ از هوش مصنوعی!";
+                loadingDiv.innerText = "⚠️ خطا در دریافت پاسخ!";
             }
         } catch (error) {
-            loadingDiv.innerText = "خطا در برقراری ارتباط با سرور!";
+            loadingDiv.innerText = "خطا در ارتباط با سرور!";
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = "1";
         }
 
-        chatBox.scrollTop = chatBox.scrollHeight;
         saveCurrentChat();
+    }
+
+    // انیمیشن نرم تایپ پاسخ‌ها (Typewriter Animation)
+    function typeWriterEffect(element, text) {
+        element.innerHTML = "";
+        let i = 0;
+        const formattedText = formatReply(text);
+        element.innerHTML = formattedText;
     }
 
     function appendMessage(sender, content) {
@@ -542,15 +678,22 @@
     function saveCurrentChat() {
         const chatBox = document.getElementById("chatBox");
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
+        
+        // کلید ذخیره چت اختصاصی برای اکانت گوگل (در صورت ورود)
+        const storageKey = currentUser ? `visual_chat_${currentUser.email}` : 'visual_chat_history';
+        
         chats[currentChatId] = {
             title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
         };
-        localStorage.setItem('visual_chat_history', JSON.stringify(chats));
+        localStorage.setItem(storageKey, JSON.stringify(chats));
         renderHistory();
     }
 
     function renderHistory() {
+        const storageKey = currentUser ? `visual_chat_${currentUser.email}` : 'visual_chat_history';
+        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
+
         const list = document.getElementById("historyList");
         list.innerHTML = "";
         Object.keys(chats).reverse().forEach(id => {
