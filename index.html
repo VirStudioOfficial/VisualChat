@@ -331,7 +331,6 @@
         .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: rgba(255,255,255,0.08); }
         .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        /* استایل حالت فعال بودن سرچ وب */
         .icon-btn.search-active {
             color: var(--accent) !important;
             background-color: rgba(56, 189, 248, 0.15) !important;
@@ -449,7 +448,6 @@
                     <i class="fa-regular fa-face-smile"></i>
                 </button>
 
-                <!-- دکمه جدید فعال/غیرفعال‌سازی جستجوی وب -->
                 <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب (گوگل)">
                     <i class="fa-solid fa-globe"></i>
                 </button>
@@ -467,10 +465,11 @@
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
     let currentUser = null;
     let chats = {};
+    let chatHistoryData = {}; // حافظه پیام‌ها برای ارسال به بک‌اند
     let selectedFileData = null;
     let isFirstMessage = true;
     let isGenerating = false;
-    let isSearchEnabled = false; // وضعیت سرچ وب
+    let isSearchEnabled = false;
     let currentAbortController = null;
     let typeWriterInterval = null;
 
@@ -480,6 +479,9 @@
 
         const storageKey = currentUser ? `visual_chat_${currentUser.email}` : 'visual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
+        
+        const historyKey = currentUser ? `visual_history_${currentUser.email}` : 'visual_history_data';
+        chatHistoryData = JSON.parse(localStorage.getItem(historyKey)) || {};
 
         if (chats[currentChatId]) {
             loadChat(currentChatId);
@@ -715,8 +717,20 @@
         chatBox.appendChild(loadingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
 
+        // محاسبه دقیق زمان و تاریخ ایران جهت برطرف شدن مشکل زمان
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' });
+        const dateString = now.toLocaleDateString('fa-IR-u-nu-latn', { timeZone: 'Asia/Tehran', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const contextInfo = `[زمان دقیق ایران: امروز ${dateString} | ساعت: ${timeString}]`;
+
         const systemInstruction = "دستورالعمل مهم: نام تو Visual Bot است. اگر هر کسی درباره هویت، نام، مدل یا سازنده تو پرسید، تحت هیچ شرایطی نباید نام Gemini یا Google را ببری و باید بگویی نام من Visual Bot است. همچنین در استفاده از ایموجی زیاده‌روی نکن و حداکثر ۱ تا ۲ ایموجی ملایم در کل متن استفاده کن.";
-        const fullPrompt = systemInstruction + "\n\nمتن کاربر: " + (textPrompt || '');
+        const fullPrompt = systemInstruction + "\n" + contextInfo + "\n\nمتن کاربر: " + (textPrompt || '');
+
+        // بروزرسانی حافظه چت بر اساس شاسی این گفتگو
+        if (!chatHistoryData[currentChatId]) {
+            chatHistoryData[currentChatId] = [];
+        }
+        chatHistoryData[currentChatId].push({ role: 'user', text: fullPrompt });
 
         currentAbortController = new AbortController();
 
@@ -728,7 +742,8 @@
                     text: fullPrompt, 
                     persona: persona, 
                     file: payloadFile,
-                    webSearch: isSearchEnabled // ارسال متغیر سرچ به بک‌اند
+                    webSearch: isSearchEnabled,
+                    history: chatHistoryData[currentChatId] // ارسال کل تاریخچه چت برای حافظه‌دار شدن
                 }),
                 signal: currentAbortController.signal
             });
@@ -741,6 +756,10 @@
                 saveCurrentChat();
             } else if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
                 const reply = data.candidates[0].content.parts[0].text;
+                
+                // افزودن پاسخ مدل به حافظه چت
+                chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+
                 typeWriterEffect(loadingDiv, reply, () => {
                     setGeneratingState(false);
                     saveCurrentChat();
@@ -810,12 +829,14 @@
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
 
         const storageKey = currentUser ? `visual_chat_${currentUser.email}` : 'visual_chat_history';
+        const historyKey = currentUser ? `visual_history_${currentUser.email}` : 'visual_history_data';
 
         chats[currentChatId] = {
             title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
         };
         localStorage.setItem(storageKey, JSON.stringify(chats));
+        localStorage.setItem(historyKey, JSON.stringify(chatHistoryData));
         localStorage.setItem('last_active_chat_id', currentChatId);
         renderHistory();
     }
