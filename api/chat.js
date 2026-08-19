@@ -12,7 +12,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
-    // ۱. ساخت آرایه استاندارد و تمیز برای تاریخچه
+    // ۱. ساخت تاریخچه پیام‌ها
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         }];
     }
 
-    // ۲. اعمال Persona
+    // ۲. اعمال پرسونا
     if (persona && contents.length > 0) {
         let prefix = "";
         if (persona === 'friendly') prefix = "[پاسخ را صمیمی و دوستانه بده] ";
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // ۳. افزودن عکس در صورت وجود به آخرین پیام
+    // ۳. افزودن فایل/عکس
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -52,12 +52,14 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۴. بدنه اصلی درخواست برای ارسال به گوگل
+    // ۴. تعیین مدل و ابزار سرچ
+    // اگر سرچ روشن باشد از 2.5-flash استفاده می‌شود تا ارور ندهد
+    const selectedModel = webSearch ? 'gemini-2.5-flash' : 'gemini-3.5-flash-lite';
+
     const requestBody = { contents: contents };
 
-    // فعال‌سازی سرچ فقط در صورت فعال بودن
     if (webSearch) {
-        requestBody.tools = [{ googleSearch: {} }];
+        requestBody.tools = [{ google_search: {} }]; // فرمت صحیح سرچ وب برای Gemini
     }
 
     let lastError = null;
@@ -66,7 +68,7 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -83,7 +85,7 @@ export default async function handler(req, res) {
                 continue; 
             }
 
-            console.log(`✅ Successfully responded using Key #${i + 1}`);
+            console.log(`✅ Successfully responded using Key #${i + 1} with model ${selectedModel}`);
             return res.status(200).json(data);
 
         } catch (err) {
