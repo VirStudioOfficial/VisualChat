@@ -73,7 +73,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { text, rawText, file, webSearch, history } = req.body || {};
+        const { userName, text, rawText, file, webSearch, history } = req.body || {};
         const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : (text || "");
 
         const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
@@ -132,9 +132,21 @@ export default async function handler(req, res) {
             }
         }
 
-        // تنظیم مدل روی gemini-3.5-flash-lite
+        // مدل هوش مصنوعی Gemini 3.5 Flash Lite
         const MODEL_NAME = 'gemini-3.5-flash-lite';
         let lastError = null;
+
+        // دستورالعمل سیستمی عالی برای تکامل، هوشمندی و درک بالا
+        const systemInstruction = {
+            parts: [{
+                text: `نام تو Virtual Bot است. هوش مصنوعی حرفه‌ای، باهوش و بسیار منطقی هستی.
+نام کاربر: "${userName || 'دوست من'}" است.
+دستورالعمل‌ها:
+۱. پاسخ‌ها باید دقیق، ساختاریافته، کاملاً روان و به دور از ابهام باشند.
+۲. اگر کاربر سوال علمی یا کدی پرسید، دقیق‌ترین راه‌حل را به همراه فرمت‌بندی مناسب ارائه‌ده.
+۳. همواره به زبان فارسی صمیمی اما کاملاً محترمانه گفتگو کن.`
+            }]
+        };
 
         for (let i = 0; i < geminiKeys.length; i++) {
             const currentKey = geminiKeys[i];
@@ -145,7 +157,10 @@ export default async function handler(req, res) {
                         'Content-Type': 'application/json',
                         'x-goog-api-key': currentKey
                     },
-                    body: JSON.stringify({ contents: contents })
+                    body: JSON.stringify({ 
+                        contents: contents,
+                        systemInstruction: systemInstruction 
+                    })
                 });
 
                 const data = await response.json();
