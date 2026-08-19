@@ -73,7 +73,8 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { userName, text, rawText, file, webSearch, history } = req.body || {};
+        // ===== 🔥 دریافت مدل از درخواست =====
+        const { userName, text, rawText, file, webSearch, history, model } = req.body || {};
         const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : (text || "");
 
         const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
@@ -88,7 +89,6 @@ export default async function handler(req, res) {
 
         let contents = [];
 
-        // ===== ساخت تاریخچه =====
         if (history && Array.isArray(history) && history.length > 0) {
             contents = history.map(item => ({
                 role: item.role === 'user' ? 'user' : 'model',
@@ -105,7 +105,6 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: { message: 'متن ورودی خالی است.' } });
         }
 
-        // ===== جستجوی وب =====
         const isWebSearchActive = webSearch === true || webSearch === 'true';
         const isSearchNeeded = isWebSearchActive && shouldSearchWeb(searchQueryBase);
         res.setHeader('X-Search-Performed', String(isSearchNeeded));
@@ -120,16 +119,13 @@ export default async function handler(req, res) {
             }
         }
 
-        // ===== ✅ ارسال فایل (تصویر/ویدیو) با MIME Type درست =====
         if (file && file.base64 && contents.length > 0) {
             const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
             const lastIndex = contents.length - 1;
             
             if (contents[lastIndex].role === 'user') {
-                // تشخیص MIME Type بر اساس نام فایل
                 let mimeType = file.type || 'image/jpeg';
                 
-                // اگه ویدیو هست، mime_type رو درست کن
                 if (file.name && /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name)) {
                     const ext = file.name.split('.').pop().toLowerCase();
                     const mimeMap = {
@@ -156,19 +152,60 @@ export default async function handler(req, res) {
             }
         }
 
-        // ===== مدل: gemini-3.5-flash-lite (ساپورت ویدیو داره!) =====
-        const MODEL_NAME = 'gemini-3.5-flash-lite';
+        // ============================================================
+        // 🔥 مدل رو از درخواست میگیریم (اگه نباشه، پیش‌فرض)
+        // ============================================================
+        const MODEL_NAME = model || 'gemini-3.5-flash-lite';
+        console.log(`🤖 Using model: ${MODEL_NAME}`);
         let lastError = null;
 
-        // ===== System Instruction (به روش درست) =====
-        const systemText = `نام تو Virtual Bot است. هوش مصنوعی حرفه‌ای، باهوش و بسیار منطقی هستی.
+        // ===== System Instruction (پویا بر اساس مدل) =====
+        let systemText = '';
+        if (MODEL_NAME === 'gemini-3.5-flash-lite') {
+            systemText = `تو Virtual Bot 1.1 هستی، یک هوش مصنوعی سریع و پاسخگو با مدل Gemini 3.5 Flash-Lite.
 نام کاربر: "${userName || 'دوست من'}" است.
-دستورالعمل‌ها:
-۱. پاسخ‌ها باید دقیق، ساختاریافته، کاملاً روان و به دور از ابهام باشند.
-۲. اگر کاربر سوال علمی یا کدی پرسید، دقیق‌ترین راه‌حل را به همراه فرمت‌بندی مناسب ارائه‌ده.
-۳. همواره به زبان فارسی صمیمی اما کاملاً محترمانه گفتگو کن.`;
 
-        // ===== اضافه کردن system instruction به اولین پیام =====
+⚡ ویژگی‌های تو:
+- سریع‌ترین پاسخ‌ها
+- مناسب برای مکالمات روزمره
+- پاسخ‌های مختصر و مفید
+
+📌 دستورالعمل‌ها:
+- پاسخ‌ها را کاملاً به فارسی روان بنویس.
+- مختصر و مفید پاسخ بده.
+- با لحن دوستانه و صمیمی صحبت کن.`;
+        } else if (MODEL_NAME === 'gemini-3.6-flash') {
+            systemText = `تو Virtual Bot 1.5 هستی، یک هوش مصنوعی پیشرفته با مدل Gemini 3.6 Flash.
+نام کاربر: "${userName || 'دوست من'}" است.
+
+🚀 ویژگی‌های تو:
+- جدیدترین و به‌روزترین مدل
+- دقت بالا در تحلیل متن و تصویر
+- پاسخ‌های ساختاریافته و کامل
+
+📌 دستورالعمل‌ها:
+- پاسخ‌ها را کاملاً به فارسی روان و محترمانه بنویس.
+- اگر کاربر سوال کد/برنامه‌نویسی پرسید، کد کامل و فرمت‌شده بده.
+- در صورت نیاز، از اطلاعات جستجوی وب استفاده کن.`;
+        } else if (MODEL_NAME === 'gemini-3.1-pro') {
+            systemText = `تو Virtual Bot 1.3 هستی، یک هوش مصنوعی حرفه‌ای با مدل Gemini 3.1 Pro.
+نام کاربر: "${userName || 'دوست من'}" است.
+
+🧠 ویژگی‌های تو:
+- تخصص در کدنویسی و مسائل فنی
+- استدلال عمیق و دقیق
+- مناسب برای پروژه‌های پیچیده
+
+📌 دستورالعمل‌ها:
+- پاسخ‌ها را کاملاً به فارسی روان بنویس.
+- برای سوالات کدنویسی، کد کامل با توضیحات دقیق بده.
+- با لحن حرفه‌ای و محترمانه صحبت کن.`;
+        } else {
+            systemText = `تو Virtual Bot هستی، یک هوش مصنوعی حرفه‌ای.
+نام کاربر: "${userName || 'دوست من'}" است.
+پاسخ‌های دقیق، ساختاریافته و روان به فارسی بده.`;
+        }
+
         if (contents.length > 0 && contents[0].role === 'user') {
             contents[0].parts[0].text = `${systemText}\n\n${contents[0].parts[0].text}`;
         }
@@ -188,7 +225,7 @@ export default async function handler(req, res) {
                 const data = await response.json();
 
                 if (!response.ok) {
-                    console.warn(`⚠️ Gemini Key #${i + 1} failed:`, data?.error?.message || response.statusText);
+                    console.warn(`⚠️ Gemini Key #${i + 1} failed for ${MODEL_NAME}:`, data?.error?.message || response.statusText);
                     lastError = data;
                     continue;
                 }
@@ -203,7 +240,7 @@ export default async function handler(req, res) {
 
         return res.status(500).json({
             error: {
-                message: 'خطا در دریافت پاسخ از تمامی کلیدهای Gemini',
+                message: `خطا در دریافت پاسخ از تمامی کلیدهای Gemini برای مدل ${MODEL_NAME}`,
                 details: lastError
             }
         });
