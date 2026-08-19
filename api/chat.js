@@ -82,21 +82,20 @@ export default async function handler(req, res) {
 
     let contents = [];
 
-    // ۱. بازسازی تاریخچه چت
+    // ۱. بازسازی تاریخچه چت (اصلاح منطق تکرار)
     if (history && Array.isArray(history) && history.length > 0) {
         contents = history.map(item => ({
             role: item.role === 'user' ? 'user' : 'model',
             parts: [{ text: String(item.text || "") }]
         }));
+    } else {
+        contents.push({
+            role: 'user',
+            parts: [{ text: String(text || searchQueryBase || "") }]
+        });
     }
 
-    // ۲. اضافه کردن پیام جدید کاربر به انتهای تاریخچه (اصلاح باگ اصلی)
-    contents.push({
-        role: 'user',
-        parts: [{ text: String(text || searchQueryBase || "") }]
-    });
-
-    // ۳. بررسی و تزریق سرچ وب
+    // ۲. بررسی و تزریق سرچ وب
     const isWebSearchActive = webSearch === true || webSearch === 'true';
     const isSearchNeeded = isWebSearchActive && shouldSearchWeb(searchQueryBase);
 
@@ -105,14 +104,14 @@ export default async function handler(req, res) {
         const searchResults = await fetchTavilyResults(searchQueryBase, tavilyKeys);
         const lastIndex = contents.length - 1;
 
-        if (searchResults && contents[lastIndex].role === 'user') {
+        if (searchResults && lastIndex >= 0 && contents[lastIndex].role === 'user') {
             contents[lastIndex].parts[0].text += `\n\n[نتایج جستجوی زنده وب برای این پرسش]:\n${searchResults}\n\n[دستورالعمل: با استفاده از اطلاعات بالا، پاسخ دقیق و به روز ارائه بده.]`;
         }
     } else {
         console.log(`⏩ SKIPPED SEARCH FOR: "${searchQueryBase}"`);
     }
 
-    // ۴. تزریق فایل/عکس به آخرین پیام
+    // ۳. تزریق فایل/عکس به آخرین پیام
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
