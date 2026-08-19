@@ -12,7 +12,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: { message: 'هیچ کلیدی در تنظیمات Vercel یافت نشد!' } });
     }
 
-    // ۱. آماده‌سازی تاریخچه پیام‌ها به فرمت استاندارد
+    // ۱. ساخت آرایه contents بر اساس تاریخچه
     let contents = [];
 
     if (history && Array.isArray(history) && history.length > 0) {
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // ۳. اضافه کردن فایل (عکس) به آخرین پیام در صورت وجود
+    // ۳. افزودن فایل (عکس) در صورت وجود
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.split(',')[1];
         const lastIndex = contents.length - 1;
@@ -52,7 +52,7 @@ export default async function handler(req, res) {
         });
     }
 
-    // ۴. قابلیت سرچ وب
+    // ۴. ابزار سرچ وب
     const tools = webSearch ? [{ googleSearch: {} }] : [];
 
     let lastError = null;
@@ -61,7 +61,8 @@ export default async function handler(req, res) {
         const currentKey = apiKeys[i];
         
         try {
-            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent', {
+            // دقیقاً ست شده روی gemini-3.5-flash-lite
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
