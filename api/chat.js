@@ -27,7 +27,7 @@ function shouldSearchWeb(userText) {
     return allowedKeywords.some(kw => normalized.includes(kw));
 }
 
-// تابع اجرا و چرخش خودکار روی کلیدهای Tavily
+// تابع سرچ Tavily
 async function fetchTavilyResults(query, tavilyKeys) {
     if (!tavilyKeys || tavilyKeys.length === 0) return null;
 
@@ -60,7 +60,6 @@ async function fetchTavilyResults(query, tavilyKeys) {
     return null;
 }
 
-// هاندر اصلی سرور
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: { message: 'Method not allowed' } });
@@ -83,18 +82,21 @@ export default async function handler(req, res) {
 
     let contents = [];
 
+    // ۱. بازسازی تاریخچه چت
     if (history && Array.isArray(history) && history.length > 0) {
         contents = history.map(item => ({
             role: item.role === 'user' ? 'user' : 'model',
             parts: [{ text: String(item.text || "") }]
         }));
-    } else {
-        contents = [{
-            role: 'user',
-            parts: [{ text: String(text || "") }]
-        }];
     }
 
+    // ۲. اضافه کردن پیام جدید کاربر به انتهای تاریخچه (اصلاح باگ اصلی)
+    contents.push({
+        role: 'user',
+        parts: [{ text: String(text || searchQueryBase || "") }]
+    });
+
+    // ۳. بررسی و تزریق سرچ وب
     const isWebSearchActive = webSearch === true || webSearch === 'true';
     const isSearchNeeded = isWebSearchActive && shouldSearchWeb(searchQueryBase);
 
@@ -110,6 +112,7 @@ export default async function handler(req, res) {
         console.log(`⏩ SKIPPED SEARCH FOR: "${searchQueryBase}"`);
     }
 
+    // ۴. تزریق فایل/عکس به آخرین پیام
     if (file && file.base64 && contents.length > 0) {
         const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
         const lastIndex = contents.length - 1;
@@ -123,7 +126,7 @@ export default async function handler(req, res) {
 
     res.setHeader('X-Search-Performed', String(isSearchNeeded));
 
-    const MODEL_NAME = 'gemini-1.5-flash';
+    const MODEL_NAME = 'gemini-3.5-flash-lite';
     let lastError = null;
 
     for (let i = 0; i < geminiKeys.length; i++) {
