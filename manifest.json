@@ -1,0 +1,11 @@
+{
+  "background_color": "#0b0d19",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "virtual bot",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "virtualbot",
+  "start_url": "/",
+  "theme_color": "#ffffff"
+}
