@@ -111,22 +111,20 @@
                 radial-gradient(circle at -10% 110%, rgba(34,211,238,0.10), transparent 40%);
         }
 
-        /* --- مودال لاگین اجباری --- */
+        /* --- مودال لاگین (غیرفعال پیش‌فرض جهت جلوگیری از چشمک) --- */
         #authOverlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(10, 12, 18, 0.88);
             backdrop-filter: blur(12px);
             z-index: 9999;
-            display: flex;
+            display: none;
             justify-content: center;
             align-items: center;
-            transition: opacity 0.3s ease, visibility 0.3s ease;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
         }
-        #authOverlay.hidden {
-            opacity: 0;
-            visibility: hidden;
-            pointer-events: none;
+        #authOverlay.active {
+            display: flex !important;
         }
 
         .auth-card {
@@ -138,7 +136,7 @@
             max-width: 400px;
             text-align: center;
             box-shadow: 0 20px 50px var(--shadow-b);
-            animation: fadeIn 0.4s ease-out;
+            animation: fadeIn 0.3s ease-out;
         }
 
         .auth-card .home-mark {
@@ -172,6 +170,11 @@
         @keyframes messageIn {
             from { opacity: 0; transform: translateY(10px) scale(0.985); }
             to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
+            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         }
 
         @keyframes glowPulse {
@@ -604,7 +607,7 @@
         }
         .settings-overlay.active { display: block; }
 
-        /* اصلاح کامل مودال تنظیمات و استایل اسکرول */
+        /* اصلاح کامل پوزیشن، سنتر شدن و اسکرول مودال تنظیمات */
         .settings-modal {
             display: none;
             position: fixed;
@@ -619,12 +622,14 @@
             padding: 22px;
             z-index: 41;
             box-shadow: 0 20px 60px var(--shadow-b);
-            animation: messageIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
             overflow-y: auto;
         }
         .settings-modal::-webkit-scrollbar { width: 5px; }
         .settings-modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-        .settings-modal.active { display: block; }
+        .settings-modal.active {
+            display: block;
+            animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
 
         .settings-header {
             display: flex;
@@ -763,7 +768,7 @@
 </head>
 <body>
 
-    <!-- مودال لاگین اجباری گوگل -->
+    <!-- مودال لاگین گوگل -->
     <div id="authOverlay">
         <div class="auth-card">
             <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
@@ -983,7 +988,7 @@
         };
 
         localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
-        document.getElementById('authOverlay').classList.add('hidden');
+        document.getElementById('authOverlay').classList.remove('active');
 
         initUserData();
     }
@@ -999,15 +1004,16 @@
 
     function checkSavedUser() {
         const saved = localStorage.getItem('virtual_chat_user');
+        const overlay = document.getElementById('authOverlay');
         if (saved) {
             currentUser = JSON.parse(saved);
             if (!currentUser.customName) {
                 currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email);
             }
-            document.getElementById('authOverlay').classList.add('hidden');
+            overlay.classList.remove('active');
             initUserData();
         } else {
-            document.getElementById('authOverlay').classList.remove('hidden');
+            overlay.classList.add('active');
         }
     }
 
@@ -1026,7 +1032,6 @@
         }
     }
 
-    // به‌روزرسانی UI بخش کاربر: ایمیل حذف شد، اسم و دکمه‌های خروج/سوییچ اکانت اضافه شد
     function updateUserUI() {
         if (!currentUser) return;
         const profileDiv = document.getElementById('userProfile');
@@ -1051,23 +1056,21 @@
         document.getElementById('customUserNameInput').value = currentUser.customName || currentUser.name;
     }
 
-    // خروج از حساب
     function logoutUser() {
         if (confirm('آیا می‌خواهی از حساب کاربری خارج بشی؟')) {
             localStorage.removeItem('virtual_chat_user');
             currentUser = null;
-            document.getElementById('authOverlay').classList.remove('hidden');
+            document.getElementById('authOverlay').classList.add('active');
             if (window.google && google.accounts && google.accounts.id) {
                 google.accounts.id.disableAutoSelect();
             }
         }
     }
 
-    // سوییچ اکانت (تغییر حساب)
     function switchAccount() {
         localStorage.removeItem('virtual_chat_user');
         currentUser = null;
-        document.getElementById('authOverlay').classList.remove('hidden');
+        document.getElementById('authOverlay').classList.add('active');
         if (window.google && google.accounts && google.accounts.id) {
             google.accounts.id.disableAutoSelect();
             google.accounts.id.prompt();
