@@ -228,6 +228,17 @@
             color: transparent;
         }
 
+        /* Close Icon Button inside Sidebar */
+        .sidebar-close-btn {
+            display: flex; 
+            color: var(--text-muted); 
+            width: 32px; 
+            height: 32px; 
+            border-radius: 10px; 
+            transition: 0.2s ease;
+        }
+        .sidebar-close-btn:hover { color: var(--text-main); background: var(--bg-card); transform: rotate(90deg); }
+
         .user-profile {
             background-color: var(--bg-card);
             border: 1px solid var(--border-soft);
@@ -436,7 +447,7 @@
         .scroll-latest-btn.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
         .scroll-latest-btn:hover { border-color:var(--accent-2); transform:translateX(-50%) scale(1.05); }
 
-        /* ===== NEW INPUT & MODEL AREA (Gemini Style) ===== */
+        /* ===== NEW INPUT & MODEL AREA ===== */
         .input-area-wrapper {
             width: 100%;
             max-width: 940px;
@@ -450,7 +461,7 @@
         .input-box {
             background: var(--bg-input);
             border: 1px solid var(--border-soft);
-            border-radius: 40px; /* Pill shape like Gemini */
+            border-radius: 40px;
             padding: 8px 12px 8px 16px;
             display: flex;
             align-items: center;
@@ -466,7 +477,6 @@
             box-shadow: 0 0 0 4px rgba(139,92,246,0.1), 0 8px 32px var(--shadow-a);
         }
 
-        /* The Text Area */
         textarea#userInput {
             flex: 1;
             color: var(--text-main) !important;
@@ -482,13 +492,12 @@
             outline: none !important;
             box-shadow: none !important;
             line-height: 1.5;
-            margin: 0; /* Fix the floating issue */
+            margin: 0;
             align-self: center;
         }
 
         textarea::placeholder { color: var(--text-muted) !important; }
 
-        /* Side Icons (Send, Attach, Globe) */
         .input-box .side-icons {
             display: flex;
             align-items: center;
@@ -527,7 +536,6 @@
         .action-btn:hover:not(:disabled) { filter: brightness(1.1); transform: scale(1.05); }
         .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
 
-        /* ===== MODEL SELECTOR INSIDE INPUT (Like Gemini) ===== */
         .model-pill-selector {
             display: flex;
             align-items: center;
@@ -539,12 +547,10 @@
             transition: all 0.2s ease;
             position: relative;
             flex-shrink: 0;
-            margin-left: 6px; /* Spacing from text */
+            margin-left: 6px;
             height: 32px;
         }
-        .model-pill-selector:hover {
-            background: rgba(255,255,255,0.15);
-        }
+        .model-pill-selector:hover { background: rgba(255,255,255,0.15); }
         .model-pill-selector .model-icon {
             width: 20px; height: 20px;
             border-radius: 50%;
@@ -591,20 +597,12 @@
             font-size: 0.8rem;
             color: var(--text-muted);
         }
-        .model-pill-dropdown-item:hover {
-            background: var(--bg-card);
-            color: var(--text-main);
-        }
-        .model-pill-dropdown-item.active {
-            background: var(--bg-card);
-            color: var(--text-main);
-            border: 1px solid rgba(139,92,246,0.2);
-        }
+        .model-pill-dropdown-item:hover { background: var(--bg-card); color: var(--text-main); }
+        .model-pill-dropdown-item.active { background: var(--bg-card); color: var(--text-main); border: 1px solid rgba(139,92,246,0.2); }
         .model-pill-dropdown-item .item-name { font-weight: 600; }
         .model-pill-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
         .model-pill-dropdown-item .item-check { margin-right: auto; color: var(--accent-2); font-size: 0.8rem; }
 
-        /* File preview inside input */
         .input-box .file-preview {
             display: none;
             align-items: center;
@@ -792,11 +790,8 @@
         .history-search-input { display: none; min-width:0; flex:1; height:38px; padding:0 14px; border:1px solid var(--border-soft); outline:none; background:var(--bg-input); color:var(--text-main); border-radius:10px; font-family:inherit; font-size:0.8rem; }
         .history-tools.active .history-search-input { display: block; animation: fadeIn 0.2s ease; }
         
-        .sidebar-close-btn { display: flex; color: var(--text-muted); width: 32px; height: 32px; border-radius: 10px; }
-        .sidebar-close-btn:hover { color: var(--text-main); background: var(--bg-card); }
-
         @media (min-width: 769px) {
-            .sidebar-close-btn { display: none; }
+            .sidebar-close-btn { display: flex; } /* Show close button on desktop too */
         }
     </style>
 </head>
@@ -891,7 +886,7 @@
 
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
-                <!-- NEW MODEL SELECTOR INSIDE INPUT (Like Gemini) -->
+                <!-- MODEL SELECTOR INSIDE INPUT -->
                 <div class="model-pill-selector" id="modelPill" onclick="togglePillDropdown()">
                     <span class="model-icon"><i class="fa-solid fa-sparkles"></i></span>
                     <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
@@ -1013,7 +1008,7 @@
 
 <script>
     // =====================================================
-    // سیستم انتخاب مدل (NEW PILL INSIDE INPUT VERSION)
+    // سیستم انتخاب مدل
     // =====================================================
     let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.6-flash';
     let currentModelDisplay = {
@@ -1048,7 +1043,7 @@
     });
 
     // =====================================================
-    // بقیه کدها (همه قابلیت‌ها) - با رفع باگ undefined در پیام‌ها
+    // سیستم احراز هویت و مدیریت کاربر
     // =====================================================
 
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
@@ -1057,10 +1052,15 @@
     let chatHistoryData = {};
     let selectedFileData = null;
     let isFirstMessage = true;
-    let isGenerating = false;
+    
+    // === FIX: Global State for Stop/Cancel across chat switches ===
+    window.globalGenerateState = {
+        isGenerating: false,
+        abortController: null,
+        typeWriterInterval: null
+    };
+
     let isSearchEnabled = false;
-    let currentAbortController = null;
-    let typeWriterInterval = null;
     let lastFailedRequest = null;
 
 
@@ -1291,7 +1291,7 @@
     }
 
     function useSuggestion(el) {
-        if (isGenerating) return;
+        if (window.globalGenerateState.isGenerating) return;
         document.getElementById('userInput').value = el.innerText;
         autoResizeTextarea(document.getElementById('userInput'));
         sendMessage();
@@ -1309,7 +1309,7 @@
     }
 
     function toggleSearch() {
-        if (isGenerating) return;
+        if (window.globalGenerateState.isGenerating) return;
         isSearchEnabled = !isSearchEnabled;
         const btn = document.getElementById("searchToggleBtn");
         if (isSearchEnabled) {
@@ -1335,7 +1335,7 @@
     function handleKeyDown(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (!isGenerating) sendMessage();
+            if (!window.globalGenerateState.isGenerating) sendMessage();
         }
     }
 
@@ -1455,7 +1455,7 @@
     }
 
     async function processIncomingFile(file) {
-        if (isGenerating || !file) return;
+        if (window.globalGenerateState.isGenerating || !file) return;
 
         const fileNameSpan = document.getElementById('fileName');
         const previewImg = document.getElementById('previewImg');
@@ -1518,7 +1518,7 @@
         wrapper.dataset.fileDnDReady = '1';
 
         ['dragenter', 'dragover'].forEach(type => wrapper.addEventListener(type, (e) => {
-            if (isGenerating) return;
+            if (window.globalGenerateState.isGenerating) return;
             e.preventDefault();
             e.stopPropagation();
             wrapper.classList.add('drag-over');
@@ -1529,13 +1529,13 @@
             wrapper.classList.remove('drag-over');
         }));
         wrapper.addEventListener('drop', async (e) => {
-            if (isGenerating) return;
+            if (window.globalGenerateState.isGenerating) return;
             const file = e.dataTransfer?.files?.[0];
             if (file) await processIncomingFile(file);
         });
 
         input.addEventListener('paste', async (e) => {
-            if (isGenerating) return;
+            if (window.globalGenerateState.isGenerating) return;
             const files = Array.from(e.clipboardData?.files || []);
             let file = files[0];
             if (!file) {
@@ -1549,12 +1549,12 @@
     }
 
     function handleActionClick() {
-        if (isGenerating) stopGeneration();
+        if (window.globalGenerateState.isGenerating) stopGeneration();
         else sendMessage();
     }
 
     function setGeneratingState(generating) {
-        isGenerating = generating;
+        window.globalGenerateState.isGenerating = generating;
         const inputField = document.getElementById("userInput");
         const actionBtn = document.getElementById("actionBtn");
         const actionIcon = document.getElementById("actionIcon");
@@ -1577,8 +1577,8 @@
     }
 
     function stopGeneration() {
-        if (currentAbortController) currentAbortController.abort();
-        if (typeWriterInterval) clearInterval(typeWriterInterval);
+        if (window.globalGenerateState.abortController) window.globalGenerateState.abortController.abort();
+        if (window.globalGenerateState.typeWriterInterval) clearInterval(window.globalGenerateState.typeWriterInterval);
         setGeneratingState(false);
         saveCurrentChat();
     }
@@ -1653,7 +1653,7 @@
     }
 
     async function retryFromButton(btn) {
-        if (isGenerating) return;
+        if (window.globalGenerateState.isGenerating) return;
         let request = lastFailedRequest;
         if (!request) {
             try {
@@ -1666,7 +1666,7 @@
     }
 
     async function retryRequest(request = lastFailedRequest) {
-        if (!request || isGenerating) return;
+        if (!request || window.globalGenerateState.isGenerating) return;
         await sendToGemini(request.textPrompt, request.payloadFile, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
     }
 
@@ -1697,7 +1697,9 @@
             ensureVirtualPersona();
             chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
         }
-        currentAbortController = new AbortController();
+        
+        // Using Global AbortController
+        window.globalGenerateState.abortController = new AbortController();
 
         try {
             const response = await fetch('/api/chat', {
@@ -1713,7 +1715,7 @@
                     model: currentModel,
                     styleHint: virtualPersona
                 }),
-                signal: currentAbortController.signal
+                signal: window.globalGenerateState.abortController.signal
             });
 
             if (response.status === 429) {
@@ -1758,7 +1760,7 @@
             setGeneratingState(false);
             saveCurrentChat();
         } finally {
-            currentAbortController = null;
+            window.globalGenerateState.abortController = null;
             updateScrollLatestButton();
         }
     }
@@ -1766,13 +1768,14 @@
     function typeWriterEffect(element, text, onComplete) {
         element.textContent = "";
         let i = 0;
-        typeWriterInterval = setInterval(() => {
+        window.globalGenerateState.typeWriterInterval = setInterval(() => {
             if (i < text.length) {
                 element.textContent += text.charAt(i++);
                 const chatBox = document.getElementById("chatBox");
                 chatBox.scrollTop = chatBox.scrollHeight;
             } else {
-                clearInterval(typeWriterInterval);
+                clearInterval(window.globalGenerateState.typeWriterInterval);
+                window.globalGenerateState.typeWriterInterval = null;
                 element.innerHTML = formatReply(text);
                 if (onComplete) onComplete();
             }
@@ -1792,7 +1795,6 @@
         chatBox.scrollTop = chatBox.scrollHeight;
         updateScrollLatestButton();
         
-        // Decorate messages immediately to prevent undefined bugs
         addMessageActions(wrapperDiv, sender);
     }
 
@@ -1923,12 +1925,12 @@
         chatBox?.addEventListener('scroll', updateScrollLatestButton, { passive: true });
         repairLoadedChatButtons(chatBox);
         updateScrollLatestButton();
-        decorateMessages(); // Final safety net
+        decorateMessages();
     }
     setTimeout(initializeV3, 0);
 
     function startNewChat() {
-        if (isGenerating) stopGeneration();
+        if (window.globalGenerateState.isGenerating) stopGeneration();
         currentChatId = Date.now();
         localStorage.setItem('last_active_chat_id', currentChatId);
         isFirstMessage = true;
@@ -1968,7 +1970,7 @@
             const item = document.createElement("div");
             item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
             item.innerHTML = `<i class="fa-regular fa-comment-dots"></i><span>${escapeHtml(title)}</span>`;
-            item.onclick = () => { if (!isGenerating) loadChat(id); };
+            item.onclick = () => { if (!window.globalGenerateState.isGenerating) loadChat(id); };
             list.appendChild(item);
         });
         const empty = document.getElementById('historyEmpty');
@@ -2005,7 +2007,7 @@
 
 
     function loadChat(id, isInitialLoad = false) {
-        if (isGenerating) stopGeneration();
+        if (window.globalGenerateState.isGenerating) stopGeneration();
         currentChatId = id;
         localStorage.setItem('last_active_chat_id', currentChatId);
         isFirstMessage = false;
@@ -2020,7 +2022,7 @@
         scrollToBottom();
         requestAnimationFrame(scrollToBottom);
         setTimeout(scrollToBottom, isInitialLoad ? 120 : 0);
-        setTimeout(decorateMessages, 100); // Apply labels after load
+        setTimeout(decorateMessages, 100);
     }
 
     function exportCurrentChat(format){
@@ -2041,13 +2043,11 @@
         localStorage.setItem(storageKey,JSON.stringify(chats));localStorage.setItem(historyKey,JSON.stringify(chatHistoryData));startNewChat();closeSettings();
     }
 
-    // ===== FIX FOR THE UNDEFINED BUG =====
     function addMessageActions(wrapper, sender) {
         if (!wrapper || wrapper.querySelector('.message-actions')) return;
         const msg = wrapper.querySelector('.message');
         if (!msg) return;
         
-        // رفع باگ undefined: اگر کاربر لاگین نکرده باشد، نام پیش‌فرض بگذار
         let displayName = '';
         if (sender === 'user') {
             displayName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'شما';
@@ -2058,7 +2058,6 @@
         const bar = document.createElement('div');
         bar.className = 'message-actions';
         
-        // اضافه کردن نام کاربر به صورت یک تگ کوچک و تمیز
         const nameTag = document.createElement('span');
         nameTag.style.cssText = 'font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-left:8px; opacity:0.8;';
         nameTag.textContent = displayName;
@@ -2086,7 +2085,7 @@
     }
 
     function regenerateMessage(wrapper) {
-        if(isGenerating) return;
+        if(window.globalGenerateState.isGenerating) return;
         const botWrappers=[...document.querySelectorAll('#chatBox .message-wrapper.bot')];
         const index=botWrappers.indexOf(wrapper);
         if(index<0) return;
@@ -2103,7 +2102,7 @@
     }
 
     function editUserMessage(wrapper){
-        if(isGenerating) return;
+        if(window.globalGenerateState.isGenerating) return;
         const text=wrapper.querySelector('.message')?.innerText||'';
         const input=document.getElementById('userInput'); input.value=text; autoResizeTextarea(input); input.focus();
         wrapper.classList.add('editing');
@@ -2120,7 +2119,6 @@
         if(hits[0]) hits[0].scrollIntoView({behavior:'smooth',block:'center'});
     }
 
-    // Keep existing keyboard behavior but add / command discovery.
     const __oldHandleKeyDown = handleKeyDown;
     handleKeyDown = function(e){
         const input=e.target;
@@ -2132,7 +2130,6 @@
         menu?.classList.toggle('active', this.value.trim()==='/');
     });
 
-    // Upgrade persona without changing /api/chat payload shape.
     ensureVirtualPersona = function(){
         if(!chatHistoryData[currentChatId]) chatHistoryData[currentChatId]=[];
         const h=chatHistoryData[currentChatId];
@@ -2141,7 +2138,6 @@
         h.unshift({role:'user',text:upgradedPersona,__virtualPersona:true},{role:'model',text:'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.',__virtualPersona:true});
     };
 
-    // More reliable formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit.
     formatReply = function(text){
         const escaped=escapeHtml(text);
         const parts=escaped.split(/```/);
@@ -2168,7 +2164,6 @@
         }).join('');return rendered||'<p>پاسخی دریافت نشد.</p>';
     };
 
-    // Decorate restored and newly generated messages without breaking saved chat HTML.
     const __oldAppendMessage=appendMessage;
     appendMessage=function(sender,content){__oldAppendMessage(sender,content);};
     const __oldLoadChat=loadChat;
