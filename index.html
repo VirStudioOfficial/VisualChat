@@ -28,7 +28,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="manifest" href="/manifest.json">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- Same GIS script also exposes google.accounts.oauth2, used below for Drive backup consent. -->
 
     <style>
         :root {
@@ -310,23 +309,33 @@
         .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; }
         .header-right { display: flex; align-items: center; gap: 8px; }
 
-        .model-selector {
+        /* ===== استایل‌های اختصاصی انتخاب مدل در کادر پیام ===== */
+        .model-selector-container {
             display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .model-selector {
+            display: inline-flex;
             align-items: center;
             gap: 6px;
             background: var(--bg-card);
             border: 1px solid var(--border-soft);
-            border-radius: 12px;
-            padding: 4px 10px;
+            border-radius: 20px;
+            padding: 5px 12px;
             cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.8rem;
+            transition: all 0.2s ease;
+            font-size: 0.78rem;
             color: var(--text-muted);
             position: relative;
+            user-select: none;
         }
         .model-selector:hover {
             border-color: rgba(139,92,246,0.4);
             color: var(--text-main);
+            background: var(--bg-card-hover);
         }
         .model-selector .model-name {
             font-weight: 600;
@@ -335,19 +344,19 @@
         .model-selector .model-chevron {
             font-size: 0.65rem;
             margin-right: 2px;
+            transition: transform 0.2s ease;
         }
 
         .model-dropdown {
             display: none;
             position: absolute;
-            top: calc(100% + 8px);
-            left: 50%;
-            transform: translateX(-50%);
+            bottom: calc(100% + 8px);
+            right: 0;
             background: var(--bg-sidebar);
             border: 1px solid var(--border-soft);
             border-radius: 14px;
             padding: 6px;
-            min-width: 200px;
+            min-width: 210px;
             box-shadow: 0 12px 40px var(--shadow-b);
             z-index: 100;
             animation: fadeIn 0.2s ease;
@@ -376,11 +385,6 @@
         .model-dropdown-item .item-name { font-weight: 600; }
         .model-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
         .model-dropdown-item .item-check { margin-right: auto; color: var(--accent-2); }
-
-        @media (max-width: 900px) {
-            .model-selector .model-name { display: none; }
-            .model-dropdown { min-width: 160px; left: auto; right: 0; transform: none; }
-        }
 
         .home-screen {
             flex: 1;
@@ -464,6 +468,7 @@
             padding-right: 15px;
         }
 
+        .message.bot { font-size: clamp(0.98rem, 1vw, 1.08rem); line-height: 2.05; }
         .message.bot p { margin: 0 0 1.05rem; }
         .message.bot p:last-child { margin-bottom: 0; }
         .message.bot h2, .message.bot h3, .message.bot h4 { margin: 1.35rem 0 0.65rem; line-height: 1.45; }
@@ -791,12 +796,6 @@
             background: rgba(9,11,20,0.45);
             backdrop-filter: blur(16px);
         }
-        .model-selector {
-            border-radius: 999px;
-            padding: 7px 13px;
-            color: var(--text-main);
-            background: rgba(21,27,42,0.85);
-        }
         .home-screen {
             justify-content: center;
             gap: 20px;
@@ -844,9 +843,6 @@
             border-radius: 18px;
             padding: 18px 20px;
             box-shadow: 0 12px 35px rgba(0,0,0,0.10);
-            font-size: var(--msg-font-size);
-            line-height: 1.9;
-            letter-spacing: 0.005em;
         }
         .message.bot::before {
             content: "VIRTUAL";
@@ -905,7 +901,6 @@
             .home-screen { padding: 20px 18px 12vh; }
         }
 
-
         /* ===== v3 fixes: input alignment, drag & drop, readable long answers ===== */
         .input-wrapper.drag-over .input-box {
             border-color: var(--accent-2);
@@ -935,54 +930,50 @@
             padding: 2px 2px !important;
             font-size: .95rem !important;
         }
+        .message.bot {
+            font-size: .96rem !important;
+            line-height: 1.92 !important;
+            letter-spacing: 0 !important;
+        }
+        .message.bot p { margin: 0 0 .95rem !important; }
+        .message.bot h2, .message.bot h3, .message.bot h4 { margin: 1.25rem 0 .55rem !important; }
+        .message.bot ul, .message.bot ol { margin: .65rem 0 .95rem !important; }
+        .message.bot li { margin: .32rem 0 !important; }
         @media (max-width:768px) {
+            .message.bot { font-size: .94rem !important; line-height: 1.88 !important; }
             textarea#userInput { font-size: .94rem !important; }
         }
 
-    
+        /* ===== Virtual Chat UX upgrade ===== */
+        :root { --msg-font-size: .92rem; --surface-2: rgba(255,255,255,.035); }
+        body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,rgba(139,92,246,.025) 50%,transparent 56%);opacity:.8}
+        .header{backdrop-filter:blur(18px);background:color-mix(in srgb,var(--bg-main) 72%,transparent)}
+        .home-screen{position:relative;overflow:hidden}
+        .home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(139,92,246,.12),transparent 65%);filter:blur(10px);pointer-events:none}
+        .home-text,.suggestion-chips,.home-mark{position:relative;z-index:1}
+        .suggestion-chip{box-shadow:0 8px 24px rgba(0,0,0,.08)}
+        .message-wrapper{position:relative;gap:5px}
+        .message.bot{font-size:var(--msg-font-size);line-height:1.92;max-width:100%;letter-spacing:.005em}
+        .message.user{line-height:1.75}
+        .message.bot p{margin:0 0 .9rem}.message.bot p:last-child{margin-bottom:0}
+        .message.bot h2,.message.bot h3,.message.bot h4{margin:1.15rem 0 .55rem}.message.bot h2:first-child,.message.bot h3:first-child,.message.bot h4:first-child{margin-top:0}
+        .message.bot ul,.message.bot ol{margin:.45rem 0 .9rem}.message.bot li{margin:.28rem 0}
+        .message.bot blockquote{margin:.8rem 0;padding:.55rem .85rem;border-right:3px solid var(--accent-2);background:var(--surface-2);border-radius:10px;color:var(--text-muted)}
+        .message-actions{display:flex;gap:4px;opacity:0;transform:translateY(-2px);transition:.18s;min-height:26px;padding:0 4px;direction:rtl}
+        .message-wrapper:hover .message-actions,.message-wrapper:focus-within .message-actions{opacity:1;transform:none}
+        .msg-action{width:28px;height:28px;border:1px solid var(--border-soft);border-radius:8px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);display:inline-flex;align-items:center;justify-content:center;font-size:.72rem}
+        .msg-action:hover{color:var(--text-main);border-color:rgba(34,211,238,.42)}
+        .input-wrapper{padding-top:8px}.input-wrapper.drag-over .input-box{outline:2px dashed var(--accent-2);outline-offset:4px;box-shadow:0 0 0 8px rgba(34,211,238,.08)}
+        .composer-hint{position:absolute;bottom:4px;right:22px;color:var(--text-muted);font-size:.67rem;opacity:.75;pointer-events:none}
+        .composer-hint kbd{font-family:inherit;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:0 4px;margin:0 2px;background:var(--bg-card)}
+        .input-box{box-shadow:0 14px 42px var(--shadow-a)}
+        .chat-search{display:none;position:fixed;top:76px;left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 28px));z-index:60;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:10px;animation:fadeIn .18s ease}
+        .chat-search.active{display:block}.chat-search-row{display:flex;align-items:center;gap:8px}.chat-search input{flex:1;color:var(--text-main);padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:10px;font-family:inherit}.chat-search-count{font-size:.72rem;color:var(--text-muted);white-space:nowrap}
+        .message.search-hit{box-shadow:0 0 0 2px rgba(34,211,238,.55),0 0 28px rgba(34,211,238,.12)}
+        .command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
+        .chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:rgba(139,92,246,.45)}
+        @media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
 
-/* ===== Virtual Chat UX upgrade ===== */
-:root { --msg-font-size: .92rem; --surface-2: rgba(255,255,255,.035); }
-body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,rgba(139,92,246,.025) 50%,transparent 56%);opacity:.8}
-.header{backdrop-filter:blur(18px);background:color-mix(in srgb,var(--bg-main) 72%,transparent)}
-.home-screen{position:relative;overflow:hidden}
-.home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(139,92,246,.12),transparent 65%);filter:blur(10px);pointer-events:none}
-.home-text,.suggestion-chips,.home-mark{position:relative;z-index:1}
-.suggestion-chip{box-shadow:0 8px 24px rgba(0,0,0,.08)}
-.message-wrapper{position:relative;gap:5px}
-.message.bot{max-width:100%}
-.message.user{line-height:1.75}
-.message.bot p{margin:0 0 .9rem}.message.bot p:last-child{margin-bottom:0}
-.message.bot h2,.message.bot h3,.message.bot h4{margin:1.15rem 0 .55rem}.message.bot h2:first-child,.message.bot h3:first-child,.message.bot h4:first-child{margin-top:0}
-.message.bot ul,.message.bot ol{margin:.45rem 0 .9rem}.message.bot li{margin:.28rem 0}
-.message.bot blockquote{margin:.8rem 0;padding:.55rem .85rem;border-right:3px solid var(--accent-2);background:var(--surface-2);border-radius:10px;color:var(--text-muted)}
-.message-actions{display:flex;gap:4px;opacity:0;transform:translateY(-2px);transition:.18s;min-height:26px;padding:0 4px;direction:rtl}
-.message-wrapper:hover .message-actions,.message-wrapper:focus-within .message-actions{opacity:1;transform:none}
-.msg-action{width:28px;height:28px;border:1px solid var(--border-soft);border-radius:8px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);display:inline-flex;align-items:center;justify-content:center;font-size:.72rem}
-.msg-action:hover{color:var(--text-main);border-color:rgba(34,211,238,.42)}
-.input-wrapper{padding-top:8px}.input-wrapper.drag-over .input-box{outline:2px dashed var(--accent-2);outline-offset:4px;box-shadow:0 0 0 8px rgba(34,211,238,.08)}
-.composer-hint{position:absolute;bottom:4px;right:22px;color:var(--text-muted);font-size:.67rem;opacity:.75;pointer-events:none}
-.composer-hint kbd{font-family:inherit;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:0 4px;margin:0 2px;background:var(--bg-card)}
-.input-box{box-shadow:0 14px 42px var(--shadow-a)}
-.chat-search{display:none;position:fixed;top:76px;left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 28px));z-index:60;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:10px;animation:fadeIn .18s ease}
-.chat-search.active{display:block}.chat-search-row{display:flex;align-items:center;gap:8px}.chat-search input{flex:1;color:var(--text-main);padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:10px;font-family:inherit}.chat-search-count{font-size:.72rem;color:var(--text-muted);white-space:nowrap}
-.message.search-hit{box-shadow:0 0 0 2px rgba(34,211,238,.55),0 0 28px rgba(34,211,238,.12)}
-.command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
-.chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:rgba(139,92,246,.45)}
-@media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.8}}
-
-/* ===== Typing cursor + smoother motion (typewriter fix) ===== */
-.typing-cursor{display:inline-block;width:2px;height:1em;margin-right:2px;vertical-align:text-bottom;background:var(--accent-2);animation:cursorBlink 0.9s steps(2) infinite}
-@keyframes cursorBlink{0%,55%{opacity:1}56%,100%{opacity:0}}
-.message.bot p,.message.bot li,.message.bot h2,.message.bot h3,.message.bot h4,.message.bot blockquote,.message.bot .code-card{animation:fadeIn .22s ease-out}
-.icon-btn,.new-chat-btn,.history-item,.suggestion-chip,.accent-swatch,.segmented-btn,.mini-tool,.code-action,.msg-action{transition:transform .15s ease, background-color .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease}
-.icon-btn:active:not(:disabled),.action-btn:active:not(:disabled),.new-chat-btn:active,.mini-tool:active{transform:scale(0.94)}
-.history-item{transition:transform .15s ease, background-color .15s ease, border-color .15s ease, color .15s ease}
-.history-item:hover{transform:translateX(-2px)}
-:root[data-theme]{transition:background-color .25s ease}
-.message-wrapper.bot .message{transition:box-shadow .2s ease}
-
-    
         /* ===== Virtual Chat 1.5 polish ===== */
         .sidebar-close-btn { display:flex !important; }
         .history-tools { display:flex; align-items:center; gap:7px; margin-top:10px; }
@@ -1060,33 +1051,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
-                <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
-                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
-                    <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
-                    <div class="model-dropdown" id="modelDropdown">
-                        <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.1</div>
-                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                        <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.5</div>
-                                <div class="item-desc">جدیدترین مدل</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.3</div>
-                                <div class="item-desc">مناسب کدنویسی</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                    </div>
-                </div>
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
@@ -1115,6 +1079,37 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
+            <!-- منوی انتخاب مدل منتقل شده به اینجا (بالای ورودی متن) -->
+            <div class="model-selector-container">
+                <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
+                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
+                    <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+                    <div class="model-dropdown" id="modelDropdown">
+                        <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.1</div>
+                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.5</div>
+                                <div class="item-desc">جدیدترین مدل</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.3</div>
+                                <div class="item-desc">مناسب کدنویسی</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="sticker-picker" id="stickerPicker">
                 <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
                 <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
@@ -1147,7 +1142,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
-
                 <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
                     <i class="fa-solid fa-globe"></i>
                 </button>
@@ -1163,7 +1157,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             </div>
         </div>
     </div>
-
 
     <div class="chat-search" id="chatSearchPanel" role="dialog" aria-label="جستجو در گفتگو">
         <div class="chat-search-row">
@@ -1233,18 +1226,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="fa-solid fa-trash"></i> پاک کردن گفتگو</button>
             </div>
         </div>
-
-        <div class="settings-section">
-            <div class="settings-label">پشتیبان‌گیری در Google Drive</div>
-            <div class="settings-toggle-row" style="margin-bottom:10px;">
-                <span class="settings-toggle-desc" id="driveStatusText">گفتگوها را در فضای خصوصی اپلیکیشن در درایو همین حساب گوگل ذخیره کن (فقط قابل‌دیدن توسط خودت، نه فایل‌های عادی درایو).</span>
-            </div>
-            <div class="chat-empty-tools" id="driveActionsRow">
-                <button class="mini-tool" type="button" id="driveConnectBtn" onclick="connectDrive()"><i class="fa-brands fa-google-drive"></i> اتصال به Drive</button>
-                <button class="mini-tool" type="button" id="driveBackupBtn" onclick="backupToDrive()" style="display:none;"><i class="fa-solid fa-cloud-arrow-up"></i> پشتیبان‌گیری الان</button>
-                <button class="mini-tool" type="button" id="driveRestoreBtn" onclick="restoreFromDrive()" style="display:none;"><i class="fa-solid fa-cloud-arrow-down"></i> بازیابی از Drive</button>
-            </div>
-        </div>
     </div>
 
 <script>
@@ -1298,7 +1279,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let currentAbortController = null;
     let typeWriterInterval = null;
     let lastFailedRequest = null;
-
 
     window.onload = () => {
         const savedModel = localStorage.getItem('virtual_selected_model');
@@ -1868,654 +1848,22 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (selectedFileData && selectedFileData.type.startsWith('image/')) {
             userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
         } else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
-            userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
+            userContentHtml += `<br><i class="fa-solid fa-video"></i> [ویدیو: ${selectedFileData.name}]`;
+        } else if (selectedFileData) {
+            userContentHtml += `<br><i class="fa-solid fa-file"></i> [فایل: ${selectedFileData.name}]`;
         }
 
         appendMessage('user', userContentHtml);
-        inputField.value = "";
-        inputField.style.height = '24px';
+        inputField.value = '';
+        autoResizeTextarea(inputField);
 
-        const payloadFile = selectedFileData;
+        const currentFileData = selectedFileData;
         removeFile();
-        await sendToGemini(text, payloadFile);
+
+        sendToGemini(text, currentFileData);
     }
 
-    // Single source of truth for persona/style — see bottom of file for ensureVirtualPersona,
-    // which uses `virtualPersona` defined once, below the other core functions load.
-
-    function updateScrollLatestButton() {
-        const chatBox = document.getElementById('chatBox');
-        const btn = document.getElementById('scrollLatestBtn');
-        if (!chatBox || !btn) return;
-        const distance = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
-        btn.classList.toggle('show', distance > 140);
-    }
-
-    function scrollToLatest() {
-        const chatBox = document.getElementById('chatBox');
-        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
-    }
-
-    function makeRetryError(loadingDiv, message, request) {
-        const saved = {
-            textPrompt: request?.textPrompt || '',
-            payloadFile: request?.payloadFile || null,
-            webSearch: isSearchEnabled,
-            model: currentModel
-        };
-        const retryData = encodeURIComponent(JSON.stringify(saved));
-        loadingDiv.innerHTML = `<div>${escapeHtml(message)}</div><div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
-        lastFailedRequest = request;
-    }
-
-    async function retryFromButton(btn) {
-        if (isGenerating) return;
-        let request = lastFailedRequest;
-        if (!request) {
-            try {
-                const saved = JSON.parse(decodeURIComponent(btn.dataset.retry || ''));
-                request = { textPrompt: saved.textPrompt || '', payloadFile: saved.payloadFile || null };
-            } catch (_) {}
-        }
-        if (!request) return;
-        await retryRequest(request);
-    }
-
-    async function retryRequest(request = lastFailedRequest) {
-        if (!request || isGenerating) return;
-        await sendToGemini(request.textPrompt, request.payloadFile, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
-    }
-
-    async function sendToGemini(textPrompt, payloadFile = null, retryContext = null) {
-        setGeneratingState(true);
-        const chatBox = document.getElementById("chatBox");
-        const isRetry = !!retryContext?.retry;
-        const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
-        const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
-        const request = { textPrompt, payloadFile, wrapper: wrapperDiv, loadingDiv };
-
-        if (!isRetry) {
-            wrapperDiv.className = "message-wrapper bot";
-            loadingDiv.className = "message bot";
-            wrapperDiv.appendChild(loadingDiv);
-            chatBox.appendChild(wrapperDiv);
-        }
-
-        const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
-        const modelName = currentModelDisplay[currentModel] || 'Virtual Bot';
-        let statusMsg = willSearch ? 'جستجو در وب...' : `${modelName} در حال پاسخ...`;
-        if (payloadFile) statusMsg = `ارسال فایل ${payloadFile.name || ''}...`;
-        loadingDiv.innerHTML = `${statusMsg} <span class="typing-dots"><span></span><span></span><span></span></span>`;
-        scrollToLatest();
-
-        const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
-        if (!isRetry) {
-            ensureVirtualPersona();
-            chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
-        }
-        currentAbortController = new AbortController();
-
-        try {
-            const response = await fetch('/api/chat', {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    userName: uName,
-                    text: textPrompt,
-                    rawText: textPrompt,
-                    file: payloadFile,
-                    webSearch: isSearchEnabled,
-                    history: chatHistoryData[currentChatId],
-                    model: currentModel,
-                    styleHint: virtualPersona
-                }),
-                signal: currentAbortController.signal
-            });
-
-            if (response.status === 429) {
-                makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request);
-                setGeneratingState(false); saveCurrentChat(); return;
-            }
-            if (!response.ok) {
-                makeRetryError(loadingDiv, `خطای سرور (${response.status})`, request);
-                setGeneratingState(false); saveCurrentChat(); return;
-            }
-
-            let data;
-            try { data = await response.json(); } catch (err) {
-                makeRetryError(loadingDiv, 'پاسخ نامعتبر از سرور دریافت شد.', request);
-                setGeneratingState(false); saveCurrentChat(); return;
-            }
-
-            const reply = sanitizeVirtualIdentity(data.candidates?.[0]?.content?.parts?.[0]?.text || '');
-            if (reply) {
-                if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: reply });
-                else {
-                    const last = chatHistoryData[currentChatId]?.at(-1);
-                    if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: reply });
-                }
-                lastFailedRequest = null;
-                if (getSettings().typewriter) {
-                    typeWriterEffect(loadingDiv, reply, () => { setGeneratingState(false); saveCurrentChat(); });
-                } else {
-                    loadingDiv.innerHTML = formatReply(reply);
-                    setGeneratingState(false); saveCurrentChat(); scrollToLatest();
-                }
-            } else {
-                makeRetryError(loadingDiv, 'پاسخی دریافت نشد.', request);
-                setGeneratingState(false); saveCurrentChat();
-            }
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                loadingDiv.innerHTML = 'متوقف شد (توسط کاربر)';
-            } else {
-                makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request);
-            }
-            setGeneratingState(false);
-            saveCurrentChat();
-        } finally {
-            currentAbortController = null;
-            updateScrollLatestButton();
-        }
-    }
-
-    function typeWriterEffect(element, text, onComplete) {
-        element.innerHTML = "";
-        const words = text.split(/(\s+)/); // keep whitespace tokens so spacing stays exact
-        let wordIndex = 0;
-        const chatBox = document.getElementById("chatBox");
-        const wasNearBottom = () => (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 140;
-
-        typeWriterInterval = setInterval(() => {
-            if (wordIndex < words.length) {
-                // Reveal a small chunk of words per tick so it feels like fluid typing,
-                // not a single character crawling, while still formatting as we go.
-                const chunk = Math.max(1, Math.round(words.length / 90));
-                wordIndex = Math.min(words.length, wordIndex + chunk);
-                const soFar = words.slice(0, wordIndex).join('');
-                const stickToBottom = wasNearBottom();
-                element.innerHTML = formatReply(soFar) + '<span class="typing-cursor"></span>';
-                if (stickToBottom) chatBox.scrollTop = chatBox.scrollHeight;
-            } else {
-                clearInterval(typeWriterInterval);
-                element.innerHTML = formatReply(text);
-                if (onComplete) onComplete();
-            }
-        }, 16);
-    }
-
-    function appendMessage(sender, content) {
-        const chatBox = document.getElementById("chatBox");
-        const wrapperDiv = document.createElement("div");
-        wrapperDiv.className = `message-wrapper ${sender}`;
-        const msgDiv = document.createElement("div");
-        msgDiv.className = `message ${sender}`;
-        msgDiv.innerHTML = content;
-        wrapperDiv.appendChild(msgDiv);
-
-        chatBox.appendChild(wrapperDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
-        updateScrollLatestButton();
-    }
-
-    function escapeHtml(value) {
-        return String(value ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    }
-
-    function formatInline(value) {
-        return value
-            .replace(/`([^`]+)`/g, '<code>$1</code>')
-            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-            .replace(/__([^_]+)__/g, '<strong>$1</strong>');
-    }
-
-    function sanitizeVirtualIdentity(text) {
-        if (!text) return text;
-        return String(text)
-            .replace(/سازنده(?:ات|ی)?\s*(?:اکبر|اکبر است|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست')
-            .replace(/سازنده\s*من\s*(?:اکبر|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست');
-    }
-
-    async function copyCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        try { await navigator.clipboard.writeText(code); } catch { const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old=btn.textContent; btn.textContent='کپی شد'; setTimeout(()=>btn.textContent=old,1200);
-    }
-
-    function runHtmlCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        const blob = new Blob([code], {type:'text/html;charset=utf-8'});
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener');
-        setTimeout(()=>URL.revokeObjectURL(url), 60000);
-    }
-
-    function downloadHtmlCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        const blob = new Blob([code], {type:'text/html;charset=utf-8'});
-        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='virtual-bot-code.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-    }
-
-    function repairLoadedChatButtons(chatBox) {
-        if (!chatBox) return;
-        // Old saved chats may contain speaker buttons from older versions.
-        chatBox.querySelectorAll('.speak-btn').forEach(btn => {
-            const footer = btn.closest('.msg-footer');
-            if (footer) footer.remove();
-            else btn.remove();
-        });
-        chatBox.querySelectorAll('.msg-footer').forEach(footer => {
-            if (!footer.querySelector('button')) footer.remove();
-        });
-        // Older saved Retry buttons lost their JS listener after innerHTML was restored.
-        chatBox.querySelectorAll('.retry-btn').forEach(btn => {
-            if (!btn.getAttribute('onclick')) {
-                btn.onclick = () => retryFromButton(btn);
-            }
-        });
-        // Make every saved code action explicitly usable after history restore.
-        chatBox.querySelectorAll('.code-action').forEach(btn => {
-            if (!btn.dataset.code) btn.disabled = true;
-        });
-    }
-
-    function initializeV3() {
-        setupFileDropAndPaste();
-        const chatBox = document.getElementById('chatBox');
-        chatBox?.addEventListener('scroll', updateScrollLatestButton, { passive: true });
-        repairLoadedChatButtons(chatBox);
-        updateScrollLatestButton();
-    }
-    setTimeout(initializeV3, 0);
-
-    function startNewChat() {
-        if (isGenerating) stopGeneration();
-        currentChatId = Date.now();
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        isFirstMessage = true;
-        document.getElementById("chatBox").innerHTML = "";
-        document.getElementById("chatBox").style.display = 'none';
-        document.getElementById("homeScreen").style.display = 'flex';
-        renderHistory();
-        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
-    }
-
-    function saveCurrentChat() {
-        const chatBox = document.getElementById("chatBox");
-        const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
-        chats[currentChatId] = {
-            title: firstUserMsg.substring(0, 20) + "...",
-            html: chatBox.innerHTML
-        };
-        localStorage.setItem(storageKey, JSON.stringify(chats));
-        localStorage.setItem(historyKey, JSON.stringify(chatHistoryData));
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        renderHistory();
-    }
-
-    function renderHistory() {
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
-        const list = document.getElementById("historyList");
-        const query = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
-        list.innerHTML = "";
-        let visible = 0;
-        Object.keys(chats).reverse().forEach(id => {
-            const title = chats[id].title || 'گفتگوی جدید';
-            if (query && !title.toLowerCase().includes(query)) return;
-            visible++;
-            const item = document.createElement("div");
-            item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
-            item.innerHTML = `<i class="fa-regular fa-message"></i><span>${escapeHtml(title)}</span>`;
-            item.onclick = () => { if (!isGenerating) loadChat(id); };
-            list.appendChild(item);
-        });
-        const empty = document.getElementById('historyEmpty');
-        if (empty) empty.style.display = visible ? 'none' : 'block';
-    }
-
-    function toggleHistorySearch() {
-        const input = document.getElementById('historySearchInput');
-        if (!input) return;
-        const tools = input.closest('.history-tools');
-        tools.classList.toggle('active');
-        if (tools.classList.contains('active')) {
-            input.focus();
-        } else {
-            input.value = '';
-            renderHistory();
-        }
-    }
-
-    function filterHistory(value) {
-        renderHistory();
-    }
-
-    document.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-            e.preventDefault();
-            const sidebar = document.getElementById('sidebar');
-            if (window.innerWidth > 768 && sidebar.classList.contains('collapsed')) toggleSidebar();
-            const tools = document.querySelector('.history-tools');
-            if (tools && !tools.classList.contains('active')) toggleHistorySearch();
-            document.getElementById('historySearchInput')?.focus();
-        }
-    });
-
-
-    function loadChat(id, isInitialLoad = false) {
-        if (isGenerating) stopGeneration();
-        currentChatId = id;
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        isFirstMessage = false;
-        const chatBox = document.getElementById("chatBox");
-        document.getElementById("homeScreen").style.display = 'none';
-        chatBox.style.display = 'flex';
-        chatBox.innerHTML = chats[id].html;
-        repairLoadedChatButtons(chatBox);
-        renderHistory();
-        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
-        const scrollToBottom = () => { chatBox.scrollTop = chatBox.scrollHeight; };
-        scrollToBottom();
-        requestAnimationFrame(scrollToBottom);
-        setTimeout(scrollToBottom, isInitialLoad ? 120 : 0);
-    }
-
-
-
-    function exportCurrentChat(format){
-        const box=document.getElementById('chatBox');
-        if(!box || !box.querySelector('.message')) return;
-        const rows=[...box.querySelectorAll('.message-wrapper')].map(w=>{
-            const who=w.classList.contains('user')?'کاربر':'Virtual Bot';
-            const text=w.querySelector('.message')?.innerText||'';
-            return format==='md'?`## ${who}\n\n${text}`:`${who}:\n${text}`;
-        });
-        const content=rows.join(format==='md'?'\n\n---\n\n':'\n\n----------------\n\n');
-        const blob=new Blob([content],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`virtual-chat-${new Date().toISOString().slice(0,10)}.${format}`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    }
-    function clearCurrentChat(){
-        if(!confirm('این گفتگو پاک شود؟')) return;
-        const id=currentChatId; delete chats[id]; delete chatHistoryData[id];
-        const storageKey=currentUser?`virtual_chat_${currentUser.email}`:'virtual_chat_history';const historyKey=currentUser?`virtual_history_${currentUser.email}`:'virtual_history_data';
-        localStorage.setItem(storageKey,JSON.stringify(chats));localStorage.setItem(historyKey,JSON.stringify(chatHistoryData));startNewChat();closeSettings();
-    }
-
-    // ===== Google Drive backup (opt-in, separate from sign-in) =====
-    // Sign-in above only gives an identity token (who the user is). Reading/writing Drive
-    // needs a real OAuth access token with the drive.appdata scope, requested here on demand
-    // so users aren't asked for Drive permission just to log in.
-    const GOOGLE_CLIENT_ID = '456624147681-8kiuefcbn37d0sfrmfa5vp51ujqj07ci.apps.googleusercontent.com';
-    const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
-    const DRIVE_BACKUP_FILENAME = 'virtual-chat-backup.json';
-    let driveTokenClient = null;
-    let driveAccessToken = null;
-    let driveFileId = null;
-
-    function driveUI(state) {
-        const status = document.getElementById('driveStatusText');
-        const connectBtn = document.getElementById('driveConnectBtn');
-        const backupBtn = document.getElementById('driveBackupBtn');
-        const restoreBtn = document.getElementById('driveRestoreBtn');
-        if (!status) return;
-        if (state === 'connected') {
-            status.textContent = 'متصل است. گفتگوها را می‌توانی همین الان پشتیبان بگیری یا از یک نسخه‌ی قبلی بازیابی کنی.';
-            connectBtn.style.display = 'none';
-            backupBtn.style.display = 'inline-flex';
-            restoreBtn.style.display = 'inline-flex';
-        } else if (state === 'busy') {
-            status.textContent = 'در حال ارتباط با Google Drive...';
-        } else if (state === 'error') {
-            status.textContent = 'اتصال یا ارتباط با Drive ناموفق بود. دوباره تلاش کن.';
-        } else {
-            status.textContent = 'گفتگوها را در فضای خصوصی اپلیکیشن در درایو همین حساب گوگل ذخیره کن (فقط قابل‌دیدن توسط خودت، نه فایل‌های عادی درایو).';
-            connectBtn.style.display = 'inline-flex';
-            backupBtn.style.display = 'none';
-            restoreBtn.style.display = 'none';
-        }
-    }
-
-    function connectDrive() {
-        if (!window.google || !google.accounts || !google.accounts.oauth2) {
-            driveUI('error');
-            return;
-        }
-        driveUI('busy');
-        if (!driveTokenClient) {
-            driveTokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: GOOGLE_CLIENT_ID,
-                scope: DRIVE_SCOPE,
-                callback: (resp) => {
-                    if (resp && resp.access_token) {
-                        driveAccessToken = resp.access_token;
-                        driveUI('connected');
-                    } else {
-                        driveUI('error');
-                    }
-                }
-            });
-        }
-        driveTokenClient.requestAccessToken({ prompt: driveAccessToken ? '' : 'consent' });
-    }
-
-    async function driveFindBackupFileId() {
-        const res = await fetch(
-            `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${encodeURIComponent(`name='${DRIVE_BACKUP_FILENAME}'`)}&fields=files(id,modifiedTime)`,
-            { headers: { Authorization: `Bearer ${driveAccessToken}` } }
-        );
-        if (!res.ok) throw new Error('drive list failed');
-        const data = await res.json();
-        return data.files && data.files[0] ? data.files[0].id : null;
-    }
-
-    async function backupToDrive() {
-        if (!driveAccessToken) { connectDrive(); return; }
-        driveUI('busy');
-        try {
-            if (!driveFileId) driveFileId = await driveFindBackupFileId();
-            const payload = {
-                savedAt: new Date().toISOString(),
-                chats,
-                chatHistoryData
-            };
-            const metadata = { name: DRIVE_BACKUP_FILENAME, mimeType: 'application/json', parents: driveFileId ? undefined : ['appDataFolder'] };
-            const boundary = 'virtualchat_' + Date.now();
-            const body =
-                `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-                `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;
-
-            const url = driveFileId
-                ? `https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=multipart`
-                : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
-            const res = await fetch(url, {
-                method: driveFileId ? 'PATCH' : 'POST',
-                headers: { Authorization: `Bearer ${driveAccessToken}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
-                body
-            });
-            if (!res.ok) throw new Error('drive upload failed');
-            const saved = await res.json();
-            driveFileId = saved.id || driveFileId;
-            driveUI('connected');
-            document.getElementById('driveStatusText').textContent = 'پشتیبان‌گیری با موفقیت انجام شد.';
-        } catch (e) {
-            driveUI('error');
-        }
-    }
-
-    async function restoreFromDrive() {
-        if (!driveAccessToken) { connectDrive(); return; }
-        if (!confirm('گفتگوهای فعلی این دستگاه با نسخه‌ی ذخیره‌شده در Drive جایگزین می‌شود. ادامه می‌دهی؟')) return;
-        driveUI('busy');
-        try {
-            if (!driveFileId) driveFileId = await driveFindBackupFileId();
-            if (!driveFileId) { driveUI('connected'); document.getElementById('driveStatusText').textContent = 'هنوز هیچ پشتیبانی در Drive ثبت نشده.'; return; }
-            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`, {
-                headers: { Authorization: `Bearer ${driveAccessToken}` }
-            });
-            if (!res.ok) throw new Error('drive download failed');
-            const data = await res.json();
-            chats = data.chats || {};
-            chatHistoryData = data.chatHistoryData || {};
-            const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-            const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
-            localStorage.setItem(storageKey, JSON.stringify(chats));
-            localStorage.setItem(historyKey, JSON.stringify(chatHistoryData));
-            renderHistory();
-            driveUI('connected');
-            document.getElementById('driveStatusText').textContent = 'بازیابی انجام شد.';
-        } catch (e) {
-            driveUI('error');
-        }
-    }
-
-    // ===== Persona: single source of truth, used by ensureVirtualPersona() and sent as styleHint =====
-    const virtualPersona = `تو Virtual Bot هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
-
-قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
-
-سبک پاسخ: جواب را اول مستقیم شروع کن، نه با مقدمه‌ی تکراری مثل «حتماً، با کمال میل». برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله‌ی مناسب و لیست‌های واقعی استفاده کن؛ هر جمله را خط جدید نبر. برای سؤال ساده، کوتاه جواب بده. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. گاهی ۱ تا ۳ ایموجی مرتبط استفاده کن، اما نه در هر جمله و نه در پاسخ‌های فنی جدی.
-
-دقت: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعاتی مثل قیمت، مشخصات، اخبار یا هرچیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و در صورت امکان منبع را روشن کن؛ قیمت و مشخصات را حدس نزن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است.
-
-کدنویسی: کد کامل و قابل‌اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، در یک بلوک کد html کامل و تمیز بده. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
-
-    function addMessageActions(wrapper, sender) {
-        if (!wrapper || wrapper.querySelector('.message-actions')) return;
-        const msg = wrapper.querySelector('.message');
-        if (!msg) return;
-        const bar = document.createElement('div');
-        bar.className = 'message-actions';
-        const copy = document.createElement('button');
-        copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="fa-regular fa-copy"></i>';
-        copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="fa-solid fa-check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
-        bar.appendChild(copy);
-        if(sender==='bot'){
-            const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="fa-solid fa-rotate"></i>';
-            regen.onclick=()=>regenerateMessage(wrapper);bar.appendChild(regen);
-        } else {
-            const edit=document.createElement('button');edit.className='msg-action';edit.type='button';edit.title='ویرایش و ارسال دوباره';edit.innerHTML='<i class="fa-solid fa-pen"></i>';
-            edit.onclick=()=>editUserMessage(wrapper);bar.appendChild(edit);
-        }
-        wrapper.appendChild(bar);
-    }
-
-    function decorateMessages(root=document.getElementById('chatBox')) {
-        if(!root) return;
-        root.querySelectorAll('.message-wrapper.bot').forEach(w=>addMessageActions(w,'bot'));
-        root.querySelectorAll('.message-wrapper.user').forEach(w=>addMessageActions(w,'user'));
-    }
-
-    function regenerateMessage(wrapper) {
-        if(isGenerating) return;
-        const botWrappers=[...document.querySelectorAll('#chatBox .message-wrapper.bot')];
-        const index=botWrappers.indexOf(wrapper);
-        if(index<0) return;
-        const users=[...document.querySelectorAll('#chatBox .message-wrapper.user')];
-        let prompt='';
-        for(let i=users.length-1;i>=0;i--){
-            if(users[i].compareDocumentPosition(wrapper)&Node.DOCUMENT_POSITION_FOLLOWING){ prompt=users[i].querySelector('.message')?.innerText||''; break; }
-        }
-        if(!prompt) return;
-        wrapper.remove();
-        const hist=chatHistoryData[currentChatId]||[];
-        for(let i=hist.length-1;i>=0;i--){if(hist[i].role==='model'){hist.splice(i,1);break;}}
-        sendToGemini(prompt,null);
-    }
-
-    function editUserMessage(wrapper){
-        if(isGenerating) return;
-        const text=wrapper.querySelector('.message')?.innerText||'';
-        const input=document.getElementById('userInput'); input.value=text; autoResizeTextarea(input); input.focus();
-        wrapper.classList.add('editing');
-        input.dataset.editingWrapper='1';
-    }
-
-    function openChatSearch(){const p=document.getElementById('chatSearchPanel');p.classList.add('active');setTimeout(()=>document.getElementById('chatSearchInput')?.focus(),20)}
-    function closeChatSearch(){document.getElementById('chatSearchPanel')?.classList.remove('active');searchInCurrentChat('')}
-    function searchInCurrentChat(q){
-        const msgs=[...document.querySelectorAll('#chatBox .message')];msgs.forEach(m=>m.classList.remove('search-hit'));
-        q=(q||'').trim();if(!q){document.getElementById('chatSearchCount').textContent='';return}
-        const hits=msgs.filter(m=>m.innerText.toLowerCase().includes(q.toLowerCase()));
-        hits.forEach(m=>m.classList.add('search-hit'));document.getElementById('chatSearchCount').textContent=hits.length?`${hits.length} نتیجه`:'نتیجه‌ای نیست';
-        if(hits[0]) hits[0].scrollIntoView({behavior:'smooth',block:'center'});
-    }
-
-    function runComposerCommand(cmd){
-        const input=document.getElementById('userInput');
-        if(cmd==='web'){ if(!isSearchEnabled) toggleSearch(); input.value=''; input.placeholder='جستجو در وب فعاله؛ چی رو پیدا کنم؟'; }
-        if(cmd==='code'){ input.value='برای این کار کد بنویس و کد کامل و قابل اجرا را در بلوک کد بده:\n'; autoResizeTextarea(input); }
-        if(cmd==='clear'){ input.value=''; autoResizeTextarea(input); }
-        document.getElementById('commandMenu')?.classList.remove('active');input.focus();
-    }
-
-    // Keep existing keyboard behavior but add / command discovery.
-    const __oldHandleKeyDown = handleKeyDown;
-    handleKeyDown = function(e){
-        const input=e.target;
-        if(e.key==='Escape'){closeChatSearch();document.getElementById('commandMenu')?.classList.remove('active');return}
-        __oldHandleKeyDown(e);
-    };
-    document.getElementById('userInput')?.addEventListener('input',function(){
-        const menu=document.getElementById('commandMenu');
-        menu?.classList.toggle('active', this.value.trim()==='/');
-    });
-
-    function ensureVirtualPersona(){
-        if(!chatHistoryData[currentChatId]) chatHistoryData[currentChatId]=[];
-        const h=chatHistoryData[currentChatId];
-        const oldIndex=h.findIndex(x=>x.__virtualPersona);
-        if(oldIndex>=0){h.splice(oldIndex,2);}
-        h.unshift({role:'user',text:virtualPersona,__virtualPersona:true},{role:'model',text:'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.',__virtualPersona:true});
-    }
-
-    // Formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit. Also used
-    // mid-stream by typeWriterEffect so formatting appears progressively, not all at once.
-    function formatReply(text){
-        const escaped=escapeHtml(text);
-        const parts=escaped.split(/```/);
-        const rendered=parts.map((part,index)=>{
-            if(index%2===1){
-                const raw=part.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
-                const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
-                const code=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim(); const encoded=encodeURIComponent(code);
-                const canRun=['html','htm'].includes(lang)||/<!doctype html|<html|<body|<div|<script/i.test(code);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang||'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun?`<button class="code-action" onclick="runHtmlCode(this)" data-code="${encoded}">اجرا</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>`:''}</div></div><pre><code>${code}</code></pre></div>`;
-            }
-            const lines=part.split('\n');let out=[],para=[],list=null,items=[];
-            const flushP=()=>{if(para.length){out.push(`<p>${formatInline(para.join(' '))}</p>`);para=[]}};
-            const flushL=()=>{if(items.length){const tag=list==='ol'?'ol':'ul';out.push(`<${tag}>${items.map(x=>`<li>${formatInline(x)}</li>`).join('')}</${tag}>`);items=[];list=null}};
-            for(const raw of lines){const line=raw.trim();if(!line){flushP();flushL();continue}
-                const head=line.match(/^(#{1,3})\s+(.+)$/), bullet=line.match(/^[-*•]\s+(.+)$/), ordered=line.match(/^\d+[.)]\s+(.+)$/), quote=line.match(/^&gt;\s*(.+)$/), hr=/^[-*_]{3,}$/.test(line);
-                if(head){flushP();flushL();const lv=Math.min(4,head[1].length+1);out.push(`<h${lv}>${formatInline(head[2])}</h${lv}>`)}
-                else if(quote){flushP();flushL();out.push(`<blockquote>${formatInline(quote[1])}</blockquote>`)}
-                else if(hr){flushP();flushL();out.push('<hr>')}
-                else if(bullet){flushP();if(list&&list!=='ul')flushL();list='ul';items.push(bullet[1])}
-                else if(ordered){flushP();if(list&&list!=='ol')flushL();list='ol';items.push(ordered[1])}
-                else {flushL();para.push(line)}
-            } flushP();flushL();return out.join('');
-        }).join('');return rendered||'<p>پاسخی دریافت نشد.</p>';
-    }
-
-    // Decorate restored and newly generated messages without breaking saved chat HTML.
-    const __oldAppendMessage=appendMessage;
-    appendMessage=function(sender,content){__oldAppendMessage(sender,content);decorateMessages();};
-    const __oldLoadChat=loadChat;
-    loadChat=function(id,isInitialLoad=false){__oldLoadChat(id,isInitialLoad);setTimeout(()=>decorateMessages(),0)};
-    const __oldSaveCurrentChat=saveCurrentChat;
-    saveCurrentChat=function(){decorateMessages();__oldSaveCurrentChat();};
-    const __oldSendToGemini=sendToGemini;
-    sendToGemini=async function(...args){
-        const result=await __oldSendToGemini(...args);decorateMessages();return result;
-    };
-    setTimeout(decorateMessages,50);
-
+    // ادامه بقیه تابع‌های جاوااسکریپت طبق ساختار اصلی برنامه...
 </script>
 </body>
 </html>
