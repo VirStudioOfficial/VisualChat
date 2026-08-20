@@ -59,7 +59,7 @@ async function fetchTavilyResults(query, tavilyKeys) {
     return null;
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -162,11 +162,11 @@ module.exports = async function handler(req, res) {
         console.log(`Using model: ${MODEL_NAME}`);
         let lastError = null;
 
-let systemText = '';
+        let systemText = '';
 
-if (MODEL_NAME === 'gemini-3.5-flash-lite') {
+        if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 
-    systemText = `تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
+            systemText = `تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
 هویت:
 - اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سوال مشابه، بگو: «من Virtual Bot 1.1 هستم 🤖».
@@ -196,9 +196,9 @@ if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 
 نام کاربر: "${userName || 'دوست من'}" است.`;
 
-} else if (MODEL_NAME === 'gemini-3.6-flash') {
+        } else if (MODEL_NAME === 'gemini-3.6-flash') {
 
-    systemText = `تو Virtual Bot 1.5 هستی؛ یک دستیار هوش مصنوعی فارسی.
+            systemText = `تو Virtual Bot 1.5 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
 هویت:
 - اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.5 هستم 🤖».
@@ -229,9 +229,9 @@ if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 
 نام کاربر: "${userName || 'دوست من'}" است.`;
 
-} else if (MODEL_NAME === 'gemini-3.1-pro') {
+        } else if (MODEL_NAME === 'gemini-3.1-pro') {
 
-    systemText = `تو Virtual Bot 1.3 هستی؛ یک دستیار هوش مصنوعی پیشرفته فارسی.
+            systemText = `تو Virtual Bot 1.3 هستی؛ یک دستیار هوش مصنوعی پیشرفته فارسی.
 
 هویت:
 - اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.3 هستم 🤖».
@@ -261,9 +261,9 @@ if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 
 نام کاربر: "${userName || 'دوست من'}" است.`;
 
-} else {
+        } else {
 
-    systemText = `تو Virtual Bot هستی؛ یک دستیار هوش مصنوعی فارسی.
+            systemText = `تو Virtual Bot هستی؛ یک دستیار هوش مصنوعی فارسی.
 
 قوانین:
 - هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
@@ -276,7 +276,6 @@ if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 - سؤال‌های ساده را بی‌دلیل طولانی نکن.
 
 نام کاربر: "${userName || 'دوست من'}" است.`;
-}
         }
 
         const modelsToTry = [MODEL_NAME];
