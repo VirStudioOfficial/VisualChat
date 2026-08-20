@@ -3,15 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Virtual Chat</title>
+    <title>Virtual Chat Pro</title>
     <script>
-        (function () {
+        (function() {
             try {
                 var saved = JSON.parse(localStorage.getItem('virtual_settings') || '{}');
                 var mode = saved.theme || 'auto';
-                var resolved = mode === 'auto'
-                    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-                    : mode;
+                var resolved = mode === 'auto' ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : mode;
                 document.documentElement.setAttribute('data-theme', resolved);
                 if (saved.c1 && saved.c2) {
                     document.documentElement.style.setProperty('--accent-1', saved.c1);
@@ -49,6 +47,8 @@
             --msg-font-size: 0.92rem;
             --success: #34d399;
             --warning: #fbbf24;
+            --glass-bg: rgba(16, 19, 28, 0.75);
+            --transition-smooth: cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         :root[data-theme="light"] {
@@ -63,15 +63,8 @@
             --border-soft: rgba(15,23,42,0.08);
             --shadow-a: rgba(30,41,59,0.10);
             --shadow-b: rgba(30,41,59,0.16);
+            --glass-bg: rgba(255,255,255,0.82);
         }
-
-        :root[data-theme="light"] body {
-            background-image:
-                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.10), transparent 45%),
-                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.08), transparent 40%);
-        }
-
-        :root[data-theme="light"] textarea { color: #1a1d29 !important; }
 
         * {
             box-sizing: border-box;
@@ -81,7 +74,9 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        select, input, button {
+        select,
+        input,
+        button {
             -webkit-appearance: none !important;
             -moz-appearance: none !important;
             appearance: none !important;
@@ -89,14 +84,15 @@
             border: none;
             background: none;
         }
-        
+
         textarea {
             outline: none !important;
             border: none;
             background: none;
         }
 
-        html, body {
+        html,
+        body {
             height: 100%;
             height: 100dvh;
             background-color: var(--bg-main);
@@ -108,376 +104,258 @@
             display: flex;
             position: relative;
             background-image:
-                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.16), transparent 45%),
-                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.10), transparent 40%);
+                radial-gradient(circle at 85% -10%, rgba(139, 92, 246, 0.16), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(34, 211, 238, 0.10), transparent 40%);
         }
-
-        #authOverlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(10, 12, 18, 0.88);
-            backdrop-filter: blur(12px);
-            z-index: 9999;
-            display: none;
-            justify-content: center;
+.home-mark {
+            width: 72px;
+            height: 72px;
+            border-radius: 24px;
+            background: var(--accent-grad);
+            display: flex;
             align-items: center;
-            transition: opacity 0.25s ease, visibility 0.25s ease;
-        }
-        #authOverlay.active { display: flex !important; }
-
-        .auth-card {
-            background: var(--bg-sidebar);
-            border: 1px solid var(--border-soft);
-            border-radius: 20px;
-            padding: 36px 28px;
-            width: 90%;
-            max-width: 400px;
-            text-align: center;
-            box-shadow: 0 20px 50px var(--shadow-b);
-            animation: fadeIn 0.3s ease-out;
+            justify-content: center;
+            font-size: 1.8rem;
+            color: #fff;
+            box-shadow: 0 18px 55px rgba(34, 211, 238, 0.14), 0 0 35px rgba(139, 92, 246, 0.22);
+            animation: float 3.5s ease-in-out infinite;
+            position: relative;
+            z-index: 1;
         }
 
-        .auth-card .home-mark { margin: 0 auto 18px auto; }
-        .auth-card h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: 8px; color: var(--text-main); }
-        .auth-card p { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px; line-height: 1.6; }
-        .google-btn-wrapper { display: flex; justify-content: center; }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(6px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes messageIn {
-            from { opacity: 0; transform: translateY(10px) scale(0.985); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        @keyframes modalIn {
-            from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
-            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        }
-
-        @keyframes glowPulse {
-            0%, 100% { opacity: 0.55; }
-            50% { opacity: 1; }
-        }
-
-        @keyframes dotBounce {
-            0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
-            40% { transform: translateY(-4px); opacity: 1; }
-        }
-
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .sidebar-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(4px);
-            z-index: 15;
-        }
-        .sidebar-overlay.active { display: block; }
-
-        /* ===== MODERNIZED SIDEBAR ===== */
-        .sidebar {
-            width: 272px;
-            background-color: var(--bg-sidebar);
-            border-left: 1px solid var(--border-soft);
+        .home-text {
             display: flex;
             flex-direction: column;
-            padding: 16px;
-            z-index: 20;
-            /* New Animations */
-            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
-            box-shadow: -8px 0 25px rgba(0,0,0,0.4);
-        }
-        .sidebar.collapsed { transform: translateX(100%); opacity: 0; pointer-events: none; }
-
-        .brand-title {
-            font-size: 1.15rem;
-            font-weight: 800;
-            display: flex;
+            gap: 10px;
             align-items: center;
-            justify-content: space-between;
-            margin-bottom: 18px;
-            padding: 0 2px;
+            position: relative;
+            z-index: 1;
+        }
+        .home-title {
+            font-size: clamp(1.7rem, 3vw, 2.35rem);
+            font-weight: 800;
+            max-width: 680px;
+            color: var(--text-main);
             letter-spacing: -0.02em;
+            line-height: 1.4;
         }
-        .brand-title .brand-name { display: flex; align-items: center; gap: 9px; }
-        .brand-mark {
-            width: 26px; height: 26px;
-            border-radius: 8px;
-            background: var(--accent-grad);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 0.75rem; color: #fff; flex-shrink: 0;
-            box-shadow: 0 0 18px rgba(139,92,246,0.45);
-        }
-        .brand-text {
-            background: var(--accent-grad);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
+        .home-subtitle {
+            font-size: 1rem;
+            max-width: 580px;
+            color: var(--text-muted);
+            line-height: 1.6;
         }
 
-        /* Close Button with Rotating Animation */
-        .sidebar-close-btn {
-            display: flex !important;
-            color: var(--text-muted); width: 32px; height: 32px;
-            border-radius: 50%; justify-content: center; align-items: center;
-            transition: 0.2s ease;
+        .suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            max-width: 650px;
+            position: relative;
+            z-index: 1;
         }
-        .sidebar-close-btn:hover { color: var(--text-main); background: var(--bg-card); transform: rotate(90deg); }
-
-        .user-profile {
-            background-color: var(--bg-card);
+        .suggestion-chip {
+            padding: 11px 17px;
+            background: var(--bg-card);
             border: 1px solid var(--border-soft);
             border-radius: 14px;
-            padding: 10px 12px;
-            margin-bottom: 14px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            min-height: 56px;
-        }
-        .user-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
-        .user-info { flex: 1; overflow: hidden; }
-        .user-name { font-size: 0.9rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
-        .user-actions { display: flex; gap: 4px; align-items: center; }
-        .user-actions .icon-btn { width: 28px; height: 28px; font-size: 0.8rem; border-radius: 8px; transition: 0.2s; }
-        .user-actions .icon-btn:hover { background: var(--border-soft); }
-
-        .new-chat-btn {
-            background: var(--bg-card);
-            color: var(--text-main);
-            border: 1px solid var(--border-soft);
-            padding: 12px;
-            border-radius: 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 9px;
-            font-weight: 600;
-            font-size: 0.9rem;
-            transition: all 0.2s ease;
-        }
-        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: rgba(139,92,246,0.4); }
-        .new-chat-btn i { color: var(--accent-2); }
-
-        .history-list {
-            flex: 1;
-            overflow-y: auto;
-            margin-top: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .history-list::-webkit-scrollbar { width: 5px; }
-        .history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-
-        .history-item {
-            padding: 10px 12px;
-            border-radius: 9px;
-            font-size: 0.84rem;
-            color: var(--text-muted);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 9px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            transition: 0.15s;
-            border: 1px solid transparent;
-        }
-        .history-item i { font-size: 0.75rem; flex-shrink: 0; }
-        .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
-        .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: rgba(139,92,246,0.35); }
-        .history-item.active i { color: var(--accent-2); }
-
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            height: 100dvh;
-            position: relative;
-            overflow: hidden;
-        }
-
-        /* ===== CLEAN HEADER ===== */
-        .chat-header {
-            padding: 14px 22px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border-soft);
-            z-index: 5;
-        }
-
-        .header-left { display: flex; align-items: center; gap: 12px; }
-        .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; border-radius: 8px; transition: 0.2s; }
-        .menu-btn:hover { background: var(--bg-card); }
-        .header-right { display: flex; align-items: center; gap: 8px; }
-
-        .home-screen {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            gap: 26px;
-            padding: 20px;
-            text-align: center;
-            animation: fadeIn 0.35s ease-out;
-        }
-
-        .home-mark {
-            width: 56px; height: 56px;
-            border-radius: 16px;
-            background: var(--accent-grad);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 1.5rem; color: #fff;
-            box-shadow: 0 0 40px rgba(139,92,246,0.35);
-            animation: glowPulse 3.5s ease-in-out infinite;
-        }
-
-        .home-text { display: flex; flex-direction: column; gap: 10px; align-items: center; }
-        .home-title { font-size: 1.6rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; line-height: 1.4; max-width: 480px; }
-        .home-subtitle { font-size: 0.92rem; color: var(--text-muted); line-height: 1.6; }
-
-        .suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 520px; }
-        .suggestion-chip {
-            padding: 9px 16px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 20px;
             font-size: 0.82rem;
-            color: var(--text-muted);
+            color: var(--text-main);
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.25s var(--transition-smooth);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
         }
-        .suggestion-chip:hover { color: var(--text-main); border-color: rgba(139,92,246,0.4); background: var(--bg-card-hover); }
+        .suggestion-chip:hover {
+            transform: translateY(-3px) scale(1.02);
+            border-color: rgba(139, 92, 246, 0.4);
+            background: var(--bg-card-hover);
+            box-shadow: 0 12px 35px rgba(139, 92, 246, 0.12);
+        }
+        .suggestion-chip:active {
+            transform: scale(0.96);
+        }
 
+        /* ===== باکس چت ===== */
         .chat-box {
             flex: 1;
-            padding: 22px max(8%, calc((100% - 850px) / 2));
+            padding: 30px max(7%, calc((100% - 940px) / 2));
             overflow-y: auto;
             display: none;
             flex-direction: column;
-            gap: 18px;
+            gap: 22px;
             scroll-behavior: smooth;
         }
-        .chat-box::-webkit-scrollbar { width: 6px; }
-        .chat-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        .chat-box::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-box::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+        .chat-box::-webkit-scrollbar-track {
+            background: transparent;
+        }
 
-        .message-wrapper { display: flex; flex-direction: column; max-width: 85%; }
-        .message-wrapper.user { align-self: flex-end; }
-        .message-wrapper.bot { align-self: flex-start; max-width: 90%; }
+        .message-wrapper {
+            display: flex;
+            flex-direction: column;
+            max-width: min(100%, 820px);
+            gap: 5px;
+            animation: messagePop 0.35s var(--transition-smooth);
+            position: relative;
+        }
+        .message-wrapper.user {
+            align-self: flex-start;
+        }
+        .message-wrapper.bot {
+            align-self: stretch;
+            max-width: 940px;
+        }
 
         .message {
             padding: 14px 18px;
-            border-radius: 16px;
-            line-height: 1.8;
+            border-radius: 18px;
+            line-height: 1.85;
             word-wrap: break-word;
             font-size: var(--msg-font-size);
-            animation: messageIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-            transform-origin: bottom;
             position: relative;
+            transition: all 0.2s ease;
         }
-
         .message.user {
-            background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(34,211,238,0.08));
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.14), rgba(34, 211, 238, 0.07));
             border: 1px solid var(--border-soft);
             color: var(--text-main);
-            border-radius: 18px 18px 4px 18px;
+            border-bottom-right-radius: 4px;
         }
-
         .message.bot {
-            background: rgba(16,21,34,0.6);
+            background: rgba(16, 21, 34, 0.58);
             border: 1px solid var(--border-soft);
-            border-right: 3px solid var(--accent-2);
-            border-radius: 18px;
-            padding: 16px 18px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+/* ===== استیکر ===== */
+        .sticker-img {
+            width: 120px;
+            height: 120px;
+            object-fit: contain;
         }
 
-        .message.bot p { margin: 0 0 1rem; }
-        .message.bot p:last-child { margin-bottom: 0; }
-        .message.bot h2, .message.bot h3, .message.bot h4 { margin: 1.2rem 0 0.6rem; line-height: 1.5; }
-        .message.bot ul, .message.bot ol { margin: 0.5rem 0 1rem; padding-right: 1.5rem; }
-        .message.bot li { margin: 0.3rem 0; }
-        .message.bot code { font-family: Consolas, monospace; background: rgba(139,92,246,0.12); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
-        .code-card { margin: 1rem 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: #0b0f18; direction: ltr; text-align: left; }
-        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; background:rgba(255,255,255,0.04); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); }
-        .code-actions { display:flex; gap:6px; }
-        .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:5px 9px; cursor:pointer; font-family:inherit; font-size:0.76rem; transition: 0.2s; }
-        .code-action:hover { border-color:var(--accent-2); }
-        .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; }
-        .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; }
-        .retry-row { display:flex; align-items:center; gap:9px; margin-top:10px; color:var(--text-muted); font-size:0.84rem; }
-        .retry-btn { border:1px solid rgba(248,113,113,.35); background:rgba(248,113,113,.08); color:#fca5a5; border-radius:9px; padding:7px 11px; cursor:pointer; font-family:inherit; }
-        .retry-btn:hover { background:rgba(248,113,113,.14); }
-
-        .typing-dots { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
-        .typing-dots span {
-            width: 6px; height: 6px; border-radius: 50%;
-            background: var(--accent-2);
-            animation: dotBounce 1.2s infinite;
+        .sticker-picker {
+            display: none;
+            position: absolute;
+            bottom: 78px;
+            right: 20px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 16px;
+            padding: 12px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            box-shadow: 0 10px 30px var(--shadow-b);
+            z-index: 30;
+            animation: fadeSlideUp 0.2s ease;
         }
-        .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
-        .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+        .sticker-picker.active {
+            display: grid;
+        }
+        .sticker-item {
+            width: 48px;
+            height: 48px;
+            cursor: pointer;
+            border-radius: 8px;
+            padding: 4px;
+            transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .sticker-item:hover {
+            transform: scale(1.12);
+            background-color: var(--bg-input);
+        }
 
-        .scroll-latest-btn { position:absolute; bottom: calc(100% + 20px); left:50%; transform:translateX(-50%) translateY(8px); width:36px; height:36px; border-radius:50%; border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); box-shadow:0 8px 24px var(--shadow-b); cursor:pointer; opacity:0; pointer-events:none; transition:opacity .18s, transform .18s; z-index:4; }
-        .scroll-latest-btn.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
-        .scroll-latest-btn:hover { border-color:var(--accent-2); }
-
+        /* ===== ورودی ===== */
         .input-wrapper {
             width: 100%;
             max-width: 940px;
             margin: 0 auto;
-            padding: 0 15px 20px 15px;
+            padding: 8px 15px 22px 15px;
             position: relative;
+            padding-top: 8px;
         }
 
-        /* ===== MODERN INPUT BOX ===== */
+        .input-wrapper.drag-over .input-box {
+            border-color: var(--accent-2);
+            box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.12), 0 12px 34px rgba(0, 0, 0, 0.18);
+        }
+        .input-wrapper.drag-over::after {
+            content: 'فایل را اینجا رها کن';
+            position: absolute;
+            inset: 0 15px 16px;
+            border: 1px dashed var(--accent-2);
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(10, 12, 18, 0.72);
+            color: var(--text-main);
+            font-size: 0.88rem;
+            font-weight: 600;
+            pointer-events: none;
+            z-index: 10;
+            backdrop-filter: blur(2px);
+        }
+
         .input-box {
             background-color: var(--bg-input);
             border: 1px solid var(--border-soft);
-            border-radius: 24px;
-            padding: 6px 12px 6px 8px;
+            border-radius: 18px;
+            padding: 8px 10px;
             display: flex;
             align-items: center;
-            gap: 8px;
-            box-shadow: 0 8px 32px var(--shadow-a);
-            transition: border-color 0.2s, box-shadow 0.2s;
-            min-height: 52px;
+            gap: 6px;
+            box-shadow: 0 14px 42px var(--shadow-a);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            background: rgba(18, 24, 39, 0.92);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
         }
         .input-box:focus-within {
-            border-color: rgba(139,92,246,0.55);
-            box-shadow: 0 0 0 3px rgba(139,92,246,0.12), 0 8px 32px var(--shadow-a);
+            border-color: rgba(139, 92, 246, 0.55);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12), 0 14px 42px var(--shadow-a);
         }
 
         textarea#userInput {
             flex: 1;
             color: var(--text-main) !important;
+            -webkit-appearance: auto !important;
             resize: none !important;
             overflow: hidden !important;
-            height: 24px;
+            height: 24px !important;
+            min-height: 24px;
             max-height: 120px;
-            font-size: 0.95rem;
-            padding: 4px 2px;
+            font-size: 0.95rem !important;
+            padding: 2px 2px !important;
             background: transparent !important;
+            border: none !important;
+            outline: none !important;
             box-shadow: none !important;
-            margin: 0;
-            align-self: center;
+            line-height: 1.45 !important;
         }
-        textarea::placeholder { color: var(--text-muted) !important; }
-        textarea:disabled { opacity: 0.55; cursor: not-allowed; }
+        textarea#userInput::-webkit-resizer,
+        textarea#userInput::-webkit-scrollbar-corner {
+            display: none !important;
+            opacity: 0 !important;
+        }
+        textarea#userInput:-webkit-autofill,
+        textarea#userInput:-webkit-autofill:hover,
+        textarea#userInput:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--text-main) !important;
+-webkit-box-shadow: 0 0 0px 1000px var(--bg-input) inset !important;
+            transition: background-color 5000s ease-in-out 0s !important;
+        }
+        textarea::placeholder {
+            color: var(--text-muted) !important;
+        }
+        textarea:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
 
         .icon-btn {
             color: var(--text-muted);
@@ -491,160 +369,172 @@
             justify-content: center;
             flex-shrink: 0;
             transition: all 0.2s ease;
-            background: transparent;
         }
-        .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); transform: scale(1.05); }
-        .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .icon-btn:hover:not(:disabled) {
+            color: var(--text-main);
+            background-color: var(--border-soft);
+            transform: scale(1.05);
+        }
+        .icon-btn:active:not(:disabled) {
+            transform: scale(0.92);
+        }
+        .icon-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
 
         .icon-btn.search-active {
             color: var(--accent-2) !important;
             background-color: rgba(34, 211, 238, 0.14) !important;
         }
 
+        .icon-btn.recording {
+            animation: pulseGlow 1.2s infinite;
+        }
+
         .action-btn {
             background: var(--accent-grad);
             color: #fff !important;
-            border-radius: 12px;
-            width: 38px; height: 38px;
-            transition: all 0.2s ease;
+            border-radius: 12px !important;
+            transition: all 0.25s var(--transition-smooth) !important;
         }
-        .action-btn:hover:not(:disabled) { filter: brightness(1.1); transform: scale(1.05); }
-        .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
-
-        /* ===== MODEL SELECTOR INSIDE INPUT ===== */
-        .model-pill-selector {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(255,255,255,0.08);
-            border-radius: 24px;
-            padding: 4px 12px 4px 8px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            position: relative;
-            flex-shrink: 0;
-            margin-left: 6px;
-            height: 32px;
+        .action-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+            transform: scale(1.05) !important;
+            box-shadow: 0 8px 25px rgba(139, 92, 246, 0.3);
         }
-        .model-pill-selector:hover { background: rgba(255,255,255,0.15); }
-        .model-pill-selector .model-icon {
-            width: 20px; height: 20px;
-            border-radius: 50%;
-            background: var(--accent-grad);
-            display: flex; align-items: center; justify-content: center;
-            color: white; font-size: 0.6rem;
-            flex-shrink: 0;
+        .action-btn:active:not(:disabled) {
+            transform: scale(0.92) !important;
         }
-        .model-pill-selector .model-name {
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: var(--text-main);
-            white-space: nowrap;
-        }
-        .model-pill-selector i.chevron {
-            font-size: 0.6rem;
-            color: var(--text-muted);
+        .action-btn.stop-mode {
+            background: var(--danger) !important;
+            animation: pulseGlow 1s ease-in-out infinite;
         }
 
-        .model-pill-dropdown {
-            display: none;
+        .composer-hint {
             position: absolute;
-            bottom: calc(100% + 10px);
-            right: 0;
-            background: var(--bg-sidebar);
-            border: 1px solid var(--border-soft);
-            border-radius: 16px;
-            padding: 6px;
-            min-width: 200px;
-            box-shadow: 0 15px 45px var(--shadow-b);
-            z-index: 50;
-            animation: slideUp 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-            overflow: hidden;
-        }
-        .model-pill-dropdown.active { display: block; }
-        .model-pill-dropdown-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 14px;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.15s;
-            font-size: 0.8rem;
+            bottom: 4px;
+            right: 22px;
             color: var(--text-muted);
+            font-size: 0.67rem;
+            opacity: 0.75;
+            pointer-events: none;
         }
-        .model-pill-dropdown-item:hover { background: var(--bg-card); color: var(--text-main); }
-        .model-pill-dropdown-item.active { background: var(--bg-card); color: var(--text-main); border: 1px solid rgba(139,92,246,0.2); }
-        .model-pill-dropdown-item .item-name { font-weight: 600; }
-        .model-pill-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
-        .model-pill-dropdown-item .item-check { margin-right: auto; color: var(--accent-2); font-size: 0.8rem; }
+        .composer-hint kbd {
+            font-family: inherit;
+            border: 1px solid var(--border);
+            border-bottom-width: 2px;
+            border-radius: 5px;
+            padding: 0 4px;
+            margin: 0 2px;
+            background: var(--bg-card);
+        }
+
+        .scroll-latest-btn {
+            position: absolute;
+            top: -48px;
+            left: 50%;
+            transform: translateX(-50%) translateY(8px);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-main);
+            box-shadow: 0 8px 24px var(--shadow-b);
+            cursor: pointer;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.18s ease, transform 0.18s ease;
+            z-index: 4;
+        }
+        .scroll-latest-btn.show {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+        .scroll-latest-btn:hover {
+            border-color: var(--accent-2);
+            transform: translateX(-50%) translateY(-2px);
+        }
 
         .file-preview {
             display: none;
             align-items: center;
-            gap: 8px;
-            padding: 4px 10px 4px 6px;
+            gap: 10px;
+            padding: 6px 12px;
             background-color: var(--bg-card);
             border: 1px solid var(--border-soft);
-            border-radius: 12px;
-            max-width: 140px;
-            flex-shrink: 0;
-            height: 32px;
-            margin-right: 4px;
-        }
-        .file-preview.active { display: flex; }
-        .file-preview img { width: 20px; height: 20px; border-radius: 4px; object-fit: cover; }
-        .file-preview span { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; }
-        .file-preview .file-remove { color: var(--text-muted); cursor: pointer; font-size: 0.7rem; transition: 0.2s; margin-right: 4px; }
-        .file-preview .file-remove:hover { color: var(--danger); }
-
-        .message-actions { display:flex; gap:4px; opacity:0; transform:translateY(-2px); transition:.18s; min-height:26px; padding:0 4px; direction:rtl; margin-top: 6px;}
-        .message-wrapper:hover .message-actions, .message-wrapper:focus-within .message-actions{opacity:1;transform:none}
-        .msg-action{width:28px;height:28px;border:1px solid var(--border-soft);border-radius:8px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);display:inline-flex;align-items:center;justify-content:center;font-size:.72rem; transition: 0.2s;}
-        .msg-action:hover{color:var(--text-main);border-color:rgba(34,211,238,.42);}
-
-        .stopped-state {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            color: var(--text-muted);
-            font-size: 0.88em;
-        }
-        .stopped-state i { color: var(--danger); }
-
-        @media (max-width: 900px) {
-            .chat-box { padding: 15px 5%; }
-            .input-wrapper { max-width: 100%; }
-        }
-
-        @media (max-width: 768px) {
-            .menu-btn { display: block; }
-            .sidebar {
-                position: fixed;
-                top: 0; right: 0; bottom: 0;
-                transform: translateX(100%);
-                box-shadow: -5px 0 25px rgba(0,0,0,0.5);
-                backdrop-filter: blur(12px);
+            border-radius: 10px;
+            margin-bottom: 8px;
+            width: fit-content;
+            max-width: 100%;
+padding: 8px 12px;
+                font-size: 0.75rem;
             }
-            .sidebar.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
-            .sidebar.collapsed { transform: translateX(100%); opacity: 0; pointer-events: none; }
-            .sidebar-close-btn { display: flex !important; }
-            .message-wrapper { max-width: 90%; }
-            .home-title { font-size: 1.4rem; }
-            .input-wrapper { padding: 8px 10px 14px 10px; }
-            .input-box { border-radius: 20px; min-height: 48px; padding: 4px 8px; }
-            .model-pill-selector { padding: 2px 10px 2px 6px; height: 28px; }
-            .model-pill-selector .model-name { font-size: 0.7rem; }
-            .message-actions { opacity: 1; transform: none; }
+            .icon-btn {
+                width: 32px;
+                height: 32px;
+                font-size: 0.9rem;
+            }
+            textarea#userInput {
+                font-size: 0.88rem !important;
+            }
+            .input-box {
+                padding: 6px 8px;
+                border-radius: 14px;
+            }
+        }
+
+        /* ===== پشتیبانی از حالت تاریک/روشن ===== */
+        :root[data-theme="light"] body {
+            background-image:
+                radial-gradient(circle at 85% -10%, rgba(139, 92, 246, 0.10), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(34, 211, 238, 0.08), transparent 40%);
+        }
+        :root[data-theme="light"] textarea {
+            color: #1a1d29 !important;
+        }
+        :root[data-theme="light"] .message.bot {
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid var(--border-soft);
+        }
+        :root[data-theme="light"] .message.bot code {
+            background: rgba(0, 0, 0, 0.06);
+        }
+        :root[data-theme="light"] .code-card {
+            background: #f0f2f8;
+        }
+        :root[data-theme="light"] .code-card-head {
+            background: rgba(0, 0, 0, 0.04);
+        }
+        :root[data-theme="light"] .settings-modal {
+            background: #ffffff;
+        }
+        :root[data-theme="light"] .settings-header {
+            background: #ffffff;
+        }
+        :root[data-theme="light"] .user-profile {
+            background: #f0f2f8;
+        }
+        :root[data-theme="light"] .new-chat-btn {
+            background: #f0f2f8;
+        }
+        :root[data-theme="light"] .history-item:hover {
+            background: #f0f2f8;
+        }
+        :root[data-theme="light"] .history-item.active {
+            background: #f0f2f8;
         }
     </style>
 </head>
+<body>
 <body>
 
     <div id="authOverlay">
         <div class="auth-card">
             <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
-            <h2>ورود به Virtual Chat</h2>
+            <h2>ورود به Virtual Chat Pro</h2>
             <p>برای شروع گفتگو و ذخیره ایمن اطلاعات، لطفاً با حساب گوگل خود وارد شوید.</p>
             <div class="google-btn-wrapper">
                 <div id="g_id_onload"
@@ -663,7 +553,7 @@
         <div class="brand-title">
             <div class="brand-name">
                 <span class="brand-mark"><i class="fa-solid fa-sparkles"></i></span>
-                <span class="brand-text">Virtual Chat</span>
+                <span class="brand-text">Virtual Chat Pro</span>
             </div>
             <button class="icon-btn sidebar-close-btn" onclick="toggleSidebar()" title="بستن پنل گفتگوها"><i class="fa-solid fa-xmark"></i></button>
         </div>
@@ -689,7 +579,33 @@
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
-                <!-- مدل‌ها به داخل باکس ورودی منتقل شدند، اینجا فقط دکمه منو می‌ماند -->
+                <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
+                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
+                    <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+                    <div class="model-dropdown" id="modelDropdown">
+                        <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.1</div>
+                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.5</div>
+                                <div class="item-desc">جدیدترین مدل</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+</div>
+                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.3</div>
+                                <div class="item-desc">مناسب کدنویسی</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
@@ -718,68 +634,53 @@
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            
+            <div class="sticker-picker" id="stickerPicker">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f917/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f389/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
+            </div>
+
+            <div class="file-preview" id="filePreview">
+                <img id="previewImg" src="" alt="preview">
+                <span id="fileName"></span>
+                <span class="file-status" id="fileStatus">در حال پردازش...</span>
+                <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"></i>
+            </div>
+
+            <div class="command-menu" id="commandMenu">
+                <div class="command-item" onclick="runComposerCommand('web')"><span><i class="fa-solid fa-globe"></i> جستجو در وب</span><span>/web</span></div>
+<div class="command-item" onclick="runComposerCommand('code')"><span><i class="fa-solid fa-code"></i> حالت کدنویسی</span><span>/code</span></div>
+                <div class="command-item" onclick="runComposerCommand('clear')"><span><i class="fa-solid fa-eraser"></i> پاک کردن متن</span><span>/clear</span></div>
+            </div>
+            <div class="composer-hint"><kbd>Enter</kbd> ارسال <span>·</span> <kbd>Shift</kbd>+<kbd>Enter</kbd> خط جدید <span>·</span> / فرمان‌ها</div>
             <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="fa-solid fa-arrow-down"></i></button>
-            
             <div class="input-box">
-                
-                <div class="file-preview" id="filePreview">
-                    <img id="previewImg" src="" alt="preview">
-                    <span id="fileName"></span>
-                    <i class="fa-solid fa-xmark file-remove" onclick="removeFile()"></i>
-                </div>
+                <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
+                    <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
+                </button>
 
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
-                <!-- NEW MODEL SELECTOR INSIDE INPUT -->
-                <div class="model-pill-selector" id="modelPill" onclick="togglePillDropdown()">
-                    <span class="model-icon"><i class="fa-solid fa-sparkles"></i></span>
-                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
-                    <i class="fa-solid fa-chevron-down chevron"></i>
-                    
-                    <div class="model-pill-dropdown" id="modelDropdown">
-                        <div class="model-pill-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModelPill(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.1</div>
-                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                        <div class="model-pill-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModelPill(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.5</div>
-                                <div class="item-desc">جدیدترین مدل</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                        <div class="model-pill-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModelPill(this, 'Virtual Bot 1.3', 'gemini-3.1-pro')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.3</div>
-                                <div class="item-desc">مناسب کدنویسی</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                    </div>
-                </div>
+                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
+                    <i class="fa-solid fa-globe"></i>
+                </button>
 
-                <div class="input-side-icons">
-                    <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
-                        <i class="fa-solid fa-globe"></i>
-                    </button>
+                <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
+                    <i class="fa-regular fa-face-smile"></i>
+                </button>
 
-                    <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
-                    <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
-                        <i class="fa-solid fa-paperclip"></i>
-                    </button>
-
-                    <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
-                        <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
-                    </button>
-                </div>
+                <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
+                <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
             </div>
         </div>
     </div>
-
 
     <div class="chat-search" id="chatSearchPanel" role="dialog" aria-label="جستجو در گفتگو">
         <div class="chat-search-row">
@@ -814,7 +715,7 @@
             <div class="settings-label">رنگ اصلی</div>
             <div class="accent-swatches" id="accentSwatches">
                 <button class="accent-swatch" data-c1="#8b5cf6" data-c2="#22d3ee" style="background: linear-gradient(135deg,#8b5cf6,#22d3ee);" title="بنفش و فیروزه‌ای"></button>
-                <button class="accent-swatch" data-c1="#f97316" data-c2="#ec4899" style="background: linear-gradient(135deg,#f97316,#ec4899);" title="نارنجی و صورتی"></button>
+<button class="accent-swatch" data-c1="#f97316" data-c2="#ec4899" style="background: linear-gradient(135deg,#f97316,#ec4899);" title="نارنجی و صورتی"></button>
                 <button class="accent-swatch" data-c1="#10b981" data-c2="#3b82f6" style="background: linear-gradient(135deg,#10b981,#3b82f6);" title="سبز و آبی"></button>
                 <button class="accent-swatch" data-c1="#ef4444" data-c2="#f59e0b" style="background: linear-gradient(135deg,#ef4444,#f59e0b);" title="قرمز و کهربایی"></button>
                 <button class="accent-swatch" data-c1="#6366f1" data-c2="#a855f7" style="background: linear-gradient(135deg,#6366f1,#a855f7);" title="نیلی و بنفش"></button>
@@ -850,10 +751,9 @@
             </div>
         </div>
     </div>
-
 <script>
     // =====================================================
-    // سیستم انتخاب مدل (NEW PILL INSIDE INPUT VERSION)
+    // سیستم انتخاب مدل
     // =====================================================
     let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.6-flash';
     let currentModelDisplay = {
@@ -862,14 +762,14 @@
         'gemini-3.1-pro': 'Virtual Bot 1.3'
     };
 
-    function togglePillDropdown() {
+    function toggleModelDropdown() {
         document.getElementById('modelDropdown').classList.toggle('active');
     }
 
-    function selectModelPill(element, displayName, modelValue) {
+    function selectModel(element, displayName, modelValue) {
         document.getElementById('modelDropdown').classList.remove('active');
         
-        document.querySelectorAll('.model-pill-dropdown-item').forEach(item => {
+        document.querySelectorAll('.model-dropdown-item').forEach(item => {
             item.classList.remove('active');
         });
         element.classList.add('active');
@@ -880,17 +780,16 @@
     }
 
     document.addEventListener('click', function(e) {
-        const pill = document.getElementById('modelPill');
+        const selector = document.getElementById('modelSelector');
         const dropdown = document.getElementById('modelDropdown');
-        if (pill && !pill.contains(e.target)) {
+        if (selector && !selector.contains(e.target)) {
             dropdown.classList.remove('active');
         }
     });
 
     // =====================================================
-    // بقیه کدها (همه قابلیت‌های پیشرفته شما) - کاملاً دست‌نخورده
+    // متغیرهای اصلی
     // =====================================================
-
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
     let currentUser = null;
     let chats = {};
@@ -905,7 +804,9 @@
     let activeRequestId = 0;
     let activeLoadingDiv = null;
 
-
+    // =====================================================
+    // مقداردهی اولیه
+    // =====================================================
     window.onload = () => {
         const savedModel = localStorage.getItem('virtual_selected_model');
         if (!savedModel) {
@@ -915,7 +816,7 @@
         if (savedModel && currentModelDisplay[savedModel]) {
             currentModel = savedModel;
             document.getElementById('modelDisplayName').textContent = currentModelDisplay[savedModel];
-            document.querySelectorAll('.model-pill-dropdown-item').forEach(item => {
+            document.querySelectorAll('.model-dropdown-item').forEach(item => {
                 item.classList.remove('active');
                 if (item.dataset.model === savedModel) item.classList.add('active');
             });
@@ -930,13 +831,12 @@
         const chatBox = document.getElementById('chatBox');
         chatBox.addEventListener('scroll', updateScrollLatestButton);
         updateScrollLatestButton();
+        setupFileDropAndPaste();
     };
 
-    function autoResizeTextarea(textarea) {
-        textarea.style.height = 'auto';
-        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-    }
-
+    // =====================================================
+    // توابع کاربر و احراز هویت
+    // =====================================================
     function extractNameFromEmail(email, googleName = '') {
         if (googleName && googleName.trim() && !googleName.includes('@')) return googleName.trim();
         if (!email) return 'دوست من';
@@ -944,8 +844,7 @@
         const clean = handle.replace(/[0-9_.-]/g, '');
         return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'دوست من';
     }
-
-    function handleCredentialResponse(response) {
+function handleCredentialResponse(response) {
         const responsePayload = parseJwt(response.credential);
         const autoExtractedName = extractNameFromEmail(responsePayload.email, responsePayload.name);
         currentUser = {
@@ -986,9 +885,9 @@
     function initUserData() {
         updateUserUI();
         renderHistory();
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+        const storageKey = currentUser ? virtual_chat_${currentUser.email} : 'virtual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
-        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+        const historyKey = currentUser ? virtual_history_${currentUser.email} : 'virtual_history_data';
         chatHistoryData = JSON.parse(localStorage.getItem(historyKey)) || {};
         if (chats[currentChatId]) loadChat(currentChatId, true);
     }
@@ -997,16 +896,16 @@
         if (!currentUser) return;
         const profileDiv = document.getElementById('userProfile');
         const nameToDisplay = currentUser.customName || currentUser.name;
-        profileDiv.innerHTML = `
+        profileDiv.innerHTML = 
             <img src="${currentUser.picture}" class="user-avatar" alt="User">
             <div class="user-info"><div class="user-name">${nameToDisplay}</div></div>
             <div class="user-actions">
                 <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="fa-solid fa-arrows-rotate"></i></button>
                 <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i></button>
             </div>
-        `;
+        ;
         const titleEl = document.getElementById('welcomeHomeTitle');
-        if (titleEl) titleEl.innerText = `سلام ${nameToDisplay}! امروز چطور می‌تونم کمکت کنم؟`;
+        if (titleEl) titleEl.innerText = سلام ${nameToDisplay}! امروز چطور می‌تونم کمکت کنم؟;
         document.getElementById('customUserNameInput').value = nameToDisplay;
     }
 
@@ -1028,8 +927,7 @@
             google.accounts.id.prompt();
         }
     }
-
-    function updateCustomName(val) {
+function updateCustomName(val) {
         if (!val.trim()) return;
         const name = val.trim();
         if (currentUser) {
@@ -1040,6 +938,9 @@
         updateUserUI();
     }
 
+    // =====================================================
+    // تنظیمات و تم
+    // =====================================================
     const defaultSettings = { theme: 'auto', c1: '#8b5cf6', c2: '#22d3ee', fontSize: 'normal', typewriter: true };
 
     function getSettings() {
@@ -1120,8 +1021,7 @@
         applySettings(s);
         renderSettingsUI(s);
     });
-
-    function openSettings() {
+function openSettings() {
         renderSettingsUI(getSettings());
         document.getElementById('settingsOverlay').classList.add('active');
         document.getElementById('settingsModal').classList.add('active');
@@ -1132,22 +1032,37 @@
         document.getElementById('settingsModal').classList.remove('active');
     }
 
-    function useSuggestion(el) {
-        if (isGenerating) return;
-        document.getElementById('userInput').value = el.innerText;
-        autoResizeTextarea(document.getElementById('userInput'));
-        sendMessage();
+    // =====================================================
+    // توابع کمکی
+    // =====================================================
+    function autoResizeTextarea(textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
     }
 
-    function shouldSearchWeb(userText) {
-        if (!userText) return false;
-        const cleanText = userText.trim().toLowerCase();
-        if (cleanText.length < 3) return false;
-        const ignoreList = ['سلام', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'ممنون', 'خداحافظ'];
-        const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
-        if (ignoreList.includes(normalized)) return false;
-        const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'قیمت', 'اخبار', 'خبر', 'امشب', 'امروز', 'فعلی', 'بازار', 'سیستم', 'قطعات', 'خرید', 'بودجه', 'پیشنهاد خرید'];
-        return allowedKeywords.some(kw => normalized.includes(kw));
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        if (window.innerWidth <= 768) {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('active');
+        } else {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+        }
+    }
+
+    function scrollToLatest() {
+        const chatBox = document.getElementById('chatBox');
+        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+    }
+
+    function updateScrollLatestButton() {
+        const chatBox = document.getElementById('chatBox');
+        const btn = document.getElementById('scrollLatestBtn');
+        if (!chatBox || !btn) return;
+        const distance = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+        btn.classList.toggle('show', distance > 140);
     }
 
     function toggleSearch() {
@@ -1163,15 +1078,27 @@
         }
     }
 
-    function toggleSidebar() {
-        const sidebar = document.getElementById('sidebar');
-        const overlay = document.getElementById('sidebarOverlay');
-        if (window.innerWidth <= 768) {
-            sidebar.classList.toggle('open');
-            overlay.classList.toggle('active');
-        } else {
-            sidebar.classList.toggle('collapsed');
-        }
+    function toggleStickerPicker() {
+        if (isGenerating) return;
+        document.getElementById('stickerPicker').classList.toggle('active');
+    }
+
+    function shouldSearchWeb(userText) {
+        if (!userText) return false;
+        const cleanText = userText.trim().toLowerCase();
+        if (cleanText.length < 3) return false;
+        const ignoreList = ['سلام', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'ممنون', 'خداحافظ'];
+        const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
+        if (ignoreList.includes(normalized)) return false;
+        const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'قیمت', 'اخبار', 'خبر', 'امشب', 'امروز', 'فعلی', 'بازار', 'سیستم', 'قطعات', 'خرید', 'بودجه', 'پیشنهاد خرید'];
+        return allowedKeywords.some(kw => normalized.includes(kw));
+    }
+
+    function useSuggestion(el) {
+        if (isGenerating) return;
+        document.getElementById('userInput').value = el.innerText;
+        autoResizeTextarea(document.getElementById('userInput'));
+        sendMessage();
     }
 
     function handleKeyDown(e) {
@@ -1179,11 +1106,18 @@
             e.preventDefault();
             if (!isGenerating) sendMessage();
         }
+        if (e.key === 'Escape') {
+            closeChatSearch();
+            document.getElementById('commandMenu')?.classList.remove('active');
+        }
     }
 
+    // =====================================================
+    // مدیریت فایل‌ها
+    // =====================================================
     function compressImage(file, maxDimension = 1024, quality = 0.7) {
         return new Promise((resolve) => {
-            const reader = new FileReader();
+const reader = new FileReader();
             reader.readAsDataURL(file);
             reader.onload = (event) => {
                 const img = new Image();
@@ -1280,7 +1214,7 @@
         const ext = filename.split('.').pop().toLowerCase();
         const mimeMap = {
             'mp4': 'video/mp4', 'mov': 'video/quicktime', 'webm': 'video/webm',
-            'avi': 'video/x-msvideo', 'mpeg': 'video/mpeg', 'wmv': 'video/x-ms-wmv',
+'avi': 'video/x-msvideo', 'mpeg': 'video/mpeg', 'wmv': 'video/x-ms-wmv',
             '3gpp': 'video/3gpp', 'flv': 'video/x-flv', 'mkv': 'video/x-matroska',
             'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
             'gif': 'image/gif', 'webp': 'image/webp', 'pdf': 'application/pdf',
@@ -1301,11 +1235,13 @@
 
         const fileNameSpan = document.getElementById('fileName');
         const previewImg = document.getElementById('previewImg');
+        const statusEl = document.getElementById('fileStatus');
         const previewContainer = document.getElementById('filePreview');
         
-        previewContainer.classList.add('active');
+        previewContainer.style.display = 'flex';
         fileNameSpan.innerText = file.name;
-        previewImg.style.display = 'block';
+        statusEl.textContent = 'در حال پردازش...';
+        statusEl.className = 'file-status loading';
 
         const MAX_DIRECT_SIZE = 4 * 1024 * 1024;
 
@@ -1318,10 +1254,13 @@
                 selectedFileData = { name: file.name, type: 'image/jpeg', base64: compressedBase64 };
                 previewImg.src = compressedBase64;
                 previewImg.style.display = 'block';
+                statusEl.textContent = 'تصویر آماده';
+                statusEl.className = 'file-status success';
             } else if (isVideo) {
                 let videoBase64 = '';
                 
                 if (file.size > MAX_DIRECT_SIZE) {
+                    statusEl.textContent = 'در حال فشرده‌سازی ویدیو...';
                     videoBase64 = await compressVideo(file, 480, 500000);
                 } else {
                     videoBase64 = await new Promise((resolve) => {
@@ -1333,33 +1272,37 @@
 
                 selectedFileData = { name: file.name, type: 'video/webm', base64: videoBase64 };
                 previewImg.style.display = 'none';
+                statusEl.textContent = 'ویدیو آماده';
+                statusEl.className = 'file-status success';
             } else {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const base64 = e.target.result;
                     selectedFileData = { name: file.name, type: file.type || guessMimeType(file.name), base64: base64 };
                     previewImg.style.display = 'none';
+                    statusEl.textContent = 'فایل آماده';
+                    statusEl.className = 'file-status success';
                 };
                 reader.readAsDataURL(file);
             }
         } catch (e) {
-            previewContainer.classList.remove('active');
+            statusEl.textContent = 'خطا';
+            statusEl.className = 'file-status error';
         }
     }
 
     function removeFile() {
         selectedFileData = null;
         document.getElementById('fileInput').value = '';
-        document.getElementById('filePreview').classList.remove('active');
+        document.getElementById('filePreview').style.display = 'none';
     }
 
     function setupFileDropAndPaste() {
         const wrapper = document.querySelector('.input-wrapper');
         const input = document.getElementById('userInput');
-        if (!wrapper || !input || wrapper.dataset.fileDnDReady) return;
+        if (!wrapper  !input  wrapper.dataset.fileDnDReady) return;
         wrapper.dataset.fileDnDReady = '1';
-
-        ['dragenter', 'dragover'].forEach(type => wrapper.addEventListener(type, (e) => {
+['dragenter', 'dragover'].forEach(type => wrapper.addEventListener(type, (e) => {
             if (isGenerating) return;
             e.preventDefault();
             e.stopPropagation();
@@ -1390,6 +1333,9 @@
         });
     }
 
+    // =====================================================
+    // ارسال و دریافت پیام
+    // =====================================================
     function handleActionClick() {
         if (isGenerating) stopGeneration();
         else sendMessage();
@@ -1401,10 +1347,12 @@
         const actionBtn = document.getElementById("actionBtn");
         const actionIcon = document.getElementById("actionIcon");
         const attachBtn = document.getElementById("attachBtn");
+        const stickerBtn = document.getElementById("stickerBtn");
         const searchBtn = document.getElementById("searchToggleBtn");
 
         inputField.disabled = generating;
         attachBtn.disabled = generating;
+        stickerBtn.disabled = generating;
         searchBtn.disabled = generating;
 
         if (generating) {
@@ -1452,9 +1400,9 @@
 
         let userContentHtml = text || '';
         if (selectedFileData && selectedFileData.type.startsWith('image/')) {
-            userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:12px; margin-top:8px;">`;
-        } else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
-            userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:12px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
+            userContentHtml += <br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">;
+} else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
+            userContentHtml += <br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>;
         }
 
         appendMessage('user', userContentHtml);
@@ -1466,13 +1414,13 @@
         await sendToGemini(text, payloadFile);
     }
 
-    const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
+    const virtualPersona = تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
 
 قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot 1.5 هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن و هیچ نامی مثل «اکبر» نساز؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
 
 سبک پاسخ: جواب را اول مستقیم شروع کن. برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. هر پاراگراف را بیش از حد کش نده. اگر موضوع چند بخش دارد، آن را بخش‌بندی کن. از تکرار بی‌دلیل مقدمه‌هایی مثل «حتماً، با کمال میل» خودداری کن. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. گاهی ۱ تا ۳ ایموجی یا استیکر متنی مرتبط مثل 😂🔥😎 استفاده کن، اما نه در هر جمله و نه به شکل مصنوعی. در پاسخ‌های فنی جدی، ایموجی را کم کن.
 
-دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار، وضعیت بازار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و تاریخ/منبع را در صورت امکان روشن کن. قیمت و مشخصات را حدس نزن. اگر مطمئن نیستی، صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. اگر HTML می‌نویسی، در بلوک کد html کامل و قابل اجرا ارائه کن. هدف این است که جواب‌ها هم مفید و حرفه‌ای باشند و هم شخصیت داشته باشند.`
+دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار، وضعیت بازار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و تاریخ/منبع را در صورت امکان روشن کن. قیمت و مشخصات را حدس نزن. اگر مطمئن نیستی، صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. اگر HTML می‌نویسی، در بلوک کد html کامل و قابل اجرا ارائه کن. هدف این است که جواب‌ها هم مفید و حرفه‌ای باشند و هم شخصیت داشته باشند.
 
     function ensureVirtualPersona() {
         if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
@@ -1483,194 +1431,21 @@
         );
     }
 
-    function updateScrollLatestButton() {
-        const chatBox = document.getElementById('chatBox');
-        const btn = document.getElementById('scrollLatestBtn');
-        if (!chatBox || !btn) return;
-        const distance = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
-        btn.classList.toggle('show', distance > 140);
-    }
-
-    function scrollToLatest() {
-        const chatBox = document.getElementById('chatBox');
-        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
-    }
-
-    function makeRetryError(loadingDiv, message, request) {
-        const saved = {
-            textPrompt: request?.textPrompt || '',
-            payloadFile: request?.payloadFile || null,
-            webSearch: isSearchEnabled,
-            model: currentModel
-        };
-        const retryData = encodeURIComponent(JSON.stringify(saved));
-        loadingDiv.innerHTML = `<div>${escapeHtml(message)}</div><div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
-        lastFailedRequest = request;
-    }
-
-    async function retryFromButton(btn) {
-        if (isGenerating) return;
-        let request = lastFailedRequest;
-        if (!request) {
-            try {
-                const saved = JSON.parse(decodeURIComponent(btn.dataset.retry || ''));
-                request = { textPrompt: saved.textPrompt || '', payloadFile: saved.payloadFile || null };
-            } catch (_) {}
-        }
-        if (!request) return;
-        await retryRequest(request);
-    }
-
-    async function retryRequest(request = lastFailedRequest) {
-        if (!request || isGenerating) return;
-        await sendToGemini(request.textPrompt, request.payloadFile, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
-    }
-
-    async function sendToGemini(textPrompt, payloadFile = null, retryContext = null) {
-        const requestId = ++activeRequestId;
-        setGeneratingState(true);
-        const chatBox = document.getElementById("chatBox");
-        const isRetry = !!retryContext?.retry;
-        const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
-        const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
-        const request = { textPrompt, payloadFile, wrapper: wrapperDiv, loadingDiv };
-        activeLoadingDiv = loadingDiv;
-
-        if (!isRetry) {
-            wrapperDiv.className = "message-wrapper bot";
-            loadingDiv.className = "message bot";
-            wrapperDiv.appendChild(loadingDiv);
-            chatBox.appendChild(wrapperDiv);
-        }
-
-        const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
-        const modelName = currentModelDisplay[currentModel] || 'Virtual Bot';
-        let statusMsg = willSearch ? 'جستجو در وب...' : `${modelName} در حال پاسخ...`;
-        if (payloadFile) statusMsg = `ارسال فایل ${payloadFile.name || ''}...`;
-        loadingDiv.innerHTML = `${statusMsg} <span class="typing-dots"><span></span><span></span><span></span></span>`;
-        scrollToLatest();
-
-        const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
-        if (!isRetry) {
-            ensureVirtualPersona();
-            chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
-        }
-        currentAbortController = new AbortController();
-
-        try {
-            const response = await fetch('/api/chat', {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    userName: uName,
-                    text: textPrompt,
-                    rawText: textPrompt,
-                    file: payloadFile,
-                    webSearch: isSearchEnabled,
-                    history: chatHistoryData[currentChatId],
-                    model: currentModel,
-                    styleHint: virtualPersona
-                }),
-                signal: currentAbortController.signal
-            });
-
-            if (requestId !== activeRequestId) return;
-
-            if (response.status === 429) {
-                makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request);
-                setGeneratingState(false); saveCurrentChat(); return;
-            }
-            if (!response.ok) {
-                makeRetryError(loadingDiv, `خطای سرور (${response.status})`, request);
-                setGeneratingState(false); saveCurrentChat(); return;
-            }
-
-            let data;
-            try { data = await response.json(); } catch (err) {
-                makeRetryError(loadingDiv, 'پاسخ نامعتبر از سرور دریافت شد.', request);
-                setGeneratingState(false); saveCurrentChat(); return;
-            }
-
-            const reply = sanitizeVirtualIdentity(data.candidates?.[0]?.content?.parts?.[0]?.text || '');
-            if (reply) {
-                if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: reply });
-                else {
-                    const last = chatHistoryData[currentChatId]?.at(-1);
-                    if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: reply });
-                }
-                lastFailedRequest = null;
-                if (getSettings().typewriter) {
-                    typeWriterEffect(loadingDiv, reply, () => { setGeneratingState(false); saveCurrentChat(); });
-                } else {
-                    loadingDiv.innerHTML = formatReply(reply);
-                    setGeneratingState(false); saveCurrentChat(); scrollToLatest();
-                }
-            } else {
-                makeRetryError(loadingDiv, 'پاسخی دریافت نشد.', request);
-                setGeneratingState(false); saveCurrentChat();
-            }
-        } catch (error) {
-            if (requestId !== activeRequestId) return;
-
-            if (error.name === 'AbortError') {
-                loadingDiv.innerHTML = '<span class="stopped-state"><i class="fa-solid fa-stop"></i> پاسخ متوقف شد</span>';
-            } else {
-                makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request);
-            }
-            setGeneratingState(false);
-            saveCurrentChat();
-        } finally {
-            if (requestId === activeRequestId) {
-                currentAbortController = null;
-                activeLoadingDiv = null;
-            }
-            updateScrollLatestButton();
-        }
-    }
-
-    // =====================================================
-    // YOUR FAST TYPEWRITER (UNTOUCHED)
-    // =====================================================
-    function typeWriterEffect(element, text, onComplete) {
-        const typingRequestId = activeRequestId;
-        element.textContent = "";
-        let i = 0;
-        const chatBox = document.getElementById("chatBox");
-        const charsPerTick = Math.max(1, Math.ceil(text.length / 250));
-        let tick = 0;
-        typeWriterInterval = setInterval(() => {
-            if (typingRequestId !== activeRequestId) {
-                clearInterval(typeWriterInterval);
-                typeWriterInterval = null;
-                return;
-            }
-            if (i < text.length) {
-                i = Math.min(text.length, i + charsPerTick);
-                element.textContent = text.slice(0, i);
-                if (chatBox && (++tick % 3 === 0 || i >= text.length)) {
-                    chatBox.scrollTop = chatBox.scrollHeight;
-                }
-            } else {
-                clearInterval(typeWriterInterval);
-                typeWriterInterval = null;
-                element.innerHTML = formatReply(text);
-                if (onComplete) onComplete();
-            }
-        }, 16);
-    }
-
     function appendMessage(sender, content) {
         const chatBox = document.getElementById("chatBox");
         const wrapperDiv = document.createElement("div");
-        wrapperDiv.className = `message-wrapper ${sender}`;
+        wrapperDiv.className = message-wrapper ${sender};
         const msgDiv = document.createElement("div");
-        msgDiv.className = `message ${sender}`;
+        msgDiv.className = message ${sender};
         msgDiv.innerHTML = content;
         wrapperDiv.appendChild(msgDiv);
 
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
         updateScrollLatestButton();
+        
+        // اضافه کردن دکمه‌های اکشن به پیام جدید
+        addMessageActions(wrapperDiv, sender);
     }
 
     function escapeHtml(value) {
@@ -1684,9 +1459,9 @@
 
     function formatInline(value) {
         return value
-            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/([^]+)`/g, '<code>$1</code>')
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-            .replace(/__([^_]+)__/g, '<strong>$1</strong>');
+            .replace(/([^_]+)/g, '<strong>$1</strong>');
     }
 
     function sanitizeVirtualIdentity(text) {
@@ -1695,10 +1470,9 @@
             .replace(/سازنده(?:ات|ی)?\s*(?:اکبر|اکبر است|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست')
             .replace(/سازنده\s*من\s*(?:اکبر|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست');
     }
-
-    function formatReply(text) {
+function formatReply(text) {
         const escaped = escapeHtml(text);
-        const parts = escaped.split(/```/);
+        const parts = escaped.split(/`/);
         const html = parts.map((part, index) => {
             if (index % 2 === 1) {
                 const firstLine = part.split('\n')[0].trim().toLowerCase();
@@ -1720,7 +1494,8 @@
                 if (!listItems.length) return;
                 const tag = listType === 'ol' ? 'ol' : 'ul';
                 out.push(`<${tag}>${listItems.map(item => `<li>${formatInline(item)}</li>`).join('')}</${tag}>`);
-                listItems = []; listType = null;
+                listItems = [];
+                listType = null;
             };
 
             for (const rawLine of lines) {
@@ -1732,95 +1507,455 @@
                 const ordered = line.match(/^\d+[.)]\s+(.+)$/);
 
                 if (heading) {
-                    flushParagraph(); flushList();
+                    flushParagraph();
+                    flushList();
                     const level = Math.min(4, heading[1].length + 1);
                     out.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
                 } else if (bullet) {
                     flushParagraph();
                     if (listType && listType !== 'ul') flushList();
-                    listType = 'ul'; listItems.push(bullet[1]);
+                    listType = 'ul';
+                    listItems.push(bullet[1]);
                 } else if (ordered) {
                     flushParagraph();
                     if (listType && listType !== 'ol') flushList();
-                    listType = 'ol'; listItems.push(ordered[1]);
+                    listType = 'ol';
+                    listItems.push(ordered[1]);
                 } else {
                     flushList();
                     paragraph.push(line);
                 }
             }
-            flushParagraph(); flushList();
+            flushParagraph();
+            flushList();
             return out.join('');
         }).join('');
         return html || '<p>پاسخی دریافت نشد.</p>';
     }
-
-    async function copyCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        try { await navigator.clipboard.writeText(code); } catch { const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old=btn.textContent; btn.textContent='کپی شد'; setTimeout(()=>btn.textContent=old,1200);
-    }
-
-    function runHtmlCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        const blob = new Blob([code], {type:'text/html;charset=utf-8'});
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener');
-        setTimeout(()=>URL.revokeObjectURL(url), 60000);
-    }
-
-    function downloadHtmlCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        const blob = new Blob([code], {type:'text/html;charset=utf-8'});
-        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='virtual-bot-code.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-    }
-
-    function repairLoadedChatButtons(chatBox) {
-        if (!chatBox) return;
-        chatBox.querySelectorAll('.speak-btn').forEach(btn => {
-            const footer = btn.closest('.msg-footer');
-            if (footer) footer.remove();
-            else btn.remove();
-        });
-        chatBox.querySelectorAll('.msg-footer').forEach(footer => {
-            if (!footer.querySelector('button')) footer.remove();
-        });
-        chatBox.querySelectorAll('.retry-btn').forEach(btn => {
-            if (!btn.getAttribute('onclick')) {
-                btn.onclick = () => retryFromButton(btn);
+// =====================================================
+// تایپ‌رایتر با سرعت بهبود یافته
+// =====================================================
+function typeWriterEffect(element, text, onComplete) {
+    const typingRequestId = activeRequestId;
+    element.textContent = "";
+    let i = 0;
+    const chatBox = document.getElementById("chatBox");
+    
+    // محاسبه تعداد کاراکتر در هر تیک برای سرعت بهتر
+    // برای پاسخ‌های کوتاه سریع‌تر، برای پاسخ‌های بلند با سرعت مناسب
+    const charsPerTick = Math.max(1, Math.ceil(text.length / 180));
+    let tick = 0;
+    
+    typeWriterInterval = setInterval(() => {
+        if (typingRequestId !== activeRequestId) {
+            clearInterval(typeWriterInterval);
+            typeWriterInterval = null;
+            return;
+        }
+        if (i < text.length) {
+            i = Math.min(text.length, i + charsPerTick);
+            element.textContent = text.slice(0, i);
+            // اسکرول در هر ۲ تیک برای بهبود عملکرد
+            if (chatBox && (++tick % 2 === 0 || i >= text.length)) {
+                chatBox.scrollTop = chatBox.scrollHeight;
             }
-        });
-        chatBox.querySelectorAll('.code-action').forEach(btn => {
-            if (!btn.dataset.code) btn.disabled = true;
-        });
+        } else {
+            clearInterval(typeWriterInterval);
+            typeWriterInterval = null;
+            element.innerHTML = formatReply(text);
+            if (onComplete) onComplete();
+        }
+    }, 12); // کاهش تایم از 16 به 12 میلی‌ثانیه برای سرعت بیشتر
+}
+
+// =====================================================
+// دکمه‌های اکشن پیام
+// =====================================================
+function addMessageActions(wrapper, sender) {
+    if (!wrapper || wrapper.querySelector('.message-actions')) return;
+    const msg = wrapper.querySelector('.message');
+    if (!msg) return;
+    
+    const bar = document.createElement('div');
+    bar.className = 'message-actions';
+    
+    // دکمه کپی
+    const copy = document.createElement('button');
+    copy.className = 'msg-action';
+    copy.type = 'button';
+    copy.title = 'کپی پیام';
+    copy.innerHTML = '<i class="fa-regular fa-copy"></i>';
+    copy.onclick = async () => {
+        const text = msg.innerText;
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            const t = document.createElement('textarea');
+            t.value = text;
+            document.body.appendChild(t);
+            t.select();
+            document.execCommand('copy');
+            t.remove();
+        }
+        const old = copy.innerHTML;
+        copy.innerHTML = '<i class="fa-solid fa-check"></i>';
+        setTimeout(() => copy.innerHTML = old, 1100);
+    };
+    bar.appendChild(copy);
+    
+    if (sender === 'bot') {
+        // دکمه بازتولید
+        const regen = document.createElement('button');
+        regen.className = 'msg-action';
+        regen.type = 'button';
+        regen.title = 'دوباره تولید کن';
+        regen.innerHTML = '<i class="fa-solid fa-rotate"></i>';
+        regen.onclick = () => regenerateMessage(wrapper);
+        bar.appendChild(regen);
+    } else {
+        // دکمه ویرایش
+        const edit = document.createElement('button');
+        edit.className = 'msg-action';
+        edit.type = 'button';
+        edit.title = 'ویرایش و ارسال دوباره';
+        edit.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        edit.onclick = () => editUserMessage(wrapper);
+        bar.appendChild(edit);
+    }
+    
+    wrapper.appendChild(bar);
+}
+
+function decorateMessages(root = document.getElementById('chatBox')) {
+    if (!root) return;
+    root.querySelectorAll('.message-wrapper.bot').forEach(w => addMessageActions(w, 'bot'));
+    root.querySelectorAll('.message-wrapper.user').forEach(w => addMessageActions(w, 'user'));
+}
+
+function regenerateMessage(wrapper) {
+    if (isGenerating) return;
+    const botWrappers = [...document.querySelectorAll('#chatBox .message-wrapper.bot')];
+const index = botWrappers.indexOf(wrapper);
+    if (index < 0) return;
+    
+    const users = [...document.querySelectorAll('#chatBox .message-wrapper.user')];
+    let prompt = '';
+    for (let i = users.length - 1; i >= 0; i--) {
+        if (users[i].compareDocumentPosition(wrapper) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            prompt = users[i].querySelector('.message')?.innerText || '';
+            break;
+        }
+    }
+    if (!prompt) return;
+    
+    wrapper.remove();
+    const hist = chatHistoryData[currentChatId] || [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+        if (hist[i].role === 'model') {
+            hist.splice(i, 1);
+            break;
+        }
+    }
+    sendToGemini(prompt, null);
+}
+
+function editUserMessage(wrapper) {
+    if (isGenerating) return;
+    const text = wrapper.querySelector('.message')?.innerText || '';
+    const input = document.getElementById('userInput');
+    input.value = text;
+    autoResizeTextarea(input);
+    input.focus();
+    wrapper.classList.add('editing');
+    input.dataset.editingWrapper = '1';
+}
+
+// =====================================================
+// ارسال به سرور
+// =====================================================
+function makeRetryError(loadingDiv, message, request) {
+    const saved = {
+        textPrompt: request?.textPrompt || '',
+        payloadFile: request?.payloadFile || null,
+        webSearch: isSearchEnabled,
+        model: currentModel
+    };
+    const retryData = encodeURIComponent(JSON.stringify(saved));
+    loadingDiv.innerHTML = <div>${escapeHtml(message)}</div><div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>;
+    lastFailedRequest = request;
+}
+
+async function retryFromButton(btn) {
+    if (isGenerating) return;
+    let request = lastFailedRequest;
+    if (!request) {
+        try {
+            const saved = JSON.parse(decodeURIComponent(btn.dataset.retry || ''));
+            request = { textPrompt: saved.textPrompt  '', payloadFile: saved.payloadFile  null };
+        } catch (_) {}
+    }
+    if (!request) return;
+    await retryRequest(request);
+}
+
+async function retryRequest(request = lastFailedRequest) {
+    if (!request || isGenerating) return;
+    await sendToGemini(request.textPrompt, request.payloadFile, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
+}
+
+async function sendToGemini(textPrompt, payloadFile = null, retryContext = null) {
+    const requestId = ++activeRequestId;
+    setGeneratingState(true);
+    const chatBox = document.getElementById("chatBox");
+    const isRetry = !!retryContext?.retry;
+    const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
+    const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
+    const request = { textPrompt, payloadFile, wrapper: wrapperDiv, loadingDiv };
+    activeLoadingDiv = loadingDiv;
+
+    if (!isRetry) {
+        wrapperDiv.className = "message-wrapper bot";
+        loadingDiv.className = "message bot";
+        wrapperDiv.appendChild(loadingDiv);
+        chatBox.appendChild(wrapperDiv);
     }
 
-    function initializeV3() {
-        setupFileDropAndPaste();
-        const chatBox = document.getElementById('chatBox');
-        chatBox?.addEventListener('scroll', updateScrollLatestButton, { passive: true });
-        repairLoadedChatButtons(chatBox);
+    const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
+    const modelName = currentModelDisplay[currentModel] || 'Virtual Bot';
+    let statusMsg = willSearch ? 'جستجو در وب...' : ${modelName} در حال پاسخ...;
+    if (payloadFile) statusMsg = ارسال فایل ${payloadFile.name || ''}...;
+    loadingDiv.innerHTML = ${statusMsg} <span class="typing-indicator"><span></span><span></span><span></span></span>;
+    scrollToLatest();
+
+    const uName = (currentUser && (currentUser.customName  currentUser.name)) ? (currentUser.customName  currentUser.name) : 'کاربر';
+    if (!isRetry) {
+        ensureVirtualPersona();
+        chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
+    }
+    currentAbortController = new AbortController();
+try {
+        const response = await fetch('/api/chat', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                userName: uName,
+                text: textPrompt,
+                rawText: textPrompt,
+                file: payloadFile,
+                webSearch: isSearchEnabled,
+                history: chatHistoryData[currentChatId],
+                model: currentModel,
+                styleHint: virtualPersona
+            }),
+            signal: currentAbortController.signal
+        });
+
+        if (requestId !== activeRequestId) return;
+
+        if (response.status === 429) {
+            makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request);
+            setGeneratingState(false);
+            saveCurrentChat();
+            return;
+        }
+        if (!response.ok) {
+            makeRetryError(loadingDiv, خطای سرور (${response.status}), request);
+            setGeneratingState(false);
+            saveCurrentChat();
+            return;
+        }
+
+        let data;
+        try {
+            data = await response.json();
+        } catch (err) {
+            makeRetryError(loadingDiv, 'پاسخ نامعتبر از سرور دریافت شد.', request);
+            setGeneratingState(false);
+            saveCurrentChat();
+            return;
+        }
+
+        const reply = sanitizeVirtualIdentity(data.candidates?.[0]?.content?.parts?.[0]?.text || '');
+        if (reply) {
+            if (!isRetry) {
+                chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+            } else {
+                const last = chatHistoryData[currentChatId]?.at(-1);
+                if (!last || last.role !== 'model') {
+                    chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+                } else {
+                    last.text = reply;
+                }
+            }
+            lastFailedRequest = null;
+            if (getSettings().typewriter) {
+                typeWriterEffect(loadingDiv, reply, () => {
+                    setGeneratingState(false);
+                    saveCurrentChat();
+                    // اضافه کردن دکمه‌های اکشن به پیام جدید
+                    setTimeout(() => {
+                        const lastWrapper = document.getElementById('chatBox')?.lastElementChild;
+                        if (lastWrapper) addMessageActions(lastWrapper, 'bot');
+                    }, 50);
+                });
+            } else {
+                loadingDiv.innerHTML = formatReply(reply);
+                setGeneratingState(false);
+                saveCurrentChat();
+                scrollToLatest();
+                // اضافه کردن دکمه‌های اکشن به پیام جدید
+                setTimeout(() => {
+                    const lastWrapper = document.getElementById('chatBox')?.lastElementChild;
+                    if (lastWrapper) addMessageActions(lastWrapper, 'bot');
+                }, 50);
+            }
+        } else {
+            makeRetryError(loadingDiv, 'پاسخی دریافت نشد.', request);
+            setGeneratingState(false);
+            saveCurrentChat();
+        }
+    } catch (error) {
+        if (requestId !== activeRequestId) return;
+
+        if (error.name === 'AbortError') {
+            loadingDiv.innerHTML = '<span class="stopped-state"><i class="fa-solid fa-stop"></i> پاسخ متوقف شد</span>';
+        } else {
+            makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request);
+        }
+        setGeneratingState(false);
+        saveCurrentChat();
+    } finally {
+        if (requestId === activeRequestId) {
+            currentAbortController = null;
+            activeLoadingDiv = null;
+        }
         updateScrollLatestButton();
     }
-    setTimeout(initializeV3, 0);
+}
 
-    function startNewChat() {
-        if (isGenerating) stopGeneration();
-        currentChatId = Date.now();
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        isFirstMessage = true;
-        document.getElementById("chatBox").innerHTML = "";
-        document.getElementById("chatBox").style.display = 'none';
-        document.getElementById("homeScreen").style.display = 'flex';
-        renderHistoryList();
-        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+// =====================================================
+// دکمه‌های کد
+// =====================================================
+async function copyCode(btn) {
+    const code = decodeURIComponent(btn.dataset.code || '');
+    try {
+        await navigator.clipboard.writeText(code);
+    } catch {
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+    }
+    const old = btn.textContent;
+    btn.textContent = 'کپی شد';
+    setTimeout(() => btn.textContent = old, 1200);
+}
+
+function runHtmlCode(btn) {
+    const code = decodeURIComponent(btn.dataset.code || '');
+    const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function downloadHtmlCode(btn) {
+    const code = decodeURIComponent(btn.dataset.code || '');
+    const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'virtual-bot-code.html';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function sendSticker(stickerUrl) {
+    if (isGenerating) return;
+    toggleStickerPicker();
+    const stickerHtml = <img src="${stickerUrl}" class="sticker-img" alt="sticker">;
+    appendMessage('user', stickerHtml);
+
+    if (isFirstMessage) {
+        document.getElementById("homeScreen").style.display = 'none';
+        document.getElementById("chatBox").style.display = 'flex';
+        isFirstMessage = false;
     }
 
+    sendToGemini("کاربر یک استیکر ارسال کرد.");
+}
+
+// =====================================================
+// جستجو در چت
+// =====================================================
+function openChatSearch() {
+    const p = document.getElementById('chatSearchPanel');
+    p.classList.add('active');
+    setTimeout(() => document.getElementById('chatSearchInput')?.focus(), 20);
+}
+
+function closeChatSearch() {
+    document.getElementById('chatSearchPanel')?.classList.remove('active');
+    searchInCurrentChat('');
+}
+
+function searchInCurrentChat(q) {
+    const msgs = [...document.querySelectorAll('#chatBox .message')];
+    msgs.forEach(m => m.classList.remove('search-hit'));
+    q = (q || '').trim();
+    if (!q) {
+        document.getElementById('chatSearchCount').textContent = '';
+        return;
+    }
+    const hits = msgs.filter(m => m.innerText.toLowerCase().includes(q.toLowerCase()));
+    hits.forEach(m => m.classList.add('search-hit'));
+    document.getElementById('chatSearchCount').textContent = hits.length ? ${hits.length} نتیجه : 'نتیجه‌ای نیست';
+    if (hits[0]) hits[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// =====================================================
+// کامند منو
+// =====================================================
+function runComposerCommand(cmd) {
+    const input = document.getElementById('userInput');
+    if (cmd === 'web') {
+        if (!isSearchEnabled) toggleSearch();
+        input.value = '';
+        input.placeholder = 'جستجو در وب فعاله؛ چی رو پیدا کنم؟';
+    }
+    if (cmd === 'code') {
+        input.value = 'برای این کار کد بنویس و کد کامل و قابل اجرا را در بلوک کد بده:\n';
+        autoResizeTextarea(input);
+    }
+    if (cmd === 'clear') {
+        input.value = '';
+        autoResizeTextarea(input);
+    }
+    document.getElementById('commandMenu')?.classList.remove('active');
+    input.focus();
+}
+
+// نمایش کامند منو با تایپ /
+document.getElementById('userInput')?.addEventListener('input', function() {
+    const menu = document.getElementById('commandMenu');
+    if (this.value.trim() === '/') {
+        menu?.classList.add('active');
+    } else {
+        menu?.classList.remove('active');
+    }
+});
+// =====================================================
+    // مدیریت تاریخچه و ذخیره‌سازی
+    // =====================================================
     function safeSetItem(key, value, opts = {}) {
         try {
             localStorage.setItem(key, value);
             return true;
         } catch (err) {
-            const isQuotaError = err && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22);
+            const isQuotaError = err && (err.name === 'QuotaExceededError'  err.name === 'NS_ERROR_DOM_QUOTA_REACHED'  err.code === 22);
             if (!isQuotaError || !opts.pruneChatsKey) return false;
             const chatsKey = opts.pruneChatsKey;
             try {
@@ -1838,16 +1973,17 @@
         }
     }
 
-    let __historyRenderQueued = false;
     function saveCurrentChat() {
         const chatBox = document.getElementById("chatBox");
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+        const storageKey = currentUser ? virtual_chat_${currentUser.email} : 'virtual_chat_history';
+        const historyKey = currentUser ? virtual_history_${currentUser.email} : 'virtual_history_data';
+        
         chats[currentChatId] = {
             title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
         };
+        
         const ok = safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
         if (!ok) {
             delete chats[currentChatId];
@@ -1863,22 +1999,24 @@
         const query = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
         list.innerHTML = "";
         let visible = 0;
+        
         Object.keys(chats).reverse().forEach(id => {
             const title = chats[id].title || 'گفتگوی جدید';
             if (query && !title.toLowerCase().includes(query)) return;
             visible++;
             const item = document.createElement("div");
-            item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
-            item.innerHTML = `<i class="fa-regular fa-comment-dots"></i><span>${escapeHtml(title)}</span>`;
+            item.className = history-item ${id == currentChatId ? 'active' : ''};
+            item.innerHTML = <i class="fa-regular fa-message"></i><span>${escapeHtml(title)}</span>;
             item.onclick = () => { if (!isGenerating) loadChat(id); };
             list.appendChild(item);
         });
+        
         const empty = document.getElementById('historyEmpty');
         if (empty) empty.style.display = visible ? 'none' : 'block';
     }
 
     function renderHistory() {
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+        const storageKey = currentUser ? virtual_chat_${currentUser.email} : 'virtual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
         renderHistoryList();
     }
@@ -1899,7 +2037,7 @@
     function filterHistory(value) {
         renderHistoryList();
     }
-
+// میانبر Ctrl+K برای جستجوی تاریخچه
     document.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
             e.preventDefault();
@@ -1911,168 +2049,198 @@
         }
     });
 
-
     function loadChat(id, isInitialLoad = false) {
         if (isGenerating) stopGeneration();
         currentChatId = id;
         localStorage.setItem('last_active_chat_id', currentChatId);
         isFirstMessage = false;
+        
         const chatBox = document.getElementById("chatBox");
         document.getElementById("homeScreen").style.display = 'none';
         chatBox.style.display = 'flex';
         chatBox.innerHTML = chats[id].html;
+        
+        // تعمیر دکمه‌های ذخیره شده
         repairLoadedChatButtons(chatBox);
+        
+        // تزیین پیام‌ها با دکمه‌های اکشن
+        setTimeout(() => decorateMessages(chatBox), 50);
+        
         renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+        
         const scrollToBottom = () => { chatBox.scrollTop = chatBox.scrollHeight; };
         scrollToBottom();
         requestAnimationFrame(scrollToBottom);
         setTimeout(scrollToBottom, isInitialLoad ? 120 : 0);
     }
 
-    function exportCurrentChat(format){
-        const box=document.getElementById('chatBox');
-        if(!box || !box.querySelector('.message')) return;
-        const rows=[...box.querySelectorAll('.message-wrapper')].map(w=>{
-            const who=w.classList.contains('user')?'کاربر':'Virtual Bot';
-            const text=w.querySelector('.message')?.innerText||'';
-            return format==='md'?`## ${who}\n\n${text}`:`${who}:\n${text}`;
+    function repairLoadedChatButtons(chatBox) {
+        if (!chatBox) return;
+        
+        // حذف دکمه‌های قدیمی اسپیکر
+        chatBox.querySelectorAll('.speak-btn').forEach(btn => {
+            const footer = btn.closest('.msg-footer');
+            if (footer) footer.remove();
+            else btn.remove();
         });
-        const content=rows.join(format==='md'?'\n\n---\n\n':'\n\n----------------\n\n');
-        const blob=new Blob([content],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`virtual-chat-${new Date().toISOString().slice(0,10)}.${format}`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    }
-    function clearCurrentChat(){
-        if(!confirm('این گفتگو پاک شود؟')) return;
-        const id=currentChatId; delete chats[id]; delete chatHistoryData[id];
-        const storageKey=currentUser?`virtual_chat_${currentUser.email}`:'virtual_chat_history';const historyKey=currentUser?`virtual_history_${currentUser.email}`:'virtual_history_data';
-        safeSetItem(storageKey,JSON.stringify(chats),{pruneChatsKey:storageKey});safeSetItem(historyKey,JSON.stringify(chatHistoryData),{});startNewChat();closeSettings();
+        chatBox.querySelectorAll('.msg-footer').forEach(footer => {
+            if (!footer.querySelector('button')) footer.remove();
+        });
+        
+        // تعمیر دکمه‌های Retry
+        chatBox.querySelectorAll('.retry-btn').forEach(btn => {
+            if (!btn.getAttribute('onclick')) {
+                btn.onclick = () => retryFromButton(btn);
+            }
+        });
+        
+        // غیرفعال کردن دکمه‌های کد بدون داده
+        chatBox.querySelectorAll('.code-action').forEach(btn => {
+            if (!btn.dataset.code) btn.disabled = true;
+        });
     }
 
-    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل و تمیز بده. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
+    function startNewChat() {
+        if (isGenerating) stopGeneration();
+        currentChatId = Date.now();
+        localStorage.setItem('last_active_chat_id', currentChatId);
+        isFirstMessage = true;
+        document.getElementById("chatBox").innerHTML = "";
+        document.getElementById("chatBox").style.display = 'none';
+        document.getElementById("homeScreen").style.display = 'flex';
+        renderHistoryList();
+        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+    }
+
+    // =====================================================
+    // خروجی و پاک کردن
+    // =====================================================
+    function exportCurrentChat(format) {
+        const box = document.getElementById('chatBox');
+        if (!box || !box.querySelector('.message')) return;
+        
+        const rows = [...box.querySelectorAll('.message-wrapper')].map(w => {
+            const who = w.classList.contains('user') ? 'کاربر' : 'Virtual Bot';
+            const text = w.querySelector('.message')?.innerText || '';
+            return format === 'md' ? ## ${who}\n\n${text} : ${who}:\n${text};
+        });
+        
+        const content = rows.join(format === 'md' ? '\n\n---\n\n' : '\n\n----------------\n\n');
+const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = virtual-chat-${new Date().toISOString().slice(0, 10)}.${format};
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    function clearCurrentChat() {
+        if (!confirm('این گفتگو پاک شود؟')) return;
+        const id = currentChatId;
+        delete chats[id];
+        delete chatHistoryData[id];
+        
+        const storageKey = currentUser ? virtual_chat_${currentUser.email} : 'virtual_chat_history';
+        const historyKey = currentUser ? virtual_history_${currentUser.email} : 'virtual_history_data';
+        
+        safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
+        safeSetItem(historyKey, JSON.stringify(chatHistoryData), {});
+        startNewChat();
+        closeSettings();
+    }
+
+    // =====================================================
+    // ارتقاء هویت ربات
+    // =====================================================
+    const upgradedPersona = تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل و تمیز بده. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.;
+
     try { window.virtualPersona = upgradedPersona; } catch (_) {}
 
-    function addMessageActions(wrapper, sender) {
-        if (!wrapper || wrapper.querySelector('.message-actions')) return;
-        const msg = wrapper.querySelector('.message');
-        if (!msg) return;
-        const bar = document.createElement('div');
-        bar.className = 'message-actions';
-        const copy = document.createElement('button');
-        copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="fa-regular fa-copy"></i>';
-        copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="fa-solid fa-check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
-        bar.appendChild(copy);
-        if(sender==='bot'){
-            const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="fa-solid fa-rotate"></i>';
-            regen.onclick=()=>regenerateMessage(wrapper);bar.appendChild(regen);
-        } else {
-            const edit=document.createElement('button');edit.className='msg-action';edit.type='button';edit.title='ویرایش و ارسال دوباره';edit.innerHTML='<i class="fa-solid fa-pen"></i>';
-            edit.onclick=()=>editUserMessage(wrapper);bar.appendChild(edit);
+    // بازنویسی تابع ensureVirtualPersona با persona جدید
+    const originalEnsure = ensureVirtualPersona;
+    ensureVirtualPersona = function() {
+        if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
+        const h = chatHistoryData[currentChatId];
+        const oldIndex = h.findIndex(x => x.__virtualPersona);
+        if (oldIndex >= 0) {
+            h.splice(oldIndex, 2);
         }
-        wrapper.appendChild(bar);
-    }
-
-    function decorateMessages(root=document.getElementById('chatBox')) {
-        if(!root) return;
-        root.querySelectorAll('.message-wrapper.bot').forEach(w=>addMessageActions(w,'bot'));
-        root.querySelectorAll('.message-wrapper.user').forEach(w=>addMessageActions(w,'user'));
-    }
-
-    function regenerateMessage(wrapper) {
-        if(isGenerating) return;
-        const botWrappers=[...document.querySelectorAll('#chatBox .message-wrapper.bot')];
-        const index=botWrappers.indexOf(wrapper);
-        if(index<0) return;
-        const users=[...document.querySelectorAll('#chatBox .message-wrapper.user')];
-        let prompt='';
-        for(let i=users.length-1;i>=0;i--){
-            if(users[i].compareDocumentPosition(wrapper)&Node.DOCUMENT_POSITION_FOLLOWING){ prompt=users[i].querySelector('.message')?.innerText||''; break; }
-        }
-        if(!prompt) return;
-        wrapper.remove();
-        const hist=chatHistoryData[currentChatId]||[];
-        for(let i=hist.length-1;i>=0;i--){if(hist[i].role==='model'){hist.splice(i,1);break;}}
-        sendToGemini(prompt,null);
-    }
-
-    function editUserMessage(wrapper){
-        if(isGenerating) return;
-        const text=wrapper.querySelector('.message')?.innerText||'';
-        const input=document.getElementById('userInput'); input.value=text; autoResizeTextarea(input); input.focus();
-        wrapper.classList.add('editing');
-        input.dataset.editingWrapper='1';
-    }
-
-    function openChatSearch(){const p=document.getElementById('chatSearchPanel');p.classList.add('active');setTimeout(()=>document.getElementById('chatSearchInput')?.focus(),20)}
-    function closeChatSearch(){document.getElementById('chatSearchPanel')?.classList.remove('active');searchInCurrentChat('')}
-    function searchInCurrentChat(q){
-        const msgs=[...document.querySelectorAll('#chatBox .message')];msgs.forEach(m=>m.classList.remove('search-hit'));
-        q=(q||'').trim();if(!q){document.getElementById('chatSearchCount').textContent='';return}
-        const hits=msgs.filter(m=>m.innerText.toLowerCase().includes(q.toLowerCase()));
-        hits.forEach(m=>m.classList.add('search-hit'));document.getElementById('chatSearchCount').textContent=hits.length?`${hits.length} نتیجه`:'نتیجه‌ای نیست';
-        if(hits[0]) hits[0].scrollIntoView({behavior:'smooth',block:'center'});
-    }
-
-    const __oldHandleKeyDown = handleKeyDown;
-    handleKeyDown = function(e){
-        const input=e.target;
-        if(e.key==='Escape'){closeChatSearch();document.getElementById('commandMenu')?.classList.remove('active');return}
-        __oldHandleKeyDown(e);
+        h.unshift(
+            { role: 'user', text: upgradedPersona, __virtualPersona: true },
+            { role: 'model', text: 'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.', __virtualPersona: true }
+        );
     };
-    document.getElementById('userInput')?.addEventListener('input',function(){
-        const menu=document.getElementById('commandMenu');
-        menu?.classList.toggle('active', this.value.trim()==='/');
+
+    // =====================================================
+    // مقداردهی نهایی
+    // =====================================================
+    // تزیین پیام‌ها بعد از لود
+    setTimeout(decorateMessages, 50);
+
+    // پشتیبانی از تغییر اندازه پنجره برای سایدبار
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 768) {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            if (sidebar) sidebar.classList.remove('open');
+            if (overlay) overlay.classList.remove('active');
+        }
     });
 
-    ensureVirtualPersona = function(){
-        if(!chatHistoryData[currentChatId]) chatHistoryData[currentChatId]=[];
-        const h=chatHistoryData[currentChatId];
-        const oldIndex=h.findIndex(x=>x.__virtualPersona);
-        if(oldIndex>=0){h.splice(oldIndex,2);}
-        h.unshift({role:'user',text:upgradedPersona,__virtualPersona:true},{role:'model',text:'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.',__virtualPersona:true});
+    // =====================================================
+    // بهینه‌سازی سرعت: کش کردن DOM و کاهش رفلاکس
+    // =====================================================
+    // کش کردن المنت‌های پرکاربرد
+    const domCache = {
+        chatBox: null,
+        userInput: null,
+        actionBtn: null,
+        homeScreen: null
     };
 
-    formatReply = function(text){
-        const escaped=escapeHtml(text);
-        const parts=escaped.split(/```/);
-        const rendered=parts.map((part,index)=>{
-            if(index%2===1){
-                const raw=part.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
-                const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
-                const code=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim(); const encoded=encodeURIComponent(code);
-                const canRun=['html','htm'].includes(lang)||/<!doctype html|<html|<body|<div|<script/i.test(code);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang||'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun?`<button class="code-action" onclick="runHtmlCode(this)" data-code="${encoded}">اجرا</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>`:''}</div></div><pre><code>${code}</code></pre></div>`;
-            }
-            const lines=part.split('\n');let out=[],para=[],list=null,items=[];
-            const flushP=()=>{if(para.length){out.push(`<p>${formatInline(para.join(' '))}</p>`);para=[]}};
-            const flushL=()=>{if(items.length){const tag=list==='ol'?'ol':'ul';out.push(`<${tag}>${items.map(x=>`<li>${formatInline(x)}</li>`).join('')}</${tag}>`);items=[];list=null}};
-            for(const raw of lines){const line=raw.trim();if(!line){flushP();flushL();continue}
-                const head=line.match(/^(#{1,3})\s+(.+)$/), bullet=line.match(/^[-*•]\s+(.+)$/), ordered=line.match(/^\d+[.)]\s+(.+)$/), quote=line.match(/^&gt;\s*(.+)$/), hr=/^[-*_]{3,}$/.test(line);
-                if(head){flushP();flushL();const lv=Math.min(4,head[1].length+1);out.push(`<h${lv}>${formatInline(head[2])}</h${lv}>`)}
-                else if(quote){flushP();flushL();out.push(`<blockquote>${formatInline(quote[1])}</blockquote>`)}
-                else if(hr){flushP();flushL();out.push('<hr>')}
-                else if(bullet){flushP();if(list&&list!=='ul')flushL();list='ul';items.push(bullet[1])}
-                else if(ordered){flushP();if(list&&list!=='ol')flushL();list='ol';items.push(ordered[1])}
-                else {flushL();para.push(line)}
-            } flushP();flushL();return out.join('');
-        }).join('');return rendered||'<p>پاسخی دریافت نشد.</p>';
+    function getCachedElement(id) {
+        if (domCache[id]) return domCache[id];
+        const el = document.getElementById(id);
+        if (el) domCache[id] = el;
+        return el;
+    }
+// بازنویسی توابع پرکاربرد با کش
+    const originalAppendMessage = appendMessage;
+    appendMessage = function(sender, content) {
+        const chatBox = getCachedElement('chatBox');
+        if (!chatBox) return;
+        
+        const wrapperDiv = document.createElement("div");
+        wrapperDiv.className = message-wrapper ${sender};
+        const msgDiv = document.createElement("div");
+        msgDiv.className = message ${sender};
+        msgDiv.innerHTML = content;
+        wrapperDiv.appendChild(msgDiv);
+
+        chatBox.appendChild(wrapperDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        updateScrollLatestButton();
+        addMessageActions(wrapperDiv, sender);
     };
 
-    const __oldAppendMessage=appendMessage;
-    appendMessage=function(sender,content){
-        __oldAppendMessage(sender,content);
-        const last=document.getElementById('chatBox')?.lastElementChild;
-        if(last) addMessageActions(last,sender);
-    };
-    const __oldLoadChat=loadChat;
-    loadChat=function(id,isInitialLoad=false){__oldLoadChat(id,isInitialLoad);setTimeout(()=>decorateMessages(),0)};
-    const __oldSendToGemini=sendToGemini;
-    sendToGemini=async function(...args){
-        const result=await __oldSendToGemini(...args);
-        const last=document.getElementById('chatBox')?.lastElementChild;
-        if(last) addMessageActions(last,'bot');
-        return result;
-    };
-    setTimeout(decorateMessages,50);
+    // =====================================================
+    // نمایش نسخه و اطلاعات در کنسول
+    // =====================================================
+    console.log(':rocket: Virtual Chat Pro v3.0');
+    console.log(':iphone: ویژگی‌های جدید:');
+    console.log('  - انیمیشن‌های به‌روز و روان‌تر');
+    console.log('  - سرعت بیشتر در تایپ پاسخ‌ها');
+    console.log('  - دکمه‌های اکشن برای هر پیام');
+    console.log('  - جستجوی پیشرفته در تاریخچه');
+    console.log('  - کامند منو با /');
+    console.log('  - خروجی Markdown و متن');
+    console.log('  - بهینه‌سازی عملکرد');
+    console.log('  - طراحی واکنش‌گرا و مدرن');
+    console.log('  - پشتیبانی از فایل‌های تصویر و ویدیو');
+    console.log('  - مدل‌های مختلف: Virtual Bot 1.1, 1.5, 1.3');
 
 </script>
 </body>
