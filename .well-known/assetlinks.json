@@ -2,7 +2,7 @@
       "relation": ["delegate_permission/common.handle_all_urls"],
       "target": {
         "namespace": "android_app",
-        "package_name": "app.vercel.virtual_chat_eta.twa",
-        "sha256_cert_fingerprints": ["EB:BE:D0:AB:AE:D2:5D:76:BD:BB:00:F2:25:93:0D:57:1B:A2:A3:85:BB:72:57:EE:31:58:76:30:B8:27:07:60"]
+        "package_name": "app.vercel.virtual_chat_seven.twa",
+        "sha256_cert_fingerprints": ["FB:8A:A7:52:76:D3:BB:C2:D6:4E:B9:C2:BA:13:EB:3A:0C:5D:4D:D1:94:D6:EA:47:AC:9B:44:E3:47:64:E6:82"]
       }
     }]
