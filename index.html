@@ -81,7 +81,16 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        select, input, button, textarea {
+        select, input, button {
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+            outline: none !important;
+            border: none;
+            background: none;
+        }
+        
+        textarea {
             outline: none !important;
             border: none;
             background: none;
@@ -173,6 +182,7 @@
         }
         .sidebar-overlay.active { display: block; }
 
+        /* ===== MODERNIZED SIDEBAR ===== */
         .sidebar {
             width: 272px;
             background-color: var(--bg-sidebar);
@@ -181,6 +191,7 @@
             flex-direction: column;
             padding: 16px;
             z-index: 20;
+            /* New Animations */
             transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
             box-shadow: -8px 0 25px rgba(0,0,0,0.4);
         }
@@ -212,6 +223,7 @@
             color: transparent;
         }
 
+        /* Close Button with Rotating Animation */
         .sidebar-close-btn {
             display: flex !important;
             color: var(--text-muted); width: 32px; height: 32px;
@@ -297,6 +309,7 @@
             overflow: hidden;
         }
 
+        /* ===== CLEAN HEADER ===== */
         .chat-header {
             padding: 14px 22px;
             display: flex;
@@ -431,6 +444,7 @@
             position: relative;
         }
 
+        /* ===== MODERN INPUT BOX ===== */
         .input-box {
             background-color: var(--bg-input);
             border: 1px solid var(--border-soft);
@@ -497,6 +511,7 @@
         .action-btn:hover:not(:disabled) { filter: brightness(1.1); transform: scale(1.05); }
         .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
 
+        /* ===== MODEL SELECTOR INSIDE INPUT ===== */
         .model-pill-selector {
             display: flex;
             align-items: center;
@@ -674,6 +689,7 @@
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
+                <!-- مدل‌ها به داخل باکس ورودی منتقل شدند، اینجا فقط دکمه منو می‌ماند -->
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
@@ -837,7 +853,7 @@
 
 <script>
     // =====================================================
-    // سیستم انتخاب مدل (NEW PILL INSIDE INPUT)
+    // سیستم انتخاب مدل (NEW PILL INSIDE INPUT VERSION)
     // =====================================================
     let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.6-flash';
     let currentModelDisplay = {
@@ -872,7 +888,7 @@
     });
 
     // =====================================================
-    // هسته اصلی کد (سیستم کاربر و چت) - کاملاً دست‌نخورده
+    // بقیه کدها (همه قابلیت‌های پیشرفته شما) - کاملاً دست‌نخورده
     // =====================================================
 
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
@@ -1613,59 +1629,34 @@
     }
 
     // =====================================================
-    // FAST STREAM TYPEWRITER
+    // YOUR FAST TYPEWRITER (UNTOUCHED)
     // =====================================================
     function typeWriterEffect(element, text, onComplete) {
         const typingRequestId = activeRequestId;
+        element.textContent = "";
+        let i = 0;
         const chatBox = document.getElementById("chatBox");
-        
-        // Split text by new lines for fast paragraph streaming
-        const paragraphs = text.split('\n').filter(p => p.trim().length > 0);
-        let currentParaIndex = 0;
-        let currentCharIndex = 0;
-        let displayText = "";
-
-        // Speed: High performance char chunking
-        const charsPerTick = 15; 
-
+        const charsPerTick = Math.max(1, Math.ceil(text.length / 250));
+        let tick = 0;
         typeWriterInterval = setInterval(() => {
             if (typingRequestId !== activeRequestId) {
                 clearInterval(typeWriterInterval);
                 typeWriterInterval = null;
                 return;
             }
-
-            if (currentParaIndex < paragraphs.length) {
-                let paragraph = paragraphs[currentParaIndex];
-                
-                if (currentCharIndex < paragraph.length) {
-                    let end = Math.min(currentCharIndex + charsPerTick, paragraph.length);
-                    displayText += paragraph.substring(currentCharIndex, end);
-                    currentCharIndex = end;
-                    
-                    element.textContent = displayText;
-                    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
-                } 
-                else {
-                    currentParaIndex++;
-                    currentCharIndex = 0;
-                    if (currentParaIndex < paragraphs.length) {
-                        displayText += "\n\n";
-                    } else {
-                        clearInterval(typeWriterInterval);
-                        typeWriterInterval = null;
-                        element.innerHTML = formatReply(text);
-                        if (onComplete) onComplete();
-                    }
+            if (i < text.length) {
+                i = Math.min(text.length, i + charsPerTick);
+                element.textContent = text.slice(0, i);
+                if (chatBox && (++tick % 3 === 0 || i >= text.length)) {
+                    chatBox.scrollTop = chatBox.scrollHeight;
                 }
-            } 
-            else {
+            } else {
                 clearInterval(typeWriterInterval);
                 typeWriterInterval = null;
                 element.innerHTML = formatReply(text);
                 if (onComplete) onComplete();
             }
-        }, 12); // Fast tick rate
+        }, 16);
     }
 
     function appendMessage(sender, content) {
