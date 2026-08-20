@@ -173,6 +173,82 @@
             100% { transform: scale(1); color: var(--danger); }
         }
 
+        /* ===== انیمیشن‌های جدید ===== */
+        @keyframes messageInSoft {
+            0% { opacity: 0; transform: translateY(14px) scale(0.97); }
+            60% { opacity: 1; }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes sendPop {
+            0% { transform: scale(1) rotate(0deg); }
+            35% { transform: scale(0.82) rotate(-8deg); }
+            65% { transform: scale(1.12) rotate(4deg); }
+            100% { transform: scale(1) rotate(0deg); }
+        }
+        @keyframes accentShimmer {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        @keyframes chevronFlip {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(180deg); }
+        }
+        @keyframes cardPress {
+            0% { transform: scale(1); }
+            50% { transform: scale(0.96); }
+            100% { transform: scale(1); }
+        }
+        @keyframes underlineGrow {
+            from { width: 0; opacity: 0; }
+            to { width: 100%; opacity: 1; }
+        }
+        @keyframes floatUpFade {
+            0% { opacity: 0; transform: translateY(8px); }
+            15% { opacity: 1; transform: translateY(0); }
+            85% { opacity: 1; }
+            100% { opacity: 0; transform: translateY(-6px); }
+        }
+
+        .message-wrapper { animation: messageInSoft 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+
+        .action-btn:active i { animation: sendPop 0.38s ease; }
+
+        .model-dropdown-item.active {
+            position: relative;
+            overflow: hidden;
+        }
+        .model-dropdown-item.active::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, rgba(139,92,246,0.10), rgba(34,211,238,0.14), rgba(139,92,246,0.10));
+            background-size: 200% 200%;
+            animation: accentShimmer 3.2s ease infinite;
+            pointer-events: none;
+        }
+
+        .model-selector:has(.model-dropdown.active) .model-chevron i { transform: rotate(180deg); transition: transform 0.2s ease; }
+        .model-chevron i { transition: transform 0.2s ease; }
+
+        .icon-btn:active, .msg-action:active { animation: cardPress 0.22s ease; }
+
+        .suggestion-chip { position: relative; overflow: hidden; }
+        .suggestion-chip::after {
+            content: "";
+            position: absolute;
+            right: 14px;
+            bottom: 6px;
+            left: 14px;
+            height: 2px;
+            border-radius: 2px;
+            background: var(--accent-grad);
+            width: 0;
+            opacity: 0;
+            transition: none;
+        }
+        .suggestion-chip:hover::after { animation: underlineGrow 0.25s ease forwards; }
+
         .sidebar-overlay {
             display: none;
             position: fixed;
@@ -306,6 +382,7 @@
         }
 
         .header-left { display: flex; align-items: center; gap: 12px; }
+        .header-brand-text { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); letter-spacing: 0.2px; }
         .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; }
         .header-right { display: flex; align-items: center; gap: 8px; }
 
@@ -379,6 +456,29 @@
         @media (max-width: 900px) {
             .model-selector .model-name { display: none; }
             .model-dropdown { min-width: 160px; left: auto; right: 0; transform: none; }
+        }
+
+        /* سلکتور مدل کنار نوار پیام (به سبک کلود) */
+        .composer-model-selector {
+            order: 5;
+            margin-right: 2px;
+            flex-shrink: 0;
+        }
+        .composer-model-selector .model-dropdown {
+            top: auto;
+            bottom: calc(100% + 10px);
+            left: 0;
+            right: auto;
+            transform: none;
+            animation: dropUp 0.18s ease;
+        }
+        @media (max-width: 900px) {
+            .composer-model-selector .model-name { display: inline-block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+            .composer-model-selector .model-dropdown { left: auto; right: 0; }
+        }
+        @keyframes dropUp {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         .home-screen {
@@ -477,8 +577,11 @@
         .code-actions { display:flex; gap:6px; }
         .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:5px 9px; cursor:pointer; font-family:inherit; font-size:0.76rem; }
         .code-action:hover { border-color:var(--accent-2); }
-        .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; }
-        .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; }
+        .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; tab-size: 2; }
+        .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.85rem; }
+        .code-card pre::-webkit-scrollbar { height: 8px; }
+        .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
+        .code-card-head span:first-child { text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: var(--accent-2); }
         .retry-row { display:flex; align-items:center; gap:9px; margin-top:10px; color:var(--text-muted); font-size:0.84rem; }
         .retry-btn { border:1px solid rgba(248,113,113,.35); background:rgba(248,113,113,.08); color:#fca5a5; border-radius:9px; padding:7px 11px; cursor:pointer; font-family:inherit; }
         .retry-btn:hover { background:rgba(248,113,113,.14); }
@@ -1064,33 +1167,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
-                <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
-                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
-                    <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
-                    <div class="model-dropdown" id="modelDropdown">
-                        <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.1</div>
-                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                        <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.5</div>
-                                <div class="item-desc">جدیدترین مدل</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro')">
-                            <span>
-                                <div class="item-name">Virtual Bot 1.3</div>
-                                <div class="item-desc">مناسب کدنویسی</div>
-                            </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
-                        </div>
-                    </div>
-                </div>
+                <span class="header-brand-text">Virtual Chat</span>
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
@@ -1119,16 +1196,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            <div class="sticker-picker" id="stickerPicker">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f917/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-                <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f389/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
-            </div>
+            <div class="sticker-picker" id="stickerPicker"></div>
 
             <div class="file-preview" id="filePreview">
                 <img id="previewImg" src="" alt="preview">
@@ -1164,6 +1232,34 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
                     <i class="fa-solid fa-plus"></i>
                 </button>
+
+                <div class="model-selector composer-model-selector" id="modelSelector" onclick="toggleModelDropdown()">
+                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
+                    <span class="model-chevron"><i class="fa-solid fa-chevron-up"></i></span>
+                    <div class="model-dropdown" id="modelDropdown">
+                        <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.1</div>
+                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.5</div>
+                                <div class="item-desc">جدیدترین مدل</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item" data-model="gemini-3.1-pro" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.3</div>
+                                <div class="item-desc">مناسب کدنویسی</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1894,7 +1990,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
 قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot 1.5 هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن و هیچ نامی مثل «اکبر» نساز؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
 
-سبک پاسخ: جواب را اول مستقیم شروع کن. برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. هر پاراگراف را بیش از حد کش نده. اگر موضوع چند بخش دارد، آن را بخش‌بندی کن. از تکرار بی‌دلیل مقدمه‌هایی مثل «حتماً، با کمال میل» خودداری کن. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. گاهی ۱ تا ۳ ایموجی یا استیکر متنی مرتبط مثل 😂🔥😎 استفاده کن، اما نه در هر جمله و نه به شکل مصنوعی. در پاسخ‌های فنی جدی، ایموجی را کم کن.
+سبک پاسخ: جواب را اول مستقیم شروع کن. برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. هر پاراگراف را بیش از حد کش نده. اگر موضوع چند بخش دارد، آن را بخش‌بندی کن. از تکرار بی‌دلیل مقدمه‌هایی مثل «حتماً، با کمال میل» خودداری کن. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. از ایموجی یا استیکر متنی استفاده نکن؛ لحن را با کلمات طبیعی نشان بده، نه نماد.
 
 دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار، وضعیت بازار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و تاریخ/منبع را در صورت امکان روشن کن. قیمت و مشخصات را حدس نزن. اگر مطمئن نیستی، صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. اگر HTML می‌نویسی، در بلوک کد html کامل و قابل اجرا ارائه کن. هدف این است که جواب‌ها هم مفید و حرفه‌ای باشند و هم شخصیت داشته باشند.`
 
@@ -2059,9 +2155,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         let i = 0;
         const chatBox = document.getElementById("chatBox");
         // Batch multiple characters per tick so total reveal time stays
-        // reasonable regardless of reply length (was 1 char / 8ms, i.e.
-        // ~25s for a 3000-char reply with a DOM write + scroll every tick).
-        const charsPerTick = Math.max(1, Math.ceil(text.length / 250));
+        // reasonable regardless of reply length, and reveal in fewer, larger
+        // ticks so long replies finish fast without feeling instant.
+        const charsPerTick = Math.max(1, Math.ceil(text.length / 90));
         let tick = 0;
         typeWriterInterval = setInterval(() => {
             if (typingRequestId !== activeRequestId) {
@@ -2082,7 +2178,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 element.innerHTML = formatReply(text);
                 if (onComplete) onComplete();
             }
-        }, 16);
+        }, 10);
     }
 
     function appendMessage(sender, content) {
@@ -2392,7 +2488,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
-    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل و تمیز بده. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
+    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل، تمیز و با ایندنت درست و منظم بده؛ تگ‌ها را به‌ترتیب و خوانا بنویس، نه فشرده و درهم. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
     try { window.virtualPersona = upgradedPersona; } catch (_) {}
 
     function addMessageActions(wrapper, sender) {
