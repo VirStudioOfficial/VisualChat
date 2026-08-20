@@ -978,7 +978,33 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:rgba(139,92,246,.45)}
 @media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
 
-    </style>
+    
+        /* ===== Virtual Chat 1.5 polish ===== */
+        .sidebar-close-btn { display:flex !important; }
+        .history-tools { display:flex; align-items:center; gap:7px; margin-top:10px; }
+        .history-search-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
+        .history-search-toggle:hover { color:var(--text-main); border-color:rgba(139,92,246,.4); }
+        .history-search-input { display:none; min-width:0; flex:1; height:36px; padding:0 11px; border:1px solid var(--border-soft); outline:none; background:var(--bg-input); color:var(--text-main); border-radius:10px; font-family:inherit; font-size:.78rem; }
+        .history-tools.active .history-search-input { display:block; animation:fadeIn .16s ease; }
+        .history-empty { color:var(--text-muted); font-size:.75rem; text-align:center; padding:18px 8px; line-height:1.7; }
+        .sidebar.collapsed { width:0; min-width:0; padding-left:0; padding-right:0; border:0; overflow:hidden; }
+        .sidebar.collapsed > * { opacity:0; pointer-events:none; }
+        .menu-btn { display:flex !important; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; }
+        .menu-btn:hover { background:var(--bg-card); }
+        .chat-header { min-height:58px; }
+        .message { line-height:1.85; }
+        .message.bot p { margin:0 0 14px; }
+        .message.bot p:last-child { margin-bottom:0; }
+        .message.bot h2, .message.bot h3, .message.bot h4 { margin:20px 0 9px; line-height:1.45; }
+        .message.bot ul, .message.bot ol { margin:9px 0 16px; padding-right:24px; }
+        .message.bot li { margin:6px 0; padding-right:3px; }
+        .message.bot blockquote { margin:14px 0; padding:10px 14px; border-right:3px solid var(--accent-2); background:rgba(34,211,238,.05); border-radius:10px; }
+        @media (max-width:768px) {
+            .sidebar.collapsed { width:272px; }
+            .sidebar.collapsed > * { opacity:1; pointer-events:auto; }
+            .sidebar-close-btn { display:flex !important; }
+        }
+</style>
 </head>
 <body>
 
@@ -1006,7 +1032,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <span class="brand-mark"><i class="fa-solid fa-sparkles"></i></span>
                 <span class="brand-text">Virtual Chat</span>
             </div>
-            <i class="fa-solid fa-xmark icon-btn" onclick="toggleSidebar()" style="display: var(--mobile-close, none);"></i>
+            <button class="icon-btn sidebar-close-btn" onclick="toggleSidebar()" title="بستن پنل گفتگوها"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
         <div class="user-profile" id="userProfile">
@@ -1016,7 +1042,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <button class="new-chat-btn" id="newChatBtn" onclick="startNewChat()">
             <i class="fa-solid fa-plus"></i> گفتگوی تازه
         </button>
+        <div class="history-tools">
+            <button class="history-search-toggle" type="button" onclick="toggleHistorySearch()" title="جستجو بین گفتگوها"><i class="fa-solid fa-magnifying-glass"></i></button>
+            <input id="historySearchInput" class="history-search-input" type="search" placeholder="جستجو بین گفتگوها..." oninput="filterHistory(this.value)" autocomplete="off">
+        </div>
         <div class="history-list" id="historyList"></div>
+        <div class="history-empty" id="historyEmpty" style="display:none;">گفتگویی با این عنوان پیدا نشد.</div>
     </div>
 
     <div class="main-content">
@@ -1026,17 +1057,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     <i class="fa-solid fa-bars"></i>
                 </button>
                 <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
-                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.1</span>
+                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
                     <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
                     <div class="model-dropdown" id="modelDropdown">
-                        <div class="model-dropdown-item active" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
+                        <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.1</div>
                                 <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
                             </span>
                             <span class="item-check"><i class="fa-solid fa-check"></i></span>
                         </div>
-                        <div class="model-dropdown-item" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
+                        <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.5</div>
                                 <div class="item-desc">جدیدترین مدل</div>
@@ -1204,7 +1235,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // =====================================================
     // سیستم انتخاب مدل
     // =====================================================
-    let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.5-flash-lite';
+    let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.6-flash';
     let currentModelDisplay = {
         'gemini-3.5-flash-lite': 'Virtual Bot 1.1',
         'gemini-3.6-flash': 'Virtual Bot 1.5',
@@ -1255,6 +1286,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     window.onload = () => {
         const savedModel = localStorage.getItem('virtual_selected_model');
+        if (!savedModel) {
+            currentModel = 'gemini-3.6-flash';
+            document.getElementById('modelDisplayName').textContent = 'Virtual Bot 1.5';
+        }
         if (savedModel && currentModelDisplay[savedModel]) {
             currentModel = savedModel;
             document.getElementById('modelDisplayName').textContent = currentModelDisplay[savedModel];
@@ -1489,7 +1524,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const ignoreList = ['سلام', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'ممنون', 'خداحافظ'];
         const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
         if (ignoreList.includes(normalized)) return false;
-        const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'قیمت', 'اخبار', 'خبر', 'امشب'];
+        const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'قیمت', 'اخبار', 'خبر', 'امشب', 'امروز', 'فعلی', 'بازار', 'سیستم', 'قطعات', 'خرید', 'بودجه', 'پیشنهاد خرید'];
         return allowedKeywords.some(kw => normalized.includes(kw));
     }
 
@@ -1507,8 +1542,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function toggleSidebar() {
-        document.getElementById('sidebar').classList.toggle('open');
-        document.getElementById('sidebarOverlay').classList.toggle('active');
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        if (window.innerWidth <= 768) {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('active');
+        } else {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+        }
     }
 
     function toggleStickerPicker() {
@@ -1822,7 +1864,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         await sendToGemini(text, payloadFile);
     }
 
-    const virtualPersona = `تو شخصیت Virtual Bot هستی؛ یک دستیار فارسی‌زبان باحال، طبیعی، باهوش و خودمانی. خشک، اداری و رباتی حرف نزن. مثل یک آدم واقعی که با کاربر دوست است جواب بده، اما بیش‌ازحد لوس یا پر از ایموجی هم نباش. برای سؤال‌های ساده مستقیم جواب بده و مقدمه‌های تکراری مثل «حتماً، با کمال میل» نگو. اگر کاربر شوخی کرد، شوخی را بفهم و طبیعی جواب بده. اگر موضوع پیچیده است، پاسخ را با تیترهای کوتاه، پاراگراف‌های خوانا و لیست‌ها مرتب کن. وقتی لازم نیست طولانی ننویس. اگر مطمئن نیستی صادقانه بگو. هدف تو این است که حس یک دستیار اختصاصی و متفاوت را بدهی، نه یک پاسخ‌دهنده خشک و عمومی.`;
+    const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
+
+قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot 1.5 هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن و هیچ نامی مثل «اکبر» نساز؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
+
+سبک پاسخ: جواب را اول مستقیم شروع کن. برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. هر پاراگراف را بیش از حد کش نده. اگر موضوع چند بخش دارد، آن را بخش‌بندی کن. از تکرار بی‌دلیل مقدمه‌هایی مثل «حتماً، با کمال میل» خودداری کن. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. گاهی ۱ تا ۳ ایموجی یا استیکر متنی مرتبط مثل 😂🔥😎 استفاده کن، اما نه در هر جمله و نه به شکل مصنوعی. در پاسخ‌های فنی جدی، ایموجی را کم کن.
+
+دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار، وضعیت بازار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و تاریخ/منبع را در صورت امکان روشن کن. قیمت و مشخصات را حدس نزن. اگر مطمئن نیستی، صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. اگر HTML می‌نویسی، در بلوک کد html کامل و قابل اجرا ارائه کن. هدف این است که جواب‌ها هم مفید و حرفه‌ای باشند و هم شخصیت داشته باشند.`
 
     function ensureVirtualPersona() {
         if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
@@ -1937,7 +1985,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 setGeneratingState(false); saveCurrentChat(); return;
             }
 
-            const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            const reply = sanitizeVirtualIdentity(data.candidates?.[0]?.content?.parts?.[0]?.text || '');
             if (reply) {
                 if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: reply });
                 else {
@@ -2013,6 +2061,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             .replace(/`([^`]+)`/g, '<code>$1</code>')
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
             .replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    }
+
+    function sanitizeVirtualIdentity(text) {
+        if (!text) return text;
+        return String(text)
+            .replace(/سازنده(?:ات|ی)?\s*(?:اکبر|اکبر است|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست')
+            .replace(/سازنده\s*من\s*(?:اکبر|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست');
     }
 
     function formatReply(text) {
@@ -2156,15 +2211,51 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
         const list = document.getElementById("historyList");
+        const query = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
         list.innerHTML = "";
+        let visible = 0;
         Object.keys(chats).reverse().forEach(id => {
+            const title = chats[id].title || 'گفتگوی جدید';
+            if (query && !title.toLowerCase().includes(query)) return;
+            visible++;
             const item = document.createElement("div");
             item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
-            item.innerHTML = `<i class="fa-regular fa-message"></i> <span>${chats[id].title}</span>`;
+            item.innerHTML = `<i class="fa-regular fa-message"></i><span>${escapeHtml(title)}</span>`;
             item.onclick = () => { if (!isGenerating) loadChat(id); };
             list.appendChild(item);
         });
+        const empty = document.getElementById('historyEmpty');
+        if (empty) empty.style.display = visible ? 'none' : 'block';
     }
+
+    function toggleHistorySearch() {
+        const input = document.getElementById('historySearchInput');
+        if (!input) return;
+        const tools = input.closest('.history-tools');
+        tools.classList.toggle('active');
+        if (tools.classList.contains('active')) {
+            input.focus();
+        } else {
+            input.value = '';
+            renderHistory();
+        }
+    }
+
+    function filterHistory(value) {
+        renderHistory();
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            const sidebar = document.getElementById('sidebar');
+            if (window.innerWidth > 768 && sidebar.classList.contains('collapsed')) toggleSidebar();
+            const tools = document.querySelector('.history-tools');
+            if (tools && !tools.classList.contains('active')) toggleHistorySearch();
+            document.getElementById('historySearchInput')?.focus();
+        }
+    });
+
 
     function loadChat(id, isInitialLoad = false) {
         if (isGenerating) stopGeneration();
