@@ -309,33 +309,23 @@
         .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; }
         .header-right { display: flex; align-items: center; gap: 8px; }
 
-        /* ===== استایل‌های اختصاصی انتخاب مدل در کادر پیام ===== */
-        .model-selector-container {
-            display: flex;
-            align-items: center;
-            margin-bottom: 8px;
-            position: relative;
-        }
-
         .model-selector {
-            display: inline-flex;
+            display: flex;
             align-items: center;
             gap: 6px;
             background: var(--bg-card);
             border: 1px solid var(--border-soft);
-            border-radius: 20px;
-            padding: 5px 12px;
+            border-radius: 12px;
+            padding: 4px 10px;
             cursor: pointer;
-            transition: all 0.2s ease;
-            font-size: 0.78rem;
+            transition: all 0.2s;
+            font-size: 0.8rem;
             color: var(--text-muted);
             position: relative;
-            user-select: none;
         }
         .model-selector:hover {
             border-color: rgba(139,92,246,0.4);
             color: var(--text-main);
-            background: var(--bg-card-hover);
         }
         .model-selector .model-name {
             font-weight: 600;
@@ -344,19 +334,19 @@
         .model-selector .model-chevron {
             font-size: 0.65rem;
             margin-right: 2px;
-            transition: transform 0.2s ease;
         }
 
         .model-dropdown {
             display: none;
             position: absolute;
-            bottom: calc(100% + 8px);
-            right: 0;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
             background: var(--bg-sidebar);
             border: 1px solid var(--border-soft);
             border-radius: 14px;
             padding: 6px;
-            min-width: 210px;
+            min-width: 200px;
             box-shadow: 0 12px 40px var(--shadow-b);
             z-index: 100;
             animation: fadeIn 0.2s ease;
@@ -385,6 +375,11 @@
         .model-dropdown-item .item-name { font-weight: 600; }
         .model-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
         .model-dropdown-item .item-check { margin-right: auto; color: var(--accent-2); }
+
+        @media (max-width: 900px) {
+            .model-selector .model-name { display: none; }
+            .model-dropdown { min-width: 160px; left: auto; right: 0; transform: none; }
+        }
 
         .home-screen {
             flex: 1;
@@ -796,6 +791,12 @@
             background: rgba(9,11,20,0.45);
             backdrop-filter: blur(16px);
         }
+        .model-selector {
+            border-radius: 999px;
+            padding: 7px 13px;
+            color: var(--text-main);
+            background: rgba(21,27,42,0.85);
+        }
         .home-screen {
             justify-content: center;
             gap: 20px;
@@ -1051,36 +1052,6 @@
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
                     <i class="fa-solid fa-bars"></i>
                 </button>
-            </div>
-            <div class="header-right">
-                <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                </button>
-                <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
-                    <i class="fa-solid fa-gear"></i>
-                </button>
-            </div>
-        </div>
-
-        <div class="home-screen" id="homeScreen">
-            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
-            <div class="home-text">
-                <h1 class="home-title" id="welcomeHomeTitle">سلام! بریم یه چیز باحال بسازیم؟</h1>
-                <p class="home-subtitle">سؤال بپرس، ایده بساز، کد بنویس یا یه فایل بنداز اینجا؛ از همون‌جا ادامه می‌دیم.</p>
-            </div>
-            <div class="suggestion-chips">
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده خفن برای ویدیو بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">این متن رو ساده و باحال توضیح بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">برای این پروژه کد بنویس</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه چیز جدید و جالب پیدا کن</div>
-            </div>
-        </div>
-
-        <div class="chat-box" id="chatBox"></div>
-
-        <div class="input-wrapper">
-            <!-- منوی انتخاب مدل منتقل شده به اینجا (بالای ورودی متن) -->
-            <div class="model-selector-container">
                 <div class="model-selector" id="modelSelector" onclick="toggleModelDropdown()">
                     <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
                     <span class="model-chevron"><i class="fa-solid fa-chevron-down"></i></span>
@@ -1109,7 +1080,33 @@
                     </div>
                 </div>
             </div>
+            <div class="header-right">
+                <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </button>
+                <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+            </div>
+        </div>
 
+        <div class="home-screen" id="homeScreen">
+            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
+            <div class="home-text">
+                <h1 class="home-title" id="welcomeHomeTitle">سلام! بریم یه چیز باحال بسازیم؟</h1>
+                <p class="home-subtitle">سؤال بپرس، ایده بساز، کد بنویس یا یه فایل بنداز اینجا؛ از همون‌جا ادامه می‌دیم.</p>
+            </div>
+            <div class="suggestion-chips">
+                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده خفن برای ویدیو بده</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">این متن رو ساده و باحال توضیح بده</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">برای این پروژه کد بنویس</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">یه چیز جدید و جالب پیدا کن</div>
+            </div>
+        </div>
+
+        <div class="chat-box" id="chatBox"></div>
+
+        <div class="input-wrapper">
             <div class="sticker-picker" id="stickerPicker">
                 <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
                 <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp" class="sticker-item" onclick="sendSticker(this.src)">
@@ -1265,7 +1262,7 @@
     });
 
     // =====================================================
-    // بقیه کدها (همه قابلیت‌ها)
+    // منطق و مدیریت گفتگو
     // =====================================================
 
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
@@ -1297,6 +1294,7 @@
         
         checkSavedUser();
         loadSettings();
+        setupFileDropAndPaste();
 
         if (window.innerWidth <= 768) {
             document.documentElement.style.setProperty('--mobile-close', 'block');
@@ -1359,11 +1357,11 @@
 
     function initUserData() {
         updateUserUI();
-        renderHistory();
         const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         chats = JSON.parse(localStorage.getItem(storageKey)) || {};
         const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
         chatHistoryData = JSON.parse(localStorage.getItem(historyKey)) || {};
+        renderHistory();
         if (chats[currentChatId]) loadChat(currentChatId, true);
     }
 
@@ -1373,7 +1371,7 @@
         const nameToDisplay = currentUser.customName || currentUser.name;
         profileDiv.innerHTML = `
             <img src="${currentUser.picture}" class="user-avatar" alt="User">
-            <div class="user-info"><div class="user-name">${nameToDisplay}</div></div>
+            <div class="user-info"><div class="user-name">${escapeHtml(nameToDisplay)}</div></div>
             <div class="user-actions">
                 <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="fa-solid fa-arrows-rotate"></i></button>
                 <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i></button>
@@ -1600,7 +1598,6 @@
         });
     }
 
-    // ===== فشرده‌سازی ویدیو =====
     function compressVideo(file, targetWidth = 480, bitrate = 500000) {
         return new Promise((resolve, reject) => {
             const video = document.createElement('video');
@@ -1620,7 +1617,6 @@
                 canvas.width = width;
                 canvas.height = height;
                 const ctx = canvas.getContext('2d');
-
                 const stream = canvas.captureStream(25);
                 
                 let mimeType = 'video/webm';
@@ -1790,7 +1786,7 @@
                 const item = Array.from(e.clipboardData?.items || []).find(i => i.kind === 'file');
                 file = item?.getAsFile?.() || null;
             }
-            if (!file) return; // normal text paste
+            if (!file) return;
             e.preventDefault();
             await processIncomingFile(file);
         });
@@ -1844,26 +1840,441 @@
             isFirstMessage = false;
         }
 
-        let userContentHtml = text || '';
+        let userContentHtml = escapeHtml(text).replace(/\n/g, '<br>') || '';
         if (selectedFileData && selectedFileData.type.startsWith('image/')) {
             userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
         } else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
-            userContentHtml += `<br><i class="fa-solid fa-video"></i> [ویدیو: ${selectedFileData.name}]`;
-        } else if (selectedFileData) {
-            userContentHtml += `<br><i class="fa-solid fa-file"></i> [فایل: ${selectedFileData.name}]`;
+            userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
         }
 
         appendMessage('user', userContentHtml);
-        inputField.value = '';
-        autoResizeTextarea(inputField);
+        inputField.value = "";
+        inputField.style.height = '24px';
 
-        const currentFileData = selectedFileData;
+        const payloadFile = selectedFileData;
         removeFile();
-
-        sendToGemini(text, currentFileData);
+        await sendToGemini(text, payloadFile);
     }
 
-    // ادامه بقیه تابع‌های جاوااسکریپت طبق ساختار اصلی برنامه...
+    const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
+
+قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot 1.5 هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن و هیچ نامی مثل «اکبر» نساز؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
+
+سبک پاسخ: جواب را اول مستقیم شروع کن. برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. هر پاراگراف را بیش از حد کش نده. اگر موضوع چند بخش دارد، آن را بخش‌بندی کن. از تکرار بی‌دلیل مقدمه‌هایی مثل «حتماً، با کمال میل» خودداری کن. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. گاهی ۱ تا ۳ ایموجی یا استیکر متنی مرتبط مثل 😂🔥😎 استفاده کن، اما نه در هر جمله و نه به شکل مصنوعی. در پاسخ‌های فنی جدی، ایموجی را کم کن.
+
+دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار، وضعیت بازار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و تاریخ/منبع را در صورت امکان روشن کن. قیمت و مشخصات را حدس نزن. اگر مطمئن نیستی، صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. اگر HTML می‌نویسی، در بلوک کد html کامل و قابل اجرا ارائه کن. هدف این است که جواب‌ها هم مفید و حرفه‌ای باشند و هم شخصیت داشته باشند.`;
+
+    function ensureVirtualPersona() {
+        if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
+        if (chatHistoryData[currentChatId].some(item => item.__virtualPersona)) return;
+        chatHistoryData[currentChatId].unshift(
+            { role: 'user', text: virtualPersona, __virtualPersona: true },
+            { role: 'model', text: 'متوجه شدم؛ از این به بعد با شخصیت طبیعی، خودمانی و خوانا پاسخ می‌دهم.', __virtualPersona: true }
+        );
+    }
+
+    function updateScrollLatestButton() {
+        const chatBox = document.getElementById('chatBox');
+        const btn = document.getElementById('scrollLatestBtn');
+        if (!chatBox || !btn) return;
+        const distance = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+        btn.classList.toggle('show', distance > 140);
+    }
+
+    function scrollToLatest() {
+        const chatBox = document.getElementById('chatBox');
+        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+    }
+
+    function makeRetryError(loadingDiv, message, request) {
+        const saved = {
+            textPrompt: request?.textPrompt || '',
+            payloadFile: request?.payloadFile || null,
+            webSearch: isSearchEnabled,
+            model: currentModel
+        };
+        const retryData = encodeURIComponent(JSON.stringify(saved));
+        loadingDiv.innerHTML = `<div>${escapeHtml(message)}</div><div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
+        lastFailedRequest = request;
+    }
+
+    async function retryFromButton(btn) {
+        if (isGenerating) return;
+        let request = lastFailedRequest;
+        if (!request) {
+            try {
+                const saved = JSON.parse(decodeURIComponent(btn.dataset.retry || ''));
+                request = { textPrompt: saved.textPrompt || '', payloadFile: saved.payloadFile || null };
+            } catch (_) {}
+        }
+        if (!request) return;
+        await retryRequest(request);
+    }
+
+    async function retryRequest(request = lastFailedRequest) {
+        if (!request || isGenerating) return;
+        await sendToGemini(request.textPrompt, request.payloadFile, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
+    }
+
+    async function sendToGemini(textPrompt, payloadFile = null, retryContext = null) {
+        setGeneratingState(true);
+        const chatBox = document.getElementById("chatBox");
+        const isRetry = !!retryContext?.retry;
+        const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
+        const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
+        const request = { textPrompt, payloadFile, wrapper: wrapperDiv, loadingDiv };
+
+        if (!isRetry) {
+            wrapperDiv.className = "message-wrapper bot";
+            loadingDiv.className = "message bot";
+            wrapperDiv.appendChild(loadingDiv);
+            chatBox.appendChild(wrapperDiv);
+        }
+
+        const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
+        const modelName = currentModelDisplay[currentModel] || 'Virtual Bot';
+        let statusMsg = willSearch ? 'جستجو در وب...' : `${modelName} در حال پاسخ...`;
+        if (payloadFile) statusMsg = `ارسال فایل ${payloadFile.name || ''}...`;
+        loadingDiv.innerHTML = `${statusMsg} <span class="typing-dots"><span></span><span></span><span></span></span>`;
+        scrollToLatest();
+
+        const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
+        if (!isRetry) {
+            ensureVirtualPersona();
+            chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
+        }
+        currentAbortController = new AbortController();
+
+        try {
+            const response = await fetch('/api/chat', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    userName: uName,
+                    text: textPrompt,
+                    rawText: textPrompt,
+                    file: payloadFile,
+                    webSearch: isSearchEnabled,
+                    history: chatHistoryData[currentChatId],
+                    model: currentModel,
+                    styleHint: virtualPersona
+                }),
+                signal: currentAbortController.signal
+            });
+
+            if (response.status === 429) {
+                makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request);
+                setGeneratingState(false); saveCurrentChat(); return;
+            }
+            if (!response.ok) {
+                makeRetryError(loadingDiv, `خطای سرور (${response.status})`, request);
+                setGeneratingState(false); saveCurrentChat(); return;
+            }
+
+            let data;
+            try { data = await response.json(); } catch (err) {
+                makeRetryError(loadingDiv, 'پاسخ نامعتبر از سرور دریافت شد.', request);
+                setGeneratingState(false); saveCurrentChat(); return;
+            }
+
+            const reply = sanitizeVirtualIdentity(data.candidates?.[0]?.content?.parts?.[0]?.text || '');
+            if (reply) {
+                if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+                else {
+                    const last = chatHistoryData[currentChatId]?.at(-1);
+                    if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+                }
+                lastFailedRequest = null;
+                if (getSettings().typewriter) {
+                    typeWriterEffect(loadingDiv, reply, () => { setGeneratingState(false); saveCurrentChat(); });
+                } else {
+                    loadingDiv.innerHTML = formatReply(reply);
+                    setGeneratingState(false); saveCurrentChat(); scrollToLatest();
+                }
+            } else {
+                makeRetryError(loadingDiv, 'پاسخی دریافت نشد.', request);
+                setGeneratingState(false); saveCurrentChat();
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                loadingDiv.innerHTML = 'متوقف شد (توسط کاربر)';
+            } else {
+                makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request);
+            }
+            setGeneratingState(false);
+            saveCurrentChat();
+        } finally {
+            currentAbortController = null;
+            updateScrollLatestButton();
+        }
+    }
+
+    function typeWriterEffect(element, text, onComplete) {
+        element.textContent = "";
+        let i = 0;
+        typeWriterInterval = setInterval(() => {
+            if (i < text.length) {
+                element.textContent += text.charAt(i++);
+                const chatBox = document.getElementById("chatBox");
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } else {
+                clearInterval(typeWriterInterval);
+                element.innerHTML = formatReply(text);
+                if (onComplete) onComplete();
+            }
+        }, 8);
+    }
+
+    function appendMessage(sender, content) {
+        const chatBox = document.getElementById("chatBox");
+        const wrapperDiv = document.createElement("div");
+        wrapperDiv.className = `message-wrapper ${sender}`;
+        const msgDiv = document.createElement("div");
+        msgDiv.className = `message ${sender}`;
+        msgDiv.innerHTML = content;
+        wrapperDiv.appendChild(msgDiv);
+
+        chatBox.appendChild(wrapperDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        updateScrollLatestButton();
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function sanitizeVirtualIdentity(text) {
+        if (!text) return '';
+        return text
+            .replace(/Gemini/gi, 'Virtual Bot')
+            .replace(/Google/gi, 'Virtual Chat');
+    }
+
+    function formatReply(text) {
+        if (!text) return '';
+        
+        let codeBlocks = [];
+        let placeholderText = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
+            let index = codeBlocks.length;
+            codeBlocks.push({ lang: lang || 'code', code: code });
+            return `___CODE_BLOCK_${index}___`;
+        });
+
+        let formatted = escapeHtml(placeholderText);
+
+        formatted = formatted.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+        formatted = formatted.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+        formatted = formatted.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+        formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
+        formatted = formatted.replace(/\n\n/g, '<br><br>');
+        formatted = formatted.replace(/\n/g, '<br>');
+
+        codeBlocks.forEach((block, idx) => {
+            const escapedCode = escapeHtml(block.code);
+            const codeCard = `
+                <div class="code-card">
+                    <div class="code-card-head">
+                        <span>${block.lang}</span>
+                        <div class="code-actions">
+                            <button class="code-action" onclick="copyCode(this)">کپی</button>
+                        </div>
+                    </div>
+                    <pre><code>${escapedCode}</code></pre>
+                </div>
+            `;
+            formatted = formatted.replace(`___CODE_BLOCK_${idx}___`, codeCard);
+        });
+
+        return formatted;
+    }
+
+    function copyCode(btn) {
+        const code = btn.closest('.code-card').querySelector('code').innerText;
+        navigator.clipboard.writeText(code).then(() => {
+            btn.textContent = 'کپی شد!';
+            setTimeout(() => btn.textContent = 'کپی', 2000);
+        });
+    }
+
+    function saveCurrentChat() {
+        const chatBox = document.getElementById("chatBox");
+        if (!chatBox) return;
+        chats[currentChatId] = chatBox.innerHTML;
+        
+        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+        localStorage.setItem(storageKey, JSON.stringify(chats));
+
+        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+        localStorage.setItem(historyKey, JSON.stringify(chatHistoryData));
+        
+        localStorage.setItem('last_active_chat_id', currentChatId);
+        renderHistory();
+    }
+
+    function loadChat(chatId, skipSave = false) {
+        if (!skipSave) saveCurrentChat();
+        currentChatId = chatId;
+        localStorage.setItem('last_active_chat_id', currentChatId);
+
+        const chatBox = document.getElementById("chatBox");
+        const homeScreen = document.getElementById("homeScreen");
+
+        if (chats[chatId] && chats[chatId].trim() !== '') {
+            chatBox.innerHTML = chats[chatId];
+            chatBox.style.display = 'flex';
+            homeScreen.style.display = 'none';
+            isFirstMessage = false;
+        } else {
+            chatBox.innerHTML = '';
+            chatBox.style.display = 'none';
+            homeScreen.style.display = 'flex';
+            isFirstMessage = true;
+        }
+
+        renderHistory();
+        if (window.innerWidth <= 768) {
+            document.getElementById('sidebar').classList.remove('open');
+            document.getElementById('sidebarOverlay').classList.remove('active');
+        }
+    }
+
+    function startNewChat() {
+        saveCurrentChat();
+        currentChatId = Date.now();
+        chatHistoryData[currentChatId] = [];
+        loadChat(currentChatId, true);
+    }
+
+    function renderHistory() {
+        const list = document.getElementById('historyList');
+        if (!list) return;
+        list.innerHTML = '';
+
+        const keys = Object.keys(chats).sort((a, b) => b - a);
+        keys.forEach(id => {
+            const item = document.createElement('div');
+            item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
+            
+            let title = 'گفتگوی جدید';
+            const history = chatHistoryData[id];
+            if (history && history.length > 0) {
+                const firstUserMsg = history.find(m => m.role === 'user' && !m.__virtualPersona);
+                if (firstUserMsg && firstUserMsg.text) {
+                    title = firstUserMsg.text.substring(0, 24) + (firstUserMsg.text.length > 24 ? '...' : '');
+                }
+            }
+
+            item.innerHTML = `<i class="fa-regular fa-message"></i> <span>${escapeHtml(title)}</span>`;
+            item.onclick = () => loadChat(id);
+            list.appendChild(item);
+        });
+    }
+
+    function toggleHistorySearch() {
+        const tools = document.querySelector('.history-tools');
+        tools.classList.toggle('active');
+        if (tools.classList.contains('active')) {
+            document.getElementById('historySearchInput').focus();
+        }
+    }
+
+    function filterHistory(query) {
+        const q = query.toLowerCase().trim();
+        const items = document.querySelectorAll('.history-item');
+        let found = 0;
+
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            if (text.includes(q)) {
+                item.style.display = 'flex';
+                found++;
+            } else {
+                item.style.display = 'none';
+            }
+        });
+
+        document.getElementById('historyEmpty').style.display = (found === 0 && q !== '') ? 'block' : 'none';
+    }
+
+    function openChatSearch() {
+        document.getElementById('chatSearchPanel').classList.add('active');
+        document.getElementById('chatSearchInput').focus();
+    }
+
+    function closeChatSearch() {
+        document.getElementById('chatSearchPanel').classList.remove('active');
+        document.querySelectorAll('.message.search-hit').forEach(el => el.classList.remove('search-hit'));
+    }
+
+    function searchInCurrentChat(query) {
+        const q = query.toLowerCase().trim();
+        const messages = document.querySelectorAll('#chatBox .message');
+        document.querySelectorAll('.message.search-hit').forEach(el => el.classList.remove('search-hit'));
+
+        if (!q) {
+            document.getElementById('chatSearchCount').textContent = '';
+            return;
+        }
+
+        let hits = 0;
+        messages.forEach(msg => {
+            if (msg.textContent.toLowerCase().includes(q)) {
+                msg.classList.add('search-hit');
+                hits++;
+            }
+        });
+
+        document.getElementById('chatSearchCount').textContent = hits > 0 ? `${hits} مورد پیدا شد` : 'یافت نشد';
+    }
+
+    function runComposerCommand(cmd) {
+        document.getElementById('commandMenu').classList.remove('active');
+        const input = document.getElementById('userInput');
+        if (cmd === 'web') {
+            toggleSearch();
+        } else if (cmd === 'code') {
+            input.value = 'برای پروژه زیر کد بنویس:\n';
+            input.focus();
+        } else if (cmd === 'clear') {
+            input.value = '';
+            input.style.height = '24px';
+        }
+    }
+
+    function exportCurrentChat(type) {
+        const history = chatHistoryData[currentChatId] || [];
+        if (history.length === 0) { alert('پیامی برای خروجی وجود ندارد.'); return; }
+
+        let content = '';
+        history.filter(m => !m.__virtualPersona).forEach(m => {
+            const sender = m.role === 'user' ? 'شما' : 'Virtual Bot';
+            content += `[${sender}]:\n${m.text}\n\n--------------------\n\n`;
+        });
+
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chat-export-${currentChatId}.${type === 'md' ? 'md' : 'txt'}`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function clearCurrentChat() {
+        if (confirm('آیا مطمئنی که می‌خواهی پیام‌های این گفتگو پاک شوند؟')) {
+            chats[currentChatId] = '';
+            chatHistoryData[currentChatId] = [];
+            loadChat(currentChatId, true);
+            closeSettings();
+        }
+    }
 </script>
 </body>
 </html>
