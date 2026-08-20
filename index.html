@@ -72,8 +72,6 @@
                 radial-gradient(circle at -10% 110%, rgba(34,211,238,0.10), transparent 40%);
         }
 
-        :root[data-theme="light"] textarea { color: #181d2a !important; }
-
         * {
             box-sizing: border-box;
             margin: 0;
@@ -438,70 +436,144 @@
         .scroll-latest-btn.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
         .scroll-latest-btn:hover { border-color:var(--accent-2); transform:translateX(-50%) scale(1.05); }
 
-        /* ===== NEW INPUT & MODEL AREA ===== */
+        /* ===== NEW INPUT & MODEL AREA (Gemini Style) ===== */
         .input-area-wrapper {
             width: 100%;
             max-width: 940px;
             margin: 0 auto;
-            padding: 0 20px 24px 20px;
+            padding: 0 24px 24px 24px;
             position: relative;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            gap: 12px;
         }
 
-        /* Modern Model Selector Tag */
-        .model-pill-container {
-            display: flex;
-            justify-content: flex-start;
-            width: 100%;
-            padding: 0 4px;
-            position: relative;
-        }
-        
-        .model-pill {
+        .input-box {
+            background: var(--bg-input);
+            border: 1px solid var(--border-soft);
+            border-radius: 40px; /* Pill shape like Gemini */
+            padding: 8px 12px 8px 16px;
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 8px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 999px;
-            padding: 6px 14px 6px 10px;
-            cursor: pointer;
-            transition: all 0.25s ease;
-            font-size: 0.78rem;
+            box-shadow: 0 8px 32px var(--shadow-a);
+            transition: border-color 0.25s, box-shadow 0.25s;
+            width: 100%;
+            min-height: 56px;
+        }
+        .input-box:focus-within {
+            border-color: rgba(139,92,246,0.5);
+            box-shadow: 0 0 0 4px rgba(139,92,246,0.1), 0 8px 32px var(--shadow-a);
+        }
+
+        /* The Text Area */
+        textarea#userInput {
+            flex: 1;
+            color: var(--text-main) !important;
+            -webkit-appearance: auto !important;
+            resize: none !important;
+            overflow: hidden !important;
+            height: 24px;
+            max-height: 130px;
+            font-size: 0.95rem;
+            padding: 0 8px;
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            line-height: 1.5;
+            margin: 0; /* Fix the floating issue */
+            align-self: center;
+        }
+
+        textarea::placeholder { color: var(--text-muted) !important; }
+
+        /* Side Icons (Send, Attach, Globe) */
+        .input-box .side-icons {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .icon-btn {
             color: var(--text-muted);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            font-size: 1.05rem;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all 0.2s ease;
+            background: transparent;
         }
-        .model-pill:hover {
-            border-color: var(--accent-1);
-            color: var(--text-main);
-            box-shadow: 0 4px 15px rgba(139,92,246,0.15);
-            transform: translateY(-1px);
+        .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); transform: scale(1.05); }
+
+        .icon-btn.search-active {
+            color: var(--accent-2) !important;
+            background-color: rgba(34, 211, 238, 0.12) !important;
         }
-        .model-pill i {
-            color: var(--accent-2);
-            font-size: 0.7rem;
+
+        .action-btn {
+            background: var(--accent-grad);
+            color: #fff !important;
+            width: 38px; height: 38px;
+            border-radius: 12px;
+            transition: all 0.2s ease;
         }
-        .model-pill .model-icon {
-            width: 18px; height: 18px;
+        .action-btn:hover:not(:disabled) { filter: brightness(1.1); transform: scale(1.05); }
+        .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
+
+        /* ===== MODEL SELECTOR INSIDE INPUT (Like Gemini) ===== */
+        .model-pill-selector {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 24px;
+            padding: 4px 12px 4px 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            flex-shrink: 0;
+            margin-left: 6px; /* Spacing from text */
+            height: 32px;
+        }
+        .model-pill-selector:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        .model-pill-selector .model-icon {
+            width: 20px; height: 20px;
             border-radius: 50%;
             background: var(--accent-grad);
             display: flex; align-items: center; justify-content: center;
-            color: white; font-size: 0.55rem;
+            color: white; font-size: 0.6rem;
+            flex-shrink: 0;
+        }
+        .model-pill-selector .model-name {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-main);
+            white-space: nowrap;
+        }
+        .model-pill-selector i.chevron {
+            font-size: 0.6rem;
+            color: var(--text-muted);
         }
 
         .model-pill-dropdown {
             display: none;
             position: absolute;
-            top: calc(100% + 8px);
-            left: 0;
+            bottom: calc(100% + 10px);
+            right: 0;
             background: var(--bg-sidebar);
             border: 1px solid var(--border-soft);
             border-radius: 16px;
             padding: 6px;
-            min-width: 220px;
+            min-width: 200px;
             box-shadow: 0 15px 45px var(--shadow-b);
             z-index: 50;
             animation: slideUp 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
@@ -532,105 +604,29 @@
         .model-pill-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
         .model-pill-dropdown-item .item-check { margin-right: auto; color: var(--accent-2); font-size: 0.8rem; }
 
-        /* Input Box */
-        .input-box {
-            background: var(--bg-input);
-            border: 1px solid var(--border-soft);
-            border-radius: 24px;
-            padding: 8px 12px 8px 16px;
-            display: flex;
-            align-items: flex-end;
-            gap: 6px;
-            box-shadow: 0 8px 32px var(--shadow-a);
-            transition: border-color 0.25s, box-shadow 0.25s;
-            width: 100%;
-        }
-        .input-box:focus-within {
-            border-color: rgba(139,92,246,0.5);
-            box-shadow: 0 0 0 4px rgba(139,92,246,0.1), 0 8px 32px var(--shadow-a);
-        }
-
-        textarea#userInput {
-            flex: 1;
-            color: var(--text-main) !important;
-            -webkit-appearance: auto !important;
-            resize: none !important;
-            overflow: hidden !important;
-            height: 24px;
-            max-height: 130px;
-            font-size: 0.95rem;
-            padding: 8px 2px;
-            background: transparent !important;
-            border: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-            line-height: 1.6;
-        }
-
-        textarea::placeholder { color: var(--text-muted) !important; }
-
-        .icon-btn {
-            color: var(--text-muted);
-            font-size: 1.05rem;
-            cursor: pointer;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-            transition: all 0.2s ease;
-            background: transparent;
-        }
-        .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); transform: scale(1.05); }
-
-        .icon-btn.search-active {
-            color: var(--accent-2) !important;
-            background-color: rgba(34, 211, 238, 0.12) !important;
-        }
-
-        .icon-btn.recording { animation: pulseMic 1.2s infinite; }
-
-        .action-btn {
-            background: var(--accent-grad);
-            color: #fff !important;
-            width: 40px; height: 40px;
-            border-radius: 14px;
-            transition: all 0.2s ease;
-        }
-        .action-btn:hover:not(:disabled) { filter: brightness(1.1); transform: scale(1.05); }
-        .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
-
-        .input-box .attach-btn {
-            background: transparent;
-            color: var(--text-muted);
-        }
-        .input-box .attach-btn:hover { color: var(--text-main); background: var(--border-soft); }
-
+        /* File preview inside input */
         .input-box .file-preview {
             display: none;
             align-items: center;
-            gap: 10px;
-            padding: 4px 12px 4px 8px;
+            gap: 8px;
+            padding: 4px 10px 4px 6px;
             background-color: var(--bg-card);
             border: 1px solid var(--border-soft);
             border-radius: 12px;
-            max-width: 160px;
+            max-width: 140px;
             flex-shrink: 0;
-            margin-left: 8px;
-            height: 34px;
+            height: 32px;
+            margin: 0 4px;
         }
         .input-box .file-preview.active { display: flex; }
-        .input-box .file-preview img { width: 24px; height: 24px; border-radius: 4px; object-fit: cover; }
-        .input-box .file-preview span { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px; }
-        .input-box .file-preview .file-status { display: none; }
-        .input-box .file-preview .file-remove { color: var(--text-muted); cursor: pointer; font-size: 0.8rem; transition: 0.2s; margin-right: 4px; }
+        .input-box .file-preview img { width: 20px; height: 20px; border-radius: 4px; object-fit: cover; }
+        .input-box .file-preview span { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; }
+        .input-box .file-preview .file-remove { color: var(--text-muted); cursor: pointer; font-size: 0.7rem; transition: 0.2s; margin-right: 4px; }
         .input-box .file-preview .file-remove:hover { color: var(--danger); }
 
         @media (max-width: 900px) {
             .chat-box { padding: 20px 5%; }
-            .input-area-wrapper { padding: 0 14px 18px 14px; }
+            .input-area-wrapper { padding: 0 16px 18px 16px; }
         }
 
         @media (max-width: 768px) {
@@ -647,7 +643,9 @@
             .message-wrapper { max-width: 95%; }
             .message-wrapper.bot { max-width: 100%; }
             .home-title { font-size: 1.6rem; }
-            .input-box { padding: 6px 10px 6px 14px; }
+            .input-box { padding: 6px 10px; border-radius: 30px; min-height: 48px; }
+            .model-pill-selector { padding: 2px 10px 2px 6px; height: 28px; }
+            .model-pill-selector .model-name { font-size: 0.7rem; }
         }
 
         /* ===== Settings Modal ===== */
@@ -797,7 +795,6 @@
         .sidebar-close-btn { display: flex; color: var(--text-muted); width: 32px; height: 32px; border-radius: 10px; }
         .sidebar-close-btn:hover { color: var(--text-main); background: var(--bg-card); }
 
-        /* Responsive tweaks for sidebar on mobile */
         @media (min-width: 769px) {
             .sidebar-close-btn { display: none; }
         }
@@ -882,12 +879,23 @@
 
         <div class="input-area-wrapper">
             
-            <!-- NEW MODEL SELECTOR PILL -->
-            <div class="model-pill-container">
-                <div class="model-pill" id="modelPill" onclick="togglePillDropdown()">
+            <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="fa-solid fa-arrow-down"></i></button>
+            
+            <div class="input-box">
+                
+                <div class="file-preview" id="filePreview">
+                    <img id="previewImg" src="" alt="preview">
+                    <span id="fileName"></span>
+                    <i class="fa-solid fa-xmark file-remove" onclick="removeFile()"></i>
+                </div>
+
+                <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
+
+                <!-- NEW MODEL SELECTOR INSIDE INPUT (Like Gemini) -->
+                <div class="model-pill-selector" id="modelPill" onclick="togglePillDropdown()">
                     <span class="model-icon"><i class="fa-solid fa-sparkles"></i></span>
                     <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
-                    <i class="fa-solid fa-chevron-down"></i>
+                    <i class="fa-solid fa-chevron-down chevron"></i>
                     
                     <div class="model-pill-dropdown" id="modelDropdown">
                         <div class="model-pill-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModelPill(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
@@ -913,32 +921,21 @@
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="fa-solid fa-arrow-down"></i></button>
-            
-            <div class="input-box">
-                
-                <div class="file-preview" id="filePreview">
-                    <img id="previewImg" src="" alt="preview">
-                    <span id="fileName"></span>
-                    <i class="fa-solid fa-xmark file-remove" onclick="removeFile()"></i>
+                <div class="side-icons">
+                    <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
+                        <i class="fa-solid fa-globe"></i>
+                    </button>
+
+                    <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
+                    <button class="icon-btn attach-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
+                        <i class="fa-solid fa-paperclip"></i>
+                    </button>
+
+                    <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
+                        <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
+                    </button>
                 </div>
-
-                <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
-
-                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
-                    <i class="fa-solid fa-globe"></i>
-                </button>
-
-                <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
-                <button class="icon-btn attach-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
-                    <i class="fa-solid fa-paperclip"></i>
-                </button>
-
-                <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
-                    <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
-                </button>
             </div>
         </div>
     </div>
@@ -1016,7 +1013,7 @@
 
 <script>
     // =====================================================
-    // سیستم انتخاب مدل (NEW PILL VERSION)
+    // سیستم انتخاب مدل (NEW PILL INSIDE INPUT VERSION)
     // =====================================================
     let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.6-flash';
     let currentModelDisplay = {
@@ -1051,7 +1048,7 @@
     });
 
     // =====================================================
-    // بقیه کدها (همه قابلیت‌ها) - بدون تغییر در منطق اصلی
+    // بقیه کدها (همه قابلیت‌ها) - با رفع باگ undefined در پیام‌ها
     // =====================================================
 
     let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
@@ -1096,7 +1093,6 @@
     function autoResizeTextarea(textarea) {
         textarea.style.height = 'auto';
         textarea.style.height = Math.min(textarea.scrollHeight, 130) + 'px';
-        // Update file preview visibility if needed
     }
 
     function extractNameFromEmail(email, googleName = '') {
@@ -1367,7 +1363,6 @@
         });
     }
 
-    // ===== فشرده‌سازی ویدیو =====
     function compressVideo(file, targetWidth = 480, bitrate = 500000) {
         return new Promise((resolve, reject) => {
             const video = document.createElement('video');
@@ -1547,7 +1542,7 @@
                 const item = Array.from(e.clipboardData?.items || []).find(i => i.kind === 'file');
                 file = item?.getAsFile?.() || null;
             }
-            if (!file) return; // normal text paste
+            if (!file) return;
             e.preventDefault();
             await processIncomingFile(file);
         });
@@ -1796,6 +1791,9 @@
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
         updateScrollLatestButton();
+        
+        // Decorate messages immediately to prevent undefined bugs
+        addMessageActions(wrapperDiv, sender);
     }
 
     function escapeHtml(value) {
@@ -1925,6 +1923,7 @@
         chatBox?.addEventListener('scroll', updateScrollLatestButton, { passive: true });
         repairLoadedChatButtons(chatBox);
         updateScrollLatestButton();
+        decorateMessages(); // Final safety net
     }
     setTimeout(initializeV3, 0);
 
@@ -2021,6 +2020,7 @@
         scrollToBottom();
         requestAnimationFrame(scrollToBottom);
         setTimeout(scrollToBottom, isInitialLoad ? 120 : 0);
+        setTimeout(decorateMessages, 100); // Apply labels after load
     }
 
     function exportCurrentChat(format){
@@ -2041,20 +2041,34 @@
         localStorage.setItem(storageKey,JSON.stringify(chats));localStorage.setItem(historyKey,JSON.stringify(chatHistoryData));startNewChat();closeSettings();
     }
 
-    // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
-    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل و تمیز بده. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
-    try { window.virtualPersona = upgradedPersona; } catch (_) {}
-
+    // ===== FIX FOR THE UNDEFINED BUG =====
     function addMessageActions(wrapper, sender) {
         if (!wrapper || wrapper.querySelector('.message-actions')) return;
         const msg = wrapper.querySelector('.message');
         if (!msg) return;
+        
+        // رفع باگ undefined: اگر کاربر لاگین نکرده باشد، نام پیش‌فرض بگذار
+        let displayName = '';
+        if (sender === 'user') {
+            displayName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'شما';
+        } else {
+            displayName = 'Virtual Bot';
+        }
+
         const bar = document.createElement('div');
         bar.className = 'message-actions';
+        
+        // اضافه کردن نام کاربر به صورت یک تگ کوچک و تمیز
+        const nameTag = document.createElement('span');
+        nameTag.style.cssText = 'font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-left:8px; opacity:0.8;';
+        nameTag.textContent = displayName;
+        bar.appendChild(nameTag);
+
         const copy = document.createElement('button');
         copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="fa-regular fa-copy"></i>';
         copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="fa-solid fa-check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
         bar.appendChild(copy);
+        
         if(sender==='bot'){
             const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="fa-solid fa-rotate"></i>';
             regen.onclick=()=>regenerateMessage(wrapper);bar.appendChild(regen);
@@ -2104,14 +2118,6 @@
         const hits=msgs.filter(m=>m.innerText.toLowerCase().includes(q.toLowerCase()));
         hits.forEach(m=>m.classList.add('search-hit'));document.getElementById('chatSearchCount').textContent=hits.length?`${hits.length} نتیجه`:'نتیجه‌ای نیست';
         if(hits[0]) hits[0].scrollIntoView({behavior:'smooth',block:'center'});
-    }
-
-    function runComposerCommand(cmd){
-        const input=document.getElementById('userInput');
-        if(cmd==='web'){ if(!isSearchEnabled) toggleSearch(); input.value=''; input.placeholder='جستجو در وب فعاله؛ چی رو پیدا کنم؟'; }
-        if(cmd==='code'){ input.value='برای این کار کد بنویس و کد کامل و قابل اجرا را در بلوک کد بده:\n'; autoResizeTextarea(input); }
-        if(cmd==='clear'){ input.value=''; autoResizeTextarea(input); }
-        document.getElementById('commandMenu')?.classList.remove('active');input.focus();
     }
 
     // Keep existing keyboard behavior but add / command discovery.
@@ -2164,14 +2170,14 @@
 
     // Decorate restored and newly generated messages without breaking saved chat HTML.
     const __oldAppendMessage=appendMessage;
-    appendMessage=function(sender,content){__oldAppendMessage(sender,content);decorateMessages();};
+    appendMessage=function(sender,content){__oldAppendMessage(sender,content);};
     const __oldLoadChat=loadChat;
     loadChat=function(id,isInitialLoad=false){__oldLoadChat(id,isInitialLoad);setTimeout(()=>decorateMessages(),0)};
     const __oldSaveCurrentChat=saveCurrentChat;
     saveCurrentChat=function(){decorateMessages();__oldSaveCurrentChat();};
     const __oldSendToGemini=sendToGemini;
     sendToGemini=async function(...args){
-        const result=await __oldSendToGemini(...args);decorateMessages();return result;
+        const result=await __oldSendToGemini(...args);return result;
     };
     setTimeout(decorateMessages,50);
 
