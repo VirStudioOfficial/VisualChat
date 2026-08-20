@@ -28,6 +28,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="manifest" href="/manifest.json">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Same GIS script also exposes google.accounts.oauth2, used below for Drive backup consent. -->
 
     <style>
         :root {
@@ -463,7 +464,6 @@
             padding-right: 15px;
         }
 
-        .message.bot { font-size: clamp(0.98rem, 1vw, 1.08rem); line-height: 2.05; }
         .message.bot p { margin: 0 0 1.05rem; }
         .message.bot p:last-child { margin-bottom: 0; }
         .message.bot h2, .message.bot h3, .message.bot h4 { margin: 1.35rem 0 0.65rem; line-height: 1.45; }
@@ -844,6 +844,9 @@
             border-radius: 18px;
             padding: 18px 20px;
             box-shadow: 0 12px 35px rgba(0,0,0,0.10);
+            font-size: var(--msg-font-size);
+            line-height: 1.9;
+            letter-spacing: 0.005em;
         }
         .message.bot::before {
             content: "VIRTUAL";
@@ -932,17 +935,7 @@
             padding: 2px 2px !important;
             font-size: .95rem !important;
         }
-        .message.bot {
-            font-size: .96rem !important;
-            line-height: 1.92 !important;
-            letter-spacing: 0 !important;
-        }
-        .message.bot p { margin: 0 0 .95rem !important; }
-        .message.bot h2, .message.bot h3, .message.bot h4 { margin: 1.25rem 0 .55rem !important; }
-        .message.bot ul, .message.bot ol { margin: .65rem 0 .95rem !important; }
-        .message.bot li { margin: .32rem 0 !important; }
         @media (max-width:768px) {
-            .message.bot { font-size: .94rem !important; line-height: 1.88 !important; }
             textarea#userInput { font-size: .94rem !important; }
         }
 
@@ -957,7 +950,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .home-text,.suggestion-chips,.home-mark{position:relative;z-index:1}
 .suggestion-chip{box-shadow:0 8px 24px rgba(0,0,0,.08)}
 .message-wrapper{position:relative;gap:5px}
-.message.bot{font-size:var(--msg-font-size);line-height:1.92;max-width:100%;letter-spacing:.005em}
+.message.bot{max-width:100%}
 .message.user{line-height:1.75}
 .message.bot p{margin:0 0 .9rem}.message.bot p:last-child{margin-bottom:0}
 .message.bot h2,.message.bot h3,.message.bot h4{margin:1.15rem 0 .55rem}.message.bot h2:first-child,.message.bot h3:first-child,.message.bot h4:first-child{margin-top:0}
@@ -976,7 +969,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .message.search-hit{box-shadow:0 0 0 2px rgba(34,211,238,.55),0 0 28px rgba(34,211,238,.12)}
 .command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
 .chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:rgba(139,92,246,.45)}
-@media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
+@media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.8}}
+
+/* ===== Typing cursor + smoother motion (typewriter fix) ===== */
+.typing-cursor{display:inline-block;width:2px;height:1em;margin-right:2px;vertical-align:text-bottom;background:var(--accent-2);animation:cursorBlink 0.9s steps(2) infinite}
+@keyframes cursorBlink{0%,55%{opacity:1}56%,100%{opacity:0}}
+.message.bot p,.message.bot li,.message.bot h2,.message.bot h3,.message.bot h4,.message.bot blockquote,.message.bot .code-card{animation:fadeIn .22s ease-out}
+.icon-btn,.new-chat-btn,.history-item,.suggestion-chip,.accent-swatch,.segmented-btn,.mini-tool,.code-action,.msg-action{transition:transform .15s ease, background-color .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease}
+.icon-btn:active:not(:disabled),.action-btn:active:not(:disabled),.new-chat-btn:active,.mini-tool:active{transform:scale(0.94)}
+.history-item{transition:transform .15s ease, background-color .15s ease, border-color .15s ease, color .15s ease}
+.history-item:hover{transform:translateX(-2px)}
+:root[data-theme]{transition:background-color .25s ease}
+.message-wrapper.bot .message{transition:box-shadow .2s ease}
 
     
         /* ===== Virtual Chat 1.5 polish ===== */
@@ -1227,6 +1231,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="fa-solid fa-file-arrow-down"></i> خروجی Markdown</button>
                 <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="fa-regular fa-copy"></i> خروجی متن</button>
                 <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="fa-solid fa-trash"></i> پاک کردن گفتگو</button>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-label">پشتیبان‌گیری در Google Drive</div>
+            <div class="settings-toggle-row" style="margin-bottom:10px;">
+                <span class="settings-toggle-desc" id="driveStatusText">گفتگوها را در فضای خصوصی اپلیکیشن در درایو همین حساب گوگل ذخیره کن (فقط قابل‌دیدن توسط خودت، نه فایل‌های عادی درایو).</span>
+            </div>
+            <div class="chat-empty-tools" id="driveActionsRow">
+                <button class="mini-tool" type="button" id="driveConnectBtn" onclick="connectDrive()"><i class="fa-brands fa-google-drive"></i> اتصال به Drive</button>
+                <button class="mini-tool" type="button" id="driveBackupBtn" onclick="backupToDrive()" style="display:none;"><i class="fa-solid fa-cloud-arrow-up"></i> پشتیبان‌گیری الان</button>
+                <button class="mini-tool" type="button" id="driveRestoreBtn" onclick="restoreFromDrive()" style="display:none;"><i class="fa-solid fa-cloud-arrow-down"></i> بازیابی از Drive</button>
             </div>
         </div>
     </div>
@@ -1864,22 +1880,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         await sendToGemini(text, payloadFile);
     }
 
-    const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
-
-قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot 1.5 هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن و هیچ نامی مثل «اکبر» نساز؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
-
-سبک پاسخ: جواب را اول مستقیم شروع کن. برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. هر پاراگراف را بیش از حد کش نده. اگر موضوع چند بخش دارد، آن را بخش‌بندی کن. از تکرار بی‌دلیل مقدمه‌هایی مثل «حتماً، با کمال میل» خودداری کن. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. گاهی ۱ تا ۳ ایموجی یا استیکر متنی مرتبط مثل 😂🔥😎 استفاده کن، اما نه در هر جمله و نه به شکل مصنوعی. در پاسخ‌های فنی جدی، ایموجی را کم کن.
-
-دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار، وضعیت بازار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و تاریخ/منبع را در صورت امکان روشن کن. قیمت و مشخصات را حدس نزن. اگر مطمئن نیستی، صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. اگر HTML می‌نویسی، در بلوک کد html کامل و قابل اجرا ارائه کن. هدف این است که جواب‌ها هم مفید و حرفه‌ای باشند و هم شخصیت داشته باشند.`
-
-    function ensureVirtualPersona() {
-        if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
-        if (chatHistoryData[currentChatId].some(item => item.__virtualPersona)) return;
-        chatHistoryData[currentChatId].unshift(
-            { role: 'user', text: virtualPersona, __virtualPersona: true },
-            { role: 'model', text: 'متوجه شدم؛ از این به بعد با شخصیت طبیعی، خودمانی و خوانا پاسخ می‌دهم.', __virtualPersona: true }
-        );
-    }
+    // Single source of truth for persona/style — see bottom of file for ensureVirtualPersona,
+    // which uses `virtualPersona` defined once, below the other core functions load.
 
     function updateScrollLatestButton() {
         const chatBox = document.getElementById('chatBox');
@@ -2018,19 +2020,28 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function typeWriterEffect(element, text, onComplete) {
-        element.textContent = "";
-        let i = 0;
+        element.innerHTML = "";
+        const words = text.split(/(\s+)/); // keep whitespace tokens so spacing stays exact
+        let wordIndex = 0;
+        const chatBox = document.getElementById("chatBox");
+        const wasNearBottom = () => (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 140;
+
         typeWriterInterval = setInterval(() => {
-            if (i < text.length) {
-                element.textContent += text.charAt(i++);
-                const chatBox = document.getElementById("chatBox");
-                chatBox.scrollTop = chatBox.scrollHeight;
+            if (wordIndex < words.length) {
+                // Reveal a small chunk of words per tick so it feels like fluid typing,
+                // not a single character crawling, while still formatting as we go.
+                const chunk = Math.max(1, Math.round(words.length / 90));
+                wordIndex = Math.min(words.length, wordIndex + chunk);
+                const soFar = words.slice(0, wordIndex).join('');
+                const stickToBottom = wasNearBottom();
+                element.innerHTML = formatReply(soFar) + '<span class="typing-cursor"></span>';
+                if (stickToBottom) chatBox.scrollTop = chatBox.scrollHeight;
             } else {
                 clearInterval(typeWriterInterval);
                 element.innerHTML = formatReply(text);
                 if (onComplete) onComplete();
             }
-        }, 8);
+        }, 16);
     }
 
     function appendMessage(sender, content) {
@@ -2068,64 +2079,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return String(text)
             .replace(/سازنده(?:ات|ی)?\s*(?:اکبر|اکبر است|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست')
             .replace(/سازنده\s*من\s*(?:اکبر|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست');
-    }
-
-    function formatReply(text) {
-        const escaped = escapeHtml(text);
-        const parts = escaped.split(/```/);
-        const html = parts.map((part, index) => {
-            if (index % 2 === 1) {
-                const firstLine = part.split('\n')[0].trim().toLowerCase();
-                const lang = /^[a-zA-Z0-9+#.-]+$/.test(firstLine) ? firstLine : '';
-                const code = (lang ? part.slice(part.indexOf('\n') + 1) : part).trim();
-                const encoded = encodeURIComponent(code);
-                const canRun = ['html', 'htm'].includes(lang) || /<!doctype html|<html|<body|<div|<script/i.test(code);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang || 'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun ? `<button class="code-action" onclick="runHtmlCode(this)" data-code="${encoded}">اجرا</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>` : ''}</div></div><pre><code>${code}</code></pre></div>`;
-            }
-
-            const lines = part.split('\n');
-            let out = [], listType = null, listItems = [], paragraph = [];
-            const flushParagraph = () => {
-                if (!paragraph.length) return;
-                out.push(`<p>${paragraph.map(formatInline).join('<br>')}</p>`);
-                paragraph = [];
-            };
-            const flushList = () => {
-                if (!listItems.length) return;
-                const tag = listType === 'ol' ? 'ol' : 'ul';
-                out.push(`<${tag}>${listItems.map(item => `<li>${formatInline(item)}</li>`).join('')}</${tag}>`);
-                listItems = []; listType = null;
-            };
-
-            for (const rawLine of lines) {
-                const line = rawLine.trim();
-                if (!line) { flushParagraph(); flushList(); continue; }
-
-                const heading = line.match(/^(#{1,3})\s+(.+)$/);
-                const bullet = line.match(/^[-*•]\s+(.+)$/);
-                const ordered = line.match(/^\d+[.)]\s+(.+)$/);
-
-                if (heading) {
-                    flushParagraph(); flushList();
-                    const level = Math.min(4, heading[1].length + 1);
-                    out.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
-                } else if (bullet) {
-                    flushParagraph();
-                    if (listType && listType !== 'ul') flushList();
-                    listType = 'ul'; listItems.push(bullet[1]);
-                } else if (ordered) {
-                    flushParagraph();
-                    if (listType && listType !== 'ol') flushList();
-                    listType = 'ol'; listItems.push(ordered[1]);
-                } else {
-                    flushList();
-                    paragraph.push(line);
-                }
-            }
-            flushParagraph(); flushList();
-            return out.join('');
-        }).join('');
-        return html || '<p>پاسخی دریافت نشد.</p>';
     }
 
     async function copyCode(btn) {
@@ -2295,9 +2248,143 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         localStorage.setItem(storageKey,JSON.stringify(chats));localStorage.setItem(historyKey,JSON.stringify(chatHistoryData));startNewChat();closeSettings();
     }
 
-    // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
-    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل و تمیز بده. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
-    try { window.virtualPersona = upgradedPersona; } catch (_) {}
+    // ===== Google Drive backup (opt-in, separate from sign-in) =====
+    // Sign-in above only gives an identity token (who the user is). Reading/writing Drive
+    // needs a real OAuth access token with the drive.appdata scope, requested here on demand
+    // so users aren't asked for Drive permission just to log in.
+    const GOOGLE_CLIENT_ID = '456624147681-8kiuefcbn37d0sfrmfa5vp51ujqj07ci.apps.googleusercontent.com';
+    const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+    const DRIVE_BACKUP_FILENAME = 'virtual-chat-backup.json';
+    let driveTokenClient = null;
+    let driveAccessToken = null;
+    let driveFileId = null;
+
+    function driveUI(state) {
+        const status = document.getElementById('driveStatusText');
+        const connectBtn = document.getElementById('driveConnectBtn');
+        const backupBtn = document.getElementById('driveBackupBtn');
+        const restoreBtn = document.getElementById('driveRestoreBtn');
+        if (!status) return;
+        if (state === 'connected') {
+            status.textContent = 'متصل است. گفتگوها را می‌توانی همین الان پشتیبان بگیری یا از یک نسخه‌ی قبلی بازیابی کنی.';
+            connectBtn.style.display = 'none';
+            backupBtn.style.display = 'inline-flex';
+            restoreBtn.style.display = 'inline-flex';
+        } else if (state === 'busy') {
+            status.textContent = 'در حال ارتباط با Google Drive...';
+        } else if (state === 'error') {
+            status.textContent = 'اتصال یا ارتباط با Drive ناموفق بود. دوباره تلاش کن.';
+        } else {
+            status.textContent = 'گفتگوها را در فضای خصوصی اپلیکیشن در درایو همین حساب گوگل ذخیره کن (فقط قابل‌دیدن توسط خودت، نه فایل‌های عادی درایو).';
+            connectBtn.style.display = 'inline-flex';
+            backupBtn.style.display = 'none';
+            restoreBtn.style.display = 'none';
+        }
+    }
+
+    function connectDrive() {
+        if (!window.google || !google.accounts || !google.accounts.oauth2) {
+            driveUI('error');
+            return;
+        }
+        driveUI('busy');
+        if (!driveTokenClient) {
+            driveTokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: DRIVE_SCOPE,
+                callback: (resp) => {
+                    if (resp && resp.access_token) {
+                        driveAccessToken = resp.access_token;
+                        driveUI('connected');
+                    } else {
+                        driveUI('error');
+                    }
+                }
+            });
+        }
+        driveTokenClient.requestAccessToken({ prompt: driveAccessToken ? '' : 'consent' });
+    }
+
+    async function driveFindBackupFileId() {
+        const res = await fetch(
+            `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${encodeURIComponent(`name='${DRIVE_BACKUP_FILENAME}'`)}&fields=files(id,modifiedTime)`,
+            { headers: { Authorization: `Bearer ${driveAccessToken}` } }
+        );
+        if (!res.ok) throw new Error('drive list failed');
+        const data = await res.json();
+        return data.files && data.files[0] ? data.files[0].id : null;
+    }
+
+    async function backupToDrive() {
+        if (!driveAccessToken) { connectDrive(); return; }
+        driveUI('busy');
+        try {
+            if (!driveFileId) driveFileId = await driveFindBackupFileId();
+            const payload = {
+                savedAt: new Date().toISOString(),
+                chats,
+                chatHistoryData
+            };
+            const metadata = { name: DRIVE_BACKUP_FILENAME, mimeType: 'application/json', parents: driveFileId ? undefined : ['appDataFolder'] };
+            const boundary = 'virtualchat_' + Date.now();
+            const body =
+                `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+                `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--`;
+
+            const url = driveFileId
+                ? `https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=multipart`
+                : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+            const res = await fetch(url, {
+                method: driveFileId ? 'PATCH' : 'POST',
+                headers: { Authorization: `Bearer ${driveAccessToken}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+                body
+            });
+            if (!res.ok) throw new Error('drive upload failed');
+            const saved = await res.json();
+            driveFileId = saved.id || driveFileId;
+            driveUI('connected');
+            document.getElementById('driveStatusText').textContent = 'پشتیبان‌گیری با موفقیت انجام شد.';
+        } catch (e) {
+            driveUI('error');
+        }
+    }
+
+    async function restoreFromDrive() {
+        if (!driveAccessToken) { connectDrive(); return; }
+        if (!confirm('گفتگوهای فعلی این دستگاه با نسخه‌ی ذخیره‌شده در Drive جایگزین می‌شود. ادامه می‌دهی؟')) return;
+        driveUI('busy');
+        try {
+            if (!driveFileId) driveFileId = await driveFindBackupFileId();
+            if (!driveFileId) { driveUI('connected'); document.getElementById('driveStatusText').textContent = 'هنوز هیچ پشتیبانی در Drive ثبت نشده.'; return; }
+            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`, {
+                headers: { Authorization: `Bearer ${driveAccessToken}` }
+            });
+            if (!res.ok) throw new Error('drive download failed');
+            const data = await res.json();
+            chats = data.chats || {};
+            chatHistoryData = data.chatHistoryData || {};
+            const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+            const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+            localStorage.setItem(storageKey, JSON.stringify(chats));
+            localStorage.setItem(historyKey, JSON.stringify(chatHistoryData));
+            renderHistory();
+            driveUI('connected');
+            document.getElementById('driveStatusText').textContent = 'بازیابی انجام شد.';
+        } catch (e) {
+            driveUI('error');
+        }
+    }
+
+    // ===== Persona: single source of truth, used by ensureVirtualPersona() and sent as styleHint =====
+    const virtualPersona = `تو Virtual Bot هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
+
+قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
+
+سبک پاسخ: جواب را اول مستقیم شروع کن، نه با مقدمه‌ی تکراری مثل «حتماً، با کمال میل». برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله‌ی مناسب و لیست‌های واقعی استفاده کن؛ هر جمله را خط جدید نبر. برای سؤال ساده، کوتاه جواب بده. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. گاهی ۱ تا ۳ ایموجی مرتبط استفاده کن، اما نه در هر جمله و نه در پاسخ‌های فنی جدی.
+
+دقت: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعاتی مثل قیمت، مشخصات، اخبار یا هرچیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و در صورت امکان منبع را روشن کن؛ قیمت و مشخصات را حدس نزن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است.
+
+کدنویسی: کد کامل و قابل‌اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، در یک بلوک کد html کامل و تمیز بده. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
 
     function addMessageActions(wrapper, sender) {
         if (!wrapper || wrapper.querySelector('.message-actions')) return;
@@ -2380,17 +2467,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         menu?.classList.toggle('active', this.value.trim()==='/');
     });
 
-    // Upgrade persona without changing /api/chat payload shape.
-    ensureVirtualPersona = function(){
+    function ensureVirtualPersona(){
         if(!chatHistoryData[currentChatId]) chatHistoryData[currentChatId]=[];
         const h=chatHistoryData[currentChatId];
         const oldIndex=h.findIndex(x=>x.__virtualPersona);
         if(oldIndex>=0){h.splice(oldIndex,2);}
-        h.unshift({role:'user',text:upgradedPersona,__virtualPersona:true},{role:'model',text:'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.',__virtualPersona:true});
-    };
+        h.unshift({role:'user',text:virtualPersona,__virtualPersona:true},{role:'model',text:'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.',__virtualPersona:true});
+    }
 
-    // More reliable formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit.
-    formatReply = function(text){
+    // Formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit. Also used
+    // mid-stream by typeWriterEffect so formatting appears progressively, not all at once.
+    function formatReply(text){
         const escaped=escapeHtml(text);
         const parts=escaped.split(/```/);
         const rendered=parts.map((part,index)=>{
@@ -2414,7 +2501,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 else {flushL();para.push(line)}
             } flushP();flushL();return out.join('');
         }).join('');return rendered||'<p>پاسخی دریافت نشد.</p>';
-    };
+    }
 
     // Decorate restored and newly generated messages without breaking saved chat HTML.
     const __oldAppendMessage=appendMessage;
