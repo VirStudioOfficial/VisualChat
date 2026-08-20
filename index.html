@@ -2057,6 +2057,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const typingRequestId = activeRequestId;
         element.textContent = "";
         let i = 0;
+        const chatBox = document.getElementById("chatBox");
+        // Batch multiple characters per tick so total reveal time stays
+        // reasonable regardless of reply length (was 1 char / 8ms, i.e.
+        // ~25s for a 3000-char reply with a DOM write + scroll every tick).
+        const charsPerTick = Math.max(1, Math.ceil(text.length / 250));
+        let tick = 0;
         typeWriterInterval = setInterval(() => {
             if (typingRequestId !== activeRequestId) {
                 clearInterval(typeWriterInterval);
@@ -2064,15 +2070,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 return;
             }
             if (i < text.length) {
-                element.textContent += text.charAt(i++);
-                const chatBox = document.getElementById("chatBox");
-                chatBox.scrollTop = chatBox.scrollHeight;
+                i = Math.min(text.length, i + charsPerTick);
+                element.textContent = text.slice(0, i);
+                // Scrolling forces layout — only do it every few ticks.
+                if (chatBox && (++tick % 3 === 0 || i >= text.length)) {
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
             } else {
                 clearInterval(typeWriterInterval);
+                typeWriterInterval = null;
                 element.innerHTML = formatReply(text);
                 if (onComplete) onComplete();
             }
-        }, 8);
+        }, 16);
     }
 
     function appendMessage(sender, content) {
@@ -2230,10 +2240,37 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         document.getElementById("chatBox").innerHTML = "";
         document.getElementById("chatBox").style.display = 'none';
         document.getElementById("homeScreen").style.display = 'flex';
-        renderHistory();
+        renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
     }
 
+    // Safe localStorage writer: on quota errors, prunes the oldest saved chats
+    // (chat ids are Date.now() timestamps, so lowest id = oldest) and retries,
+    // instead of silently losing the newest chat or throwing mid-flow.
+    function safeSetItem(key, value, opts = {}) {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (err) {
+            const isQuotaError = err && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22);
+            if (!isQuotaError || !opts.pruneChatsKey) return false;
+            const chatsKey = opts.pruneChatsKey;
+            try {
+                const stored = JSON.parse(localStorage.getItem(chatsKey) || '{}');
+                const ids = Object.keys(stored).sort((a, b) => Number(a) - Number(b));
+                const toDrop = Math.max(1, Math.ceil(ids.length * 0.2));
+                ids.slice(0, toDrop).forEach(id => { delete stored[id]; });
+                localStorage.setItem(chatsKey, JSON.stringify(stored));
+                localStorage.setItem(key, value);
+                return true;
+            } catch (retryErr) {
+                console.error('localStorage write failed even after pruning:', retryErr);
+                return false;
+            }
+        }
+    }
+
+    let __historyRenderQueued = false;
     function saveCurrentChat() {
         const chatBox = document.getElementById("chatBox");
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
@@ -2243,15 +2280,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
         };
-        localStorage.setItem(storageKey, JSON.stringify(chats));
-        localStorage.setItem(historyKey, JSON.stringify(chatHistoryData));
-        localStorage.setItem('last_active_chat_id', currentChatId);
-        renderHistory();
+        const ok = safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
+        if (!ok) {
+            // Even after pruning we couldn't fit it — drop this chat's stored
+            // HTML (keep the lighter text history) rather than lose everything.
+            delete chats[currentChatId];
+            safeSetItem(storageKey, JSON.stringify(chats), {});
+        }
+        safeSetItem(historyKey, JSON.stringify(chatHistoryData), {});
+        safeSetItem('last_active_chat_id', currentChatId, {});
+        renderHistoryList();
     }
 
-    function renderHistory() {
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
+    // Re-renders the sidebar list from the in-memory `chats` object without
+    // re-reading and re-parsing the whole (potentially large) JSON blob back
+    // out of localStorage — that reload is only needed when `chats` might be
+    // stale (initial load / login), see renderHistory() below.
+    function renderHistoryList() {
         const list = document.getElementById("historyList");
         const query = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
         list.innerHTML = "";
@@ -2270,6 +2315,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (empty) empty.style.display = visible ? 'none' : 'block';
     }
 
+    // Full reload from localStorage — use only when `chats` may be stale
+    // (initial page load, after login/switch account). Everywhere else,
+    // renderHistoryList() reuses the already-current in-memory `chats`.
+    function renderHistory() {
+        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
+        renderHistoryList();
+    }
+
     function toggleHistorySearch() {
         const input = document.getElementById('historySearchInput');
         if (!input) return;
@@ -2279,12 +2333,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             input.focus();
         } else {
             input.value = '';
-            renderHistory();
+            renderHistoryList();
         }
     }
 
     function filterHistory(value) {
-        renderHistory();
+        renderHistoryList();
     }
 
     document.addEventListener('keydown', (e) => {
@@ -2309,7 +2363,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         chatBox.style.display = 'flex';
         chatBox.innerHTML = chats[id].html;
         repairLoadedChatButtons(chatBox);
-        renderHistory();
+        renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
         const scrollToBottom = () => { chatBox.scrollTop = chatBox.scrollHeight; };
         scrollToBottom();
@@ -2334,7 +2388,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if(!confirm('این گفتگو پاک شود؟')) return;
         const id=currentChatId; delete chats[id]; delete chatHistoryData[id];
         const storageKey=currentUser?`virtual_chat_${currentUser.email}`:'virtual_chat_history';const historyKey=currentUser?`virtual_history_${currentUser.email}`:'virtual_history_data';
-        localStorage.setItem(storageKey,JSON.stringify(chats));localStorage.setItem(historyKey,JSON.stringify(chatHistoryData));startNewChat();closeSettings();
+        safeSetItem(storageKey,JSON.stringify(chats),{pruneChatsKey:storageKey});safeSetItem(historyKey,JSON.stringify(chatHistoryData),{});startNewChat();closeSettings();
     }
 
     // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
@@ -2459,15 +2513,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     };
 
     // Decorate restored and newly generated messages without breaking saved chat HTML.
+    // Perf note: decorateMessages() does querySelectorAll over the *whole*
+    // chat box, so calling it after every single message makes each turn's
+    // cost grow with total chat length (O(n) per message => O(n²) per chat).
+    // A new message only ever appends as the box's last child, so on the
+    // hot path we decorate just that node; the full scan is reserved for
+    // loadChat, where the entire subtree is freshly restored from stored
+    // HTML and every wrapper genuinely needs its action bar re-attached.
     const __oldAppendMessage=appendMessage;
-    appendMessage=function(sender,content){__oldAppendMessage(sender,content);decorateMessages();};
+    appendMessage=function(sender,content){
+        __oldAppendMessage(sender,content);
+        const last=document.getElementById('chatBox')?.lastElementChild;
+        if(last) addMessageActions(last,sender);
+    };
     const __oldLoadChat=loadChat;
     loadChat=function(id,isInitialLoad=false){__oldLoadChat(id,isInitialLoad);setTimeout(()=>decorateMessages(),0)};
-    const __oldSaveCurrentChat=saveCurrentChat;
-    saveCurrentChat=function(){decorateMessages();__oldSaveCurrentChat();};
     const __oldSendToGemini=sendToGemini;
     sendToGemini=async function(...args){
-        const result=await __oldSendToGemini(...args);decorateMessages();return result;
+        const result=await __oldSendToGemini(...args);
+        const last=document.getElementById('chatBox')?.lastElementChild;
+        if(last) addMessageActions(last,'bot');
+        return result;
     };
     setTimeout(decorateMessages,50);
 
