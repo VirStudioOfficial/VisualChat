@@ -648,8 +648,47 @@
         .code-card pre::-webkit-scrollbar { height: 8px; }
         .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
         .code-card-head span:first-child { text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: var(--accent-2); }
-        .chat-generated-image { display: block; max-width: 100%; height: auto; border-radius: 14px; margin: 0.5rem 0; border: 1px solid var(--border-soft); cursor: pointer; transition: opacity 0.15s ease; }
-        .chat-generated-image:hover { opacity: 0.92; }
+
+        /* ===== Image Result Card (§10-12) ===== */
+        .image-result-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--bg-card); max-width: 420px; }
+        .image-result-preview { position: relative; cursor: pointer; display: block; background: var(--code-bg); }
+        .image-result-preview img { display: block; width: 100%; max-height: 320px; object-fit: contain; }
+        .image-result-preview:hover .image-result-zoom-hint { opacity: 1; }
+        .image-result-zoom-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.28); color: #fff; font-size: 1.4rem; opacity: 0; transition: opacity .15s; }
+        .image-result-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
+        .image-result-actions .code-action { display: inline-flex; align-items: center; gap: 5px; }
+
+        .image-lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 24px; }
+        .image-lightbox-overlay.active { display: flex; }
+        .image-lightbox-inner { position: relative; max-width: min(92vw, 1100px); max-height: 92vh; }
+        .image-lightbox-inner img { max-width: 100%; max-height: 92vh; border-radius: 10px; display: block; }
+        .image-lightbox-close { position: absolute; top: -14px; left: -14px; width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--bg-card); color: var(--text-main); font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px var(--shadow-a); }
+        .image-lightbox-close:hover { background: var(--danger); color: #fff; }
+
+        /* ===== Error / More Details (§8) ===== */
+        .error-message { display: flex; align-items: flex-start; gap: 8px; color: var(--danger); font-size: 0.9rem; line-height: 1.6; }
+        .error-message i { margin-top: 2px; flex-shrink: 0; }
+        .more-details-btn { margin-top: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-family: inherit; font-size: 0.76rem; }
+        .more-details-btn:hover { color: var(--text-main); border-color: var(--accent-2); }
+        .error-details { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--code-bg); font-size: 0.8rem; color: var(--text-muted); direction: ltr; text-align: left; word-break: break-word; }
+        .error-details > div { margin-bottom: 4px; }
+        .err-detail-label { color: var(--text-main); font-weight: 600; }
+        .error-details .code-action { margin-top: 6px; }
+
+        /* ===== Edited File Card + File Preview modal (§6) ===== */
+        .edited-file-meta { padding: 0 14px 12px; font-size: 0.78rem; color: var(--text-muted); }
+        .file-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 20px; }
+        .file-preview-overlay.active { display: flex; }
+        .file-preview-modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; width: min(92vw, 900px); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px var(--shadow-b); }
+        .file-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+        .file-preview-head span { font-weight: 600; font-size: 0.9rem; color: var(--text-main); word-break: break-all; }
+        .file-preview-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .file-preview-body { overflow: auto; padding: 0; direction: ltr; text-align: left; background: var(--code-bg); }
+        .file-preview-body pre { margin: 0; padding: 10px 0; }
+        .file-preview-body code { font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.82rem; color: var(--code-text); }
+        .fp-line { display: block; padding: 0 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+        .fp-line:hover { background: rgba(255,255,255,0.04); }
+        .fp-lineno { display: inline-block; min-width: 2.6em; margin-inline-end: 12px; color: var(--text-muted); opacity: 0.55; user-select: none; text-align: right; }
         .retry-row { display:flex; align-items:center; gap:9px; margin-top:10px; color:var(--text-muted); font-size:0.84rem; }
         .retry-btn { border:1px solid rgba(248,113,113,.35); background:rgba(248,113,113,.08); color:#fca5a5; border-radius:9px; padding:7px 11px; cursor:pointer; font-family:inherit; }
         .retry-btn:hover { background:rgba(248,113,113,.14); }
@@ -1430,9 +1469,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             </span>
                             <span class="item-check"><i class="fa-solid fa-check"></i></span>
                         </div>
-                       <div class="model-dropdown-item" data-model="gemini-3.1-flash-image" onclick="selectModel(this, 'Virtual Image 1', 'gemini-3.1-flash-image')">
+                       <div class="model-dropdown-item" data-model="gemini-3.1-flash-image" onclick="selectModel(this, 'تصویرساز (Nano Banana 2)', 'gemini-3.1-flash-image')">
                             <span>
-                                <div class="item-name">Virtual Image 1</div>
+                                <div class="item-name">تصویرساز (Virtual bot image 1)</div>
                                 <div class="item-desc">تولید عکس با هوش مصنوعی</div>
                             </span>
                             <span class="item-check"><i class="fa-solid fa-check"></i></span>
@@ -1568,7 +1607,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         'gemini-3.5-flash-lite': 'Virtual Bot 1.1',
         'gemini-3.6-flash': 'Virtual Bot 1.5',
         'gemini-3.1-pro-preview': 'Virtual Bot 1.3',
-        'gemini-3.1-flash-image': 'Virtual Image 1'
+        'gemini-3.1-flash-image': 'تصویرساز (Nano Banana 2)'
     };
 
     function toggleModelDropdown() {
@@ -1951,11 +1990,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function compressImage(file, maxDimension = 1024, quality = 0.7) {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
+            // FIX/§2: a corrupted image file, or one whose FileReader/Image
+            // decode simply fails, used to leave this Promise pending
+            // forever — the upload UI would show "در حال پردازش..." with no
+            // way to recover short of removing the file and reloading.
+            reader.onerror = () => reject(new Error('FileReader failed to read image'));
             reader.onload = (event) => {
                 const img = new Image();
+                img.onerror = () => reject(new Error('Corrupted or unsupported image file'));
                 img.src = event.target.result;
                 img.onload = () => {
                     let width = img.width, height = img.height;
@@ -2002,14 +2047,33 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     mimeType = 'video/webm;codecs=vp8';
                 }
 
-                const mediaRecorder = new MediaRecorder(stream, {
-                    mimeType: mimeType,
-                    videoBitsPerSecond: bitrate
-                });
+                // FIX/§2: constructing MediaRecorder can throw synchronously
+                // (unsupported mimeType/options on some browsers), and even
+                // once it's running it can emit an error event (e.g. the
+                // encoder failing mid-stream). Neither case was handled
+                // before, so the file's status would be stuck on "در حال
+                // فشرده‌سازی ویدیو..." forever with no way out except
+                // reloading the page.
+                let mediaRecorder;
+                try {
+                    mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: mimeType,
+                        videoBitsPerSecond: bitrate
+                    });
+                } catch (constructErr) {
+                    URL.revokeObjectURL(video.src);
+                    reject(constructErr);
+                    return;
+                }
 
                 const chunks = [];
                 mediaRecorder.ondataavailable = (e) => {
                     if (e.data && e.data.size > 0) chunks.push(e.data);
+                };
+
+                mediaRecorder.onerror = (err) => {
+                    URL.revokeObjectURL(video.src);
+                    reject(err?.error || err || new Error('MediaRecorder error'));
                 };
 
                 mediaRecorder.onstop = () => {
@@ -2019,10 +2083,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                         URL.revokeObjectURL(video.src);
                         resolve(reader.result);
                     };
+                    reader.onerror = () => {
+                        URL.revokeObjectURL(video.src);
+                        reject(new Error('Failed to read compressed video blob'));
+                    };
                     reader.readAsDataURL(blob);
                 };
 
-                video.play();
+                video.play().catch((playErr) => {
+                    URL.revokeObjectURL(video.src);
+                    reject(playErr);
+                });
                 mediaRecorder.start();
 
                 function drawFrame() {
@@ -2060,15 +2131,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return mimeMap[ext] || 'application/octet-stream';
     }
 
+    // §3: extension list expanded to also cover hpp/bash/csv/log, which
+    // were requested but previously fell through to the generic binary
+    // branch (base64-only, no text extraction) even though they're plain
+    // text and should get the same "Reading -> Ready" text pipeline as
+    // other code/text files.
     const CODE_TEXT_EXTENSIONS = ['js', 'jsx', 'ts', 'tsx', 'html', 'htm', 'css', 'scss', 'json', 'py',
-        'java', 'c', 'cpp', 'h', 'cs', 'php', 'rb', 'go', 'rs', 'sql', 'sh', 'yml', 'yaml', 'xml',
-        'md', 'txt', 'vue', 'svelte', 'kt', 'swift', 'ini', 'env', 'conf'];
+        'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'php', 'rb', 'go', 'rs', 'sql', 'sh', 'bash', 'yml', 'yaml', 'xml',
+        'md', 'txt', 'vue', 'svelte', 'kt', 'swift', 'ini', 'env', 'conf', 'csv', 'log'];
 
     function isCodeOrTextFile(file) {
-        if (!file) return false;
-        if (file.type && file.type.startsWith('text/')) return true;
+        if (!file || !file.name) return false;
+        // FIX/§3: don't trust file.type alone (it can be empty or wrong for
+        // renamed files, and some browsers report text/plain or "" for code
+        // files with recognizable extensions like .py or .yml). Check both
+        // the MIME type AND the extension, and let the extension win when
+        // it's a known code/text extension even if the MIME type disagrees.
         const ext = (file.name.split('.').pop() || '').toLowerCase();
-        return CODE_TEXT_EXTENSIONS.includes(ext);
+        if (CODE_TEXT_EXTENSIONS.includes(ext)) return true;
+        if (file.type && file.type.startsWith('text/')) return true;
+        if (file.type === 'application/json' || file.type === 'application/xml') return true;
+        return false;
     }
 
     function renderCodeFilesBar() {
@@ -2125,15 +2208,31 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const previewContainer = document.getElementById('filePreview');
         
         previewContainer.style.display = 'flex';
-        fileNameSpan.innerText = file.name;
+        fileNameSpan.innerText = file.name || 'فایل بدون‌نام';
         statusEl.textContent = 'در حال پردازش...';
         statusEl.className = 'file-status loading';
+
+        // FIX/§2: a genuinely empty (0-byte) file used to sail through every
+        // branch below as if it were valid content — for a text file that
+        // means codeFilesMemory silently gets an empty string, and the model
+        // later "reads" a file that has nothing in it without ever being
+        // told so. Reject it explicitly and don't pretend it was processed.
+        if (file.size === 0) {
+            statusEl.textContent = 'فایل خالی است';
+            statusEl.className = 'file-status error';
+            showToast('این فایل خالی است و قابل پردازش نیست.', 'warning');
+            return;
+        }
 
         const MAX_DIRECT_SIZE = 4 * 1024 * 1024;
 
         try {
-            const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name);
-            const isImage = file.type.startsWith('image/');
+            // FIX: file.type can be undefined on some File-like objects
+            // (certain clipboard/drag sources), which previously threw on
+            // .startsWith(). Coerce to a string first.
+            const mimeType = file.type || '';
+            const isVideo = mimeType.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name || '');
+            const isImage = mimeType.startsWith('image/');
 
             if (isImage) {
                 const compressedBase64 = await compressImage(file, 1024, 0.7);
@@ -2184,7 +2283,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 // size cap here since a large PDF becomes a very large base64
                 // payload; the backend enforces its own hard limit too, but failing
                 // fast client-side avoids a pointless upload+round-trip.
-                const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+                const isPdf = mimeType === 'application/pdf' || /\.pdf$/i.test(file.name || '');
                 const MAX_PDF_SIZE = 8 * 1024 * 1024; // 8MB
                 if (isPdf && file.size > MAX_PDF_SIZE) {
                     statusEl.textContent = 'فایل PDF خیلی بزرگ است (حداکثر ۸ مگابایت)';
@@ -2194,8 +2293,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const base64 = e.target.result;
-                        selectedFileData = { name: file.name, type: file.type || guessMimeType(file.name), base64: base64 };
-                        previewImg.style.display = 'none';
+                        selectedFileData = { name: file.name, type: file.type || guessMimeType(file.name), base64: base64 };                        previewImg.style.display = 'none';
                         statusEl.textContent = isPdf ? 'PDF آماده' : 'فایل آماده';
                         statusEl.className = 'file-status success';
                     };
@@ -2371,7 +2469,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
     }
 
-    function makeRetryError(loadingDiv, message, request) {
+    function makeRetryError(loadingDiv, message, request, errorDetail = null) {
         const saved = {
             textPrompt: request?.textPrompt || '',
             payloadFile: request?.payloadFile || null,
@@ -2379,9 +2477,51 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             model: currentModel
         };
         const retryData = encodeURIComponent(JSON.stringify(saved));
-        loadingDiv.innerHTML = `<div>${escapeHtml(message)}</div><div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
+
+        // FIX / §8: errors used to be a single generic line with no way to
+        // see what actually happened. When the backend sends a structured
+        // error object ({message,type,stage,detail}), show a real
+        // "جزئیات بیشتر" (More Details) toggle with the technical info —
+        // never raw secrets/keys, since the backend log module already
+        // strips those before anything reaches this payload.
+        let detailsHtml = '';
+        if (errorDetail && typeof errorDetail === 'object') {
+            const detailId = 'errdetail-' + Math.random().toString(36).slice(2, 9);
+            const rows = [];
+            if (errorDetail.type) rows.push(`<div><span class="err-detail-label">نوع خطا:</span> ${escapeHtml(String(errorDetail.type))}</div>`);
+            if (errorDetail.stage) rows.push(`<div><span class="err-detail-label">مرحله:</span> ${escapeHtml(String(errorDetail.stage))}</div>`);
+            if (errorDetail.detail) rows.push(`<div><span class="err-detail-label">جزئیات فنی:</span> ${escapeHtml(String(errorDetail.detail))}</div>`);
+            const detailText = [
+                errorDetail.type ? `نوع: ${errorDetail.type}` : '',
+                errorDetail.stage ? `مرحله: ${errorDetail.stage}` : '',
+                errorDetail.detail ? `جزئیات: ${errorDetail.detail}` : ''
+            ].filter(Boolean).join('\n');
+            const encodedDetail = encodeURIComponent(detailText);
+            detailsHtml = `
+                <button class="more-details-btn" type="button" onclick="toggleErrorDetails('${detailId}')">جزئیات بیشتر</button>
+                <div class="error-details" id="${detailId}" style="display:none;">
+                    ${rows.join('')}
+                    <button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedDetail}">کپی جزئیات</button>
+                </div>`;
+        }
+
+        loadingDiv.innerHTML = `<div class="error-message"><i class="fa-solid fa-circle-exclamation"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
+    }
+
+    function toggleErrorDetails(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function copyErrorDetails(btn) {
+        const text = decodeURIComponent(btn.dataset.detail || '');
+        try { await navigator.clipboard.writeText(text); }
+        catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        const old = btn.textContent; btn.textContent = 'کپی شد'; setTimeout(() => btn.textContent = old, 1200);
+        if (typeof showToast === 'function') showToast('جزئیات خطا کپی شد', 'success');
     }
 
     async function retryFromButton(btn) {
@@ -2483,11 +2623,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (requestId !== activeRequestId) return;
 
             if (response.status === 429) {
-                makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request);
+                makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request, { type: 'timeout', stage: 'request', detail: 'HTTP 429' });
                 setGeneratingState(false); saveCurrentChat(); return;
             }
             if (!response.ok || !response.body) {
-                makeRetryError(loadingDiv, `خطای سرور (${response.status})`, request);
+                let bodyDetail = null;
+                try { const j = await response.clone().json(); bodyDetail = j?.error || null; } catch (_) {}
+                makeRetryError(loadingDiv, bodyDetail?.message || `خطای سرور (${response.status})`, request, bodyDetail || { type: 'network_error', stage: 'request', detail: `HTTP ${response.status}` });
                 setGeneratingState(false); saveCurrentChat(); return;
             }
 
@@ -2499,7 +2641,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let sseBuffer = '';
             let fullReply = '';
             let streamError = null;
+            let streamErrorDetail = null;
             let gotAnyText = false;
+            let receivedImage = null;
             let liveRenderTimer = null;
 
             const flushLiveRender = () => {
@@ -2536,12 +2680,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     let parsed;
                     try { parsed = JSON.parse(jsonStr); } catch (_) { continue; }
 
+                    if (parsed.image) {
+                        // FIX: the backend sends a structured image payload
+                        // (url/base64/dataUrl/mimeType/filename/prompt) on a
+                        // dedicated SSE event, but this loop previously only
+                        // read parsed.text/parsed.error and silently dropped
+                        // it. Without capturing it here, no Image Result
+                        // Card (preview/download/regenerate) is possible —
+                        // the UI only ever saw the markdown fallback text.
+                        receivedImage = parsed.image;
+                    }
                     if (parsed.text) {
                         gotAnyText = true;
                         fullReply += parsed.text;
                         queueLiveRender();
                     } else if (parsed.error) {
-                        streamError = parsed.error;
+                        if (typeof parsed.error === 'string') {
+                            streamError = parsed.error;
+                        } else {
+                            streamError = parsed.error.message || 'خطای نامشخص';
+                            streamErrorDetail = parsed.error;
+                        }
                     }
                 }
             }
@@ -2549,11 +2708,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (sseBuffer.trim().startsWith('data:')) {
                 try {
                     const parsed = JSON.parse(sseBuffer.trim().slice(5).trim());
+                    if (parsed.image) {
+                        receivedImage = parsed.image;
+                    }
                     if (parsed.text) {
                         gotAnyText = true;
                         fullReply += parsed.text;
                     } else if (parsed.error) {
-                        streamError = parsed.error;
+                        if (typeof parsed.error === 'string') {
+                            streamError = parsed.error;
+                        } else {
+                            streamError = parsed.error.message || 'خطای نامشخص';
+                            streamErrorDetail = parsed.error;
+                        }
                     }
                 } catch (_) {}
             }
@@ -2563,22 +2730,36 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (requestId !== activeRequestId) return;
 
             const reply = sanitizeVirtualIdentity(fullReply);
-            if (gotAnyText && reply) {
-                if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+            if ((gotAnyText && reply) || receivedImage) {
+                const historyText = reply || (receivedImage ? '[تصویر تولید شد]' : '');
+                if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
                 else {
                     const last = chatHistoryData[currentChatId]?.at(-1);
-                    if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: reply });
+                    if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
                 }
                 lastFailedRequest = null;
 
-                const { displayText, edits } = stripFileEditBlock(reply);
-                let finalHtml = formatReply(displayText || reply);
+                // FIX: when a structured image payload is present, drop the
+                // markdown "![Generated Image](url)" fallback line from the
+                // displayed text so the image isn't rendered twice (once by
+                // formatReply's markdown handling, once by the Image Card).
+                let textForDisplay = reply;
+                if (receivedImage) {
+                    textForDisplay = textForDisplay.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim();
+                }
+
+                const { displayText, edits } = stripFileEditBlock(textForDisplay);
+                let finalHtml = displayText ? formatReply(displayText) : '';
+                if (receivedImage) {
+                    finalHtml += buildImageResultCardHtml(receivedImage);
+                }
                 finalHtml += buildFileEditResultHtml(edits);
+                if (!finalHtml) finalHtml = formatReply('');
 
                 loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
-                makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request);
+                makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request, streamErrorDetail);
                 setGeneratingState(false); saveCurrentChat();
             }
         } catch (error) {
@@ -2588,7 +2769,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (error.name === 'AbortError') {
                 loadingDiv.innerHTML = '<span class="stopped-state"><i class="fa-solid fa-stop"></i> پاسخ متوقف شد</span>';
             } else {
-                makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request);
+                makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request, { type: 'network_error', stage: 'fetch', detail: error?.message || String(error) });
             }
             setGeneratingState(false);
             saveCurrentChat();
@@ -2630,17 +2811,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function formatInline(value) {
         return value
-            // Markdown image: ![alt](url) — must run before the link handler below
-            // since the link pattern would otherwise also match the "(url)" part.
-            // Only allow http(s) and data:image/ URLs so this can't become an XSS
-            // vector via a crafted "javascript:" or similar scheme. Wrapped in a
-            // plain <a> (not an onclick handler) so HTML-entity-escaped characters
-            // like &amp; in the URL decode correctly instead of breaking the link.
-            .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+|data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+)\)/g,
-                (match, alt, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer"><img src="${url}" alt="${alt || 'تصویر'}" class="chat-generated-image" loading="lazy"></a>`)
-            // Markdown link: [text](url) — same scheme allow-list.
-            .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-                (match, text, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`)
             .replace(/`([^`]+)`/g, '<code>$1</code>')
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
             .replace(/__([^_]+)__/g, '<strong>$1</strong>');
@@ -2794,11 +2964,165 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             const memoryEntry = codeFilesMemory.find(f => f.name === fileName);
             if (memoryEntry) memoryEntry.content = content;
 
+            // §6: Edited File Card — name, size, status, change count, and
+            // Preview/Copy/Download actions (previously only a bare
+            // "دانلود فایل ویرایش‌شده" link with no way to actually look at
+            // or copy the result without downloading it first).
             const encoded = encodeURIComponent(content);
             const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
-            html += `<div class="code-card"><div class="code-card-head"><span><i class="fa-solid fa-file-circle-check"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}</span><div class="code-actions"><button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeHtml(fileName)}">دانلود فایل ویرایش‌شده</button></div></div></div>`;
+            const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
+            html += `<div class="code-card edited-file-card">
+                <div class="code-card-head">
+                    <span><i class="fa-solid fa-file-circle-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}</span>
+                    <div class="code-actions">
+                        <button class="code-action" onclick="openFilePreview('${encoded}','${escapeAttr(fileName)}')"><i class="fa-solid fa-eye"></i> پیش‌نمایش</button>
+                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="fa-regular fa-copy"></i> کپی</button>
+                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="fa-solid fa-download"></i> دانلود</button>
+                    </div>
+                </div>
+                <div class="edited-file-meta">${sizeKb} KB &middot; آماده</div>
+            </div>`;
         }
         return html;
+    }
+
+    // ===== Image Result Card (§10-12) =====
+    // Renders the structured image payload the backend sends
+    // ({url,base64,dataUrl,mimeType,filename,prompt}) as a real card with
+    // Preview (lightbox), Download, Open, Copy URL, Copy prompt and
+    // Regenerate — instead of a bare markdown image with no controls.
+    let __imageCardSeq = 0;
+
+    // FIX: image cards previously would have kept their data only in a
+    // volatile in-memory JS object, keyed by a per-session id. Since saved
+    // chats are restored by re-inserting stored innerHTML (see loadChat()),
+    // that registry is empty after a reload/chat-switch, and every button
+    // on an old image card (Preview/Download/Copy/Regenerate) would silently
+    // do nothing — violating §24 (previous image outputs must still work).
+    // Storing the payload directly on the element via data-image (URI-encoded
+    // JSON) makes each card self-contained and reload-proof, matching the
+    // same pattern already used for code blocks (data-code).
+    function buildImageResultCardHtml(image) {
+        if (!image) return '';
+        const cardId = 'imgcard-' + (++__imageCardSeq) + '-' + Date.now();
+        const src = image.dataUrl || (image.base64 ? `data:${image.mimeType || 'image/jpeg'};base64,${image.base64}` : image.url) || '';
+        const hasUrl = !!image.url;
+        const hasPrompt = !!image.prompt;
+        const encodedImage = encodeURIComponent(JSON.stringify(image));
+        return `
+            <div class="image-result-card" id="${cardId}" data-image="${encodedImage}">
+                <div class="image-result-preview" onclick="openImageLightbox('${cardId}')" role="button" tabindex="0" aria-label="بزرگ‌نمایی تصویر" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openImageLightbox('${cardId}')}">
+                    <img src="${src}" alt="تصویر تولیدشده" loading="lazy">
+                    <span class="image-result-zoom-hint"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
+                </div>
+                <div class="image-result-actions">
+                    <button class="code-action" type="button" onclick="openImageLightbox('${cardId}')"><i class="fa-solid fa-expand"></i> پیش‌نمایش</button>
+                    <button class="code-action" type="button" onclick="downloadResultImage('${cardId}')"><i class="fa-solid fa-download"></i> دانلود</button>
+                    ${hasUrl ? `<button class="code-action" type="button" onclick="openResultImageTab('${cardId}')"><i class="fa-solid fa-arrow-up-right-from-square"></i> باز کردن</button>` : ''}
+                    ${hasUrl ? `<button class="code-action" type="button" onclick="copyImageUrl('${cardId}', this)"><i class="fa-regular fa-copy"></i> کپی لینک</button>` : ''}
+                    ${hasPrompt ? `<button class="code-action" type="button" onclick="copyImagePrompt('${cardId}', this)"><i class="fa-regular fa-copy"></i> کپی prompt</button>` : ''}
+                    <button class="code-action" type="button" onclick="regenerateImage('${cardId}')"><i class="fa-solid fa-rotate"></i> تولید دوباره</button>
+                </div>
+            </div>`;
+    }
+
+    function getImageCardData(cardId) {
+        const el = document.getElementById(cardId);
+        if (!el || !el.dataset.image) return null;
+        try { return JSON.parse(decodeURIComponent(el.dataset.image)); } catch (_) { return null; }
+    }
+
+    function openImageLightbox(cardId) {
+        const image = getImageCardData(cardId);
+        if (!image) return;
+        const src = image.dataUrl || (image.base64 ? `data:${image.mimeType || 'image/jpeg'};base64,${image.base64}` : image.url) || '';
+        let overlay = document.getElementById('imageLightboxOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'imageLightboxOverlay';
+            overlay.className = 'image-lightbox-overlay';
+            overlay.innerHTML = `<div class="image-lightbox-inner"><img id="imageLightboxImg" alt="پیش‌نمایش تصویر"><button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeImageLightbox()"><i class="fa-solid fa-xmark"></i></button></div>`;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeImageLightbox(); });
+        }
+        document.getElementById('imageLightboxImg').src = src;
+        overlay.classList.add('active');
+        document.addEventListener('keydown', __lightboxEscHandler);
+    }
+
+    function __lightboxEscHandler(e) {
+        if (e.key === 'Escape') closeImageLightbox();
+    }
+
+    function closeImageLightbox() {
+        const overlay = document.getElementById('imageLightboxOverlay');
+        if (overlay) overlay.classList.remove('active');
+        document.removeEventListener('keydown', __lightboxEscHandler);
+    }
+
+    function downloadResultImage(cardId) {
+        const image = getImageCardData(cardId);
+        if (!image) return;
+        // §11 download priority: dataURL/base64 first (guaranteed to work
+        // and avoids CORS), falling back to the remote URL only if neither
+        // is available.
+        let href = image.dataUrl || (image.base64 ? `data:${image.mimeType || 'image/jpeg'};base64,${image.base64}` : null);
+        const ext = (image.mimeType && image.mimeType.split('/')[1]) || 'jpg';
+        const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+        const filename = image.filename && image.filename !== 'image.jpg' ? image.filename : `virtual-bot-image-${stamp}.${ext}`;
+
+        if (href) {
+            const a = document.createElement('a');
+            a.href = href; a.download = filename;
+            document.body.appendChild(a); a.click(); a.remove();
+            return;
+        }
+        if (image.url) {
+            // Fallback: fetch as blob so browsers don't just navigate to/open
+            // the image instead of downloading it (a bare <a href=url> can
+            // do that for cross-origin images without Content-Disposition).
+            fetch(image.url).then(r => r.blob()).then(blob => {
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl; a.download = filename;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            }).catch(() => {
+                window.open(image.url, '_blank', 'noopener');
+                if (typeof showToast === 'function') showToast('دانلود مستقیم ممکن نشد؛ تصویر در تب جدید باز شد.', 'warning');
+            });
+        }
+    }
+
+    function openResultImageTab(cardId) {
+        const image = getImageCardData(cardId);
+        if (image?.url) window.open(image.url, '_blank', 'noopener');
+    }
+
+    async function copyImageUrl(cardId, btn) {
+        const image = getImageCardData(cardId);
+        if (!image?.url) return;
+        try { await navigator.clipboard.writeText(image.url); }
+        catch { const ta = document.createElement('textarea'); ta.value = image.url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        const old = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
+        if (typeof showToast === 'function') showToast('لینک تصویر کپی شد', 'success');
+    }
+
+    async function copyImagePrompt(cardId, btn) {
+        const image = getImageCardData(cardId);
+        if (!image?.prompt) return;
+        try { await navigator.clipboard.writeText(image.prompt); }
+        catch { const ta = document.createElement('textarea'); ta.value = image.prompt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        const old = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
+        if (typeof showToast === 'function') showToast('prompt کپی شد', 'success');
+    }
+
+    function regenerateImage(cardId) {
+        if (isGenerating) return;
+        const image = getImageCardData(cardId);
+        const prompt = image?.prompt;
+        if (!prompt) { if (typeof showToast === 'function') showToast('prompt این تصویر در دسترس نیست.', 'warning'); return; }
+        sendToGemini(prompt, null);
     }
 
     function downloadEditedFile(btn) {
@@ -2810,6 +3134,72 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         a.download = filename;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    // ===== File Preview modal for edited files (§6) =====
+    // Full-content, line-numbered, scrollable preview + copy for edited
+    // text/code files, opened from the "پیش‌نمایش" button on an edited-file
+    // card. Built as an injected overlay (same technique as the confirm
+    // modal / image lightbox) so no static markup has to change.
+    function escapeAttr(value) {
+        return String(value ?? '').replace(/"/g, '&quot;');
+    }
+
+    function openFilePreview(encodedContent, filename) {
+        const content = decodeURIComponent(encodedContent);
+        let overlay = document.getElementById('filePreviewOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'filePreviewOverlay';
+            overlay.className = 'file-preview-overlay';
+            overlay.innerHTML = `
+                <div class="file-preview-modal" role="dialog" aria-modal="true" aria-labelledby="filePreviewTitle">
+                    <div class="file-preview-head">
+                        <span id="filePreviewTitle"></span>
+                        <div class="file-preview-head-actions">
+                            <button class="code-action" type="button" id="filePreviewCopyBtn"><i class="fa-regular fa-copy"></i> کپی همه</button>
+                            <button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeFilePreview()"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                    <div class="file-preview-body"><pre><code id="filePreviewCode"></code></pre></div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFilePreview(); });
+        }
+        document.getElementById('filePreviewTitle').textContent = filename || 'پیش‌نمایش فایل';
+        const codeEl = document.getElementById('filePreviewCode');
+        // Numbered, escaped lines — never render raw file content as HTML.
+        const lines = content.split('\n');
+        codeEl.innerHTML = lines.map((ln, i) => `<span class="fp-line"><span class="fp-lineno">${i + 1}</span>${escapeHtml(ln)}</span>`).join('\n');
+        const copyBtn = document.getElementById('filePreviewCopyBtn');
+        copyBtn.onclick = async () => {
+            try { await navigator.clipboard.writeText(content); }
+            catch { const ta = document.createElement('textarea'); ta.value = content; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+            const old = copyBtn.innerHTML; copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد';
+            setTimeout(() => copyBtn.innerHTML = old, 1200);
+            if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
+        };
+        overlay.classList.add('active');
+        document.addEventListener('keydown', __filePreviewEscHandler);
+    }
+
+    function __filePreviewEscHandler(e) {
+        if (e.key === 'Escape') closeFilePreview();
+    }
+
+    function closeFilePreview() {
+        const overlay = document.getElementById('filePreviewOverlay');
+        if (overlay) overlay.classList.remove('active');
+        document.removeEventListener('keydown', __filePreviewEscHandler);
+    }
+
+    async function copyEditedFile(btn) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        try { await navigator.clipboard.writeText(code); }
+        catch { const ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        const old = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد';
+        setTimeout(() => btn.innerHTML = old, 1200);
+        if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
     }
 
     function repairLoadedChatButtons(chatBox) {
@@ -2830,8 +3220,26 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             }
         });
         // Make every saved code action explicitly usable after history restore.
+        // FIX: this used to disable ANY .code-action button lacking
+        // data-code — but image-card buttons (Preview/Download/Open/Copy/
+        // Regenerate) intentionally reuse the .code-action class without a
+        // data-code attribute (they carry their payload on the parent
+        // .image-result-card's data-image instead). The old check silently
+        // disabled every restored image card's buttons. Only disable code
+        // buttons that are actually supposed to have data-code (copy/run/
+        // download-html/download-edited-file) and skip anything living
+        // inside an image-result-card.
         chatBox.querySelectorAll('.code-action').forEach(btn => {
+            if (btn.closest('.image-result-card')) return;
             if (!btn.dataset.code) btn.disabled = true;
+        });
+        // Image cards restored from storage lose nothing (their data lives
+        // in data-image on the card itself), but re-check integrity so a
+        // corrupted/edited save doesn't leave a broken card silently clickable.
+        chatBox.querySelectorAll('.image-result-card').forEach(card => {
+            if (!getImageCardData(card.id)) {
+                card.querySelectorAll('.code-action').forEach(btn => btn.disabled = true);
+            }
         });
     }
 
@@ -2852,6 +3260,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         document.getElementById("chatBox").innerHTML = "";
         document.getElementById("chatBox").style.display = 'none';
         document.getElementById("homeScreen").style.display = 'flex';
+        // FIX: a New Chat must not silently carry over the previous chat's
+        // attached file / code files. Without this, selectedFileData and
+        // codeFilesMemory kept referencing files from the old conversation
+        // and got sent along with the very first message of the new chat.
+        removeFile();
+        clearCodeFilesMemory();
+        lastCodeFilesForEdit = [];
+        lastFailedRequest = null;
         renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
     }
@@ -2970,6 +3386,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         currentChatId = id;
         localStorage.setItem('last_active_chat_id', currentChatId);
         isFirstMessage = false;
+        // FIX: switching chats must not keep a pending file/upload from the
+        // previously open chat attached to the composer of this one.
+        removeFile();
+        clearCodeFilesMemory();
+        lastCodeFilesForEdit = [];
+        lastFailedRequest = null;
         const chatBox = document.getElementById("chatBox");
         document.getElementById("homeScreen").style.display = 'none';
         chatBox.style.display = 'flex';
