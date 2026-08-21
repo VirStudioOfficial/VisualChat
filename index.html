@@ -59,7 +59,7 @@
                         root.style.setProperty('--accent-1', '#6b7078');
                         root.style.setProperty('--accent-2', '#b6bac1');
                         root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6b7078, #2b2e35 48%, #b6bac1)');
-                        document.documentElement.style.setProperty('--app-bg-image', 'linear-gradient(160deg, #64676d 0%, #3b3d43 34%, #24262c 66%, #1d1f24 100%)');
+                        document.documentElement.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.22), transparent 45%), radial-gradient(circle at -10% 110%, rgba(182,186,193,0.12), transparent 40%)');
                     } else {
                         var darkBase = '#0a0c12';
                         var lightBase = '#f6f7fb';
@@ -675,8 +675,6 @@
         }
         .loader-searching .loader-dots span { background: var(--accent-2); }
 
-        .sticker-img { width: 120px; height: 120px; object-fit: contain; }
-
         .scroll-latest-btn { position:absolute; top:-48px; left:50%; transform:translateX(-50%) translateY(8px); width:36px; height:36px; border-radius:50%; border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); box-shadow:0 8px 24px var(--shadow-b); cursor:pointer; opacity:0; pointer-events:none; transition:opacity .18s, transform .18s; z-index:4; }
         .scroll-latest-btn.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
         .scroll-latest-btn:hover { border-color:var(--accent-2); }
@@ -688,25 +686,6 @@
             padding: 10px 15px 16px 15px;
             position: relative;
         }
-
-        .sticker-picker {
-            display: none;
-            position: absolute;
-            bottom: 78px;
-            right: 20px;
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 16px;
-            padding: 12px;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            box-shadow: 0 10px 30px var(--shadow-b);
-            z-index: 30;
-            animation: fadeIn 0.2s ease;
-        }
-        .sticker-picker.active { display: grid; }
-        .sticker-item { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; padding: 4px; transition: transform 0.15s, background 0.15s; }
-        .sticker-item:hover { transform: scale(1.12); background-color: var(--bg-input); }
 
         .input-box {
             background-color: var(--bg-input);
@@ -962,7 +941,6 @@
             .message-wrapper { max-width: 90%; }
             .home-title { font-size: 1.4rem; }
             .input-wrapper { padding: 8px 10px 10px 10px; }
-            .sticker-picker { right: 10px; left: 10px; grid-template-columns: repeat(4, 1fr); justify-items: center; }
         }
 
         /* ===== Virtual Chat refresh ===== */
@@ -1278,8 +1256,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            <div class="sticker-picker" id="stickerPicker"></div>
-
             <div class="file-preview" id="filePreview">
                 <img id="previewImg" src="" alt="preview">
                 <span id="fileName"></span>
@@ -1302,10 +1278,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
-
-                <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
-                    <i class="fa-regular fa-face-smile"></i>
-                </button>
 
                 <input type="file" id="fileInput" hidden multiple onchange="handleFileSelect(event)">
                 <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
@@ -1697,7 +1669,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             root.style.setProperty('--accent-1', '#6b7078');
             root.style.setProperty('--accent-2', '#b6bac1');
             root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6b7078, #2b2e35 48%, #b6bac1)');
-            root.style.setProperty('--app-bg-image', 'linear-gradient(160deg, #64676d 0%, #3b3d43 34%, #24262c 66%, #1d1f24 100%)');
+            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.22), transparent 45%), radial-gradient(circle at -10% 110%, rgba(182,186,193,0.12), transparent 40%)');
             return;
         }
 
@@ -1840,26 +1812,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             sidebar.classList.toggle('collapsed');
             document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
         }
-    }
-
-    function toggleStickerPicker() {
-        if (isGenerating) return;
-        document.getElementById('stickerPicker').classList.toggle('active');
-    }
-
-    function sendSticker(stickerUrl) {
-        if (isGenerating) return;
-        toggleStickerPicker();
-        const stickerHtml = `<img src="${stickerUrl}" class="sticker-img" alt="sticker">`;
-        appendMessage('user', stickerHtml);
-
-        if (isFirstMessage) {
-            document.getElementById("homeScreen").style.display = 'none';
-            document.getElementById("chatBox").style.display = 'flex';
-            isFirstMessage = false;
-        }
-
-        sendToGemini("کاربر یک استیکر ارسال کرد.");
     }
 
     function handleKeyDown(e) {
@@ -2170,11 +2122,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const actionBtn = document.getElementById("actionBtn");
         const actionIcon = document.getElementById("actionIcon");
         const attachBtn = document.getElementById("attachBtn");
-        const stickerBtn = document.getElementById("stickerBtn");
 
         inputField.disabled = generating;
         attachBtn.disabled = generating;
-        stickerBtn.disabled = generating;
 
         if (generating) {
             actionBtn.classList.add("stop-mode");
