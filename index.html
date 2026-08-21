@@ -1220,6 +1220,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <span class="file-status" id="fileStatus">در حال پردازش...</span>
                 <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"></i>
             </div>
+            <div id="codeFilesBar" style="display:none; flex-wrap:wrap; gap:6px; padding:6px 4px;"></div>
 
             <div class="command-menu" id="commandMenu">
                 <div class="command-item" onclick="runComposerCommand('web')"><span><i class="fa-solid fa-globe"></i> جستجو در وب</span><span>/web</span></div>
@@ -1236,15 +1237,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
 
-                <button class="icon-btn" id="searchToggleBtn" onclick="toggleSearch()" title="جستجوی وب">
-                    <i class="fa-solid fa-globe"></i>
-                </button>
-
                 <button class="icon-btn" id="stickerBtn" onclick="toggleStickerPicker()" title="استیکر">
                     <i class="fa-regular fa-face-smile"></i>
                 </button>
 
-                <input type="file" id="fileInput" hidden onchange="handleFileSelect(event)">
+                <input type="file" id="fileInput" hidden multiple onchange="handleFileSelect(event)">
                 <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
                     <i class="fa-solid fa-plus"></i>
                 </button>
@@ -1385,10 +1382,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let chats = {};
     let chatHistoryData = {};
     let selectedFileData = null;
-    let lastCodeFileForEdit = null;
+    let lastCodeFilesForEdit = [];
+    let codeFilesMemory = []; // [{name, content}] — فایل‌های کد ضمیمه‌شده که تا وقتی کاربر پاکشون نکنه تو مکالمه می‌مونن
     let isFirstMessage = true;
     let isGenerating = false;
-    let isSearchEnabled = false;
+    let isSearchEnabled = true; // سرچ خودکاره؛ تصمیم نهایی رو shouldSearchWeb() و بک‌اند می‌گیرن
     let currentAbortController = null;
     let typeWriterInterval = null;
     let lastFailedRequest = null;
@@ -1643,16 +1641,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function toggleSearch() {
-        if (isGenerating) return;
-        isSearchEnabled = !isSearchEnabled;
-        const btn = document.getElementById("searchToggleBtn");
-        if (isSearchEnabled) {
-            btn.classList.add("search-active");
-            btn.title = "جستجوی وب: فعال";
-        } else {
-            btn.classList.remove("search-active");
-            btn.title = "جستجوی وب: غیرفعال";
-        }
+        // دکمه‌ی دستی سرچ حذف شده؛ سرچ همیشه خودکاره. این تابع فقط برای
+        // سازگاری با فرمان /web نگه داشته شده و کاری نمی‌کنه.
+        isSearchEnabled = true;
     }
 
     function toggleSidebar() {
@@ -1815,10 +1806,40 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return CODE_TEXT_EXTENSIONS.includes(ext);
     }
 
+    function renderCodeFilesBar() {
+        const bar = document.getElementById('codeFilesBar');
+        if (!bar) return;
+        if (!codeFilesMemory.length) {
+            bar.style.display = 'none';
+            bar.innerHTML = '';
+            return;
+        }
+        bar.style.display = 'flex';
+        bar.innerHTML = codeFilesMemory.map(f => `
+            <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;">
+                <i class="fa-solid fa-file-code"></i> ${escapeHtml(f.name)}
+                <i class="fa-solid fa-xmark icon-btn" style="width:16px;height:16px;font-size:0.75rem;cursor:pointer;" onclick="removeCodeFile('${f.name.replace(/'/g, "\\'")}')"></i>
+            </span>
+        `).join('');
+    }
+
+    function removeCodeFile(name) {
+        codeFilesMemory = codeFilesMemory.filter(f => f.name !== name);
+        renderCodeFilesBar();
+    }
+
+    function clearCodeFilesMemory() {
+        codeFilesMemory = [];
+        renderCodeFilesBar();
+    }
+
     async function handleFileSelect(event) {
-        const file = event?.target?.files?.[0];
-        if (!file) return;
-        await processIncomingFile(file);
+        const files = Array.from(event?.target?.files || []);
+        if (!files.length) return;
+        for (const file of files) {
+            await processIncomingFile(file);
+        }
+        event.target.value = '';
     }
 
     async function processIncomingFile(file) {
@@ -1871,18 +1892,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     statusEl.textContent = 'فایل خیلی بزرگ است (حداکثر ۳۰۰ کیلوبایت)';
                     statusEl.className = 'file-status error';
                 } else {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        selectedFileData = { name: file.name, type: 'text/code', mode: 'text', content: String(e.target.result || '') };
-                        previewImg.style.display = 'none';
-                        statusEl.textContent = 'فایل کد آماده برای ویرایش';
-                        statusEl.className = 'file-status success';
-                    };
-                    reader.onerror = () => {
-                        statusEl.textContent = 'خطا';
-                        statusEl.className = 'file-status error';
-                    };
-                    reader.readAsText(file);
+                    const text = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(String(e.target.result || ''));
+                        reader.onerror = reject;
+                        reader.readAsText(file);
+                    });
+                    const existingIndex = codeFilesMemory.findIndex(f => f.name === file.name);
+                    if (existingIndex >= 0) codeFilesMemory[existingIndex] = { name: file.name, content: text, mode: 'text' };
+                    else codeFilesMemory.push({ name: file.name, content: text, mode: 'text' });
+                    renderCodeFilesBar();
+                    previewContainer.style.display = 'none';
                 }
             } else {
                 const reader = new FileReader();
@@ -1956,12 +1976,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const actionIcon = document.getElementById("actionIcon");
         const attachBtn = document.getElementById("attachBtn");
         const stickerBtn = document.getElementById("stickerBtn");
-        const searchBtn = document.getElementById("searchToggleBtn");
 
         inputField.disabled = generating;
         attachBtn.disabled = generating;
         stickerBtn.disabled = generating;
-        searchBtn.disabled = generating;
 
         if (generating) {
             actionBtn.classList.add("stop-mode");
@@ -2000,7 +2018,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function sendMessage() {
         const inputField = document.getElementById("userInput");
         const text = inputField.value.trim();
-        if (!text && !selectedFileData) return;
+        if (!text && !selectedFileData && codeFilesMemory.length === 0) return;
 
         if (isFirstMessage) {
             document.getElementById("homeScreen").style.display = 'none';
@@ -2013,8 +2031,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
         } else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
             userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
-        } else if (selectedFileData && selectedFileData.mode === 'text') {
-            userContentHtml += `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="fa-solid fa-file-code"></i> ${escapeHtml(selectedFileData.name)}</span>`;
+        }
+        if (codeFilesMemory.length > 0) {
+            userContentHtml += codeFilesMemory.map(f =>
+                `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="fa-solid fa-file-code"></i> ${escapeHtml(f.name)}</span>`
+            ).join('');
         }
 
         appendMessage('user', userContentHtml);
@@ -2097,7 +2118,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         activeLoadingDiv = loadingDiv;
 
         if (payloadFile && payloadFile.mode === 'text' && typeof payloadFile.content === 'string') {
-            lastCodeFileForEdit = { name: payloadFile.name, content: payloadFile.content };
+            lastCodeFilesForEdit = [{ name: payloadFile.name, content: payloadFile.content, mode: 'text' }];
+        } else if (codeFilesMemory.length > 0) {
+            lastCodeFilesForEdit = codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text' }));
+        } else {
+            lastCodeFilesForEdit = [];
         }
 
         if (!isRetry) {
@@ -2128,6 +2153,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     text: textPrompt,
                     rawText: textPrompt,
                     file: payloadFile,
+                    files: lastCodeFilesForEdit,
                     webSearch: isSearchEnabled,
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
@@ -2377,14 +2403,37 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function buildFileEditResultHtml(edits) {
-        if (!edits || !lastCodeFileForEdit) return '';
-        const { content, appliedCount, failedCount } = applyFileEdits(lastCodeFileForEdit.content, edits);
-        if (appliedCount === 0) return '';
+        if (!edits || !edits.length || !lastCodeFilesForEdit.length) return '';
 
-        const safeName = lastCodeFileForEdit.name || 'edited-file.txt';
-        const encoded = encodeURIComponent(content);
-        const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
-        return `<div class="code-card"><div class="code-card-head"><span><i class="fa-solid fa-file-circle-check"></i> ${appliedCount} تغییر روی «${escapeHtml(safeName)}»${failNote}</span><div class="code-actions"><button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeHtml(safeName)}">دانلود فایل ویرایش‌شده</button></div></div></div>`;
+        // اگر مدل کلید "file" رو نذاشته باشه و فقط یک فایل ضمیمه بوده، همون یکی رو هدف بگیر.
+        const singleFileName = lastCodeFilesForEdit.length === 1 ? lastCodeFilesForEdit[0].name : null;
+
+        const editsByFile = {};
+        for (const edit of edits) {
+            const targetName = (edit && edit.file) ? edit.file : singleFileName;
+            if (!targetName) continue;
+            if (!editsByFile[targetName]) editsByFile[targetName] = [];
+            editsByFile[targetName].push(edit);
+        }
+
+        let html = '';
+        for (const fileName of Object.keys(editsByFile)) {
+            const fileEntry = lastCodeFilesForEdit.find(f => f.name === fileName);
+            if (!fileEntry) continue;
+
+            const { content, appliedCount, failedCount } = applyFileEdits(fileEntry.content, editsByFile[fileName]);
+            if (appliedCount === 0) continue;
+
+            // حافظه‌ی فایل رو با نسخه‌ی ویرایش‌شده آپدیت کن تا پیام بعدی روی همین نسخه ادامه بده.
+            fileEntry.content = content;
+            const memoryEntry = codeFilesMemory.find(f => f.name === fileName);
+            if (memoryEntry) memoryEntry.content = content;
+
+            const encoded = encodeURIComponent(content);
+            const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
+            html += `<div class="code-card"><div class="code-card-head"><span><i class="fa-solid fa-file-circle-check"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}</span><div class="code-actions"><button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeHtml(fileName)}">دانلود فایل ویرایش‌شده</button></div></div></div>`;
+        }
+        return html;
     }
 
     function downloadEditedFile(btn) {
