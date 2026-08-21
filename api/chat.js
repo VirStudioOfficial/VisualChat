@@ -202,30 +202,51 @@ export default async function handler(req, res) {
         let lastError = null;
 
         if (MODEL_NAME.includes('imagen')) {
+            // ===== FIX: Google shut down all Imagen `:generateImages` endpoints on
+            // Aug 17, 2026. Calling them now returns a non-JSON / empty body, which
+            // crashed `imgRes.json()` with "Unexpected end of JSON input" on every
+            // key. Migrated to the replacement Gemini native image model
+            // ('gemini-2.5-flash-image', aka "Nano Banana"), which uses
+            // `:generateContent` and returns the image as an inline_data content
+            // part instead of a `generatedImages` array. =====
+            const IMAGE_MODEL_NAME = 'gemini-2.5-flash-image';
             for (let k = 0; k < geminiKeys.length; k++) {
                 const currentKey = geminiKeys[k];
                 try {
                     console.log(`[Imagen] Generating image with Key #${k + 1}`);
-                    const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateImages`, {
+                    const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL_NAME}:generateContent`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'x-goog-api-key': currentKey
                         },
                         body: JSON.stringify({
-                            prompt: searchQueryBase,
-                            config: { numberOfImages: 1, outputMimeType: 'image/jpeg' }
+                            contents: [{ parts: [{ text: searchQueryBase }] }],
+                            generationConfig: { responseModalities: ['IMAGE'] }
                         })
                     });
 
-                    const imgData = await imgRes.json();
+                    // ===== FIX: don't let a non-JSON / empty body crash the whole
+                    // handler — read as text first, parse safely, and treat a parse
+                    // failure the same as any other failed key (fall through to the
+                    // next one) instead of throwing past the per-key try/catch. =====
+                    const rawBody = await imgRes.text();
+                    let imgData = null;
+                    try {
+                        imgData = rawBody ? JSON.parse(rawBody) : null;
+                    } catch (parseErr) {
+                        console.warn(`[Imagen] Key #${k + 1} returned non-JSON response:`, rawBody.slice(0, 200));
+                        lastError = { error: { message: 'Non-JSON response from image model' } };
+                        continue;
+                    }
+
                     if (!imgRes.ok) {
                         console.warn(`[Imagen] Key #${k + 1} failed:`, imgData?.error?.message || imgRes.statusText);
                         lastError = imgData;
                         continue;
                     }
 
-                    const base64Img = imgData?.generatedImages?.[0]?.image?.imageBytes;
+                    const base64Img = imgData?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data)?.inlineData?.data;
                     if (base64Img) {
                         const imgMarkdown = `![${searchQueryBase}](data:image/jpeg;base64,${base64Img})`;
                         if (wantsStream) {
