@@ -436,7 +436,7 @@ export default async function handler(req, res) {
             // reaching keys further down the list. 45s keeps the response snappy for
             // the common case (quota errors return in under a second) while still
             // giving every key in a large pool a real chance. =====
-            const overallDeadline = Date.now() + 45000;
+            const overallDeadline = Date.now() + 60000;
 
             outerLoop:
             for (const currentModel of modelsToTry) {
@@ -446,12 +446,15 @@ export default async function handler(req, res) {
                     try {
                         console.log(`[stream] Trying model: ${currentModel} with Key #${k + 1}`);
 
-                        // ===== FIX: shorter per-attempt connect timeout (8s) — quota/demand
-                        // errors return almost instantly from Google, so a real hang only
-                        // needs a short window before moving to the next key, keeping the
-                        // shared 25s budget above from being eaten by one bad key =====
+                        // ===== FIX: per-attempt timeout raised back to 15s. The earlier 8s
+                        // assumed only quota/demand errors happen (which do return almost
+                        // instantly), but a real request that's simply slightly slow to
+                        // start streaming (common under Google's own "high demand" load) was
+                        // getting aborted before it had a real chance to respond, wasting
+                        // otherwise-working keys. 15s still leaves room to cycle through a
+                        // 12-key pool inside the 45s overall budget below. =====
                         const streamController = new AbortController();
-                        const streamTimeoutId = setTimeout(() => streamController.abort(), 8000);
+                        const streamTimeoutId = setTimeout(() => streamController.abort(), 15000);
                         let upstream;
                         try {
                             upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`, {
@@ -527,7 +530,7 @@ export default async function handler(req, res) {
         }
 
         // ===== FIX: same shared deadline for the non-streaming path =====
-        const overallDeadlineNonStream = Date.now() + 45000;
+        const overallDeadlineNonStream = Date.now() + 60000;
 
         outerLoopNonStream:
         for (const currentModel of modelsToTry) {
@@ -540,7 +543,8 @@ export default async function handler(req, res) {
                     // ===== FIX: hard timeout so a slow/dead key doesn't stall a simple reply =====
                     const genController = new AbortController();
                     // ===== FIX: shorter per-attempt timeout (8s), same reasoning as the stream path =====
-                    const genTimeoutId = setTimeout(() => genController.abort(), 8000);
+                    // ===== FIX: raised back to 15s, same reasoning as the stream path =====
+                    const genTimeoutId = setTimeout(() => genController.abort(), 15000);
                     let response;
                     try {
                         response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
