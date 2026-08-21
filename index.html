@@ -289,7 +289,7 @@
             content: "";
             position: absolute;
             inset: 0;
-            background: linear-gradient(120deg, rgba(139,92,246,0.10), rgba(34,211,238,0.14), rgba(139,92,246,0.10));
+            background: linear-gradient(120deg, color-mix(in srgb, var(--accent-1) 10%, transparent), color-mix(in srgb, var(--accent-2) 14%, transparent), color-mix(in srgb, var(--accent-1) 10%, transparent));
             background-size: 200% 200%;
             animation: accentShimmer 3.2s ease infinite;
             pointer-events: none;
@@ -358,7 +358,7 @@
             background: var(--accent-grad);
             display: flex; align-items: center; justify-content: center;
             font-size: 0.75rem; color: #fff; flex-shrink: 0;
-            box-shadow: 0 0 18px rgba(139,92,246,0.45);
+            box-shadow: 0 0 18px color-mix(in srgb, var(--accent-1) 45%, transparent);
         }
         .brand-text {
             background: var(--accent-grad);
@@ -399,7 +399,7 @@
             font-size: 0.9rem;
             transition: all 0.2s ease;
         }
-        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: rgba(139,92,246,0.4); }
+        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: color-mix(in srgb, var(--accent-1) 40%, transparent); }
         .new-chat-btn i { color: var(--accent-2); }
 
         .history-list {
@@ -430,7 +430,7 @@
         }
         .history-item i { font-size: 0.75rem; flex-shrink: 0; }
         .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
-        .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: rgba(139,92,246,0.35); }
+        .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: color-mix(in srgb, var(--accent-1) 35%, transparent); }
         .history-item.active i { color: var(--accent-2); }
 
         .main-content {
@@ -472,7 +472,7 @@
             position: relative;
         }
         .model-selector:hover {
-            border-color: rgba(139,92,246,0.4);
+            border-color: color-mix(in srgb, var(--accent-1) 40%, transparent);
             color: var(--text-main);
         }
         .model-selector .model-name {
@@ -518,7 +518,7 @@
         .model-dropdown-item.active {
             background: var(--bg-card);
             color: var(--text-main);
-            border: 1px solid rgba(139,92,246,0.3);
+            border: 1px solid color-mix(in srgb, var(--accent-1) 30%, transparent);
         }
         .model-dropdown-item .item-name { font-weight: 600; }
         .model-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
@@ -570,7 +570,7 @@
             background: var(--accent-grad);
             display: flex; align-items: center; justify-content: center;
             font-size: 1.5rem; color: #fff;
-            box-shadow: 0 0 40px rgba(139,92,246,0.35);
+            box-shadow: 0 0 40px color-mix(in srgb, var(--accent-1) 35%, transparent);
             animation: glowPulse 3.5s ease-in-out infinite;
         }
 
@@ -589,7 +589,7 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        .suggestion-chip:hover { color: var(--text-main); border-color: rgba(139,92,246,0.4); background: var(--bg-card-hover); }
+        .suggestion-chip:hover { color: var(--text-main); border-color: var(--accent-1); background: var(--bg-card-hover); }
 
         .chat-box {
             flex: 1;
@@ -639,7 +639,7 @@
         .message.bot h3 { font-size: 1.08rem; }
         .message.bot ul, .message.bot ol { margin: 0.5rem 0 1.1rem; padding-right: 1.35rem; }
         .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
-        .message.bot code { font-family: Consolas, monospace; background: rgba(139,92,246,0.12); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
+        .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--code-bg); direction: ltr; text-align: left; }
         .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; background:var(--code-head-bg); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); }
         .code-actions { display:flex; gap:6px; }
@@ -754,8 +754,8 @@
             transition: border-color 0.2s, box-shadow 0.2s;
         }
         .input-box:focus-within {
-            border-color: rgba(139,92,246,0.55);
-            box-shadow: 0 0 0 3px rgba(139,92,246,0.12), 0 6px 24px var(--shadow-a);
+            border-color: color-mix(in srgb, var(--accent-1) 55%, transparent);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-1) 12%, transparent), 0 6px 24px var(--shadow-a);
         }
 
         textarea#userInput {
@@ -822,7 +822,7 @@
 
         .icon-btn.search-active {
             color: var(--accent-2) !important;
-            background-color: rgba(34, 211, 238, 0.14) !important;
+            background-color: color-mix(in srgb, var(--accent-2) 14%, transparent) !important;
         }
 
         .icon-btn.recording { animation: pulseMic 1.2s infinite; }
@@ -1012,8 +1012,8 @@
         }
         body {
             background-image:
-                radial-gradient(circle at 100% 0%, rgba(34,211,238,0.10), transparent 32%),
-                radial-gradient(circle at 0% 100%, rgba(139,92,246,0.12), transparent 36%);
+                radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent 32%),
+                radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--accent-1) 12%, transparent), transparent 36%);
         }
         .sidebar { background: var(--bg-sidebar); backdrop-filter: blur(18px); }
         .chat-header {
@@ -1034,7 +1034,7 @@
         }
         .home-mark {
             width: 72px; height: 72px; border-radius: 24px;
-            box-shadow: 0 18px 55px rgba(34,211,238,0.14), 0 0 35px rgba(139,92,246,0.22);
+            box-shadow: 0 18px 55px color-mix(in srgb, var(--accent-2) 14%, transparent), 0 0 35px color-mix(in srgb, var(--accent-1) 22%, transparent);
         }
         .home-title {
             font-size: clamp(1.7rem, 3vw, 2.35rem);
@@ -1063,7 +1063,7 @@
             letter-spacing: 0.005em;
         }
         .message.user {
-            background: linear-gradient(135deg, rgba(139,92,246,0.14), rgba(34,211,238,0.07));
+            background: linear-gradient(135deg, color-mix(in srgb, var(--accent-1) 14%, transparent), color-mix(in srgb, var(--accent-2) 7%, transparent));
             border-radius: 18px 18px 4px 18px;
             padding: 14px 18px;
         }
@@ -1110,8 +1110,8 @@
         textarea#userInput { font-size: 1rem; line-height: 1.7; }
         .action-btn { border-radius: 12px; }
         .new-chat-btn {
-            background: linear-gradient(135deg, rgba(139,92,246,0.18), rgba(34,211,238,0.10));
-            border-color: rgba(139,92,246,0.28);
+            background: linear-gradient(135deg, color-mix(in srgb, var(--accent-1) 18%, transparent), color-mix(in srgb, var(--accent-2) 10%, transparent));
+            border-color: color-mix(in srgb, var(--accent-1) 28%, transparent);
         }
         @media (max-width: 768px) {
             .chat-box { padding: 18px 14px; }
@@ -1124,7 +1124,7 @@
         /* ===== v3 fixes: input alignment, drag & drop, readable long answers ===== */
         .input-wrapper.drag-over .input-box {
             border-color: var(--accent-2);
-            box-shadow: 0 0 0 4px rgba(34,211,238,0.12), 0 12px 34px rgba(0,0,0,0.18);
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 12%, transparent), 0 12px 34px rgba(0,0,0,0.18);
         }
         .input-wrapper.drag-over::after {
             content: "فایل را اینجا رها کن";
@@ -1167,10 +1167,10 @@
 
 /* ===== Virtual Chat UX upgrade ===== */
 :root { --msg-font-size: .92rem; --surface-2: rgba(255,255,255,.035); }
-body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,rgba(139,92,246,.025) 50%,transparent 56%);opacity:.8}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,color-mix(in srgb, var(--accent-1) 2.5%, transparent) 50%,transparent 56%);opacity:.8}
 .header{backdrop-filter:blur(18px);background:color-mix(in srgb,var(--bg-main) 72%,transparent)}
 .home-screen{position:relative;overflow:hidden}
-.home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(139,92,246,.12),transparent 65%);filter:blur(10px);pointer-events:none}
+.home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb, var(--accent-1) 12%, transparent),transparent 65%);filter:blur(10px);pointer-events:none}
 .home-text,.suggestion-chips,.home-mark{position:relative;z-index:1}
 .suggestion-chip{box-shadow:0 8px 24px rgba(0,0,0,.08)}
 .message-wrapper{position:relative;gap:5px}
@@ -1183,16 +1183,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .message-actions{display:flex;gap:4px;opacity:0;transform:translateY(-2px);transition:.18s;min-height:26px;padding:0 4px;direction:rtl}
 .message-wrapper:hover .message-actions,.message-wrapper:focus-within .message-actions{opacity:1;transform:none}
 .msg-action{width:28px;height:28px;border:1px solid var(--border-soft);border-radius:8px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);display:inline-flex;align-items:center;justify-content:center;font-size:.72rem}
-.msg-action:hover{color:var(--text-main);border-color:rgba(34,211,238,.42)}
-.input-wrapper{padding-top:8px}.input-wrapper.drag-over .input-box{outline:2px dashed var(--accent-2);outline-offset:4px;box-shadow:0 0 0 8px rgba(34,211,238,.08)}
+.msg-action:hover{color:var(--text-main);border-color:color-mix(in srgb, var(--accent-2) 42%, transparent)}
+.input-wrapper{padding-top:8px}.input-wrapper.drag-over .input-box{outline:2px dashed var(--accent-2);outline-offset:4px;box-shadow:0 0 0 8px color-mix(in srgb, var(--accent-2) 8%, transparent)}
 .composer-hint{position:absolute;bottom:4px;right:22px;color:var(--text-muted);font-size:.67rem;opacity:.75;pointer-events:none}
 .composer-hint kbd{font-family:inherit;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:0 4px;margin:0 2px;background:var(--bg-card)}
 .input-box{box-shadow:0 14px 42px var(--shadow-a)}
 .chat-search{display:none;position:fixed;top:76px;left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 28px));z-index:60;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:10px;animation:fadeIn .18s ease}
 .chat-search.active{display:block}.chat-search-row{display:flex;align-items:center;gap:8px}.chat-search input{flex:1;color:var(--text-main);padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:10px;font-family:inherit}.chat-search-count{font-size:.72rem;color:var(--text-muted);white-space:nowrap}
-.message.search-hit{box-shadow:0 0 0 2px rgba(34,211,238,.55),0 0 28px rgba(34,211,238,.12)}
+.message.search-hit{box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent),0 0 28px color-mix(in srgb, var(--accent-2) 12%, transparent)}
 .command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
-.chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:rgba(139,92,246,.45)}
+.chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:color-mix(in srgb, var(--accent-1) 45%, transparent)}
 @media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
 
     
@@ -1200,7 +1200,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .sidebar-close-btn { display:flex !important; }
         .history-tools { display:flex; align-items:center; gap:7px; margin-top:10px; }
         .history-search-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
-        .history-search-toggle:hover { color:var(--text-main); border-color:rgba(139,92,246,.4); }
+        .history-search-toggle:hover { color:var(--text-main); border-color:color-mix(in srgb, var(--accent-1) 40%, transparent); }
         .history-search-input { display:none; min-width:0; flex:1; height:36px; padding:0 11px; border:1px solid var(--border-soft); outline:none; background:var(--bg-input); color:var(--text-main); border-radius:10px; font-family:inherit; font-size:.78rem; }
         .history-tools.active .history-search-input { display:block; animation:fadeIn .16s ease; }
         .history-empty { color:var(--text-muted); font-size:.75rem; text-align:center; padding:18px 8px; line-height:1.7; }
@@ -1216,7 +1216,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .message.bot h2, .message.bot h3, .message.bot h4 { margin:20px 0 9px; line-height:1.45; }
         .message.bot ul, .message.bot ol { margin:9px 0 16px; padding-right:24px; }
         .message.bot li { margin:6px 0; padding-right:3px; }
-        .message.bot blockquote { margin:14px 0; padding:10px 14px; border-right:3px solid var(--accent-2); background:rgba(34,211,238,.05); border-radius:10px; }
+        .message.bot blockquote { margin:14px 0; padding:10px 14px; border-right:3px solid var(--accent-2); background:color-mix(in srgb, var(--accent-2) 5%, transparent); border-radius:10px; }
         @media (max-width:768px) {
             .sidebar.collapsed { width:272px; }
             .sidebar.collapsed > * { opacity:1; pointer-events:auto; }
@@ -3555,8 +3555,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
         const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+        // FIX: this used to always rebuild {title, html} from scratch, which
+        // silently overwrote any AI-generated title (see
+        // maybeGenerateChatTitle) back to the truncated "سلام..."-style
+        // fallback on the very next message. Now it only sets the truncated
+        // title the first time a chat is saved, and preserves whatever
+        // title (generated or not) is already there afterward.
+        const existing = chats[currentChatId];
         chats[currentChatId] = {
-            title: firstUserMsg.substring(0, 20) + "...",
+            title: existing?.title || (firstUserMsg.substring(0, 20) + "..."),
+            titleGenerated: existing?.titleGenerated || false,
             html: chatBox.innerHTML
         };
         const ok = safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
@@ -3820,9 +3828,54 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const result=await __oldSendToGemini(...args);
         const last=document.getElementById('chatBox')?.lastElementChild;
         if(last) addMessageActions(last,'bot');
+        maybeGenerateChatTitle();
         return result;
     };
     setTimeout(decorateMessages,50);
+
+    // ===== Smart chat titles (sidebar) =====
+    // Sidebar titles previously came from truncating the user's FIRST
+    // message to 20 chars (see saveCurrentChat). Since almost every chat
+    // opens with "سلام..."/"سلام..." etc, the whole history list read as
+    // near-identical rows — a big reason the UI felt less polished than
+    // ChatGPT/Claude, which generate a real short title from the topic.
+    // This calls the new mode:'title' branch in /api/chat once, right after
+    // the FIRST exchange in a chat finishes, and swaps the stored title in
+    // place. Cheap (one small non-streamed call, only once per chat) and
+    // fails silently to the old truncated title if anything goes wrong.
+    const __titledChats = new Set();
+    async function maybeGenerateChatTitle() {
+        try {
+            if (!currentChatId || __titledChats.has(currentChatId)) return;
+            const hist = chatHistoryData[currentChatId] || [];
+            const realTurns = hist.filter(m => !m.__virtualPersona);
+            if (realTurns.length < 2) return; // need at least one full user+bot exchange
+            if (chats[currentChatId]?.titleGenerated) { __titledChats.add(currentChatId); return; }
+
+            __titledChats.add(currentChatId); // claim immediately so overlapping calls don't double-fire
+            const userText = realTurns.find(m => m.role === 'user')?.text || '';
+            const botText = realTurns.find(m => m.role === 'model')?.text || '';
+            if (!userText) return;
+
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'title', userText, botText })
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            const title = (data?.title || '').trim();
+            if (!title || !chats[currentChatId]) return;
+
+            chats[currentChatId].title = title;
+            chats[currentChatId].titleGenerated = true;
+            const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+            safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
+            renderHistoryList();
+        } catch (_) {
+            // Silent: sidebar keeps the truncated fallback title, no user-facing error needed.
+        }
+    }
 
     // ===== Toast notifications =====
     // showToast(message, type) — type: 'success' | 'error' | 'info' | 'warning'
