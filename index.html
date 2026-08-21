@@ -1309,6 +1309,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             </span>
                             <span class="item-check"><i class="fa-solid fa-check"></i></span>
                         </div>
+                        <div class="model-dropdown-item" data-model="imagen-3.0-generate-002" onclick="selectModel(this, 'تصویرساز (Imagen 3)', 'imagen-3.0-generate-002')">
+                            <span>
+                                <div class="item-name">تصویرساز (Imagen 3)</div>
+                                <div class="item-desc">تولید عکس با هوش مصنوعی</div>
+                            </span>
+                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1439,7 +1446,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let currentModelDisplay = {
         'gemini-3.5-flash-lite': 'Virtual Bot 1.1',
         'gemini-3.6-flash': 'Virtual Bot 1.5',
-        'gemini-3.1-pro-preview': 'Virtual Bot 1.3'
+        'gemini-3.1-pro-preview': 'Virtual Bot 1.3',
+        'imagen-3.0-generate-002': 'تصویرساز (Imagen 3)'
     };
 
     function toggleModelDropdown() {
@@ -2256,6 +2264,28 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function sendToGemini(textPrompt, payloadFile = null, retryContext = null) {
         const requestId = ++activeRequestId;
         setGeneratingState(true);
+
+        // ===== FIX: safety-net watchdog. Some rare network failures (e.g. the
+        // server process restarting mid-stream during a deploy) don't surface as a
+        // clean fetch rejection or AbortError — the promise can simply never
+        // settle. Without this, isGenerating stays stuck true forever and the
+        // composer (#userInput / send button) stays disabled in that chat until
+        // the page is reloaded. This timer force-resets the UI after 90s no matter
+        // what went wrong upstream, so the user is never permanently locked out. =====
+        const watchdogId = setTimeout(() => {
+            if (requestId === activeRequestId && isGenerating) {
+                console.warn('[watchdog] Request took too long — resetting UI so input is usable again.');
+                if (activeLoadingDiv && activeLoadingDiv.isConnected) {
+                    makeRetryError(activeLoadingDiv, 'پاسخ خیلی طول کشید و متوقف شد.', { textPrompt, payloadFile });
+                }
+                activeRequestId++; // invalidate this request so any late response is ignored
+                setGeneratingState(false);
+                currentAbortController = null;
+                activeLoadingDiv = null;
+                saveCurrentChat();
+            }
+        }, 90000);
+
         const chatBox = document.getElementById("chatBox");
         const isRetry = !!retryContext?.retry;
         const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
@@ -2422,6 +2452,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             setGeneratingState(false);
             saveCurrentChat();
         } finally {
+            clearTimeout(watchdogId);
             if (requestId === activeRequestId) {
                 currentAbortController = null;
                 activeLoadingDiv = null;
