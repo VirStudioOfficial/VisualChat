@@ -307,6 +307,108 @@ ${prompt}
 
 /*
 |--------------------------------------------------------------------------
+| عنوان‌گذاری هوشمند چت
+|--------------------------------------------------------------------------
+| Sidebar titles previously came from truncating the user's first message
+| to 20 chars — since almost every chat opens with "سلام..."/"سلام..."
+| etc, the whole history list ends up reading as identical entries, which
+| is a big part of why the UI feels unpolished next to ChatGPT/Claude
+| (they generate a real short title from the actual topic). This mirrors
+| translateImagePrompt()'s pattern: one small, fast, non-streamed call to
+| the lite model, with a strict "return ONLY the title" instruction and a
+| safe fallback to the old truncation behavior if every key fails.
+*/
+async function generateChatTitle(userText, botText, geminiKeys) {
+    const fallback = (userText || '').trim().slice(0, 20) + '...';
+    if (!userText || !geminiKeys || geminiKeys.length === 0) return fallback;
+
+    const titlePrompt = `
+یک عنوان بسیار کوتاه (حداکثر ۴ تا ۶ کلمه، به فارسی) برای این گفتگو بساز که
+موضوع اصلی را نشان بدهد — نه یک جمله کامل، فقط یک عنوان مثل تیتر.
+
+قوانین:
+- فقط خودِ عنوان را برگردان، بدون گیومه، بدون توضیح، بدون نقطه در انتها.
+- از کلمات عمومی مثل «سلام» یا «گفتگو» به‌تنهایی استفاده نکن؛ موضوع واقعی را بگیر.
+- اگر پیام کاربر فقط سلام و احوال‌پرسی است و موضوع مشخصی ندارد، عنوانی مثل
+  «گفتگوی عمومی» برگردان.
+
+پیام کاربر:
+${String(userText).slice(0, 500)}
+
+پاسخ ربات (اگر موجود بود):
+${String(botText || '').slice(0, 500)}
+`;
+
+    for (let i = 0; i < geminiKeys.length; i++) {
+        const key = geminiKeys[i];
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+            let response;
+
+            try {
+                response = await fetch(
+                    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-goog-api-key': key
+                        },
+                        body: JSON.stringify({
+                            contents: [
+                                {
+                                    role: 'user',
+                                    parts: [{ text: titlePrompt }]
+                                }
+                            ]
+                        }),
+                        signal: controller.signal
+                    }
+                );
+            } finally {
+                clearTimeout(timeoutId);
+            }
+
+            if (!response.ok) continue;
+
+            const data = await response.json();
+
+            let title =
+                data?.candidates?.[0]?.content?.parts
+                    ?.map(p => p?.text || '')
+                    .join('')
+                    .trim();
+
+            if (title) {
+                // Strip stray quotes/markdown the model sometimes adds despite
+                // the "no quotes" instruction, and hard-cap length as a safety
+                // net so a runaway response can't blow up the sidebar layout.
+                title = title.replace(/^["'«»]+|["'«»]+$/g, '').replace(/\.$/, '').trim();
+                if (title.length > 40) title = title.slice(0, 40).trim() + '…';
+                if (title) {
+                    log.info('chat.title_generated', {});
+                    return title;
+                }
+            }
+
+        } catch (error) {
+            log.warn('chat.title_generation_failed', {
+                keyIndex: i + 1,
+                message: error?.message || String(error)
+            });
+        }
+    }
+
+    log.warn('chat.title_generation_fallback', { reason: 'all keys failed, using truncated fallback' });
+    return fallback;
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | تولید تصویر با Pollinations
 |--------------------------------------------------------------------------
 */
@@ -738,6 +840,25 @@ async function handler(req, res) {
                 .map(k => k.trim())
                 .filter(Boolean)
         );
+
+        /*
+        |--------------------------------------------------------------------------
+        | Chat title generation (lightweight, non-streamed, separate mode)
+        |--------------------------------------------------------------------------
+        | Called once per chat right after the first exchange, from the
+        | frontend. Kept as an early return in the same handler/file (no new
+        | route) so it reuses the same key pool/health-tracking, but it never
+        | touches history trimming, file handling, web search, or the main
+        | streaming path — just a fast title guess.
+        */
+        if (req.body?.mode === 'title') {
+            const title = await generateChatTitle(
+                req.body?.userText,
+                req.body?.botText,
+                geminiKeys
+            );
+            return res.status(200).json({ title });
+        }
 
         const rawTavilyKeys =
             process.env.TAVILY_API_KEYS ||
