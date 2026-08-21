@@ -1,5 +1,143 @@
 // pages/api/chat.js
 
+/*
+|--------------------------------------------------------------------------
+| Logger - structured, no secrets ever printed
+|--------------------------------------------------------------------------
+| Every log line is one JSON object so it's easy to grep/parse in Vercel
+| logs. Never pass raw API keys, full file base64, or full user history to
+| this — only short, safe summaries.
+*/
+const log = {
+    _base(level, event, meta) {
+        try {
+            const safeMeta = { ...meta };
+            // Extra safety net: strip anything that looks like a key/token by name,
+            // in case a caller accidentally spreads a bigger object into meta.
+            for (const k of Object.keys(safeMeta)) {
+                if (/key|token|secret|authorization/i.test(k)) delete safeMeta[k];
+            }
+            console.log(JSON.stringify({
+                ts: new Date().toISOString(),
+                level,
+                event,
+                ...safeMeta
+            }));
+        } catch (_) {
+            // Logging must never crash the request.
+        }
+    },
+    info(event, meta) { this._base('info', event, meta); },
+    warn(event, meta) { this._base('warn', event, meta); },
+    error(event, meta) { this._base('error', event, meta); }
+};
+
+/*
+|--------------------------------------------------------------------------
+| Key Rotation Manager
+|--------------------------------------------------------------------------
+| Keeps a per-process (best-effort, resets on cold start) failure counter for
+| each API key so keys that are erroring a lot get tried last, instead of a
+| pure random shuffle every time. This is intentionally in-memory only: it
+| does not need a database, and never logs the key itself (only its index).
+*/
+const __keyFailureCounts = new Map(); // key -> consecutive failure count
+
+function rotateKeysByHealth(keys) {
+    // Randomize first (keeps load spread across otherwise-equal keys),
+    // then stable-sort healthier keys first.
+    const shuffled = keys
+        .map(k => ({ k, sort: Math.random() }))
+        .sort((a, b) => a.sort - b.sort)
+        .map(({ k }) => k);
+
+    return shuffled.sort((a, b) => {
+        const fa = __keyFailureCounts.get(a) || 0;
+        const fb = __keyFailureCounts.get(b) || 0;
+        return fa - fb;
+    });
+}
+
+function markKeyResult(key, ok) {
+    if (ok) {
+        __keyFailureCounts.set(key, 0);
+    } else {
+        __keyFailureCounts.set(key, (__keyFailureCounts.get(key) || 0) + 1);
+    }
+}
+
+function keyLabel(keys, key) {
+    // Never log the actual key - just a stable, non-reversible index label.
+    const idx = keys.indexOf(key);
+    return `key#${idx + 1}/${keys.length}`;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Context / History size management
+|--------------------------------------------------------------------------
+| Gemini has a large context window, but sending an ever-growing raw history
+| on every turn is wasteful, slow, and can eventually hit request-size or
+| token limits. We cap how many recent turns we send verbatim, and fold
+| anything older than that into one short summary turn so continuity isn't
+| lost. This is a lightweight heuristic summary (not a model call) so it
+| never adds latency or extra API cost.
+*/
+const MAX_HISTORY_TURNS = 24;       // most recent user+model turns kept verbatim
+const MAX_HISTORY_CHARS = 60000;    // rough safety cap on total history text size
+
+function summarizeOldTurns(oldTurns) {
+    if (!oldTurns.length) return null;
+    const topics = oldTurns
+        .filter(t => t.role === 'user')
+        .map(t => String(t.text || t.content || '').slice(0, 80).trim())
+        .filter(Boolean)
+        .slice(-8); // last few user topics from the trimmed-off section
+
+    if (!topics.length) return null;
+
+    return (
+        `[خلاصه‌ی مکالمه‌ی قبلی - برای صرفه‌جویی در حجم، پیام‌های قدیمی‌تر خلاصه شدند]\n` +
+        `موضوعاتی که قبلاً مطرح شده: ` +
+        topics.map(t => `«${t}»`).join('، ')
+    );
+}
+
+function trimHistoryForContext(history) {
+    if (!Array.isArray(history) || history.length === 0) return [];
+
+    // Never trim away pinned/persona turns (added by the frontend at index 0-1).
+    const personaTurns = history.filter(h => h.__virtualPersona);
+    const regularTurns = history.filter(h => !h.__virtualPersona);
+
+    let working = regularTurns;
+
+    if (working.length > MAX_HISTORY_TURNS) {
+        const cut = working.length - MAX_HISTORY_TURNS;
+        const dropped = working.slice(0, cut);
+        working = working.slice(cut);
+
+        const summaryText = summarizeOldTurns(dropped);
+        if (summaryText) {
+            working = [
+                { role: 'user', text: summaryText },
+                { role: 'model', text: 'باشه، زمینه‌ی قبلی رو در نظر می‌گیرم.' },
+                ...working
+            ];
+        }
+    }
+
+    // Hard character-size safety net, in case a few turns are each very long
+    // (e.g. pasted file contents already folded into history by the client).
+    let totalChars = working.reduce((sum, t) => sum + String(t.text || t.content || '').length, 0);
+    while (totalChars > MAX_HISTORY_CHARS && working.length > 2) {
+        const removed = working.shift();
+        totalChars -= String(removed.text || removed.content || '').length;
+    }
+
+    return [...personaTurns, ...working];
+}
+
 function shouldSearchWeb(userText) {
     if (!userText || typeof userText !== 'string') return false;
 
@@ -199,19 +337,19 @@ ${prompt}
                     .trim();
 
             if (translated) {
-                console.log('[Image] Prompt translated successfully.');
+                log.info('image.prompt_translated', {});
                 return translated;
             }
 
         } catch (error) {
-            console.warn(
-                `[Image] Translation failed with key #${i + 1}:`,
-                error?.message || error
-            );
+            log.warn('image.translation_failed', {
+                keyIndex: i + 1,
+                message: error?.message || String(error)
+            });
         }
     }
 
-    console.warn('[Image] Translation failed. Using original prompt.');
+    log.warn('image.translation_fallback', { reason: 'all keys failed, using original prompt' });
     return prompt;
 }
 
@@ -241,7 +379,7 @@ async function generateImage(prompt) {
                 `&seed=${seed}` +
                 `&model=flux`;
 
-            console.log('[Image] Request:', imageUrl);
+            log.info('image.request', { host: baseUrl });
 
             const controller = new AbortController();
             const timeoutId = setTimeout(
@@ -264,11 +402,10 @@ async function generateImage(prompt) {
                     `Pollinations returned ${response.status}`
                 );
 
-                console.warn(
-                    '[Image] Failed:',
-                    response.status,
-                    response.statusText
-                );
+                log.warn('image.host_failed', {
+                    status: response.status,
+                    statusText: response.statusText
+                });
 
                 continue;
             }
@@ -292,9 +429,7 @@ async function generateImage(prompt) {
 
             const base64 = buffer.toString('base64');
 
-            console.log(
-                `[Image] Generated successfully: ${buffer.length} bytes, ${contentType}`
-            );
+            log.info('image.generated', { bytes: buffer.length, contentType });
 
             return {
                 success: true,
@@ -307,10 +442,7 @@ async function generateImage(prompt) {
         } catch (error) {
             lastError = error;
 
-            console.error(
-                '[Image] Generation error:',
-                error?.message || error
-            );
+            log.error('image.generation_error', { message: error?.message || String(error) });
         }
     }
 
@@ -330,15 +462,14 @@ async function handleImageGeneration({
     wantsStream,
     res
 }) {
-    console.log('[Image] Image request detected.');
-    console.log('[Image] Original prompt:', prompt);
+    log.info('image.request_detected', { promptPreview: String(prompt || '').slice(0, 120) });
 
     const translatedPrompt = await translateImagePrompt(
         prompt,
         geminiKeys
     );
 
-    console.log('[Image] Final prompt:', translatedPrompt);
+    log.info('image.prompt_ready', { promptPreview: String(translatedPrompt || '').slice(0, 120) });
 
     const image = await generateImage(translatedPrompt);
 
@@ -517,9 +648,7 @@ async function fetchTavilyResults(query, tavilyKeys) {
                 data.results &&
                 data.results.length > 0
             ) {
-                console.log(
-                    `Tavily search succeeded using Key #${i + 1}`
-                );
+                log.info('search.succeeded', { keyIndex: i + 1, resultCount: data.results.length });
 
                 return data.results
                     .map(
@@ -532,10 +661,10 @@ async function fetchTavilyResults(query, tavilyKeys) {
             }
 
         } catch (error) {
-            console.error(
-                `Error with Tavily Key #${i + 1}:`,
-                error?.message || error
-            );
+            log.error('search.key_failed', {
+                keyIndex: i + 1,
+                message: error?.message || String(error)
+            });
         }
     }
 
@@ -545,103 +674,25 @@ async function fetchTavilyResults(query, tavilyKeys) {
 
 /*
 |--------------------------------------------------------------------------
-| Web Search Detection
-|--------------------------------------------------------------------------
-*/
-
-function shouldSearchWeb(userText) {
-    if (!userText || typeof userText !== 'string') {
-        return false;
-    }
-
-    const cleanText = userText.trim().toLowerCase();
-
-    if (cleanText.length < 3) {
-        return false;
-    }
-
-    const ignoreList = [
-        'سلام',
-        'سلامم',
-        'درود',
-        'چطوری',
-        'خوبی',
-        'صبح بخیر',
-        'عصر بخیر',
-        'شب بخیر',
-        'ممنون',
-        'مرسی',
-        'چخبر',
-        'خداحافظ',
-        'بای',
-        'اوکی',
-        'باشه'
-    ];
-
-    const normalized = cleanText
-        .replace(/[!.،,؟?]/g, '')
-        .trim();
-
-    const words = normalized
-        .split(/\s+/)
-        .filter(Boolean);
-
-    const firstWord = words[0];
-
-    if (
-        words.length <= 3 &&
-        (
-            ignoreList.includes(normalized) ||
-            ignoreList.includes(firstWord)
-        )
-    ) {
-        return false;
-    }
-
-    const allowedKeywords = [
-        'سرچ',
-        'جستجو',
-        'گوگل',
-        'اینترنت',
-        'توی وب',
-        'بررسی کن',
-        'سرچ کن',
-        'قیمت',
-        'چنده',
-        'نرخ',
-        'دلار',
-        'طلا',
-        'سکه',
-        'ارز',
-        'بیت کوین',
-        'پلی استیشن',
-        'اخبار',
-        'خبر',
-        'رویداد',
-        'نتیجه بازی',
-        'خرید',
-        'امشب',
-        'آخرین',
-        'جدیدترین',
-        'امروز'
-    ];
-
-    return allowedKeywords.some(
-        kw => normalized.includes(kw)
-    );
-}
-
-
-/*
-|--------------------------------------------------------------------------
 | MAIN API HANDLER
 |--------------------------------------------------------------------------
 */
 
+// CORS: default to '*' to preserve current behavior for any existing
+// deployment, but if the operator sets ALLOWED_ORIGIN in the environment,
+// lock requests to that origin instead. This is opt-in so nothing breaks
+// for the current setup unless the env var is explicitly added.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+
+// Requests bigger than this almost certainly indicate an oversized
+// file/base64 payload slipping past frontend checks; reject early instead
+// of doing expensive work first.
+const MAX_REQUEST_BYTES = 12 * 1024 * 1024; // 12MB
+
 async function handler(req, res) {
     res.setHeader(
         'Access-Control-Allow-Origin',
-        '*'
+        ALLOWED_ORIGIN
     );
 
     res.setHeader(
@@ -666,7 +717,26 @@ async function handler(req, res) {
         });
     }
 
+    const requestStartedAt = Date.now();
+
     try {
+        // Basic payload-size guard. req.body is already parsed by the framework
+        // by the time we get here in most Next.js/Vercel setups, so we
+        // approximate size from the serialized body rather than a raw stream.
+        try {
+            const approxBytes = Buffer.byteLength(JSON.stringify(req.body || {}), 'utf8');
+            if (approxBytes > MAX_REQUEST_BYTES) {
+                log.warn('request.too_large', { approxBytes });
+                return res.status(413).json({
+                    error: {
+                        message: 'حجم درخواست خیلی زیاده. لطفاً فایل کوچک‌تری بفرست.'
+                    }
+                });
+            }
+        } catch (_) {
+            // If we can't measure it, don't block the request over this alone.
+        }
+
         const wantsStream =
             req.body?.stream === true ||
             req.body?.stream === 'true';
@@ -677,9 +747,11 @@ async function handler(req, res) {
             rawText,
             file,
             webSearch,
-            history,
+            history: rawHistory,
             model
         } = req.body || {};
+
+        const history = trimHistoryForContext(rawHistory);
 
         const searchQueryBase =
             rawText &&
@@ -698,17 +770,12 @@ async function handler(req, res) {
             process.env.GEMINI_API_KEY ||
             '';
 
-        const geminiKeys =
+        const geminiKeys = rotateKeysByHealth(
             rawGeminiKeys
                 .split(',')
                 .map(k => k.trim())
                 .filter(Boolean)
-                .map(k => ({
-                    k,
-                    sort: Math.random()
-                }))
-                .sort((a, b) => a.sort - b.sort)
-                .map(({ k }) => k);
+        );
 
         const rawTavilyKeys =
             process.env.TAVILY_API_KEYS ||
@@ -722,13 +789,22 @@ async function handler(req, res) {
                 .filter(Boolean);
 
         if (geminiKeys.length === 0) {
-            return res.status(400).json({
+            log.error('config.no_gemini_keys', {});
+            return res.status(500).json({
                 error: {
                     message:
-                        'هیچ کلید Gemini API تنظیم نشده است!'
+                        'سرویس هوش مصنوعی موقتاً پیکربندی نشده است. لطفاً بعداً امتحان کن.'
                 }
             });
         }
+
+        log.info('request.received', {
+            hasFile: !!file || (Array.isArray(req.body?.files) && req.body.files.length > 0),
+            webSearch: !!webSearch,
+            model: model || 'default',
+            historyTurns: history.length,
+            stream: wantsStream
+        });
 
         /*
         |--------------------------------------------------------------------------
@@ -741,12 +817,18 @@ async function handler(req, res) {
                 ? req.body.files
                 : (file ? [file] : []);
 
+        // Guard: reject any individual text file content that is absurdly large.
+        // The frontend already caps this at 300KB, but the backend must not
+        // trust the client - a hand-crafted request could skip that check.
+        const MAX_TEXT_FILE_CHARS = 300 * 1024;
+
         const textFiles =
             incomingFiles.filter(
                 f =>
                     f &&
                     f.mode === 'text' &&
-                    typeof f.content === 'string'
+                    typeof f.content === 'string' &&
+                    f.content.length <= MAX_TEXT_FILE_CHARS
             );
 
         const binaryFiles =
@@ -827,15 +909,12 @@ async function handler(req, res) {
             requestedImageModel ||
             autoImageRequest;
 
-        console.log(
-            '[Request]',
-            {
-                model,
-                autoImageRequest,
-                requestedImageModel,
-                isImageRequest
-            }
-        );
+        log.info('request.classified', {
+            model: model || 'default',
+            autoImageRequest,
+            requestedImageModel,
+            isImageRequest
+        });
 
         res.setHeader(
             'X-Image-Request',
@@ -858,10 +937,9 @@ async function handler(req, res) {
                 });
 
             } catch (imageError) {
-                console.error(
-                    '[Image] Final generation error:',
-                    imageError?.message || imageError
-                );
+                log.error('image.final_error', {
+                    message: imageError?.message || String(imageError)
+                });
 
                 if (wantsStream) {
                     res.setHeader(
@@ -888,9 +966,7 @@ async function handler(req, res) {
                 return res.status(500).json({
                     error: {
                         message:
-                            'ساخت تصویر انجام نشد. سرویس تصویر موقتاً در دسترس نیست.',
-                        details:
-                            imageError?.message || String(imageError)
+                            'ساخت تصویر انجام نشد. سرویس تصویر موقتاً در دسترس نیست.'
                     }
                 });
             }
@@ -916,9 +992,7 @@ async function handler(req, res) {
             isSearchNeeded &&
             searchQueryBase
         ) {
-            console.log(
-                `Executing Tavily Search for: "${searchQueryBase}"`
-            );
+            log.info('search.executing', { queryPreview: searchQueryBase.slice(0, 100) });
 
             const searchResults =
                 await fetchTavilyResults(
@@ -1015,6 +1089,10 @@ async function handler(req, res) {
         |--------------------------------------------------------------------------
         */
 
+        // Backend-side size cap for binary payloads (images/video/PDF), since the
+        // frontend's own limits can be bypassed by a direct API call.
+        const MAX_BINARY_BASE64_CHARS = 15 * 1024 * 1024; // ~15MB of base64 text
+
         for (const bf of binaryFiles) {
             const lastIndex =
                 contents.length - 1;
@@ -1026,6 +1104,11 @@ async function handler(req, res) {
                 break;
             }
 
+            if (typeof bf.base64 !== 'string' || bf.base64.length > MAX_BINARY_BASE64_CHARS) {
+                log.warn('file.rejected_too_large', { name: bf.name || 'unknown' });
+                continue;
+            }
+
             const base64Data =
                 bf.base64.includes(',')
                     ? bf.base64.split(',')[1]
@@ -1035,18 +1118,14 @@ async function handler(req, res) {
                 bf.type ||
                 'image/jpeg';
 
+            const ext = bf.name ? (bf.name.split('.').pop() || '').toLowerCase() : '';
+
             if (
                 bf.name &&
                 /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i
                     .test(bf.name)
             ) {
-                const ext =
-                    bf.name
-                        .split('.')
-                        .pop()
-                        .toLowerCase();
-
-                const mimeMap = {
+                const videoMimeMap = {
                     'mp4': 'video/mp4',
                     'mov': 'video/quicktime',
                     'webm': 'video/webm',
@@ -1059,15 +1138,15 @@ async function handler(req, res) {
                 };
 
                 mimeType =
-                    mimeMap[ext] ||
+                    videoMimeMap[ext] ||
                     'video/mp4';
 
-                console.log(
-                    'Video detected:',
-                    bf.name,
-                    '->',
-                    mimeType
-                );
+                log.info('file.video_detected', { name: bf.name, mimeType });
+            } else if (ext === 'pdf' || mimeType === 'application/pdf') {
+                // Gemini supports PDF as an inline_data part the same way as
+                // images - no special handling needed beyond the correct mime type.
+                mimeType = 'application/pdf';
+                log.info('file.pdf_detected', { name: bf.name });
             }
 
             contents[lastIndex]
@@ -1090,9 +1169,7 @@ async function handler(req, res) {
             model ||
             'gemini-3.5-flash-lite';
 
-        console.log(
-            `Using model: ${MODEL_NAME}`
-        );
+        log.info('model.selected', { model: MODEL_NAME });
 
         let systemText = '';
 
@@ -1358,9 +1435,11 @@ async function handler(req, res) {
                         geminiKeys[k];
 
                     try {
-                        console.log(
-                            `[stream] Trying model: ${currentModel} with Key #${k + 1}`
-                        );
+                        log.info('model.attempt', {
+                            mode: 'stream',
+                            model: currentModel,
+                            key: keyLabel(geminiKeys, currentKey)
+                        });
 
                         const controller =
                             new AbortController();
@@ -1422,8 +1501,17 @@ async function handler(req, res) {
                             lastError =
                                 errorBody;
 
+                            markKeyResult(currentKey, false);
+                            log.warn('model.failed', {
+                                mode: 'stream',
+                                model: currentModel,
+                                status: upstream.status
+                            });
+
                             continue;
                         }
+
+                        markKeyResult(currentKey, true);
 
                         const reader =
                             upstream.body.getReader();
@@ -1520,14 +1608,20 @@ async function handler(req, res) {
                             res.flush();
                         }
 
+                        log.info('request.completed', {
+                            mode: 'stream',
+                            model: currentModel,
+                            durationMs: Date.now() - requestStartedAt
+                        });
+
                         return res.end();
 
                     } catch (error) {
-                        console.error(
-                            `[stream] Error:`,
-                            error?.message ||
-                            error
-                        );
+                        markKeyResult(currentKey, false);
+                        log.error('model.stream_error', {
+                            model: currentModel,
+                            message: error?.message || String(error)
+                        });
 
                         lastError = error;
                     }
@@ -1575,9 +1669,11 @@ async function handler(req, res) {
                     geminiKeys[k];
 
                 try {
-                    console.log(
-                        `Trying model: ${currentModel} with Key #${k + 1}`
-                    );
+                    log.info('model.attempt', {
+                        mode: 'non-stream',
+                        model: currentModel,
+                        key: keyLabel(geminiKeys, currentKey)
+                    });
 
                     const controller =
                         new AbortController();
@@ -1628,52 +1724,60 @@ async function handler(req, res) {
                         await response.json();
 
                     if (!response.ok) {
-                        console.warn(
-                            `Model ${currentModel} failed:`,
-                            data?.error?.message ||
-                            response.statusText
-                        );
+                        markKeyResult(currentKey, false);
+                        log.warn('model.failed', {
+                            mode: 'non-stream',
+                            model: currentModel,
+                            message: data?.error?.message || response.statusText
+                        });
 
                         lastError = data;
 
                         continue;
                     }
 
+                    markKeyResult(currentKey, true);
+                    log.info('request.completed', {
+                        mode: 'non-stream',
+                        model: currentModel,
+                        durationMs: Date.now() - requestStartedAt
+                    });
+
                     return res.status(200).json(data);
 
                 } catch (error) {
-                    console.error(
-                        `Error with model ${currentModel}:`,
-                        error?.message ||
-                        error
-                    );
+                    markKeyResult(currentKey, false);
+                    log.error('model.error', {
+                        mode: 'non-stream',
+                        model: currentModel,
+                        message: error?.message || String(error)
+                    });
 
                     lastError = error;
                 }
             }
         }
 
+        log.error('request.all_models_failed', {
+            lastError: (lastError && (lastError.message || lastError.error?.message)) || 'unknown'
+        });
+
         return res.status(500).json({
             error: {
                 message:
-                    'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
-                details:
-                    lastError
+                    'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.'
             }
         });
 
     } catch (globalError) {
-        console.error(
-            'Server Error:',
-            globalError
-        );
+        log.error('request.global_error', {
+            message: globalError?.message || String(globalError)
+        });
 
         return res.status(500).json({
             error: {
                 message:
-                    'خطای داخلی سرور',
-                details:
-                    globalError.message
+                    'خطای داخلی سرور. لطفاً دوباره امتحان کن.'
             }
         });
     }
