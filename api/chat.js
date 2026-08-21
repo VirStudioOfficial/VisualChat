@@ -185,10 +185,8 @@ function shouldGenerateImage(userText) {
 
     if (!text || text.length < 3) return false;
 
-    // تشخیص هوشمندتر با Regex، اما محدود به فاصله‌ی معقول بین اسم و فعل تا از
-    // false-positive روی جملاتی که فقط تصادفاً هر دو کلمه رو دارن جلوگیری بشه
-    // (مثلاً «عکس گرفتم ولی چیزی درست نکردم» نباید تشخیص داده بشه).
-    const imageRegex = /(عکس|تصویر|ایمیج|لوگو|پوستر|کاور|نقاشی)(?:\s+\S+){0,10}?\s*(بساز|درست کن|تولید کن|ایجاد کن|بده|طراحی کن|رندر کن)|(generate|create|make|draw|render)\s+(?:\w+\s+){0,6}(image|picture|photo|logo)/i;
+    // تشخیص هوشمندتر با استفاده از Regex برای پوشش فاصله‌ها و جملات مختلف
+    const imageRegex = /(عکس|تصویر|ایمیج|لوگو|پوستر|کاور|نقاشی)\s*.*\s*(بساز|درست کن|تولید کن|ایجاد کن|بده|طراحی کن|رندر کن)|(generate|create|make|draw|render)\s+.*\s*(image|picture|photo|logo)/i;
 
     const simpleKeywords = ['تصویرسازی', 'تصویر سازی', 'یه عکس', 'یک عکس', 'یه تصویر', 'یک تصویر'];
 
@@ -320,6 +318,7 @@ async function generateImage(prompt) {
     ];
 
     let lastError = null;
+    let lastErrorType = 'image_error';
 
     for (const baseUrl of hosts) {
         try {
@@ -355,6 +354,7 @@ async function generateImage(prompt) {
                 lastError = new Error(
                     `Pollinations returned ${response.status}`
                 );
+                lastErrorType = response.status === 429 ? 'timeout' : 'image_error';
 
                 log.warn('image.host_failed', {
                     status: response.status,
@@ -368,6 +368,7 @@ async function generateImage(prompt) {
 
             if (!arrayBuffer || arrayBuffer.byteLength === 0) {
                 lastError = new Error('Empty image response');
+                lastErrorType = 'image_error';
                 continue;
             }
 
@@ -395,12 +396,15 @@ async function generateImage(prompt) {
 
         } catch (error) {
             lastError = error;
+            lastErrorType = error?.name === 'AbortError' ? 'timeout' : 'network_error';
 
             log.error('image.generation_error', { message: error?.message || String(error) });
         }
     }
 
-    throw lastError || new Error('Image generation failed');
+    const finalError = lastError || new Error('Image generation failed');
+    finalError.errorType = lastErrorType;
+    throw finalError;
 }
 
 
@@ -684,7 +688,10 @@ async function handler(req, res) {
                 log.warn('request.too_large', { approxBytes });
                 return res.status(413).json({
                     error: {
-                        message: 'حجم درخواست خیلی زیاده. لطفاً فایل کوچک‌تری بفرست.'
+                        message: 'حجم درخواست خیلی زیاده. لطفاً فایل کوچک‌تری بفرست.',
+                        type: 'file_too_large',
+                        stage: 'request_validation',
+                        detail: `approxBytes=${approxBytes}`
                     }
                 });
             }
@@ -747,8 +754,9 @@ async function handler(req, res) {
             log.error('config.no_gemini_keys', {});
             return res.status(500).json({
                 error: {
-                    message:
-                        'سرویس هوش مصنوعی موقتاً پیکربندی نشده است. لطفاً بعداً امتحان کن.'
+                    message: 'سرویس هوش مصنوعی موقتاً پیکربندی نشده است. لطفاً بعداً امتحان کن.',
+                    type: 'api_error',
+                    stage: 'config'
                 }
             });
         }
@@ -785,6 +793,21 @@ async function handler(req, res) {
                     typeof f.content === 'string' &&
                     f.content.length <= MAX_TEXT_FILE_CHARS
             );
+
+        const oversizedTextFiles =
+            incomingFiles.filter(
+                f =>
+                    f &&
+                    f.mode === 'text' &&
+                    typeof f.content === 'string' &&
+                    f.content.length > MAX_TEXT_FILE_CHARS
+            );
+
+        if (oversizedTextFiles.length > 0) {
+            log.warn('file.rejected_too_large_text', {
+                names: oversizedTextFiles.map(f => f.name || 'unknown')
+            });
+        }
 
         const binaryFiles =
             incomingFiles.filter(
@@ -837,7 +860,9 @@ async function handler(req, res) {
         if (contents.length === 0) {
             return res.status(400).json({
                 error: {
-                    message: 'متن ورودی خالی است.'
+                    message: 'متن ورودی خالی است.',
+                    type: 'invalid_file',
+                    stage: 'request_validation'
                 }
             });
         }
@@ -896,6 +921,13 @@ async function handler(req, res) {
                     message: imageError?.message || String(imageError)
                 });
 
+                const errorPayload = {
+                    message: 'ساخت تصویر انجام نشد. سرویس تصویر موقتاً در دسترس نیست.',
+                    type: imageError?.errorType || 'image_error',
+                    stage: 'image_generation',
+                    detail: imageError?.message || String(imageError)
+                };
+
                 if (wantsStream) {
                     res.setHeader(
                         'Content-Type',
@@ -904,8 +936,7 @@ async function handler(req, res) {
 
                     res.write(
                         `data: ${JSON.stringify({
-                            error:
-                                'ساخت تصویر انجام نشد. سرویس تصویر موقتاً در دسترس نیست.'
+                            error: errorPayload
                         })}\n\n`
                     );
 
@@ -919,10 +950,7 @@ async function handler(req, res) {
                 }
 
                 return res.status(500).json({
-                    error: {
-                        message:
-                            'ساخت تصویر انجام نشد. سرویس تصویر موقتاً در دسترس نیست.'
-                    }
+                    error: errorPayload
                 });
             }
         }
@@ -1301,6 +1329,14 @@ async function handler(req, res) {
 `;
         }
 
+        if (oversizedTextFiles.length > 0) {
+            const droppedNames = oversizedTextFiles.map(f => `«${f.name || 'file'}»`).join('، ');
+            systemText += `
+
+توجه: فایل(های) ${droppedNames} به‌دلیل حجم زیاد (بیش از حد مجاز) پردازش نشدند و در اختیار تو نیستند. اگر کاربر درباره‌ی این فایل سؤال کرد، صادقانه بگو که فایل به‌خاطر حجم زیاد دریافت نشده و باید نسخه‌ی کوچک‌تری بفرستد.
+`;
+        }
+
         /*
         |--------------------------------------------------------------------------
         | Model Fallback
@@ -1585,8 +1621,12 @@ async function handler(req, res) {
 
             res.write(
                 `data: ${JSON.stringify({
-                    error:
-                        'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.'
+                    error: {
+                        message: 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
+                        type: 'model_error',
+                        stage: 'stream_generation',
+                        detail: (lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed'
+                    }
                 })}\n\n`
             );
 
@@ -1719,8 +1759,10 @@ async function handler(req, res) {
 
         return res.status(500).json({
             error: {
-                message:
-                    'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.'
+                message: 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
+                type: 'model_error',
+                stage: 'non_stream_generation',
+                detail: (lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed'
             }
         });
 
@@ -1731,8 +1773,10 @@ async function handler(req, res) {
 
         return res.status(500).json({
             error: {
-                message:
-                    'خطای داخلی سرور. لطفاً دوباره امتحان کن.'
+                message: 'خطای داخلی سرور. لطفاً دوباره امتحان کن.',
+                type: 'api_error',
+                stage: 'handler',
+                detail: globalError?.message || String(globalError)
             }
         });
     }
