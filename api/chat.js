@@ -1047,15 +1047,15 @@ async function handler(req, res) {
                         .toLowerCase();
 
                 const mimeMap = {
-                    mp4: 'video/mp4',
-                    mov: 'video/quicktime',
-                    webm: 'video/webm',
-                    avi: 'video/x-msvideo',
-                    mpeg: 'video/mpeg',
-                    wmv: 'video/x-ms-wmv',
-                    3gpp: 'video/3gpp',
-                    flv: 'video/x-flv',
-                    mkv: 'video/x-matroska'
+                    'mp4': 'video/mp4',
+                    'mov': 'video/quicktime',
+                    'webm': 'video/webm',
+                    'avi': 'video/x-msvideo',
+                    'mpeg': 'video/mpeg',
+                    'wmv': 'video/x-ms-wmv',
+                    '3gpp': 'video/3gpp',
+                    'flv': 'video/x-flv',
+                    'mkv': 'video/x-matroska'
                 };
 
                 mimeType =
