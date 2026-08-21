@@ -77,8 +77,13 @@ export default async function handler(req, res) {
     }
 
     try {
-        // ===== CHANGE 1: wantsStream defined at the very beginning =====
-        const wantsStream = req.body?.stream === true || req.body?.stream === 'false' ? false : req.body?.stream === 'true' || req.body?.stream === true;
+        // ===== FIX: this ternary previously evaluated backwards due to operator
+        // precedence — `stream: true` (a real boolean, exactly what the frontend
+        // sends) was being read as `false`, silently forcing every request onto the
+        // slow non-streaming path regardless of what the client asked for. This is
+        // likely the single biggest cause of slow/hanging replies reported so far —
+        // it predates any of the earlier timeout/key fixes. =====
+        const wantsStream = req.body?.stream === true || req.body?.stream === 'true';
 
         const { userName, text, rawText, file, webSearch, history, model } = req.body || {};
         const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : (text || "");
@@ -540,10 +545,10 @@ export default async function handler(req, res) {
                 try {
                     console.log(`Trying model: ${currentModel} with Key #${k + 1}`);
 
-                    // ===== FIX: hard timeout so a slow/dead key doesn't stall a simple reply =====
+                    // ===== FIX: per-attempt timeout (15s) — gives a real request enough
+                    // room to connect even under Google's own high-demand load, while
+                    // still moving on if a key is genuinely dead =====
                     const genController = new AbortController();
-                    // ===== FIX: shorter per-attempt timeout (8s), same reasoning as the stream path =====
-                    // ===== FIX: raised back to 15s, same reasoning as the stream path =====
                     const genTimeoutId = setTimeout(() => genController.abort(), 15000);
                     let response;
                     try {
