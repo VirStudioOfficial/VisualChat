@@ -422,16 +422,28 @@ export default async function handler(req, res) {
             // ===== CHANGE 4: flushHeaders at start of streaming =====
             if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
+            // ===== FIX: shared deadline across the whole model/key loop =====
+            // Individual per-attempt timeouts weren't enough: with 10+ keys, several
+            // failing on quota/high-demand back to back could still add up to a long
+            // wait before the client ever sees an error. This caps the ENTIRE search
+            // for a working key/model at 25s total, so the user always gets a fast
+            // reply either way.
+            const overallDeadline = Date.now() + 25000;
+
+            outerLoop:
             for (const currentModel of modelsToTry) {
                 for (let k = 0; k < geminiKeys.length; k++) {
+                    if (Date.now() > overallDeadline) break outerLoop;
                     const currentKey = geminiKeys[k];
                     try {
                         console.log(`[stream] Trying model: ${currentModel} with Key #${k + 1}`);
 
-                        // ===== FIX: timeout guards only the connection phase (not the full
-                        // streamed reply), so a slow-but-working model isn't cut off mid-answer =====
+                        // ===== FIX: shorter per-attempt connect timeout (8s) — quota/demand
+                        // errors return almost instantly from Google, so a real hang only
+                        // needs a short window before moving to the next key, keeping the
+                        // shared 25s budget above from being eaten by one bad key =====
                         const streamController = new AbortController();
-                        const streamTimeoutId = setTimeout(() => streamController.abort(), 20000);
+                        const streamTimeoutId = setTimeout(() => streamController.abort(), 8000);
                         let upstream;
                         try {
                             upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`, {
@@ -501,20 +513,26 @@ export default async function handler(req, res) {
                 }
             }
 
-            res.write(`data: ${JSON.stringify({ error: 'خطا در دریافت پاسخ از تمامی مدل‌ها و کلیدها' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ error: 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.' })}\n\n`);
             if (typeof res.flush === 'function') res.flush();
             return res.end();
         }
 
+        // ===== FIX: same shared deadline for the non-streaming path =====
+        const overallDeadlineNonStream = Date.now() + 25000;
+
+        outerLoopNonStream:
         for (const currentModel of modelsToTry) {
             for (let k = 0; k < geminiKeys.length; k++) {
+                if (Date.now() > overallDeadlineNonStream) break outerLoopNonStream;
                 const currentKey = geminiKeys[k];
                 try {
                     console.log(`Trying model: ${currentModel} with Key #${k + 1}`);
 
                     // ===== FIX: hard timeout so a slow/dead key doesn't stall a simple reply =====
                     const genController = new AbortController();
-                    const genTimeoutId = setTimeout(() => genController.abort(), 20000);
+                    // ===== FIX: shorter per-attempt timeout (8s), same reasoning as the stream path =====
+                    const genTimeoutId = setTimeout(() => genController.abort(), 8000);
                     let response;
                     try {
                         response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
@@ -554,7 +572,7 @@ export default async function handler(req, res) {
 
         return res.status(500).json({
             error: {
-                message: `خطا در دریافت پاسخ از تمامی مدل‌ها و کلیدها`,
+                message: `سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.`,
                 details: lastError
             }
         });
