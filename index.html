@@ -1385,6 +1385,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let chats = {};
     let chatHistoryData = {};
     let selectedFileData = null;
+    let lastCodeFileForEdit = null;
     let isFirstMessage = true;
     let isGenerating = false;
     let isSearchEnabled = false;
@@ -1803,6 +1804,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return mimeMap[ext] || 'application/octet-stream';
     }
 
+    const CODE_TEXT_EXTENSIONS = ['js', 'jsx', 'ts', 'tsx', 'html', 'htm', 'css', 'scss', 'json', 'py',
+        'java', 'c', 'cpp', 'h', 'cs', 'php', 'rb', 'go', 'rs', 'sql', 'sh', 'yml', 'yaml', 'xml',
+        'md', 'txt', 'vue', 'svelte', 'kt', 'swift', 'ini', 'env', 'conf'];
+
+    function isCodeOrTextFile(file) {
+        if (!file) return false;
+        if (file.type && file.type.startsWith('text/')) return true;
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        return CODE_TEXT_EXTENSIONS.includes(ext);
+    }
+
     async function handleFileSelect(event) {
         const file = event?.target?.files?.[0];
         if (!file) return;
@@ -1853,6 +1865,25 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 previewImg.style.display = 'none';
                 statusEl.textContent = 'ویدیو آماده';
                 statusEl.className = 'file-status success';
+            } else if (isCodeOrTextFile(file)) {
+                const MAX_TEXT_SIZE = 300 * 1024;
+                if (file.size > MAX_TEXT_SIZE) {
+                    statusEl.textContent = 'فایل خیلی بزرگ است (حداکثر ۳۰۰ کیلوبایت)';
+                    statusEl.className = 'file-status error';
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        selectedFileData = { name: file.name, type: 'text/code', mode: 'text', content: String(e.target.result || '') };
+                        previewImg.style.display = 'none';
+                        statusEl.textContent = 'فایل کد آماده برای ویرایش';
+                        statusEl.className = 'file-status success';
+                    };
+                    reader.onerror = () => {
+                        statusEl.textContent = 'خطا';
+                        statusEl.className = 'file-status error';
+                    };
+                    reader.readAsText(file);
+                }
             } else {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -1982,6 +2013,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
         } else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
             userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
+        } else if (selectedFileData && selectedFileData.mode === 'text') {
+            userContentHtml += `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="fa-solid fa-file-code"></i> ${escapeHtml(selectedFileData.name)}</span>`;
         }
 
         appendMessage('user', userContentHtml);
@@ -2063,6 +2096,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const request = { textPrompt, payloadFile, wrapper: wrapperDiv, loadingDiv };
         activeLoadingDiv = loadingDiv;
 
+        if (payloadFile && payloadFile.mode === 'text' && typeof payloadFile.content === 'string') {
+            lastCodeFileForEdit = { name: payloadFile.name, content: payloadFile.content };
+        }
+
         if (!isRetry) {
             wrapperDiv.className = "message-wrapper bot";
             loadingDiv.className = "message bot";
@@ -2140,7 +2177,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     if (parsed.text) {
                         gotAnyText = true;
                         fullReply += parsed.text;
-                        loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(fullReply));
+                        const liveView = stripFileEditBlock(fullReply).displayText;
+                        loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView));
                         scrollToLatest();
                     } else if (parsed.error) {
                         streamError = parsed.error;
@@ -2158,7 +2196,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: reply });
                 }
                 lastFailedRequest = null;
-                loadingDiv.innerHTML = formatReply(reply);
+
+                const { displayText, edits } = stripFileEditBlock(reply);
+                let finalHtml = formatReply(displayText || reply);
+                finalHtml += buildFileEditResultHtml(edits);
+
+                loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
                 makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request);
@@ -2300,6 +2343,59 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const code = decodeURIComponent(btn.dataset.code || '');
         const blob = new Blob([code], {type:'text/html;charset=utf-8'});
         const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='virtual-bot-code.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    }
+
+    // ===== قابلیت ویرایش فایل کد =====
+    // یک بلاک ```file-edit ...``` را از متن پاسخ جدا می‌کند (اگر باشد) و
+    // آرایه JSON تغییرات {old,new} را برمی‌گرداند. متن نمایشی بدون آن بلاک است.
+    function stripFileEditBlock(text) {
+        const match = /```file-edit\s*([\s\S]*?)```/.exec(text || '');
+        if (!match) return { displayText: text || '', edits: null };
+        let edits = null;
+        try {
+            const parsed = JSON.parse(match[1].trim());
+            if (Array.isArray(parsed)) edits = parsed;
+        } catch (_) { edits = null; }
+        const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+        return { displayText, edits };
+    }
+
+    // هر {old,new} را فقط وقتی اعمال می‌کند که old دقیقاً و فقط یک‌بار در فایل
+    // پیدا شود؛ در غیر این‌صورت آن مورد را نادیده می‌گیرد (بدون خراب کردن بقیه فایل).
+    function applyFileEdits(originalContent, edits) {
+        let content = originalContent;
+        let appliedCount = 0, failedCount = 0;
+        for (const edit of (edits || [])) {
+            if (!edit || typeof edit.old !== 'string' || typeof edit.new !== 'string' || !edit.old) { failedCount++; continue; }
+            const firstIndex = content.indexOf(edit.old);
+            const lastIndex = content.lastIndexOf(edit.old);
+            if (firstIndex === -1 || firstIndex !== lastIndex) { failedCount++; continue; }
+            content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
+            appliedCount++;
+        }
+        return { content, appliedCount, failedCount };
+    }
+
+    function buildFileEditResultHtml(edits) {
+        if (!edits || !lastCodeFileForEdit) return '';
+        const { content, appliedCount, failedCount } = applyFileEdits(lastCodeFileForEdit.content, edits);
+        if (appliedCount === 0) return '';
+
+        const safeName = lastCodeFileForEdit.name || 'edited-file.txt';
+        const encoded = encodeURIComponent(content);
+        const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
+        return `<div class="code-card"><div class="code-card-head"><span><i class="fa-solid fa-file-circle-check"></i> ${appliedCount} تغییر روی «${escapeHtml(safeName)}»${failNote}</span><div class="code-actions"><button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeHtml(safeName)}">دانلود فایل ویرایش‌شده</button></div></div></div>`;
+    }
+
+    function downloadEditedFile(btn) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        const filename = btn.dataset.filename || 'edited-file.txt';
+        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
     function repairLoadedChatButtons(chatBox) {
