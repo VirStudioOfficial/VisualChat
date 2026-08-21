@@ -1335,8 +1335,63 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="fa-solid fa-trash"></i> پاک کردن گفتگو</button>
             </div>
         </div>
+
+        <div class="settings-section">
+            <div class="settings-label">گزارش مشکل</div>
+            <textarea id="bugReportText" class="settings-input-text" rows="3" style="width:100%; resize:vertical; font-family:inherit;" placeholder="چه مشکلی دیدی؟ هرچی دقیق‌تر بنویسی بهتره..."></textarea>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+                <button class="mini-tool" type="button" id="bugReportSendBtn" onclick="sendBugReport()"><i class="fa-solid fa-bug"></i> ارسال گزارش</button>
+                <span id="bugReportStatus" style="font-size:0.82em; color:var(--text-muted, #94a3b8);"></span>
+            </div>
+        </div>
     </div>
 
+<script>
+    // =====================================================
+    // گزارش باگ
+    // =====================================================
+    const BUG_REPORT_ENDPOINT = 'https://script.google.com/macros/s/AKfycby9_zHGFJWl25s_LzW5jvpxLcW39EpgV0QqSRvxCookWMc5weujZoRpzlJAzP8TjlEGig/exec';
+
+    async function sendBugReport() {
+        const textEl = document.getElementById('bugReportText');
+        const statusEl = document.getElementById('bugReportStatus');
+        const btn = document.getElementById('bugReportSendBtn');
+        const message = (textEl?.value || '').trim();
+
+        if (!message) {
+            statusEl.textContent = 'اول متن مشکل رو بنویس';
+            statusEl.style.color = '#f87171';
+            return;
+        }
+
+        btn.disabled = true;
+        statusEl.style.color = 'var(--text-muted, #94a3b8)';
+        statusEl.textContent = 'در حال ارسال...';
+
+        try {
+            const uName = (localStorage.getItem('virtual_custom_name') || '').trim() || 'ناشناس';
+            await fetch(BUG_REPORT_ENDPOINT, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    userName: uName,
+                    message: message,
+                    model: typeof currentModel !== 'undefined' ? currentModel : '',
+                    userAgent: navigator.userAgent
+                })
+            });
+            statusEl.style.color = '#4ade80';
+            statusEl.textContent = 'ارسال شد، ممنون از گزارشت 🙏';
+            textEl.value = '';
+        } catch (err) {
+            statusEl.style.color = '#f87171';
+            statusEl.textContent = 'ارسال نشد، دوباره امتحان کن';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+</script>
 <script>
     // =====================================================
     // سیستم انتخاب مدل
@@ -1946,8 +2001,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }));
         wrapper.addEventListener('drop', async (e) => {
             if (isGenerating) return;
-            const file = e.dataTransfer?.files?.[0];
-            if (file) await processIncomingFile(file);
+            const files = Array.from(e.dataTransfer?.files || []);
+            for (const file of files) {
+                await processIncomingFile(file);
+            }
         });
 
         input.addEventListener('paste', async (e) => {
