@@ -201,15 +201,16 @@ export default async function handler(req, res) {
         console.log(`Using model: ${MODEL_NAME}`);
         let lastError = null;
 
-        if (MODEL_NAME.includes('imagen')) {
+        if (MODEL_NAME.includes('imagen') || MODEL_NAME.includes('flash-image')) {
             // ===== FIX: Google shut down all Imagen `:generateImages` endpoints on
             // Aug 17, 2026. Calling them now returns a non-JSON / empty body, which
             // crashed `imgRes.json()` with "Unexpected end of JSON input" on every
-            // key. Migrated to the replacement Gemini native image model
-            // ('gemini-2.5-flash-image', aka "Nano Banana"), which uses
-            // `:generateContent` and returns the image as an inline_data content
-            // part instead of a `generatedImages` array. =====
-            const IMAGE_MODEL_NAME = 'gemini-2.5-flash-image';
+            // key. Migrated to the current Gemini native image model,
+            // 'gemini-3.1-flash-image' (Nano Banana 2 — gemini-2.5-flash-image is
+            // now the legacy/previous-gen model). Uses `:generateContent` and
+            // returns the image as an inline_data content part instead of a
+            // `generatedImages` array. =====
+            const IMAGE_MODEL_NAME = 'gemini-3.1-flash-image';
             for (let k = 0; k < geminiKeys.length; k++) {
                 const currentKey = geminiKeys[k];
                 try {
