@@ -185,8 +185,10 @@ function shouldGenerateImage(userText) {
 
     if (!text || text.length < 3) return false;
 
-    // تشخیص هوشمندتر با استفاده از Regex برای پوشش فاصله‌ها و جملات مختلف
-    const imageRegex = /(عکس|تصویر|ایمیج|لوگو|پوستر|کاور|نقاشی)\s*.*\s*(بساز|درست کن|تولید کن|ایجاد کن|بده|طراحی کن|رندر کن)|(generate|create|make|draw|render)\s+.*\s*(image|picture|photo|logo)/i;
+    // تشخیص هوشمندتر با Regex، اما محدود به فاصله‌ی معقول بین اسم و فعل تا از
+    // false-positive روی جملاتی که فقط تصادفاً هر دو کلمه رو دارن جلوگیری بشه
+    // (مثلاً «عکس گرفتم ولی چیزی درست نکردم» نباید تشخیص داده بشه).
+    const imageRegex = /(عکس|تصویر|ایمیج|لوگو|پوستر|کاور|نقاشی)(?:\s+\S+){0,10}?\s*(بساز|درست کن|تولید کن|ایجاد کن|بده|طراحی کن|رندر کن)|(generate|create|make|draw|render)\s+(?:\w+\s+){0,6}(image|picture|photo|logo)/i;
 
     const simpleKeywords = ['تصویرسازی', 'تصویر سازی', 'یه عکس', 'یک عکس', 'یه تصویر', 'یک تصویر'];
 
