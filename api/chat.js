@@ -202,24 +202,46 @@ export default async function handler(req, res) {
         let lastError = null;
 
         if (MODEL_NAME.includes('imagen') || MODEL_NAME.includes('flash-image')) {
-            // ===== FIX: Google's image models (Imagen, and every Gemini
-            // "flash-image" / Nano Banana variant) have NO free tier at all —
-            // confirmed on Google's official pricing page, Free Tier is
-            // "Not available" for every image-output model. That's why every
-            // key failed with `limit: 0` quota errors regardless of which
-            // Google model name was used; this isn't a key or model-name
-            // problem, image generation on Gemini simply requires billing.
-            // Switched to Pollinations' free, keyless Flux image API instead
-            // (gen.pollinations.ai, their current unified gateway — the older
-            // image.pollinations.ai host still serves the GPU backend but
-            // gen.* is their documented public entry point as of mid-2026):
-            // no API key needed, no per-key quota to rotate, supports custom
-            // width/height (1920x1080 here). Note: the old `nologo` param was
-            // removed by Pollinations in June 2026 and no longer does
-            // anything, so it's dropped here. =====
+            // ===== FIX: two separate problems surfaced after the switch to
+            // Pollinations:
+            // 1) Pollinations does automatic fallback routing between image
+            //    models when the requested one (flux) is busy/unavailable —
+            //    this is a documented feature, not a bug — but the fallback
+            //    model that was used (sana) handles non-English prompts very
+            //    poorly.
+            // 2) Farsi/Persian prompt text was reaching the image model
+            //    largely as literal "?" characters (visible in the returned
+            //    image's embedded generation metadata), because these image
+            //    models are trained overwhelmingly on English captions.
+            // Fix: translate the prompt to English first using Gemini's free
+            // text tier (gemini-3.5-flash-lite has no cost and is already in
+            // use elsewhere in this file), then send the English prompt to
+            // Pollinations. This fixes both: an English prompt renders
+            // correctly on any fallback model, and encoding issues don't
+            // arise since English is plain ASCII. =====
+            let translatedPrompt = searchQueryBase || 'an image';
+            try {
+                const translateKey = geminiKeys[Math.floor(Math.random() * geminiKeys.length)];
+                const translateRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': translateKey },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: `Translate the following image description to a concise, vivid English image-generation prompt. Reply with ONLY the translated prompt, no quotes, no extra text:\n\n${searchQueryBase}` }] }]
+                    })
+                });
+                if (translateRes.ok) {
+                    const translateData = await translateRes.json();
+                    const candidate = translateData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                    if (candidate) translatedPrompt = candidate;
+                }
+            } catch (translateErr) {
+                console.warn('[Imagen] Translation failed, using original prompt:', translateErr?.message || translateErr);
+            }
+            console.log('[Imagen] Translated prompt:', translatedPrompt);
+
             const pollinationsHosts = [
-                `https://gen.pollinations.ai/image/${encodeURIComponent(searchQueryBase || 'an image')}`,
-                `https://image.pollinations.ai/prompt/${encodeURIComponent(searchQueryBase || 'an image')}`
+                `https://gen.pollinations.ai/image/${encodeURIComponent(translatedPrompt)}`,
+                `https://image.pollinations.ai/prompt/${encodeURIComponent(translatedPrompt)}`
             ];
 
             for (const baseUrl of pollinationsHosts) {
