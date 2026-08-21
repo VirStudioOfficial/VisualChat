@@ -2957,18 +2957,76 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return { displayText, edits };
     }
 
-    // هر {old,new} را فقط وقتی اعمال می‌کند که old دقیقاً و فقط یک‌بار در فایل
-    // پیدا شود؛ در غیر این‌صورت آن مورد را نادیده می‌گیرد (بدون خراب کردن بقیه فایل).
+    // هر {old,new} را اعمال می‌کند اگر "old" دقیقاً و فقط یک‌بار در فایل پیدا
+    // شود؛ اگر تطابق دقیق نبود (مثلاً به‌خاطر فاصله/تب/شکست‌خط متفاوت که مدل
+    // گاهی هنگام کپی متن جابه‌جا می‌کند)، یک تلاش دوم با نرمال‌سازی سطحی
+    // whitespace انجام می‌دهد. این هنوز خیلی محافظه‌کارانه است: محتوای واقعی
+    // خط‌ها باید یکی باشد و باز هم فقط روی تطابق یکتا اعمال می‌شود — بنابراین
+    // ریسک خراب کردن فایل را اضافه نمی‌کند، فقط رد شدن بی‌دلیل ویرایش‌های
+    // معتبر را کم می‌کند.
+    function normalizeForMatch(s) {
+        return String(s)
+            .replace(/\r\n/g, '\n')
+            .split('\n')
+            .map(line => line.replace(/[ \t]+$/g, '').replace(/[ \t]+/g, ' ').trim())
+            .join('\n')
+            .trim();
+    }
+
+    function findUniqueFuzzyMatch(content, oldText) {
+        // Slide a window of the same line-count over the content, comparing
+        // the whitespace-normalized form. Returns {index, length} for the
+        // ORIGINAL (non-normalized) text if exactly one window matches.
+        const contentLines = content.split('\n');
+        const oldLines = oldText.replace(/\r\n/g, '\n').split('\n');
+        const target = normalizeForMatch(oldText);
+        const wanted = oldLines.length;
+        if (wanted === 0 || wanted > contentLines.length) return null;
+
+        let match = null, matchCount = 0;
+        let runningIndex = 0;
+        const lineStarts = [];
+        for (let i = 0; i < contentLines.length; i++) {
+            lineStarts.push(runningIndex);
+            runningIndex += contentLines[i].length + 1; // +1 for the '\n' we split on
+        }
+
+        for (let i = 0; i + wanted <= contentLines.length; i++) {
+            const windowLines = contentLines.slice(i, i + wanted);
+            if (normalizeForMatch(windowLines.join('\n')) === target) {
+                matchCount++;
+                if (matchCount > 1) return null; // not unique, bail out
+                const startIdx = lineStarts[i];
+                const endIdx = (i + wanted < lineStarts.length ? lineStarts[i + wanted] : content.length + 1) - 1;
+                match = { index: startIdx, length: Math.min(endIdx, content.length) - startIdx };
+            }
+        }
+        return matchCount === 1 ? match : null;
+    }
+
     function applyFileEdits(originalContent, edits) {
         let content = originalContent;
         let appliedCount = 0, failedCount = 0;
         for (const edit of (edits || [])) {
             if (!edit || typeof edit.old !== 'string' || typeof edit.new !== 'string' || !edit.old) { failedCount++; continue; }
+
             const firstIndex = content.indexOf(edit.old);
             const lastIndex = content.lastIndexOf(edit.old);
-            if (firstIndex === -1 || firstIndex !== lastIndex) { failedCount++; continue; }
-            content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
-            appliedCount++;
+            if (firstIndex !== -1 && firstIndex === lastIndex) {
+                content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
+                appliedCount++;
+                continue;
+            }
+            if (firstIndex !== -1 && firstIndex !== lastIndex) { failedCount++; continue; } // ambiguous exact match — don't guess
+
+            const fuzzy = findUniqueFuzzyMatch(content, edit.old);
+            if (fuzzy) {
+                content = content.slice(0, fuzzy.index) + edit.new + content.slice(fuzzy.index + fuzzy.length);
+                appliedCount++;
+                continue;
+            }
+
+            failedCount++;
         }
         return { content, appliedCount, failedCount };
     }
