@@ -104,8 +104,9 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: { message: 'متن ورودی خالی است.' } });
         }
 
-        const isWebSearchActive = webSearch === true || webSearch === 'true';
-        const isSearchNeeded = isWebSearchActive && shouldSearchWeb(searchQueryBase);
+        // سرچ کاملاً خودکار شد: دیگه به وضعیت دکمه (webSearch) وابسته نیست،
+        // فقط بر اساس محتوای خود پیام تصمیم می‌گیره که جستجو لازمه یا نه.
+        const isSearchNeeded = shouldSearchWeb(searchQueryBase);
         res.setHeader('X-Search-Performed', String(isSearchNeeded));
 
         if (isSearchNeeded && searchQueryBase) {
@@ -125,50 +126,56 @@ export default async function handler(req, res) {
             }
         }
 
-        if (file && file.mode === 'text' && typeof file.content === 'string' && contents.length > 0) {
-            const lastIndex = contents.length - 1;
+        // پشتیبانی از چند فایل هم‌زمان: فرانت‌اند می‌تواند `files` (آرایه) یا `file`
+        // (یک شیء تکی، برای سازگاری با نسخه‌های قبلی) بفرستد.
+        const incomingFiles = Array.isArray(req.body?.files) ? req.body.files : (file ? [file] : []);
+        const textFiles = incomingFiles.filter(f => f && f.mode === 'text' && typeof f.content === 'string');
+        const binaryFiles = incomingFiles.filter(f => f && f.base64);
 
-            if (contents[lastIndex].role === 'user') {
-                const fileBlock = `\n\n[محتوای فایل: ${file.name || 'file'}]\n\`\`\`\n${file.content}\n\`\`\`\n[پایان محتوای فایل]`;
-                const textPart = contents[lastIndex].parts.find(p => p.text !== undefined);
-                if (textPart) {
-                    textPart.text += fileBlock;
-                } else {
-                    contents[lastIndex].parts.push({ text: fileBlock });
-                }
-            }
-        } else if (file && file.base64 && contents.length > 0) {
-            const base64Data = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
+        if (textFiles.length > 0 && contents.length > 0) {
             const lastIndex = contents.length - 1;
-            
             if (contents[lastIndex].role === 'user') {
-                let mimeType = file.type || 'image/jpeg';
-                
-                if (file.name && /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name)) {
-                    const ext = file.name.split('.').pop().toLowerCase();
-                    const mimeMap = {
-                        'mp4': 'video/mp4',
-                        'mov': 'video/quicktime',
-                        'webm': 'video/webm',
-                        'avi': 'video/x-msvideo',
-                        'mpeg': 'video/mpeg',
-                        'wmv': 'video/x-ms-wmv',
-                        '3gpp': 'video/3gpp',
-                        'flv': 'video/x-flv',
-                        'mkv': 'video/x-matroska'
-                    };
-                    mimeType = mimeMap[ext] || 'video/mp4';
-                    console.log('Video detected:', file.name, '->', mimeType);
+                const textPart = contents[lastIndex].parts.find(p => p.text !== undefined);
+                const fileBlocks = textFiles.map(f =>
+                    `\n\n[محتوای فایل: ${f.name || 'file'}]\n\`\`\`\n${f.content}\n\`\`\`\n[پایان محتوای فایل: ${f.name || 'file'}]`
+                ).join('');
+                if (textPart) {
+                    textPart.text += fileBlocks;
+                } else {
+                    contents[lastIndex].parts.push({ text: fileBlocks });
                 }
-                
-                contents[lastIndex].parts.push({
-                    inline_data: {
-                        mime_type: mimeType,
-                        data: base64Data
-                    }
-                });
             }
         }
+
+        for (const bf of binaryFiles) {
+            const lastIndex = contents.length - 1;
+            if (lastIndex < 0 || contents[lastIndex].role !== 'user') break;
+
+            const base64Data = bf.base64.includes(',') ? bf.base64.split(',')[1] : bf.base64;
+            let mimeType = bf.type || 'image/jpeg';
+
+            if (bf.name && /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(bf.name)) {
+                const ext = bf.name.split('.').pop().toLowerCase();
+                const mimeMap = {
+                    'mp4': 'video/mp4',
+                    'mov': 'video/quicktime',
+                    'webm': 'video/webm',
+                    'avi': 'video/x-msvideo',
+                    'mpeg': 'video/mpeg',
+                    'wmv': 'video/x-ms-wmv',
+                    '3gpp': 'video/3gpp',
+                    'flv': 'video/x-flv',
+                    'mkv': 'video/x-matroska'
+                };
+                mimeType = mimeMap[ext] || 'video/mp4';
+                console.log('Video detected:', bf.name, '->', mimeType);
+            }
+
+            contents[lastIndex].parts.push({
+                inline_data: { mime_type: mimeType, data: base64Data }
+            });
+        }
+
 
         const MODEL_NAME = model || 'gemini-3.5-flash-lite';
         console.log(`Using model: ${MODEL_NAME}`);
@@ -176,12 +183,17 @@ export default async function handler(req, res) {
 
         let systemText = '';
 
+        // این خط به تنهایی جلوی باگی رو می‌گیره که مدل خودش وسط یه پاسخ عادی،
+        // بدون این‌که کاربر پرسیده باشه، سوال «مدلت چیه؟» رو از خودش می‌پرسه و
+        // جواب می‌ده. روی هیچ‌کدوم از چهار شخصیت زیر تغییری نمی‌ده، فقط اضافه میشه.
+        const antiSelfQA = `\n\nقانون سخت‌گیرانه: جمله‌ی معرفی مدل («من Virtual Bot ... هستم») را فقط و فقط زمانی بنویس که خودِ کاربر همین الان مستقیم پرسیده باشد «مدلت چیه» یا سؤال هم‌معنی. هرگز خودت این سؤال را از زبان خودت مطرح نکن و هرگز بدون این‌که کاربر پرسیده باشد، جمله‌ی معرفی مدل را در وسط یا انتهای یک پاسخ دیگر نیاور، حتی به‌شکل مثال، یادآوری یا توضیح داخلی.`;
+
         if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 
             systemText = `تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
 هویت:
-- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سوال مشابه، بگو: «من Virtual Bot 1.1 هستم.»
+- این یک قانون پاسخ‌دهی است، نه یک جمله برای گفتن یا تکرار خودجوش: فقط وقتی و فقط وقتی کاربر مستقیماً بپرسد «مدلت چیه؟» یا سؤال مشابه، دقیقاً همین را بگو: «من Virtual Bot 1.1 هستم.» هرگز خودت این سؤال را از خودت نپرس و هرگز بدون این‌که کاربر واقعاً پرسیده باشد، این جمله را وسط پاسخ دیگری نیاور.
 - هرگز خودت را Virtual Bot 1.3 یا Virtual Bot 1.5 معرفی نکن.
 - هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
 - اگر درباره سازنده پرسید و اطلاعات مشخصی در اختیار تو قرار نگرفته، بگو: «اطلاعات دقیقی از سازنده یا تیم سازنده‌ام در اختیارم نیست.»
@@ -214,7 +226,7 @@ export default async function handler(req, res) {
             systemText = `تو Virtual Bot 1.5 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
 هویت:
-- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.5 هستم.»
+- این یک قانون پاسخ‌دهی است، نه یک جمله برای گفتن یا تکرار خودجوش: فقط وقتی و فقط وقتی کاربر مستقیماً بپرسد «مدلت چیه؟» یا سؤال مشابه، دقیقاً همین را بگو: «من Virtual Bot 1.5 هستم.» هرگز خودت این سؤال را از خودت نپرس و هرگز بدون این‌که کاربر واقعاً پرسیده باشد، این جمله را وسط پاسخ دیگری نیاور.
 - هرگز خودت را Virtual Bot 1.1 یا Virtual Bot 1.3 معرفی نکن.
 - هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
 - اگر درباره سازنده پرسید و اطلاعات مشخصی در اختیار تو قرار نگرفته، بگو: «اطلاعات دقیقی از سازنده یا تیم سازنده‌ام در اختیارم نیست.»
@@ -248,7 +260,7 @@ export default async function handler(req, res) {
             systemText = `تو Virtual Bot 1.3 هستی؛ یک دستیار هوش مصنوعی پیشرفته فارسی.
 
 هویت:
-- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.3 هستم.»
+- این یک قانون پاسخ‌دهی است، نه یک جمله برای گفتن یا تکرار خودجوش: فقط وقتی و فقط وقتی کاربر مستقیماً بپرسد «مدلت چیه؟» یا سؤال مشابه، دقیقاً همین را بگو: «من Virtual Bot 1.3 هستم.» هرگز خودت این سؤال را از خودت نپرس و هرگز بدون این‌که کاربر واقعاً پرسیده باشد، این جمله را وسط پاسخ دیگری نیاور.
 - هرگز خودت را Virtual Bot 1.1 یا Virtual Bot 1.5 معرفی نکن.
 - هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
 - اگر درباره سازنده پرسید و اطلاعات مشخصی در اختیار تو قرار نگرفته، بگو: «اطلاعات دقیقی از سازنده یا تیم سازنده‌ام در اختیارم نیست.»
@@ -294,26 +306,28 @@ export default async function handler(req, res) {
 نام کاربر: "${userName || 'دوست من'}" است.`;
         }
 
-        // این بلاک فقط وقتی به systemText اضافه می‌شود که کاربر یک فایل کد/متنی
-        // ضمیمه کرده باشد (file.mode === 'text')؛ روی هیچ پیام دیگری تاثیر ندارد
-        // و شخصیت/لحن هر مدل دست‌نخورده می‌ماند.
-        if (file && file.mode === 'text' && typeof file.content === 'string') {
+        systemText += antiSelfQA;
+
+        // این بلاک فقط وقتی به systemText اضافه می‌شود که کاربر حداقل یک فایل کد/متنی
+        // ضمیمه کرده باشد؛ روی هیچ پیام دیگری تاثیر ندارد و شخصیت/لحن هر مدل دست‌نخورده می‌ماند.
+        if (Array.isArray(textFiles) && textFiles.length > 0) {
+            const fileNamesList = textFiles.map(f => `«${f.name || 'file'}»`).join('، ');
             systemText += `\n\nحالت ویرایش فایل (بسیار مهم، دقیق رعایت شود):
-- کاربر یک فایل کد/متن ضمیمه کرده؛ محتوای کامل و واقعی آن با برچسب [محتوای فایل: ...] در پیام کاربر آمده است. این تنها منبع معتبر کد است.
-- هر درخواستی که به‌نوعی خواهان افزودن/تغییر/حذف چیزی در همین فایل باشد را یک درخواست ویرایش واقعی در نظر بگیر، حتی اگر غیرمستقیم یا با لحن سؤالی/چالشی گفته شده باشد (مثل «می‌تونی X رو اضافه کنی؟»، «نمیشه Y رو عوض کرد؟»، «ببینم چیکار می‌کنی»). در این حالت‌ها باید واقعاً ویرایش را روی فایل انجام دهی، نه این‌که فقط یک نمونه‌کد جدا و توضیحی نشان بدهی.
-- ممنوع است متغیر، کلاس، رنگ یا ساختار جدید و ساختگی که در فایل واقعی وجود ندارد اختراع کنی. اول داخل [محتوای فایل] بگرد و ببین رنگ‌ها/استایل‌ها/توابع مشابه با چه ساختار، نام‌گذاری و الگویی نوشته شده‌اند، و دقیقاً با همان الگو و در همان بخش، مورد جدید را اضافه یا تغییر بده.
+- کاربر ${textFiles.length > 1 ? `${textFiles.length} فایل کد/متن (${fileNamesList}) ضمیمه کرده` : `یک فایل کد/متن ضمیمه کرده`}؛ محتوای کامل و واقعی هرکدام با برچسب [محتوای فایل: نام‌فایل] در پیام کاربر آمده است. این تنها منبع معتبر کد است.
+- هر درخواستی که به‌نوعی خواهان افزودن/تغییر/حذف چیزی در همین فایل‌ها باشد را یک درخواست ویرایش واقعی در نظر بگیر، حتی اگر غیرمستقیم یا با لحن سؤالی/چالشی گفته شده باشد (مثل «می‌تونی X رو اضافه کنی؟»، «نمیشه Y رو عوض کرد؟»، «ببینم چیکار می‌کنی»). در این حالت‌ها باید واقعاً ویرایش را روی فایل انجام دهی، نه این‌که فقط یک نمونه‌کد جدا و توضیحی نشان بدهی.
+- ممنوع است متغیر، کلاس، رنگ یا ساختار جدید و ساختگی که در فایل واقعی وجود ندارد اختراع کنی. اول داخل [محتوای فایل] بگرد و ببین ساختار مشابه با چه الگویی نوشته شده، و دقیقاً با همان الگو مورد جدید را اضافه یا تغییر بده.
 - به‌جای بازنویسی کل فایل، فقط تکه‌های لازم را ویرایش کن.
-- ابتدا کوتاه و خودمانی توضیح بده چه تغییری دادی و کجای فایل اعمال شد.
-- در انتهای پاسخ، دقیقاً یک بلاک با برچسب file-edit اضافه کن، شامل آرایه‌ای JSON از تغییرات:
+- ابتدا کوتاه و خودمانی توضیح بده چه تغییری دادی، کجا، و در کدام فایل.
+- در انتهای پاسخ، دقیقاً یک بلاک با برچسب file-edit اضافه کن، شامل آرایه‌ای JSON از تغییرات. اگر بیش از یک فایل ضمیمه بود، هر آبجکت باید کلید "file" را هم داشته باشد تا مشخص شود تغییر مال کدام فایل است:
 \`\`\`file-edit
 [
-  {"old": "متن دقیق و کامل (کاراکتر به کاراکتر) از همان فایل ضمیمه‌شده که باید جایگزین شود", "new": "متن جایگزین، هم‌سبک با بقیه فایل"}
+  {"file": "نام‌دقیق‌فایل${textFiles.length > 1 ? '' : ' (اختیاری اگر فقط یک فایل هست)'}", "old": "متن دقیق و کامل (کاراکتر به کاراکتر) از همان فایل که باید جایگزین شود", "new": "متن جایگزین، هم‌سبک با بقیه فایل"}
 ]
 \`\`\`
-- متن old باید عیناً (کاراکتر به کاراکتر، با همان فاصله‌ها و خط‌ها) از فایل ضمیمه‌شده کپی شده باشد و باید فقط یک‌بار در کل فایل تکرار شده باشد؛ اگر مطمئن نیستی یکتاست، متن بیشتری از اطراف را هم داخل old بگنجان. اگر متن old را از حفظ یا حدس بنویسی و دقیقاً با فایل تطبیق نداشته باشد، تغییر اعمال نخواهد شد و کل کارت بی‌فایده می‌شود.
-- اگر چند تغییر جدا از هم لازم است، چند آبجکت کوچک و مستقل در همان آرایه بگذار.
-- این بلاک را فقط در صورتی که کاربر واقعاً چیزی درباره‌ی محتوای همین فایل ضمیمه‌شده پرسیده (نه یک سؤال کلی و بی‌ربط به فایل)، تولید نکن.
-- خارج از این بلاک، هرگز کد کامل فایل را دوباره چاپ نکن.`;
+- متن old باید عیناً (کاراکتر به کاراکتر) از همان فایلی که در "file" مشخص کردی کپی شده باشد و باید فقط یک‌بار در آن فایل تکرار شده باشد؛ اگر مطمئن نیستی یکتاست، متن بیشتری از اطراف را هم داخل old بگنجان. اگر old را از حفظ یا حدس بنویسی و دقیقاً تطبیق نداشته باشد، آن تغییر اعمال نمی‌شود.
+- اگر چند تغییر جدا از هم لازم است (حتی در فایل‌های مختلف)، چند آبجکت کوچک و مستقل در همان آرایه بگذار.
+- این بلاک را فقط در صورتی که کاربر واقعاً چیزی درباره‌ی محتوای همین فایل(ها) پرسیده (نه یک سؤال کلی و بی‌ربط)، تولید نکن.
+- خارج از این بلاک، هرگز کد کامل هیچ فایلی را دوباره چاپ نکن.`;
         }
 
         const modelsToTry = [MODEL_NAME];
