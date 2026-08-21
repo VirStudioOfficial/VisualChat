@@ -267,7 +267,11 @@
             flex-direction: column;
             padding: 16px;
             z-index: 20;
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        padding 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .brand-title {
@@ -1102,6 +1106,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .history-tools.active .history-search-input { display:block; animation:fadeIn .16s ease; }
         .history-empty { color:var(--text-muted); font-size:.75rem; text-align:center; padding:18px 8px; line-height:1.7; }
         .sidebar.collapsed { width:0; min-width:0; padding-left:0; padding-right:0; border:0; overflow:hidden; }
+        .sidebar > * { transition: opacity 0.2s ease; }
         .sidebar.collapsed > * { opacity:0; pointer-events:none; }
         .menu-btn { display:flex !important; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; }
         .menu-btn:hover { background:var(--bg-card); }
@@ -1419,6 +1424,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function autoResizeTextarea(textarea) {
         textarea.style.height = 'auto';
         textarea.style.height = Math.min(textarea.scrollHeight, 180) + 'px';
+        // Keep the caret's line in view: once the box hits its max height
+        // and becomes internally scrollable, always snap to the bottom so
+        // the line currently being typed never gets pushed out of sight.
+        textarea.scrollTop = textarea.scrollHeight;
     }
 
     function extractNameFromEmail(email, googleName = '') {
