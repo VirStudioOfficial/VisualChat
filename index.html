@@ -1175,9 +1175,128 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             font-size: 0.88em;
         }
         .stopped-state i { color: var(--danger); }
+
+        /* ===== Toast notifications ===== */
+        #toastContainer {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+            pointer-events: none;
+            width: 100%;
+            padding: 0 16px;
+        }
+        .toast {
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: 420px;
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            box-shadow: 0 12px 30px var(--shadow-b);
+            font-size: 0.86rem;
+            color: var(--text-main);
+            animation: toastIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .toast.leaving { animation: toastOut 0.2s ease forwards; }
+        .toast i { flex-shrink: 0; font-size: 1rem; }
+        .toast.success i { color: var(--success); }
+        .toast.error i { color: var(--danger); }
+        .toast.info i { color: var(--accent-2); }
+        .toast.warning i { color: var(--warning); }
+        .toast span { flex: 1; line-height: 1.5; }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateY(12px) scale(0.96); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes toastOut {
+            from { opacity: 1; transform: translateY(0) scale(1); }
+            to { opacity: 0; transform: translateY(8px) scale(0.96); }
+        }
+
+        /* ===== Confirm modal (replaces native confirm()) ===== */
+        #confirmOverlay {
+            position: fixed; inset: 0;
+            background: rgba(10, 12, 18, 0.6);
+            backdrop-filter: blur(6px);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #confirmOverlay.active { display: flex; }
+        .confirm-card {
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 18px;
+            padding: 24px;
+            width: 90%;
+            max-width: 340px;
+            text-align: center;
+            box-shadow: 0 20px 50px var(--shadow-b);
+            animation: fadeIn 0.2s ease-out;
+        }
+        .confirm-card p { color: var(--text-main); font-size: 0.92rem; margin-bottom: 18px; line-height: 1.6; }
+        .confirm-actions { display: flex; gap: 8px; }
+        .confirm-actions button {
+            flex: 1;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 0.86rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .confirm-actions .confirm-cancel { background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border); }
+        .confirm-actions .confirm-ok { background: var(--danger); color: #fff; border: 1px solid var(--danger); }
+        .confirm-actions .confirm-cancel:hover { background: var(--bg-card-hover); }
+        .confirm-actions .confirm-ok:hover { opacity: 0.9; }
+
+        /* ===== Online/offline status pill ===== */
+        #connectionStatus {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-150%);
+            z-index: 9998;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 7px 14px;
+            border-radius: 20px;
+            background: var(--danger);
+            color: #fff;
+            font-size: 0.8rem;
+            box-shadow: 0 8px 24px var(--shadow-b);
+            transition: transform 0.25s ease;
+        }
+        #connectionStatus.show { transform: translateX(-50%) translateY(0); }
+        #connectionStatus.reconnected { background: var(--success); }
 </style>
 </head>
 <body>
+
+    <div id="toastContainer" aria-live="polite"></div>
+
+    <div id="confirmOverlay">
+        <div class="confirm-card">
+            <p id="confirmMessage">این کار انجام شود؟</p>
+            <div class="confirm-actions">
+                <button type="button" class="confirm-cancel" id="confirmCancelBtn">انصراف</button>
+                <button type="button" class="confirm-ok" id="confirmOkBtn">تأیید</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="connectionStatus"><i class="fa-solid fa-wifi-slash"></i><span>اتصال اینترنت قطع شده</span></div>
 
     <div id="authOverlay">
         <div class="auth-card">
@@ -2044,6 +2163,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 if (file.size > MAX_TEXT_SIZE) {
                     statusEl.textContent = 'فایل خیلی بزرگ است (حداکثر ۳۰۰ کیلوبایت)';
                     statusEl.className = 'file-status error';
+                    showToast('فایل خیلی بزرگه — حداکثر ۳۰۰ کیلوبایت برای فایل متنی/کد.', 'warning');
                 } else {
                     const text = await new Promise((resolve, reject) => {
                         const reader = new FileReader();
@@ -2058,19 +2178,37 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     previewContainer.style.display = 'none';
                 }
             } else {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const base64 = e.target.result;
-                    selectedFileData = { name: file.name, type: file.type || guessMimeType(file.name), base64: base64 };
-                    previewImg.style.display = 'none';
-                    statusEl.textContent = 'فایل آماده';
-                    statusEl.className = 'file-status success';
-                };
-                reader.readAsDataURL(file);
+                // Covers PDFs and any other binary file type. PDFs get an explicit
+                // size cap here since a large PDF becomes a very large base64
+                // payload; the backend enforces its own hard limit too, but failing
+                // fast client-side avoids a pointless upload+round-trip.
+                const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+                const MAX_PDF_SIZE = 8 * 1024 * 1024; // 8MB
+                if (isPdf && file.size > MAX_PDF_SIZE) {
+                    statusEl.textContent = 'فایل PDF خیلی بزرگ است (حداکثر ۸ مگابایت)';
+                    statusEl.className = 'file-status error';
+                    showToast('فایل PDF خیلی بزرگه — حداکثر ۸ مگابایت.', 'warning');
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const base64 = e.target.result;
+                        selectedFileData = { name: file.name, type: file.type || guessMimeType(file.name), base64: base64 };
+                        previewImg.style.display = 'none';
+                        statusEl.textContent = isPdf ? 'PDF آماده' : 'فایل آماده';
+                        statusEl.className = 'file-status success';
+                    };
+                    reader.onerror = () => {
+                        statusEl.textContent = 'خطا در خواندن فایل';
+                        statusEl.className = 'file-status error';
+                        showToast('فایل خراب است یا خوانده نشد.', 'error');
+                    };
+                    reader.readAsDataURL(file);
+                }
             }
         } catch (e) {
             statusEl.textContent = 'خطا';
             statusEl.className = 'file-status error';
+            showToast('پردازش فایل با خطا مواجه شد.', 'error');
         }
     }
 
@@ -2241,6 +2379,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const retryData = encodeURIComponent(JSON.stringify(saved));
         loadingDiv.innerHTML = `<div>${escapeHtml(message)}</div><div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
         lastFailedRequest = request;
+        if (typeof showToast === 'function') showToast(message, 'error');
     }
 
     async function retryFromButton(btn) {
@@ -2844,11 +2983,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const content=rows.join(format==='md'?'\n\n---\n\n':'\n\n----------------\n\n');
         const blob=new Blob([content],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`virtual-chat-${new Date().toISOString().slice(0,10)}.${format}`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
     }
-    function clearCurrentChat(){
-        if(!confirm('این گفتگو پاک شود؟')) return;
+    async function clearCurrentChat(){
+        const ok = await showConfirm('این گفتگو پاک شود؟ این کار قابل بازگشت نیست.');
+        if(!ok) return;
         const id=currentChatId; delete chats[id]; delete chatHistoryData[id];
         const storageKey=currentUser?`virtual_chat_${currentUser.email}`:'virtual_chat_history';const historyKey=currentUser?`virtual_history_${currentUser.email}`:'virtual_history_data';
         safeSetItem(storageKey,JSON.stringify(chats),{pruneChatsKey:storageKey});safeSetItem(historyKey,JSON.stringify(chatHistoryData),{});startNewChat();closeSettings();
+        showToast('گفتگو حذف شد', 'success');
     }
 
     // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
@@ -2996,6 +3137,83 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return result;
     };
     setTimeout(decorateMessages,50);
+
+    // ===== Toast notifications =====
+    // showToast(message, type) — type: 'success' | 'error' | 'info' | 'warning'
+    const TOAST_ICONS = {
+        success: 'fa-solid fa-circle-check',
+        error: 'fa-solid fa-circle-exclamation',
+        warning: 'fa-solid fa-triangle-exclamation',
+        info: 'fa-solid fa-circle-info'
+    };
+    function showToast(message, type = 'info', duration = 3200) {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `<i class="${TOAST_ICONS[type] || TOAST_ICONS.info}"></i><span>${escapeHtml(message)}</span>`;
+        container.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.add('leaving');
+            setTimeout(() => toast.remove(), 220);
+        }, duration);
+    }
+
+    // ===== Custom confirm modal (replaces native confirm()) =====
+    // showConfirm(message) returns a Promise<boolean>
+    function showConfirm(message) {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('confirmOverlay');
+            const msgEl = document.getElementById('confirmMessage');
+            const okBtn = document.getElementById('confirmOkBtn');
+            const cancelBtn = document.getElementById('confirmCancelBtn');
+            if (!overlay || !msgEl || !okBtn || !cancelBtn) { resolve(window.confirm(message)); return; }
+
+            msgEl.textContent = message;
+            overlay.classList.add('active');
+
+            const cleanup = (result) => {
+                overlay.classList.remove('active');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                overlay.removeEventListener('click', onOverlayClick);
+                resolve(result);
+            };
+            const onOk = () => cleanup(true);
+            const onCancel = () => cleanup(false);
+            const onOverlayClick = (e) => { if (e.target === overlay) cleanup(false); };
+
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+            overlay.addEventListener('click', onOverlayClick);
+        });
+    }
+
+    // ===== Online / offline status =====
+    (function setupConnectionStatus() {
+        const pill = document.getElementById('connectionStatus');
+        if (!pill) return;
+        let hideTimer = null;
+
+        function updateStatus() {
+            clearTimeout(hideTimer);
+            if (navigator.onLine) {
+                if (pill.classList.contains('show')) {
+                    // Only show the "back online" pill if we were previously offline.
+                    pill.classList.add('reconnected');
+                    pill.innerHTML = '<i class="fa-solid fa-wifi"></i><span>اتصال اینترنت برقرار شد</span>';
+                    hideTimer = setTimeout(() => pill.classList.remove('show'), 2200);
+                }
+            } else {
+                pill.classList.remove('reconnected');
+                pill.innerHTML = '<i class="fa-solid fa-wifi-slash"></i><span>اتصال اینترنت قطع شده</span>';
+                pill.classList.add('show');
+            }
+        }
+        window.addEventListener('online', updateStatus);
+        window.addEventListener('offline', updateStatus);
+        if (!navigator.onLine) updateStatus();
+    })();
 
 </script>
 </body>
