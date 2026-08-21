@@ -670,6 +670,18 @@
             outline: none !important;
             box-shadow: none !important;
             scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        textarea#userInput::-webkit-scrollbar {
+            width: 5px;
+        }
+        textarea#userInput::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        textarea#userInput::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
         }
 
         textarea#userInput::-webkit-resizer,
@@ -992,7 +1004,7 @@
             background: rgba(18,24,39,0.92);
             backdrop-filter: blur(14px);
         }
-        textarea#userInput { font-size: 1rem; line-height: 1.7; height: 28px; }
+        textarea#userInput { font-size: 1rem; line-height: 1.7; }
         .action-btn { border-radius: 12px; }
         .new-chat-btn {
             background: linear-gradient(135deg, rgba(139,92,246,0.18), rgba(34,211,238,0.10));
@@ -1029,7 +1041,6 @@
             backdrop-filter: blur(2px);
         }
         textarea#userInput {
-            height: 24px !important;
             min-height: 24px;
             line-height: 1.45 !important;
             padding: 2px 2px !important;
