@@ -638,8 +638,7 @@ function shouldSearchWeb(userText) {
 |--------------------------------------------------------------------------
 */
 
-export default async function handler(req, res) {
-
+async function handler(req, res) {
     res.setHeader(
         'Access-Control-Allow-Origin',
         '*'
@@ -668,7 +667,6 @@ export default async function handler(req, res) {
     }
 
     try {
-
         const wantsStream =
             req.body?.stream === true ||
             req.body?.stream === 'true';
@@ -851,7 +849,6 @@ export default async function handler(req, res) {
         */
 
         if (isImageRequest) {
-
             try {
                 return await handleImageGeneration({
                     prompt: searchQueryBase,
@@ -861,14 +858,12 @@ export default async function handler(req, res) {
                 });
 
             } catch (imageError) {
-
                 console.error(
                     '[Image] Final generation error:',
                     imageError?.message || imageError
                 );
 
                 if (wantsStream) {
-
                     res.setHeader(
                         'Content-Type',
                         'text/event-stream; charset=utf-8'
@@ -921,7 +916,6 @@ export default async function handler(req, res) {
             isSearchNeeded &&
             searchQueryBase
         ) {
-
             console.log(
                 `Executing Tavily Search for: "${searchQueryBase}"`
             );
@@ -940,7 +934,6 @@ export default async function handler(req, res) {
                 lastIndex >= 0 &&
                 contents[lastIndex].role === 'user'
             ) {
-
                 const textPart =
                     contents[lastIndex]
                         .parts
@@ -977,14 +970,12 @@ export default async function handler(req, res) {
             textFiles.length > 0 &&
             contents.length > 0
         ) {
-
             const lastIndex =
                 contents.length - 1;
 
             if (
                 contents[lastIndex].role === 'user'
             ) {
-
                 const textPart =
                     contents[lastIndex]
                         .parts
@@ -1025,7 +1016,6 @@ export default async function handler(req, res) {
         */
 
         for (const bf of binaryFiles) {
-
             const lastIndex =
                 contents.length - 1;
 
@@ -1050,7 +1040,6 @@ export default async function handler(req, res) {
                 /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i
                     .test(bf.name)
             ) {
-
                 const ext =
                     bf.name
                         .split('.')
@@ -1124,7 +1113,6 @@ export default async function handler(req, res) {
             MODEL_NAME ===
             'gemini-3.5-flash-lite'
         ) {
-
             systemText = `
 تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
@@ -1157,7 +1145,6 @@ export default async function handler(req, res) {
             MODEL_NAME ===
             'gemini-3.6-flash'
         ) {
-
             systemText = `
 تو Virtual Bot 1.5 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
@@ -1188,7 +1175,6 @@ export default async function handler(req, res) {
             MODEL_NAME ===
             'gemini-3.1-pro-preview'
         ) {
-
             systemText = `
 تو Virtual Bot 1.3 هستی؛ یک دستیار هوش مصنوعی پیشرفته فارسی.
 
@@ -1216,7 +1202,6 @@ export default async function handler(req, res) {
 `;
 
         } else {
-
             systemText = `
 تو Virtual Bot هستی؛ یک دستیار هوش مصنوعی فارسی.
 
@@ -1245,7 +1230,6 @@ export default async function handler(req, res) {
         */
 
         if (textFiles.length > 0) {
-
             const fileNamesList =
                 textFiles
                     .map(
@@ -1322,7 +1306,6 @@ export default async function handler(req, res) {
         */
 
         if (wantsStream) {
-
             res.setHeader(
                 'Content-Type',
                 'text/event-stream; charset=utf-8'
@@ -1359,13 +1342,11 @@ export default async function handler(req, res) {
             for (
                 const currentModel of modelsToTry
             ) {
-
                 for (
                     let k = 0;
                     k < geminiKeys.length;
                     k++
                 ) {
-
                     if (
                         Date.now() >
                         overallDeadline
@@ -1377,7 +1358,6 @@ export default async function handler(req, res) {
                         geminiKeys[k];
 
                     try {
-
                         console.log(
                             `[stream] Trying model: ${currentModel} with Key #${k + 1}`
                         );
@@ -1395,7 +1375,6 @@ export default async function handler(req, res) {
                         let upstream;
 
                         try {
-
                             upstream =
                                 await fetch(
                                     `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`,
@@ -1422,7 +1401,6 @@ export default async function handler(req, res) {
                                             controller.signal
                                     }
                                 );
-
                         } finally {
                             clearTimeout(
                                 timeoutId
@@ -1433,7 +1411,6 @@ export default async function handler(req, res) {
                             !upstream.ok ||
                             !upstream.body
                         ) {
-
                             let errorBody =
                                 null;
 
@@ -1457,7 +1434,6 @@ export default async function handler(req, res) {
                         let buffer = '';
 
                         while (true) {
-
                             const {
                                 done,
                                 value
@@ -1483,7 +1459,6 @@ export default async function handler(req, res) {
                             for (
                                 const line of lines
                             ) {
-
                                 if (
                                     !line.startsWith(
                                         'data:'
@@ -1502,7 +1477,6 @@ export default async function handler(req, res) {
                                 }
 
                                 try {
-
                                     const parsed =
                                         JSON.parse(
                                             jsonStr
@@ -1516,7 +1490,6 @@ export default async function handler(req, res) {
                                         '';
 
                                     if (piece) {
-
                                         res.write(
                                             `data: ${JSON.stringify({
                                                 text: piece
@@ -1530,7 +1503,6 @@ export default async function handler(req, res) {
                                             res.flush();
                                         }
                                     }
-
                                 } catch (_) {}
                             }
                         }
@@ -1551,7 +1523,6 @@ export default async function handler(req, res) {
                         return res.end();
 
                     } catch (error) {
-
                         console.error(
                             `[stream] Error:`,
                             error?.message ||
@@ -1588,13 +1559,11 @@ export default async function handler(req, res) {
         for (
             const currentModel of modelsToTry
         ) {
-
             for (
                 let k = 0;
                 k < geminiKeys.length;
                 k++
             ) {
-
                 if (
                     Date.now() >
                     overallDeadline
@@ -1606,7 +1575,6 @@ export default async function handler(req, res) {
                     geminiKeys[k];
 
                 try {
-
                     console.log(
                         `Trying model: ${currentModel} with Key #${k + 1}`
                     );
@@ -1624,7 +1592,6 @@ export default async function handler(req, res) {
                     let response;
 
                     try {
-
                         response =
                             await fetch(
                                 `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`,
@@ -1651,7 +1618,6 @@ export default async function handler(req, res) {
                                         controller.signal
                                 }
                             );
-
                     } finally {
                         clearTimeout(
                             timeoutId
@@ -1662,7 +1628,6 @@ export default async function handler(req, res) {
                         await response.json();
 
                     if (!response.ok) {
-
                         console.warn(
                             `Model ${currentModel} failed:`,
                             data?.error?.message ||
@@ -1677,7 +1642,6 @@ export default async function handler(req, res) {
                     return res.status(200).json(data);
 
                 } catch (error) {
-
                     console.error(
                         `Error with model ${currentModel}:`,
                         error?.message ||
@@ -1699,7 +1663,6 @@ export default async function handler(req, res) {
         });
 
     } catch (globalError) {
-
         console.error(
             'Server Error:',
             globalError
@@ -1715,3 +1678,5 @@ export default async function handler(req, res) {
         });
     }
 }
+
+module.exports = handler;
