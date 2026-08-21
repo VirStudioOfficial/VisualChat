@@ -323,7 +323,7 @@ export default async function handler(req, res) {
 
 نام کاربر: "${userName || 'دوست من'}" است.`;
 
-        } else if (MODEL_NAME === 'gemini-3.1-pro') {
+        } else if (MODEL_NAME === 'gemini-3.1-pro-preview') {
 
             systemText = `تو Virtual Bot 1.3 هستی؛ یک دستیار هوش مصنوعی پیشرفته فارسی.
 
@@ -401,7 +401,7 @@ export default async function handler(req, res) {
 
         // ===== CHANGE 2: Fixed fallback order =====
         const modelsToTry = [MODEL_NAME];
-        if (MODEL_NAME === 'gemini-3.1-pro') {
+        if (MODEL_NAME === 'gemini-3.1-pro-preview') {
             modelsToTry.push('gemini-3.6-flash');
             modelsToTry.push('gemini-3.5-flash-lite');
         }
