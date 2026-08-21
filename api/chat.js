@@ -1401,8 +1401,15 @@ async function handler(req, res) {
                 res.flushHeaders();
             }
 
+            // FIX: 60s was a hard ceiling on the *whole* streaming attempt
+            // (checked only between model/key retries, not during an
+            // in-progress stream). For heavy replies — long code files,
+            // multi-file edits — Gemini can legitimately take longer than
+            // that just to finish one stream, and this file already has no
+            // per-chunk timeout, so raising the deadline doesn't reduce
+            // safety, it just stops penalizing large-but-healthy streams.
             const overallDeadline =
-                Date.now() + 60000;
+                Date.now() + 180000;
 
             let lastError = null;
 
@@ -1512,6 +1519,19 @@ async function handler(req, res) {
 
                         let buffer = '';
 
+                        // FIX: previously the only signal sent to the client
+                        // was raw text chunks + a bare {done:true} at the
+                        // end — Gemini's own finishReason (STOP / MAX_TOKENS
+                        // / SAFETY / ...) was read from the SSE payload but
+                        // never looked at, so a reply cut short because it
+                        // hit the output-token cap looked identical to a
+                        // normal, complete reply. That's the "heavy code
+                        // silently stops mid-file" symptom. We track the
+                        // last seen finishReason and forward it on {done}
+                        // so the frontend can offer a real "ادامه بده" action
+                        // instead of just showing a truncated answer.
+                        let lastFinishReason = null;
+
                         while (true) {
                             const {
                                 done,
@@ -1561,12 +1581,23 @@ async function handler(req, res) {
                                             jsonStr
                                         );
 
-                                    const piece =
+                                    const candidate =
                                         parsed
-                                            ?.candidates?.[0]
+                                            ?.candidates?.[0];
+
+                                    const piece =
+                                        candidate
                                             ?.content?.parts?.[0]
                                             ?.text ||
                                         '';
+
+                                    if (
+                                        candidate &&
+                                        candidate.finishReason
+                                    ) {
+                                        lastFinishReason =
+                                            candidate.finishReason;
+                                    }
 
                                     if (piece) {
                                         res.write(
@@ -1586,11 +1617,25 @@ async function handler(req, res) {
                             }
                         }
 
+                        // truncated=true tells the client the model was cut
+                        // off by its own output-token limit (not an error,
+                        // not the user pressing Stop) so it can offer to
+                        // continue instead of treating the reply as final.
+                        const truncated =
+                            lastFinishReason === 'MAX_TOKENS';
+
                         res.write(
                             `data: ${JSON.stringify({
-                                done: true
+                                done: true,
+                                finishReason: lastFinishReason,
+                                truncated
                             })}\n\n`
                         );
+
+                        log.info('request.finish_reason', {
+                            model: currentModel,
+                            finishReason: lastFinishReason || 'unknown'
+                        });
 
                         if (
                             typeof res.flush ===
