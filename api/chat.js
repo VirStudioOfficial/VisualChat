@@ -428,9 +428,10 @@ export default async function handler(req, res) {
                     try {
                         console.log(`[stream] Trying model: ${currentModel} with Key #${k + 1}`);
 
-                        // ===== FIX: hard timeout so a slow/dead key doesn't stall a simple reply =====
+                        // ===== FIX: timeout guards only the connection phase (not the full
+                        // streamed reply), so a slow-but-working model isn't cut off mid-answer =====
                         const streamController = new AbortController();
-                        const streamTimeoutId = setTimeout(() => streamController.abort(), 12000);
+                        const streamTimeoutId = setTimeout(() => streamController.abort(), 20000);
                         let upstream;
                         try {
                             upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`, {
@@ -513,7 +514,7 @@ export default async function handler(req, res) {
 
                     // ===== FIX: hard timeout so a slow/dead key doesn't stall a simple reply =====
                     const genController = new AbortController();
-                    const genTimeoutId = setTimeout(() => genController.abort(), 12000);
+                    const genTimeoutId = setTimeout(() => genController.abort(), 20000);
                     let response;
                     try {
                         response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
