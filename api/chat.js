@@ -59,7 +59,7 @@ async function fetchTavilyResults(query, tavilyKeys) {
     return null;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -73,269 +73,6 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { userName, text, rawText, file, webSearch, history, model } = req.body || {};
-        const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : (text || "");
-
-        const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-        const geminiKeys = rawGeminiKeys.split(',').map(k => k.trim()).filter(Boolean);
-
-        const rawTavilyKeys = process.env.TAVILY_API_KEYS || process.env.TAVILY_API_KEY || "";
-        const tavilyKeys = rawTavilyKeys.split(',').map(k => k.trim()).filter(Boolean);
-
-        if (geminiKeys.length === 0) {
-            return res.status(400).json({ error: { message: 'هیچ کلید Gemini API تنظیم نشده است!' } });
-        }
-
-        let contents = [];
-
-        if (history && Array.isArray(history) && history.length > 0) {
-            contents = history.map(item => ({
-                role: item.role === 'user' ? 'user' : 'model',
-                parts: [{ text: String(item.text || item.content || "") }]
-            }));
-        } else if (searchQueryBase) {
-            contents.push({
-                role: 'user',
-                parts: [{ text: searchQueryBase }]
-            });
-        }
-
-        if (contents.length === 0) {
-            return res.status(400).json({ error: { message: 'متن ورودی خالی است.' } });
-        }
-
-        // سرچ کاملاً خودکار شد: دیگه به وضعیت دکمه (webSearch) وابسته نیست،
-        // فقط بر اساس محتوای خود پیام تصمیم می‌گیره که جستجو لازمه یا نه.
-        const isSearchNeeded = shouldSearchWeb(searchQueryBase);
-        res.setHeader('X-Search-Performed', String(isSearchNeeded));
-
-        if (isSearchNeeded && searchQueryBase) {
-            console.log(`Executing Tavily Search for: "${searchQueryBase}"`);
-            const searchResults = await fetchTavilyResults(searchQueryBase, tavilyKeys);
-            const lastIndex = contents.length - 1;
-
-            if (searchResults && lastIndex >= 0 && contents[lastIndex].role === 'user') {
-                const textPart = contents[lastIndex].parts.find(p => p.text !== undefined);
-                if (textPart) {
-                    textPart.text += `\n\n[نتایج جستجوی وب]:\n${searchResults}\n\n[دستورالعمل: با کمک اطلاعات فوق پاسخ دقیق و به روز ارائه بده.]`;
-                } else {
-                    contents[lastIndex].parts.push({
-                        text: `\n\n[نتایج جستجوی وب]:\n${searchResults}\n\n[دستورالعمل: با کمک اطلاعات فوق پاسخ دقیق و به روز ارائه بده.]`
-                    });
-                }
-            }
-        }
-
-        // پشتیبانی از چند فایل هم‌زمان: فرانت‌اند می‌تواند `files` (آرایه) یا `file`
-        // (یک شیء تکی، برای سازگاری با نسخه‌های قبلی) بفرستد.
-        const incomingFiles = Array.isArray(req.body?.files) ? req.body.files : (file ? [file] : []);
-        const textFiles = incomingFiles.filter(f => f && f.mode === 'text' && typeof f.content === 'string');
-        const binaryFiles = incomingFiles.filter(f => f && f.base64);
-
-        if (textFiles.length > 0 && contents.length > 0) {
-            const lastIndex = contents.length - 1;
-            if (contents[lastIndex].role === 'user') {
-                const textPart = contents[lastIndex].parts.find(p => p.text !== undefined);
-                const fileBlocks = textFiles.map(f =>
-                    `\n\n[محتوای فایل: ${f.name || 'file'}]\n\`\`\`\n${f.content}\n\`\`\`\n[پایان محتوای فایل: ${f.name || 'file'}]`
-                ).join('');
-                if (textPart) {
-                    textPart.text += fileBlocks;
-                } else {
-                    contents[lastIndex].parts.push({ text: fileBlocks });
-                }
-            }
-        }
-
-        for (const bf of binaryFiles) {
-            const lastIndex = contents.length - 1;
-            if (lastIndex < 0 || contents[lastIndex].role !== 'user') break;
-
-            const base64Data = bf.base64.includes(',') ? bf.base64.split(',')[1] : bf.base64;
-            let mimeType = bf.type || 'image/jpeg';
-
-            if (bf.name && /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(bf.name)) {
-                const ext = bf.name.split('.').pop().toLowerCase();
-                const mimeMap = {
-                    'mp4': 'video/mp4',
-                    'mov': 'video/quicktime',
-                    'webm': 'video/webm',
-                    'avi': 'video/x-msvideo',
-                    'mpeg': 'video/mpeg',
-                    'wmv': 'video/x-ms-wmv',
-                    '3gpp': 'video/3gpp',
-                    'flv': 'video/x-flv',
-                    'mkv': 'video/x-matroska'
-                };
-                mimeType = mimeMap[ext] || 'video/mp4';
-                console.log('Video detected:', bf.name, '->', mimeType);
-            }
-
-            contents[lastIndex].parts.push({
-                inline_data: { mime_type: mimeType, data: base64Data }
-            });
-        }
-
-
-        const MODEL_NAME = model || 'gemini-3.5-flash-lite';
-        const wantsStream = req.body?.stream === true || req.body?.stream === 'true';
-        console.log(`Using model: ${MODEL_NAME}`);
-        let lastError = null;
-
-        if (MODEL_NAME.includes('imagen')) {
-            for (let k = 0; k < geminiKeys.length; k++) {
-                const currentKey = geminiKeys[k];
-                try {
-                    console.log(`[Imagen] Generating image with Key #${k + 1}`);
-                    const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateImages`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': currentKey
-                        },
-                        body: JSON.stringify({
-                            prompt: searchQueryBase,
-                            config: { numberOfImages: 1, outputMimeType: 'image/jpeg' }
-                        })
-                    });
-
-                    const imgData = await imgRes.json();
-                    if (!imgRes.ok) {
-                        console.warn(`[Imagen] Key #${k + 1} failed:`, imgData?.error?.message || imgRes.statusText);
-                        lastError = imgData;
-                        continue;
-                    }
-
-                    const base64Img = imgData?.generatedImages?.[0]?.image?.imageBytes;
-                    if (base64Img) {
-                        const imgMarkdown = `![${searchQueryBase}](data:image/jpeg;base64,${base64Img})`;
-                        if (wantsStream) {
-                            res.write(`data: ${JSON.stringify({ text: imgMarkdown })}\n\n`);
-                            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-                            return res.end();
-                        } else {
-                            return res.status(200).json({
-                                candidates: [{ content: { parts: [{ text: imgMarkdown }] } }]
-                            });
-                        }
-                    }
-                } catch (err) {
-                    console.error(`[Imagen] Error with Key #${k + 1}:`, err?.message || err);
-                    lastError = err;
-                }
-            }
-        }
-
-        let systemText = '';
-
-        // این خط به تنهایی جلوی باگی رو می‌گیره که مدل خودش وسط یه پاسخ عادی،
-        // بدون این‌که کاربر پرسیده باشه، سوال «مدلت چیه؟» رو از خودش می‌پرسه و
-        // جواب می‌ده. روی هیچ‌کدوم از چهار شخصیت زیر تغییری نمی‌ده، فقط اضافه میشه.
-        const antiSelfQA = `\n\nقانون سخت‌گیرانه: جمله‌ی معرفی مدل («من Virtual Bot ... هستم») را فقط و فقط زمانی بنویس که خودِ کاربر همین الان مستقیم پرسیده باشد «مدلت چیه» یا سؤال هم‌معنی. هرگز خودت این سؤال را از زبان خودت مطرح نکن و هرگز بدون این‌که کاربر پرسیده باشد، جمله‌ی معرفی مدل را در وسط یا انتهای یک پاسخ دیگر نیاور، حتی به‌شکل مثال، یادآوری یا توضیح داخلی.`;
-
-        if (MODEL_NAME === 'gemini-3.5-flash-lite') {
-            systemText = `تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
-
-هویت:
-- این یک قانون پاسخ‌دهی است، نه یک جمله برای گفتن یا تکرار خودجوش: فقط وقتی و فقط وقتی کاربر مستقیماً بپرسد «مدلت چیه؟» یا سؤال مشابه، دقیقاً همین را بگو: «من Virtual Bot 1.1 هستم.» هرگز خودت این سؤال را از خودت نپرس و هرگز بدون این‌که کاربر واقعاً پرسیده باشد، این جمله را وسط پاسخ دیگری نیاور.
-- هرگز خودت را Virtual Bot 1.3 یا Virtual Bot 1.5 معرفی نکن.
-- هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
-- اگر درباره سازنده پرسید و اطلاعات مشخصی در اختیار تو قرار نگرفته، بگو: «اطلاعات دقیقی از سازنده یا تیم سازنده‌ام در اختیارم نیست.»
-- درباره هویت، توانایی‌ها یا اطلاعاتی که نمی‌دانی چیزی از خودت نساز.
-- خودت را Gemini معرفی نکن و ادعای ساختگی درباره سیستم پشت‌صحنه نداشته باش.
-- برای سؤال‌های ساده، مستقیم و کوتاه جواب بده.
-- برای جواب‌های طولانی، پاسخ را مرتب و بخش‌بندی‌شده بنویس.
-- در صورت نیاز از تیترهای کوتاه استفاده کن.
-- بین پاراگراف‌ها فاصله مناسب بگذار.
-- از لیست‌ها در جای مناسب استفاده کن.
-- یک دیوار بزرگ و فشرده از متن تولید نکن.
-- اطلاعات را بی‌دلیل تکرار نکن.
-- اگر مطمئن نیستی، حدس را به‌عنوان واقعیت بیان نکن.
-- اگر اطلاعات جستجوی وب در اختیار تو قرار گرفته، برای پاسخ‌های به‌روز از آن استفاده کن.
-
-نام کاربر: "${userName || 'دوست من'}" است.`;
-        } else if (MODEL_NAME === 'gemini-3.6-flash') {
-
-            systemText = `تو Virtual Bot 1.5 هستی؛ یک دستیار هوش مصنوعی فارسی.
-
-هویت:
-- این یک قانون پاسخ‌دهی است، نه یک جمله برای گفتن یا تکرار خودجوش: فقط وقتی و فقط وقتی کاربر مستقیماً بپرسد «مدلت چیه؟» یا سؤال مشابه، دقیقاً همین را بگو: «من Virtual Bot 1.5 هستم.» هرگز خودت این سؤال را از خودت نپرس و هرگز بدون این‌که کاربر واقعاً پرسیده باشد، این جمله را وسط پاسخ دیگری نیاور.
-// pages/api/chat.js
-
-function shouldSearchWeb(userText) {
-    if (!userText || typeof userText !== 'string') return false;
-
-    const cleanText = userText.trim().toLowerCase();
-    if (cleanText.length < 3) return false;
-
-    const ignoreList = [
-        'سلام', 'سلامم', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'عصر بخیر',
-        'شب بخیر', 'ممنون', 'مرسی', 'چخبر', 'خداحافظ', 'بای', 'اوکی', 'باشه'
-    ];
-
-    const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
-    const words = normalized.split(/\s+/).filter(Boolean);
-    const firstWord = words[0];
-
-    if (words.length <= 3 && (ignoreList.includes(normalized) || ignoreList.includes(firstWord))) {
-        return false;
-    }
-
-    const allowedKeywords = [
-        'سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن',
-        'قیمت', 'چنده', 'نرخ', 'دلار', 'طلا', 'سکه', 'ارز', 'بیت کوین', 'پلی استیشن',
-        'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید', 'امشب', 'آخرین', 'جدیدترین', 'امروز'
-    ];
-
-    return allowedKeywords.some(kw => normalized.includes(kw));
-}
-
-async function fetchTavilyResults(query, tavilyKeys) {
-    if (!tavilyKeys || tavilyKeys.length === 0) return null;
-
-    for (let i = 0; i < tavilyKeys.length; i++) {
-        const currentKey = tavilyKeys[i];
-        try {
-            const res = await fetch('https://api.tavily.com/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    api_key: currentKey,
-                    query: query,
-                    search_depth: "basic",
-                    max_results: 4
-                })
-            });
-
-            if (!res.ok) continue;
-
-            const data = await res.json();
-            if (data.results && data.results.length > 0) {
-                console.log(`Tavily search succeeded using Key #${i + 1}`);
-                return data.results.map(r => `عنوان: ${r.title}\nمنبع: ${r.url}\nمحتوا: ${r.content}`).join("\n\n---\n\n");
-            }
-        } catch (e) {
-            console.error(`Error with Tavily Key #${i + 1}:`, e?.message || e);
-        }
-    }
-    return null;
-}
-
-export default async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: { message: 'متد درخواست پشتیبانی نمی‌شود.' } });
-    }
-
-    try {
-        // ===== CHANGE 1: wantsStream defined simply and correctly =====
         const wantsStream = req.body?.stream === true || req.body?.stream === 'true';
 
         const { userName, text, rawText, file, webSearch, history, model } = req.body || {};
@@ -369,8 +106,11 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: { message: 'متن ورودی خالی است.' } });
         }
 
-        // سرچ کاملاً خودکار شد: دیگه به وضعیت دکمه (webSearch) وابسته نیست،
-        // فقط بر اساس محتوای خود پیام تصمیم می‌گیره که جستجو لازمه یا نه.
+        // File detection - moved before Imagen
+        const incomingFiles = Array.isArray(req.body?.files) ? req.body.files : (file ? [file] : []);
+        const textFiles = incomingFiles.filter(f => f && f.mode === 'text' && typeof f.content === 'string');
+        const binaryFiles = incomingFiles.filter(f => f && f.base64);
+
         const isSearchNeeded = shouldSearchWeb(searchQueryBase);
         res.setHeader('X-Search-Performed', String(isSearchNeeded));
 
@@ -391,13 +131,7 @@ export default async function handler(req, res) {
             }
         }
 
-        // ===== CHANGE 6: Improved file detection =====
-        // پشتیبانی از چند فایل هم‌زمان: فرانت‌اند می‌تواند `files` (آرایه) یا `file`
-        // (یک شیء تکی، برای سازگاری با نسخه‌های قبلی) بفرستد.
-        const incomingFiles = Array.isArray(req.body?.files) ? req.body.files : (file ? [file] : []);
-        const textFiles = incomingFiles.filter(f => f && f.mode === 'text' && typeof f.content === 'string');
-        const binaryFiles = incomingFiles.filter(f => f && f.base64);
-
+        // Add text files content to user message
         if (textFiles.length > 0 && contents.length > 0) {
             const lastIndex = contents.length - 1;
             if (contents[lastIndex].role === 'user') {
@@ -413,6 +147,7 @@ export default async function handler(req, res) {
             }
         }
 
+        // Add binary files (images/videos) to user message
         for (const bf of binaryFiles) {
             const lastIndex = contents.length - 1;
             if (lastIndex < 0 || contents[lastIndex].role !== 'user') break;
@@ -441,7 +176,6 @@ export default async function handler(req, res) {
                 inline_data: { mime_type: mimeType, data: base64Data }
             });
         }
-
 
         const MODEL_NAME = model || 'gemini-3.5-flash-lite';
         console.log(`Using model: ${MODEL_NAME}`);
@@ -475,7 +209,6 @@ export default async function handler(req, res) {
                     if (base64Img) {
                         const imgMarkdown = `![${searchQueryBase}](data:image/jpeg;base64,${base64Img})`;
                         if (wantsStream) {
-                            // ===== CHANGE 4: flushHeaders at start of streaming =====
                             res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
                             res.setHeader('Cache-Control', 'no-cache, no-transform');
                             res.setHeader('Connection', 'keep-alive');
@@ -483,7 +216,6 @@ export default async function handler(req, res) {
                             if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
                             res.write(`data: ${JSON.stringify({ text: imgMarkdown })}\n\n`);
-                            // ===== CHANGE 5: flush after each write =====
                             if (typeof res.flush === 'function') res.flush();
                             res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
                             if (typeof res.flush === 'function') res.flush();
@@ -503,10 +235,8 @@ export default async function handler(req, res) {
 
         let systemText = '';
 
-        // ===== CHANGE 8: antiSelfQA preserved exactly =====
         const antiSelfQA = `\n\nقانون سخت‌گیرانه: جمله‌ی معرفی مدل («من Virtual Bot ... هستم») را فقط و فقط زمانی بنویس که خودِ کاربر همین الان مستقیم پرسیده باشد «مدلت چیه» یا سؤال هم‌معنی. هرگز خودت این سؤال را از زبان خودت مطرح نکن و هرگز بدون این‌که کاربر پرسیده باشد، جمله‌ی معرفی مدل را در وسط یا انتهای یک پاسخ دیگر نیاور، حتی به‌شکل مثال، یادآوری یا توضیح داخلی.`;
 
-        // ===== CHANGE 7: All System Prompts preserved exactly =====
         if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 
             systemText = `تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
@@ -627,9 +357,7 @@ export default async function handler(req, res) {
 
         systemText += antiSelfQA;
 
-        // ===== CHANGE 9: File edit mode preserved =====
-        // این بلاک فقط وقتی به systemText اضافه می‌شود که کاربر حداقل یک فایل کد/متنی
-        // ضمیمه کرده باشد؛ روی هیچ پیام دیگری تاثیر ندارد و شخصیت/لحن هر مدل دست‌نخورده می‌ماند.
+        // File edit mode
         if (Array.isArray(textFiles) && textFiles.length > 0) {
             const fileNamesList = textFiles.map(f => `«${f.name || 'file'}»`).join('، ');
             systemText += `\n\nحالت ویرایش فایل (بسیار مهم، دقیق رعایت شود):
@@ -650,7 +378,7 @@ export default async function handler(req, res) {
 - خارج از این بلاک، هرگز کد کامل هیچ فایلی را دوباره چاپ نکن.`;
         }
 
-        // ===== CHANGE 2: Fixed fallback order =====
+        // Fallback order
         const modelsToTry = [MODEL_NAME];
         if (MODEL_NAME === 'gemini-3.1-pro') {
             modelsToTry.push('gemini-3-flash');
@@ -660,24 +388,13 @@ export default async function handler(req, res) {
             modelsToTry.push('gemini-3.5-flash-lite');
         }
 
-        // Streaming path: proxies Gemini's streamGenerateContent (SSE) straight
-        // through to the client as it arrives, so the reply appears word-by-word
-        // instead of waiting for the full response. Falls back across
-        // models/keys just like the non-streaming path, but only before any
-        // bytes have been sent to the client (status is known before the body
-        // starts, so a failed attempt can still be retried with the next key).
+        // Streaming path
         if (wantsStream) {
             res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
             res.setHeader('Cache-Control', 'no-cache, no-transform');
             res.setHeader('Connection', 'keep-alive');
-            // Prevents Vercel's edge/proxy layer (and any nginx-like layer)
-            // from buffering the whole response before sending it to the
-            // client — without this, res.write() calls only reach the
-            // browser after res.end(), so the reply looks like it "pops in"
-            // instead of streaming in gradually.
             res.setHeader('X-Accel-Buffering', 'no');
             res.setHeader('X-Search-Performed', String(isSearchNeeded));
-            // ===== CHANGE 4: flushHeaders at start of streaming =====
             if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
             for (const currentModel of modelsToTry) {
@@ -706,18 +423,15 @@ export default async function handler(req, res) {
                             continue;
                         }
 
-                        // We have a good upstream connection — relay chunks as they arrive.
                         const reader = upstream.body.getReader();
                         const decoder = new TextDecoder();
                         let buffer = '';
-                        // ===== CHANGE: removed unused sentAny =====
 
                         while (true) {
                             const { done, value } = await reader.read();
                             if (done) break;
                             buffer += decoder.decode(value, { stream: true });
 
-                            // ===== CHANGE 3: Improved buffer management =====
                             const lines = buffer.split('\n');
                             buffer = lines.pop();
 
@@ -730,7 +444,6 @@ export default async function handler(req, res) {
                                     const piece = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || '';
                                     if (piece) {
                                         res.write(`data: ${JSON.stringify({ text: piece })}\n\n`);
-                                        // ===== CHANGE 5: flush after each write =====
                                         if (typeof res.flush === 'function') res.flush();
                                     }
                                 } catch (_) { /* ignore partial/malformed lines */ }
@@ -753,6 +466,7 @@ export default async function handler(req, res) {
             return res.end();
         }
 
+        // Non-streaming path
         for (const currentModel of modelsToTry) {
             for (let k = 0; k < geminiKeys.length; k++) {
                 const currentKey = geminiKeys[k];
@@ -802,156 +516,5 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: { message: 'خطای داخلی سرور', details: globalError.message } });
     }
 }
-        }
 
-        const modelsToTry = [MODEL_NAME];
-        if (MODEL_NAME === 'gemini-3.1-pro') {
-            modelsToTry.push('gemini-3-flash');
-            modelsToTry.push('gemini-3.5-flash-lite');
-        }
-        if (MODEL_NAME === 'gemini-3.6-flash') {
-            modelsToTry.push('gemini-3.5-flash-lite');
-        }
-
-        // Streaming path: proxies Gemini's streamGenerateContent (SSE) straight
-        // through to the client as it arrives, so the reply appears word-by-word
-        // instead of waiting for the full response. Falls back across
-        // models/keys just like the non-streaming path, but only before any
-        // bytes have been sent to the client (status is known before the body
-        // starts, so a failed attempt can still be retried with the next key).
-        const wantsStream = req.body?.stream === true || req.body?.stream === 'true';
-
-        if (wantsStream) {
-            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-            res.setHeader('Cache-Control', 'no-cache, no-transform');
-            res.setHeader('Connection', 'keep-alive');
-            // Prevents Vercel's edge/proxy layer (and any nginx-like layer)
-            // from buffering the whole response before sending it to the
-            // client — without this, res.write() calls only reach the
-            // browser after res.end(), so the reply looks like it "pops in"
-            // instead of streaming in gradually.
-            res.setHeader('X-Accel-Buffering', 'no');
-            res.setHeader('X-Search-Performed', String(isSearchNeeded));
-            if (typeof res.flushHeaders === 'function') res.flushHeaders();
-
-            for (const currentModel of modelsToTry) {
-                for (let k = 0; k < geminiKeys.length; k++) {
-                    const currentKey = geminiKeys[k];
-                    try {
-                        console.log(`[stream] Trying model: ${currentModel} with Key #${k + 1}`);
-
-                        const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'x-goog-api-key': currentKey
-                            },
-                            body: JSON.stringify({
-                                system_instruction: { parts: [{ text: systemText }] },
-                                contents: contents
-                            })
-                        });
-
-                        if (!upstream.ok || !upstream.body) {
-                            let errBody = null;
-                            try { errBody = await upstream.json(); } catch (_) {}
-                            console.warn(`[stream] Model ${currentModel} with Key #${k + 1} failed:`, errBody?.error?.message || upstream.statusText);
-                            lastError = errBody;
-                            continue;
-                        }
-
-                        // We have a good upstream connection — relay chunks as they arrive.
-                        const reader = upstream.body.getReader();
-                        const decoder = new TextDecoder();
-                        let buffer = '';
-                        let sentAny = false;
-
-                        while (true) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-                            buffer += decoder.decode(value, { stream: true });
-
-                            const lines = buffer.split('\n');
-                            buffer = lines.pop();
-
-                            for (const line of lines) {
-                                if (!line.startsWith('data:')) continue;
-                                const jsonStr = line.slice(5).trim();
-                                if (!jsonStr) continue;
-                                try {
-                                    const parsed = JSON.parse(jsonStr);
-                                    const piece = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                                    if (piece) {
-                                        sentAny = true;
-                                        res.write(`data: ${JSON.stringify({ text: piece })}\n\n`);
-                                        // Force the chunk out immediately instead of letting
-                                        // Node/Vercel batch it with the next write.
-                                        if (typeof res.flush === 'function') res.flush();
-                                    }
-                                } catch (_) { /* ignore partial/malformed lines */ }
-                            }
-                        }
-
-                        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-                        return res.end();
-
-                    } catch (err) {
-                        console.error(`[stream] Error with model ${currentModel} and Key #${k + 1}:`, err?.message || err);
-                        lastError = err;
-                    }
-                }
-            }
-
-            res.write(`data: ${JSON.stringify({ error: 'خطا در دریافت پاسخ از تمامی مدل‌ها و کلیدها' })}\n\n`);
-            return res.end();
-        }
-
-        for (const currentModel of modelsToTry) {
-            for (let k = 0; k < geminiKeys.length; k++) {
-                const currentKey = geminiKeys[k];
-                try {
-                    console.log(`Trying model: ${currentModel} with Key #${k + 1}`);
-                    
-                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': currentKey
-                        },
-                        body: JSON.stringify({
-                            system_instruction: {
-                                parts: [{ text: systemText }]
-                            },
-                            contents: contents
-                        })
-                    });
-
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        console.warn(`Model ${currentModel} with Key #${k + 1} failed:`, data?.error?.message || response.statusText);
-                        lastError = data;
-                        continue;
-                    }
-
-                    return res.status(200).json(data);
-
-                } catch (err) {
-                    console.error(`Error with model ${currentModel} and Key #${k + 1}:`, err?.message || err);
-                    lastError = err;
-                }
-            }
-        }
-
-        return res.status(500).json({
-            error: {
-                message: `خطا در دریافت پاسخ از تمامی مدل‌ها و کلیدها`,
-                details: lastError
-            }
-        });
-
-    } catch (globalError) {
-        console.error("Server Error:", globalError);
-        return res.status(500).json({ error: { message: 'خطای داخلی سرور', details: globalError.message } });
-    }
-}
+module.exports = handler;
