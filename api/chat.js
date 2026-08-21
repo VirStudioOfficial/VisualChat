@@ -84,7 +84,14 @@ export default async function handler(req, res) {
         const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : (text || "");
 
         const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-        const geminiKeys = rawGeminiKeys.split(',').map(k => k.trim()).filter(Boolean);
+        // ===== FIX: shuffle key order per-request. Without this, the same key(s)
+        // always sit first in the list and eat the timeout budget first on every
+        // single request if they happen to be slow/rate-limited, starving keys
+        // further down the list that might actually work right now. =====
+        const geminiKeys = rawGeminiKeys.split(',').map(k => k.trim()).filter(Boolean)
+            .map(k => ({ k, sort: Math.random() }))
+            .sort((a, b) => a.sort - b.sort)
+            .map(({ k }) => k);
 
         const rawTavilyKeys = process.env.TAVILY_API_KEYS || process.env.TAVILY_API_KEY || "";
         const tavilyKeys = rawTavilyKeys.split(',').map(k => k.trim()).filter(Boolean);
@@ -422,13 +429,14 @@ export default async function handler(req, res) {
             // ===== CHANGE 4: flushHeaders at start of streaming =====
             if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
-            // ===== FIX: shared deadline across the whole model/key loop =====
-            // Individual per-attempt timeouts weren't enough: with 10+ keys, several
-            // failing on quota/high-demand back to back could still add up to a long
-            // wait before the client ever sees an error. This caps the ENTIRE search
-            // for a working key/model at 25s total, so the user always gets a fast
-            // reply either way.
-            const overallDeadline = Date.now() + 25000;
+            // ===== FIX: overall deadline raised so it doesn't cut off a large key
+            // pool early. With 12 keys, each allowed up to 8s to fail/succeed, the
+            // worst case (several genuinely slow keys before a working one) can
+            // exceed a short shared budget and cause the loop to give up before ever
+            // reaching keys further down the list. 45s keeps the response snappy for
+            // the common case (quota errors return in under a second) while still
+            // giving every key in a large pool a real chance. =====
+            const overallDeadline = Date.now() + 45000;
 
             outerLoop:
             for (const currentModel of modelsToTry) {
@@ -519,7 +527,7 @@ export default async function handler(req, res) {
         }
 
         // ===== FIX: same shared deadline for the non-streaming path =====
-        const overallDeadlineNonStream = Date.now() + 25000;
+        const overallDeadlineNonStream = Date.now() + 45000;
 
         outerLoopNonStream:
         for (const currentModel of modelsToTry) {
