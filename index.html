@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Virtual Chat</title>
+    <link id="dynamicFavicon" rel="icon" type="image/png" href="">
+
     <script>
         (function () {
             try {
@@ -2393,6 +2395,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             actionIcon.className = "fa-solid fa-paper-plane";
             actionBtn.title = "ارسال";
         }
+
+        // آیکون تب مرورگر رو هم به‌روزرسانی کن: قرمز = در حال پاسخ/کدنویسی، سبز = تمام شد.
+        if (typeof updateFaviconStatus === 'function') updateFaviconStatus(generating);
     }
 
     function stopGeneration() {
@@ -3875,6 +3880,107 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         window.addEventListener('online', updateStatus);
         window.addEventListener('offline', updateStatus);
         if (!navigator.onLine) updateStatus();
+    })();
+
+    // ===== Dynamic favicon (globe icon + status dot) =====
+    // Draws a small "globe" favicon on a canvas (site never had a real
+    // favicon file), then updates it with a colored status dot: red while
+    // the bot is generating a reply / writing code, green when it's idle
+    // and done. Rebuilt with the site's own accent colors so it matches
+    // whatever theme/palette the user has picked (see the inline theme
+    // script at the very top of <head>).
+    (function setupDynamicFavicon() {
+        const link = document.getElementById('dynamicFavicon');
+        if (!link) return;
+
+        const SIZE = 64;
+        const canvas = document.createElement('canvas');
+        canvas.width = SIZE; canvas.height = SIZE;
+        const ctx = canvas.getContext('2d');
+
+        function cssVar(name, fallback) {
+            const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+            return v || fallback;
+        }
+
+        function drawGlobe(ctx) {
+            const c1 = cssVar('--accent-1', '#8b5cf6');
+            const c2 = cssVar('--accent-2', '#22d3ee');
+            const cx = SIZE / 2, cy = SIZE / 2, r = SIZE / 2 - 3;
+
+            const grad = ctx.createLinearGradient(0, 0, SIZE, SIZE);
+            grad.addColorStop(0, c1);
+            grad.addColorStop(1, c2);
+
+            // Globe body
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            // Latitude/longitude lines to read clearly as a globe at 16x16.
+            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.moveTo(cx - r, cy);
+            ctx.lineTo(cx + r, cy);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, r * 0.42, r, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - r);
+            ctx.lineTo(cx, cy + r);
+            ctx.stroke();
+        }
+
+        function drawStatusDot(ctx, color) {
+            if (!color) return;
+            const r = SIZE * 0.16;
+            const cx = SIZE - r - 2, cy = SIZE - r - 2;
+
+            // White ring around the dot so it stays visible against any
+            // globe color and any browser tab background (light/dark).
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        // color: null = no dot (initial load), '#f87171' red = generating,
+        // '#34d399' green = idle/done.
+        function render(color) {
+            ctx.clearRect(0, 0, SIZE, SIZE);
+            drawGlobe(ctx);
+            drawStatusDot(ctx, color);
+            link.href = canvas.toDataURL('image/png');
+        }
+
+        let idleHideTimer = null;
+
+        window.updateFaviconStatus = function (generating) {
+            clearTimeout(idleHideTimer);
+            if (generating) {
+                render(cssVar('--danger', '#f87171'));
+            } else {
+                render(cssVar('--success', '#34d399'));
+                // The green "done" dot fades back to a plain globe after a
+                // bit, so the icon doesn't look permanently "flagged" once
+                // the user has clearly seen the reply finished.
+                idleHideTimer = setTimeout(() => render(null), 4000);
+            }
+        };
+
+        // Plain globe on first load, before any message has been sent.
+        render(null);
     })();
 
 </script>
