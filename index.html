@@ -765,7 +765,7 @@
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.65);
             backdrop-filter: blur(6px);
-            z-index: 40;
+            z-index: 64;
         }
         .settings-overlay.active { display: block; }
 
@@ -781,7 +781,7 @@
             border: 1px solid var(--border-soft);
             border-radius: 20px;
             padding: 22px;
-            z-index: 41;
+            z-index: 65;
             box-shadow: 0 20px 60px var(--shadow-b);
             overflow-y: auto;
         }
@@ -791,12 +791,12 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 20px;
+            margin: -22px -22px 20px -22px;
+            padding: 22px 22px 10px 22px;
             position: sticky;
-            top: 0;
+            top: -22px;
             background: var(--bg-sidebar);
             z-index: 2;
-            padding-bottom: 10px;
             border-bottom: 1px solid var(--border-soft);
         }
         .settings-header h2 { font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
@@ -1667,6 +1667,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     });
 
     function openSettings() {
+        document.getElementById('chatSearchPanel')?.classList.remove('active');
         renderSettingsUI(getSettings());
         document.getElementById('settingsOverlay').classList.add('active');
         document.getElementById('settingsModal').classList.add('active');
