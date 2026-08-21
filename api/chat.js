@@ -185,61 +185,12 @@ function shouldGenerateImage(userText) {
 
     if (!text || text.length < 3) return false;
 
-    const imageKeywords = [
-        // فارسی
-        'تصویر بساز',
-        'تصویر درست کن',
-        'تصویر ایجاد کن',
-        'عکس بساز',
-        'عکس درست کن',
-        'عکس ایجاد کن',
-        'عکس تولید کن',
-        'تصویر تولید کن',
-        'تصویرسازی کن',
-        'تصویر سازی کن',
-        'تصویرسازی',
-        'تصویر سازی',
-        'ایمیج بساز',
-        'ایمیج درست کن',
-        'ایمیج تولید کن',
-        'عکس بده',
-        'تصویر بده',
-        'یه عکس',
-        'یک عکس',
-        'یه تصویر',
-        'یک تصویر',
-        'برام عکس بساز',
-        'برام تصویر بساز',
-        'برای من عکس بساز',
-        'برای من تصویر بساز',
-        'طراحی کن',
-        'رندر کن',
-        'نقاشی کن',
-        'پوستر بساز',
-        'تامنیل بساز',
-        'thumbnail بساز',
-        'کاور بساز',
-        'لوگو بساز',
+    // تشخیص هوشمندتر با استفاده از Regex برای پوشش فاصله‌ها و جملات مختلف
+    const imageRegex = /(عکس|تصویر|ایمیج|لوگو|پوستر|کاور|نقاشی)\s*.*\s*(بساز|درست کن|تولید کن|ایجاد کن|بده|طراحی کن|رندر کن)|(generate|create|make|draw|render)\s+.*\s*(image|picture|photo|logo)/i;
 
-        // انگلیسی
-        'generate image',
-        'generate an image',
-        'create image',
-        'create an image',
-        'make image',
-        'make an image',
-        'generate picture',
-        'create picture',
-        'make picture',
-        'image generation',
-        'draw an image',
-        'draw image',
-        'render image',
-        'generate a picture',
-        'create a picture'
-    ];
+    const simpleKeywords = ['تصویرسازی', 'تصویر سازی', 'یه عکس', 'یک عکس', 'یه تصویر', 'یک تصویر'];
 
-    return imageKeywords.some(keyword => text.includes(keyword));
+    return imageRegex.test(text) || simpleKeywords.some(kw => text.includes(kw));
 }
 
 
@@ -377,7 +328,8 @@ async function generateImage(prompt) {
                 `?width=1920` +
                 `&height=1080` +
                 `&seed=${seed}` +
-                `&model=flux`;
+                `&model=flux` +
+                `&format=jpg`;
 
             log.info('image.request', { host: baseUrl });
 
@@ -487,10 +439,11 @@ async function handleImageGeneration({
 
     const imagePayload = {
         type: 'image',
+        filename: 'image.jpg',
         url: image.url,
-        mimeType: image.contentType,
+        mimeType: 'image/jpeg',
         base64: image.base64,
-        dataUrl: `data:${image.contentType};base64,${image.base64}`,
+        dataUrl: `data:image/jpeg;base64,${image.base64}`,
         prompt: translatedPrompt
     };
 
