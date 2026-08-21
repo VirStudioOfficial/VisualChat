@@ -478,7 +478,7 @@ async function handleImageGeneration({
      * را رندر می‌کنند بسیار مهم است.
      */
     const markdownImage =
-        `![Generated Image](data:${image.contentType};base64,${image.base64})`;
+        `![Generated Image](${image.url})`;
 
     /*
      * اگر فرانت‌اند در آینده image را مستقیم بخواند،
