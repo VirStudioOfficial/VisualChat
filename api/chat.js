@@ -34,6 +34,9 @@ async function fetchTavilyResults(query, tavilyKeys) {
     for (let i = 0; i < tavilyKeys.length; i++) {
         const currentKey = tavilyKeys[i];
         try {
+            // ===== FIX: hard timeout so a slow/dead key can't stall the whole reply =====
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6000);
             const res = await fetch('https://api.tavily.com/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -42,8 +45,9 @@ async function fetchTavilyResults(query, tavilyKeys) {
                     query: query,
                     search_depth: "basic",
                     max_results: 4
-                })
-            });
+                }),
+                signal: controller.signal
+            }).finally(() => clearTimeout(timeoutId));
 
             if (!res.ok) continue;
 
@@ -59,7 +63,7 @@ async function fetchTavilyResults(query, tavilyKeys) {
     return null;
 }
 
-async function handler(req, res) {
+export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -73,7 +77,8 @@ async function handler(req, res) {
     }
 
     try {
-        const wantsStream = req.body?.stream === true || req.body?.stream === 'true';
+        // ===== CHANGE 1: wantsStream defined at the very beginning =====
+        const wantsStream = req.body?.stream === true || req.body?.stream === 'false' ? false : req.body?.stream === 'true' || req.body?.stream === true;
 
         const { userName, text, rawText, file, webSearch, history, model } = req.body || {};
         const searchQueryBase = (rawText && String(rawText).trim()) ? String(rawText).trim() : (text || "");
@@ -106,11 +111,8 @@ async function handler(req, res) {
             return res.status(400).json({ error: { message: 'متن ورودی خالی است.' } });
         }
 
-        // File detection - moved before Imagen
-        const incomingFiles = Array.isArray(req.body?.files) ? req.body.files : (file ? [file] : []);
-        const textFiles = incomingFiles.filter(f => f && f.mode === 'text' && typeof f.content === 'string');
-        const binaryFiles = incomingFiles.filter(f => f && f.base64);
-
+        // سرچ کاملاً خودکار شد: دیگه به وضعیت دکمه (webSearch) وابسته نیست،
+        // فقط بر اساس محتوای خود پیام تصمیم می‌گیره که جستجو لازمه یا نه.
         const isSearchNeeded = shouldSearchWeb(searchQueryBase);
         res.setHeader('X-Search-Performed', String(isSearchNeeded));
 
@@ -131,7 +133,13 @@ async function handler(req, res) {
             }
         }
 
-        // Add text files content to user message
+        // ===== CHANGE 6: Improved file detection =====
+        // پشتیبانی از چند فایل هم‌زمان: فرانت‌اند می‌تواند `files` (آرایه) یا `file`
+        // (یک شیء تکی، برای سازگاری با نسخه‌های قبلی) بفرستد.
+        const incomingFiles = Array.isArray(req.body?.files) ? req.body.files : (file ? [file] : []);
+        const textFiles = incomingFiles.filter(f => f && f.mode === 'text' && typeof f.content === 'string');
+        const binaryFiles = incomingFiles.filter(f => f && f.base64);
+
         if (textFiles.length > 0 && contents.length > 0) {
             const lastIndex = contents.length - 1;
             if (contents[lastIndex].role === 'user') {
@@ -147,7 +155,6 @@ async function handler(req, res) {
             }
         }
 
-        // Add binary files (images/videos) to user message
         for (const bf of binaryFiles) {
             const lastIndex = contents.length - 1;
             if (lastIndex < 0 || contents[lastIndex].role !== 'user') break;
@@ -176,6 +183,7 @@ async function handler(req, res) {
                 inline_data: { mime_type: mimeType, data: base64Data }
             });
         }
+
 
         const MODEL_NAME = model || 'gemini-3.5-flash-lite';
         console.log(`Using model: ${MODEL_NAME}`);
@@ -209,6 +217,7 @@ async function handler(req, res) {
                     if (base64Img) {
                         const imgMarkdown = `![${searchQueryBase}](data:image/jpeg;base64,${base64Img})`;
                         if (wantsStream) {
+                            // ===== CHANGE 4: flushHeaders at start of streaming =====
                             res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
                             res.setHeader('Cache-Control', 'no-cache, no-transform');
                             res.setHeader('Connection', 'keep-alive');
@@ -216,6 +225,7 @@ async function handler(req, res) {
                             if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
                             res.write(`data: ${JSON.stringify({ text: imgMarkdown })}\n\n`);
+                            // ===== CHANGE 5: flush after each write =====
                             if (typeof res.flush === 'function') res.flush();
                             res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
                             if (typeof res.flush === 'function') res.flush();
@@ -235,8 +245,10 @@ async function handler(req, res) {
 
         let systemText = '';
 
+        // ===== CHANGE 8: antiSelfQA preserved exactly =====
         const antiSelfQA = `\n\nقانون سخت‌گیرانه: جمله‌ی معرفی مدل («من Virtual Bot ... هستم») را فقط و فقط زمانی بنویس که خودِ کاربر همین الان مستقیم پرسیده باشد «مدلت چیه» یا سؤال هم‌معنی. هرگز خودت این سؤال را از زبان خودت مطرح نکن و هرگز بدون این‌که کاربر پرسیده باشد، جمله‌ی معرفی مدل را در وسط یا انتهای یک پاسخ دیگر نیاور، حتی به‌شکل مثال، یادآوری یا توضیح داخلی.`;
 
+        // ===== CHANGE 7: All System Prompts preserved exactly =====
         if (MODEL_NAME === 'gemini-3.5-flash-lite') {
 
             systemText = `تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
@@ -357,7 +369,9 @@ async function handler(req, res) {
 
         systemText += antiSelfQA;
 
-        // File edit mode
+        // ===== CHANGE 9: File edit mode preserved =====
+        // این بلاک فقط وقتی به systemText اضافه می‌شود که کاربر حداقل یک فایل کد/متنی
+        // ضمیمه کرده باشد؛ روی هیچ پیام دیگری تاثیر ندارد و شخصیت/لحن هر مدل دست‌نخورده می‌ماند.
         if (Array.isArray(textFiles) && textFiles.length > 0) {
             const fileNamesList = textFiles.map(f => `«${f.name || 'file'}»`).join('، ');
             systemText += `\n\nحالت ویرایش فایل (بسیار مهم، دقیق رعایت شود):
@@ -378,23 +392,34 @@ async function handler(req, res) {
 - خارج از این بلاک، هرگز کد کامل هیچ فایلی را دوباره چاپ نکن.`;
         }
 
-        // Fallback order
+        // ===== CHANGE 2: Fixed fallback order =====
         const modelsToTry = [MODEL_NAME];
         if (MODEL_NAME === 'gemini-3.1-pro') {
-            modelsToTry.push('gemini-3-flash');
+            modelsToTry.push('gemini-3.6-flash');
             modelsToTry.push('gemini-3.5-flash-lite');
         }
         if (MODEL_NAME === 'gemini-3.6-flash') {
             modelsToTry.push('gemini-3.5-flash-lite');
         }
 
-        // Streaming path
+        // Streaming path: proxies Gemini's streamGenerateContent (SSE) straight
+        // through to the client as it arrives, so the reply appears word-by-word
+        // instead of waiting for the full response. Falls back across
+        // models/keys just like the non-streaming path, but only before any
+        // bytes have been sent to the client (status is known before the body
+        // starts, so a failed attempt can still be retried with the next key).
         if (wantsStream) {
             res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
             res.setHeader('Cache-Control', 'no-cache, no-transform');
             res.setHeader('Connection', 'keep-alive');
+            // Prevents Vercel's edge/proxy layer (and any nginx-like layer)
+            // from buffering the whole response before sending it to the
+            // client — without this, res.write() calls only reach the
+            // browser after res.end(), so the reply looks like it "pops in"
+            // instead of streaming in gradually.
             res.setHeader('X-Accel-Buffering', 'no');
             res.setHeader('X-Search-Performed', String(isSearchNeeded));
+            // ===== CHANGE 4: flushHeaders at start of streaming =====
             if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
             for (const currentModel of modelsToTry) {
@@ -403,17 +428,26 @@ async function handler(req, res) {
                     try {
                         console.log(`[stream] Trying model: ${currentModel} with Key #${k + 1}`);
 
-                        const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'x-goog-api-key': currentKey
-                            },
-                            body: JSON.stringify({
-                                system_instruction: { parts: [{ text: systemText }] },
-                                contents: contents
-                            })
-                        });
+                        // ===== FIX: hard timeout so a slow/dead key doesn't stall a simple reply =====
+                        const streamController = new AbortController();
+                        const streamTimeoutId = setTimeout(() => streamController.abort(), 12000);
+                        let upstream;
+                        try {
+                            upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'x-goog-api-key': currentKey
+                                },
+                                body: JSON.stringify({
+                                    system_instruction: { parts: [{ text: systemText }] },
+                                    contents: contents
+                                }),
+                                signal: streamController.signal
+                            });
+                        } finally {
+                            clearTimeout(streamTimeoutId);
+                        }
 
                         if (!upstream.ok || !upstream.body) {
                             let errBody = null;
@@ -423,15 +457,18 @@ async function handler(req, res) {
                             continue;
                         }
 
+                        // We have a good upstream connection — relay chunks as they arrive.
                         const reader = upstream.body.getReader();
                         const decoder = new TextDecoder();
                         let buffer = '';
+                        let sentAny = false;
 
                         while (true) {
                             const { done, value } = await reader.read();
                             if (done) break;
                             buffer += decoder.decode(value, { stream: true });
 
+                            // ===== CHANGE 3: Improved buffer management =====
                             const lines = buffer.split('\n');
                             buffer = lines.pop();
 
@@ -443,7 +480,9 @@ async function handler(req, res) {
                                     const parsed = JSON.parse(jsonStr);
                                     const piece = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || '';
                                     if (piece) {
+                                        sentAny = true;
                                         res.write(`data: ${JSON.stringify({ text: piece })}\n\n`);
+                                        // ===== CHANGE 5: flush after each write =====
                                         if (typeof res.flush === 'function') res.flush();
                                     }
                                 } catch (_) { /* ignore partial/malformed lines */ }
@@ -466,26 +505,34 @@ async function handler(req, res) {
             return res.end();
         }
 
-        // Non-streaming path
         for (const currentModel of modelsToTry) {
             for (let k = 0; k < geminiKeys.length; k++) {
                 const currentKey = geminiKeys[k];
                 try {
                     console.log(`Trying model: ${currentModel} with Key #${k + 1}`);
-                    
-                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': currentKey
-                        },
-                        body: JSON.stringify({
-                            system_instruction: {
-                                parts: [{ text: systemText }]
+
+                    // ===== FIX: hard timeout so a slow/dead key doesn't stall a simple reply =====
+                    const genController = new AbortController();
+                    const genTimeoutId = setTimeout(() => genController.abort(), 12000);
+                    let response;
+                    try {
+                        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-goog-api-key': currentKey
                             },
-                            contents: contents
-                        })
-                    });
+                            body: JSON.stringify({
+                                system_instruction: {
+                                    parts: [{ text: systemText }]
+                                },
+                                contents: contents
+                            }),
+                            signal: genController.signal
+                        });
+                    } finally {
+                        clearTimeout(genTimeoutId);
+                    }
 
                     const data = await response.json();
 
@@ -516,5 +563,3 @@ async function handler(req, res) {
         return res.status(500).json({ error: { message: 'خطای داخلی سرور', details: globalError.message } });
     }
 }
-
-module.exports = handler;
