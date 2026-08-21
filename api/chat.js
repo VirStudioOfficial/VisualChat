@@ -202,76 +202,69 @@ export default async function handler(req, res) {
         let lastError = null;
 
         if (MODEL_NAME.includes('imagen') || MODEL_NAME.includes('flash-image')) {
-            // ===== FIX: Google shut down all Imagen `:generateImages` endpoints on
-            // Aug 17, 2026. Calling them now returns a non-JSON / empty body, which
-            // crashed `imgRes.json()` with "Unexpected end of JSON input" on every
-            // key. Migrated to the current Gemini native image model,
-            // 'gemini-3.1-flash-image' (Nano Banana 2 — gemini-2.5-flash-image is
-            // now the legacy/previous-gen model). Uses `:generateContent` and
-            // returns the image as an inline_data content part instead of a
-            // `generatedImages` array. =====
-            const IMAGE_MODEL_NAME = 'gemini-3.1-flash-image';
-            for (let k = 0; k < geminiKeys.length; k++) {
-                const currentKey = geminiKeys[k];
-                try {
-                    console.log(`[Imagen] Generating image with Key #${k + 1}`);
-                    const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL_NAME}:generateContent`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': currentKey
-                        },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: searchQueryBase }] }],
-                            generationConfig: { responseModalities: ['IMAGE'] }
-                        })
-                    });
+            // ===== FIX: Google's image models (Imagen, and every Gemini
+            // "flash-image" / Nano Banana variant) have NO free tier at all —
+            // confirmed on Google's official pricing page, Free Tier is
+            // "Not available" for every image-output model. That's why every
+            // key failed with `limit: 0` quota errors regardless of which
+            // Google model name was used; this isn't a key or model-name
+            // problem, image generation on Gemini simply requires billing.
+            // Switched to Pollinations' free, keyless Flux image API instead
+            // (gen.pollinations.ai, their current unified gateway — the older
+            // image.pollinations.ai host still serves the GPU backend but
+            // gen.* is their documented public entry point as of mid-2026):
+            // no API key needed, no per-key quota to rotate, supports custom
+            // width/height (1920x1080 here). Note: the old `nologo` param was
+            // removed by Pollinations in June 2026 and no longer does
+            // anything, so it's dropped here. =====
+            const pollinationsHosts = [
+                `https://gen.pollinations.ai/image/${encodeURIComponent(searchQueryBase || 'an image')}`,
+                `https://image.pollinations.ai/prompt/${encodeURIComponent(searchQueryBase || 'an image')}`
+            ];
 
-                    // ===== FIX: don't let a non-JSON / empty body crash the whole
-                    // handler — read as text first, parse safely, and treat a parse
-                    // failure the same as any other failed key (fall through to the
-                    // next one) instead of throwing past the per-key try/catch. =====
-                    const rawBody = await imgRes.text();
-                    let imgData = null;
-                    try {
-                        imgData = rawBody ? JSON.parse(rawBody) : null;
-                    } catch (parseErr) {
-                        console.warn(`[Imagen] Key #${k + 1} returned non-JSON response:`, rawBody.slice(0, 200));
-                        lastError = { error: { message: 'Non-JSON response from image model' } };
-                        continue;
-                    }
+            for (const baseUrl of pollinationsHosts) {
+                try {
+                    console.log(`[Imagen] Generating image via Pollinations: ${baseUrl.split('/')[2]}`);
+                    const seed = Math.floor(Math.random() * 1000000);
+                    const pollinationsUrl = `${baseUrl}?width=1920&height=1080&seed=${seed}&model=flux`;
+
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 45000);
+                    const imgRes = await fetch(pollinationsUrl, { signal: controller.signal });
+                    clearTimeout(timeoutId);
 
                     if (!imgRes.ok) {
-                        console.warn(`[Imagen] Key #${k + 1} failed:`, imgData?.error?.message || imgRes.statusText);
-                        lastError = imgData;
+                        console.warn('[Imagen] Pollinations request failed:', imgRes.status, imgRes.statusText);
+                        lastError = { error: { message: `Pollinations returned ${imgRes.status}` } };
                         continue;
                     }
 
-                    const base64Img = imgData?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data)?.inlineData?.data;
-                    if (base64Img) {
-                        const imgMarkdown = `![${searchQueryBase}](data:image/jpeg;base64,${base64Img})`;
-                        if (wantsStream) {
-                            // ===== CHANGE 4: flushHeaders at start of streaming =====
-                            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-                            res.setHeader('Cache-Control', 'no-cache, no-transform');
-                            res.setHeader('Connection', 'keep-alive');
-                            res.setHeader('X-Accel-Buffering', 'no');
-                            if (typeof res.flushHeaders === 'function') res.flushHeaders();
+                    const arrayBuffer = await imgRes.arrayBuffer();
+                    const base64Img = Buffer.from(arrayBuffer).toString('base64');
+                    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+                    const imgMarkdown = `![${searchQueryBase}](data:${contentType};base64,${base64Img})`;
 
-                            res.write(`data: ${JSON.stringify({ text: imgMarkdown })}\n\n`);
-                            // ===== CHANGE 5: flush after each write =====
-                            if (typeof res.flush === 'function') res.flush();
-                            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-                            if (typeof res.flush === 'function') res.flush();
-                            return res.end();
-                        } else {
-                            return res.status(200).json({
-                                candidates: [{ content: { parts: [{ text: imgMarkdown }] } }]
-                            });
-                        }
+                    if (wantsStream) {
+                        // ===== CHANGE 4: flushHeaders at start of streaming =====
+                        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                        res.setHeader('Cache-Control', 'no-cache, no-transform');
+                        res.setHeader('Connection', 'keep-alive');
+                        res.setHeader('X-Accel-Buffering', 'no');
+                        if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+                        res.write(`data: ${JSON.stringify({ text: imgMarkdown })}\n\n`);
+                        // ===== CHANGE 5: flush after each write =====
+                        if (typeof res.flush === 'function') res.flush();
+                        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+                        if (typeof res.flush === 'function') res.flush();
+                        return res.end();
+                    } else {
+                        return res.status(200).json({
+                            candidates: [{ content: { parts: [{ text: imgMarkdown }] } }]
+                        });
                     }
                 } catch (err) {
-                    console.error(`[Imagen] Error with Key #${k + 1}:`, err?.message || err);
+                    console.error('[Imagen] Error calling Pollinations:', err?.message || err);
                     lastError = err;
                 }
             }
