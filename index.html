@@ -916,17 +916,17 @@
                 radial-gradient(circle at 100% 0%, rgba(34,211,238,0.10), transparent 32%),
                 radial-gradient(circle at 0% 100%, rgba(139,92,246,0.12), transparent 36%);
         }
-        .sidebar { background: rgba(16,21,34,0.92); backdrop-filter: blur(18px); }
+        .sidebar { background: var(--bg-sidebar); backdrop-filter: blur(18px); }
         .chat-header {
             padding: 16px 24px;
-            background: rgba(9,11,20,0.45);
+            background: var(--bg-main);
             backdrop-filter: blur(16px);
         }
         .model-selector {
             border-radius: 999px;
             padding: 7px 13px;
             color: var(--text-main);
-            background: rgba(21,27,42,0.85);
+            background: var(--bg-card);
         }
         .home-screen {
             justify-content: center;
@@ -947,7 +947,7 @@
         .suggestion-chip {
             padding: 11px 17px;
             color: var(--text-main);
-            background: rgba(21,27,42,0.72);
+            background: var(--bg-card);
             border-radius: 14px;
         }
         .suggestion-chip:hover { transform: translateY(-2px); }
@@ -983,7 +983,7 @@
         .message.bot code {
             direction: ltr;
             display: inline-block;
-            background: rgba(255,255,255,0.07);
+            background: var(--border-soft);
             padding: 1px 6px;
             border-radius: 6px;
             font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -1005,7 +1005,7 @@
         .input-box {
             border-radius: 18px;
             padding: 8px 10px;
-            background: rgba(18,24,39,0.92);
+            background: var(--bg-input);
             backdrop-filter: blur(14px);
         }
         textarea#userInput { font-size: 1rem; line-height: 1.7; }
