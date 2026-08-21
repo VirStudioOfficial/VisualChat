@@ -1970,6 +1970,43 @@ async function handler(req, res) {
             message: globalError?.message || String(globalError)
         });
 
+        // FIX (ERR_HTTP_HEADERS_SENT): this catch wraps the WHOLE handler,
+        // including the streaming path below, which already calls
+        // res.write()/res.setHeader() as soon as it starts sending SSE
+        // chunks. If something throws AFTER that point (e.g. a late error
+        // while reading the upstream stream), execution falls through to
+        // here — and calling res.status(...).json(...) on a response whose
+        // headers are already sent crashes with ERR_HTTP_HEADERS_SENT,
+        // which is exactly what killed the reply instead of just failing
+        // gracefully. We now check res.headersSent first: if the response
+        // was never started, send the normal JSON error as before; if it
+        // was already streaming, we can't send a fresh JSON body anymore,
+        // so emit one last SSE error event (if the stream is still open)
+        // and end the response instead of trying to set headers again.
+        if (res.headersSent) {
+            try {
+                if (!res.writableEnded) {
+                    res.write(
+                        `data: ${JSON.stringify({
+                            error: {
+                                message: 'خطای داخلی سرور در میانه‌ی پاسخ. لطفاً دوباره امتحان کن.',
+                                type: 'api_error',
+                                stage: 'handler_mid_stream',
+                                detail: globalError?.message || String(globalError)
+                            }
+                        })}\n\n`
+                    );
+                    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+                }
+            } catch (_) {
+                // Stream may already be broken/closed — nothing more we can do.
+            }
+            if (!res.writableEnded) {
+                try { res.end(); } catch (_) {}
+            }
+            return;
+        }
+
         return res.status(500).json({
             error: {
                 message: 'خطای داخلی سرور. لطفاً دوباره امتحان کن.',
