@@ -13,10 +13,70 @@
                     ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
                     : mode;
                 document.documentElement.setAttribute('data-theme', resolved);
-                if (saved.c1 && saved.c2) {
-                    document.documentElement.style.setProperty('--accent-1', saved.c1);
-                    document.documentElement.style.setProperty('--accent-2', saved.c2);
+
+                var c1 = saved.c1 || '#8b5cf6';
+                var c2 = saved.c2 || '#22d3ee';
+                var isCharcoal = saved.uiPalette === 'charcoal';
+                var root = document.documentElement;
+
+                function hexToRgb(hex) {
+                    var value = String(hex || '').replace('#', '');
+                    if (value.length === 3) value = value.split('').map(function (x) { return x + x; }).join('');
+                    var n = parseInt(value, 16);
+                    return {
+                        r: (n >> 16) & 255,
+                        g: (n >> 8) & 255,
+                        b: n & 255
+                    };
                 }
+
+                function mixHex(a, b, amount) {
+                    var x = hexToRgb(a), y = hexToRgb(b);
+                    var mix = function (p, q) { return Math.round(p + (q - p) * amount); };
+                    return '#' + [mix(x.r, y.r), mix(x.g, y.g), mix(x.b, y.b)]
+                        .map(function (v) { return v.toString(16).padStart(2, '0'); }).join('');
+                }
+
+                function applyWholeUiPalette() {
+                    root.style.setProperty('--accent-1', c1);
+                    root.style.setProperty('--accent-2', c2);
+
+                    if (isCharcoal) {
+                        root.style.setProperty('--bg-main', '#1d1f24');
+                        root.style.setProperty('--bg-sidebar', '#24262c');
+                        root.style.setProperty('--bg-card', '#2b2e35');
+                        root.style.setProperty('--bg-card-hover', '#343740');
+                        root.style.setProperty('--bg-input', '#292c33');
+                        root.style.setProperty('--border', '#3a3d45');
+                        root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
+                        root.style.setProperty('--text-main', '#f1f3f5');
+                        root.style.setProperty('--text-muted', '#a7abb3');
+                        root.style.setProperty('--code-bg', '#1a1c21');
+                        root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.045)');
+                        root.style.setProperty('--code-text', '#eef0f2');
+                        root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.32)');
+                        root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.58)');
+                        root.style.setProperty('--accent-1', '#6b7078');
+                        root.style.setProperty('--accent-2', '#b6bac1');
+                        root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6b7078, #2b2e35 48%, #b6bac1)');
+                        document.documentElement.style.setProperty('--app-bg-image', 'linear-gradient(160deg, #64676d 0%, #3b3d43 34%, #24262c 66%, #1d1f24 100%)');
+                    } else {
+                        var darkBase = '#0a0c12';
+                        var lightBase = '#f6f7fb';
+                        var base = resolved === 'light' ? lightBase : darkBase;
+                        root.style.setProperty('--bg-main', mixHex(base, c1, resolved === 'light' ? 0.055 : 0.16));
+                        root.style.setProperty('--bg-sidebar', mixHex(resolved === 'light' ? '#ffffff' : '#10131c', c1, resolved === 'light' ? 0.045 : 0.18));
+                        root.style.setProperty('--bg-card', mixHex(resolved === 'light' ? '#f0f2f8' : '#161a24', c2, resolved === 'light' ? 0.05 : 0.13));
+                        root.style.setProperty('--bg-card-hover', mixHex(resolved === 'light' ? '#e6e9f3' : '#1c2130', c1, resolved === 'light' ? 0.06 : 0.18));
+                        root.style.setProperty('--bg-input', mixHex(resolved === 'light' ? '#ffffff' : '#191e29', c1, resolved === 'light' ? 0.035 : 0.15));
+                        root.style.setProperty('--border', mixHex(resolved === 'light' ? '#e2e5ef' : '#232838', c1, resolved === 'light' ? 0.10 : 0.18));
+                        root.style.setProperty('--app-bg-image',
+                            'radial-gradient(circle at 85% -10%, ' + c1 + '33, transparent 45%), radial-gradient(circle at -10% 110%, ' + c2 + '26, transparent 40%)'
+                        );
+                    }
+                }
+
+                applyWholeUiPalette();
                 if (saved.fontSize) {
                     var sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
                     document.documentElement.style.setProperty('--msg-font-size', sizes[saved.fontSize] || sizes.normal);
@@ -49,6 +109,12 @@
             --msg-font-size: 0.92rem;
             --success: #34d399;
             --warning: #fbbf24;
+            --code-bg: #0b0f18;
+            --code-head-bg: rgba(255,255,255,0.04);
+            --code-text: #f4f6fb;
+            --app-bg-image:
+                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.16), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.10), transparent 40%);
         }
 
         :root[data-theme="light"] {
@@ -60,15 +126,16 @@
             --text-main: #1a1d29;
             --text-muted: #6b7280;
             --border: #e2e5ef;
+            --code-bg: #1e2530;
+            --code-head-bg: rgba(255,255,255,0.05);
+            --code-text: #e8eaf0;
             --border-soft: rgba(15,23,42,0.08);
             --shadow-a: rgba(30,41,59,0.10);
             --shadow-b: rgba(30,41,59,0.16);
         }
 
         :root[data-theme="light"] body {
-            background-image:
-                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.10), transparent 45%),
-                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.08), transparent 40%);
+            background-image: var(--app-bg-image);
         }
 
         :root[data-theme="light"] textarea { color: #1a1d29 !important; }
@@ -107,9 +174,7 @@
         body {
             display: flex;
             position: relative;
-            background-image:
-                radial-gradient(circle at 85% -10%, rgba(139,92,246,0.16), transparent 45%),
-                radial-gradient(circle at -10% 110%, rgba(34,211,238,0.10), transparent 40%);
+            background-image: var(--app-bg-image);
         }
 
         #authOverlay {
@@ -573,13 +638,13 @@
         .message.bot ul, .message.bot ol { margin: 0.5rem 0 1.1rem; padding-right: 1.35rem; }
         .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
         .message.bot code { font-family: Consolas, monospace; background: rgba(139,92,246,0.12); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
-        .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: #0b0f18; direction: ltr; text-align: left; }
-        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; background:rgba(255,255,255,0.04); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); }
+        .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--code-bg); direction: ltr; text-align: left; }
+        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; background:var(--code-head-bg); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); }
         .code-actions { display:flex; gap:6px; }
         .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:5px 9px; cursor:pointer; font-family:inherit; font-size:0.76rem; }
         .code-action:hover { border-color:var(--accent-2); }
         .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; tab-size: 2; }
-        .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.85rem; }
+        .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.85rem; color: var(--code-text); }
         .code-card pre::-webkit-scrollbar { height: 8px; }
         .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
         .code-card-head span:first-child { text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: var(--accent-2); }
@@ -843,7 +908,7 @@
         .segmented-btn:hover { color: var(--text-main); }
         .segmented-btn.active { background: var(--accent-grad); color: #fff; }
 
-        .accent-swatches { display: flex; gap: 10px; }
+        .accent-swatches { display: flex; gap: 10px; flex-wrap: wrap; }
         .accent-swatch {
             width: 34px; height: 34px;
             border-radius: 50%;
@@ -851,6 +916,7 @@
             border: 2px solid transparent;
             transition: transform 0.15s, border-color 0.15s;
         }
+        .accent-swatch-charcoal { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); }
         .accent-swatch:hover { transform: scale(1.08); }
         .accent-swatch.active { border-color: var(--text-main); }
 
@@ -1310,11 +1376,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="settings-section">
             <div class="settings-label">رنگ اصلی</div>
             <div class="accent-swatches" id="accentSwatches">
-                <button class="accent-swatch" data-c1="#8b5cf6" data-c2="#22d3ee" style="background: linear-gradient(135deg,#8b5cf6,#22d3ee);" title="بنفش و فیروزه‌ای"></button>
-                <button class="accent-swatch" data-c1="#f97316" data-c2="#ec4899" style="background: linear-gradient(135deg,#f97316,#ec4899);" title="نارنجی و صورتی"></button>
-                <button class="accent-swatch" data-c1="#10b981" data-c2="#3b82f6" style="background: linear-gradient(135deg,#10b981,#3b82f6);" title="سبز و آبی"></button>
-                <button class="accent-swatch" data-c1="#ef4444" data-c2="#f59e0b" style="background: linear-gradient(135deg,#ef4444,#f59e0b);" title="قرمز و کهربایی"></button>
-                <button class="accent-swatch" data-c1="#6366f1" data-c2="#a855f7" style="background: linear-gradient(135deg,#6366f1,#a855f7);" title="نیلی و بنفش"></button>
+                <button class="accent-swatch" data-c1="#8b5cf6" data-c2="#22d3ee" style="background: linear-gradient(135deg,#8b5cf6,#22d3ee);" title="بنفش و فیروزه‌ای — کل محیط"></button>
+                <button class="accent-swatch" data-c1="#f97316" data-c2="#ec4899" style="background: linear-gradient(135deg,#f97316,#ec4899);" title="نارنجی و صورتی — کل محیط"></button>
+                <button class="accent-swatch" data-c1="#10b981" data-c2="#3b82f6" style="background: linear-gradient(135deg,#10b981,#3b82f6);" title="سبز و آبی — کل محیط"></button>
+                <button class="accent-swatch" data-c1="#ef4444" data-c2="#f59e0b" style="background: linear-gradient(135deg,#ef4444,#f59e0b);" title="قرمز و کهربایی — کل محیط"></button>
+                <button class="accent-swatch" data-c1="#6366f1" data-c2="#a855f7" style="background: linear-gradient(135deg,#6366f1,#a855f7);" title="نیلی و بنفش — کل محیط"></button>
+                <button class="accent-swatch accent-swatch-charcoal" data-palette="charcoal" data-c1="#6b7078" data-c2="#b6bac1" style="background: linear-gradient(160deg,#686b71 0%,#3a3c42 48%,#1d1f24 100%);" title="Charcoal Gradient — مدرن"></button>
             </div>
         </div>
 
@@ -1587,11 +1654,68 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         updateUserUI();
     }
 
-    const defaultSettings = { theme: 'auto', c1: '#8b5cf6', c2: '#22d3ee', fontSize: 'normal' };
+    const defaultSettings = { theme: 'auto', c1: '#8b5cf6', c2: '#22d3ee', fontSize: 'normal', uiPalette: 'accent' };
 
     function getSettings() {
         try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') }; }
         catch (e) { return { ...defaultSettings }; }
+    }
+
+    function hexToRgb(hex) {
+        const value = String(hex || '').replace('#', '');
+        const normalized = value.length === 3 ? value.split('').map(x => x + x).join('') : value;
+        const n = parseInt(normalized || '000000', 16);
+        return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    }
+
+    function mixHex(a, b, amount) {
+        const x = hexToRgb(a), y = hexToRgb(b);
+        const mix = (p, q) => Math.round(p + (q - p) * amount);
+        return '#' + [mix(x.r, y.r), mix(x.g, y.g), mix(x.b, y.b)]
+            .map(v => v.toString(16).padStart(2, '0')).join('');
+    }
+
+    function applyWholeUiPalette(s, resolvedTheme) {
+        const root = document.documentElement;
+        const isCharcoal = s.uiPalette === 'charcoal';
+
+        if (isCharcoal) {
+            root.style.setProperty('--bg-main', '#1d1f24');
+            root.style.setProperty('--bg-sidebar', '#24262c');
+            root.style.setProperty('--bg-card', '#2b2e35');
+            root.style.setProperty('--bg-card-hover', '#343740');
+            root.style.setProperty('--bg-input', '#292c33');
+            root.style.setProperty('--border', '#3a3d45');
+            root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
+            root.style.setProperty('--text-main', '#f1f3f5');
+            root.style.setProperty('--text-muted', '#a7abb3');
+            root.style.setProperty('--code-bg', '#1a1c21');
+            root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.045)');
+            root.style.setProperty('--code-text', '#eef0f2');
+            root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.32)');
+            root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.58)');
+            root.style.setProperty('--accent-1', '#6b7078');
+            root.style.setProperty('--accent-2', '#b6bac1');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6b7078, #2b2e35 48%, #b6bac1)');
+            root.style.setProperty('--app-bg-image', 'linear-gradient(160deg, #64676d 0%, #3b3d43 34%, #24262c 66%, #1d1f24 100%)');
+            return;
+        }
+
+        const c1 = s.c1 || defaultSettings.c1;
+        const c2 = s.c2 || defaultSettings.c2;
+        const light = resolvedTheme === 'light';
+        root.style.setProperty('--accent-1', c1);
+        root.style.setProperty('--accent-2', c2);
+        root.style.setProperty('--accent-grad', 'linear-gradient(135deg, var(--accent-1), var(--accent-2))');
+        root.style.setProperty('--bg-main', mixHex(light ? '#f6f7fb' : '#0a0c12', c1, light ? 0.055 : 0.16));
+        root.style.setProperty('--bg-sidebar', mixHex(light ? '#ffffff' : '#10131c', c1, light ? 0.045 : 0.18));
+        root.style.setProperty('--bg-card', mixHex(light ? '#f0f2f8' : '#161a24', c2, light ? 0.05 : 0.13));
+        root.style.setProperty('--bg-card-hover', mixHex(light ? '#e6e9f3' : '#1c2130', c1, light ? 0.06 : 0.18));
+        root.style.setProperty('--bg-input', mixHex(light ? '#ffffff' : '#191e29', c1, light ? 0.035 : 0.15));
+        root.style.setProperty('--border', mixHex(light ? '#e2e5ef' : '#232838', c1, light ? 0.10 : 0.18));
+        root.style.setProperty('--app-bg-image',
+            `radial-gradient(circle at 85% -10%, ${c1}33, transparent 45%), radial-gradient(circle at -10% 110%, ${c2}26, transparent 40%)`
+        );
     }
 
     function loadSettings() {
@@ -1611,8 +1735,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
             : s.theme;
         document.documentElement.setAttribute('data-theme', resolvedTheme);
-        document.documentElement.style.setProperty('--accent-1', s.c1);
-        document.documentElement.style.setProperty('--accent-2', s.c2);
+        applyWholeUiPalette(s, resolvedTheme);
         const sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
         document.documentElement.style.setProperty('--msg-font-size', sizes[s.fontSize] || sizes.normal);
     }
@@ -1625,7 +1748,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             btn.classList.toggle('active', btn.dataset.value === s.fontSize);
         });
         document.querySelectorAll('#accentSwatches .accent-swatch').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.c1 === s.c1 && btn.dataset.c2 === s.c2);
+            const isCharcoal = btn.dataset.palette === 'charcoal';
+            btn.classList.toggle('active',
+                isCharcoal ? s.uiPalette === 'charcoal'
+                    : s.uiPalette !== 'charcoal' && btn.dataset.c1 === s.c1 && btn.dataset.c2 === s.c2
+            );
         });
     }
 
@@ -1659,6 +1786,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const btn = e.target.closest('.accent-swatch');
         if (!btn) return;
         const s = getSettings();
+        s.uiPalette = btn.dataset.palette === 'charcoal' ? 'charcoal' : 'accent';
         s.c1 = btn.dataset.c1;
         s.c2 = btn.dataset.c2;
         localStorage.setItem('virtual_settings', JSON.stringify(s));
@@ -1889,6 +2017,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         renderCodeFilesBar();
     }
 
+    // فقط نوار پیش‌نمایش پایین رو مخفی می‌کنه؛ خود codeFilesMemory دست‌نخورده می‌مونه
+    // تا مدل بتونه برای ادیت‌های بعدی بدون نیاز به آپلود دوباره بهش رجوع کنه
+    function hideCodeFilesBar() {
+        const bar = document.getElementById('codeFilesBar');
+        if (bar) {
+            bar.style.display = 'none';
+        }
+    }
+
     async function handleFileSelect(event) {
         const files = Array.from(event?.target?.files || []);
         if (!files.length) return;
@@ -2102,6 +2239,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
         const payloadFile = selectedFileData;
         removeFile();
+        hideCodeFilesBar();
         await sendToGemini(text, payloadFile);
     }
 
@@ -2232,15 +2370,34 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 setGeneratingState(false); saveCurrentChat(); return;
             }
 
-            // Stream the reply in as it arrives from the backend (SSE), rendering
-            // through formatReply on each chunk so code blocks/markdown stay
-            // clean while streaming — no artificial typewriter delay.
+            // Stream the reply in as it arrives from the backend (SSE). Rendering the
+            // whole accumulated reply on every tiny chunk makes formatReply + innerHTML
+            // grow quadratically on long answers, so coalesce visual updates to ~64ms.
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let sseBuffer = '';
             let fullReply = '';
             let streamError = null;
             let gotAnyText = false;
+            let liveRenderTimer = null;
+
+            const flushLiveRender = () => {
+                liveRenderTimer = null;
+                if (requestId !== activeRequestId) return;
+                const liveView = stripFileEditBlock(fullReply).displayText;
+                loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView));
+                scrollToLatest();
+            };
+
+            const queueLiveRender = (force = false) => {
+                if (force) {
+                    if (liveRenderTimer) clearTimeout(liveRenderTimer);
+                    flushLiveRender();
+                    return;
+                }
+                if (liveRenderTimer) return;
+                liveRenderTimer = setTimeout(flushLiveRender, 64);
+            };
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -2261,14 +2418,26 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     if (parsed.text) {
                         gotAnyText = true;
                         fullReply += parsed.text;
-                        const liveView = stripFileEditBlock(fullReply).displayText;
-                        loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView));
-                        scrollToLatest();
+                        queueLiveRender();
                     } else if (parsed.error) {
                         streamError = parsed.error;
                     }
                 }
             }
+
+            if (sseBuffer.trim().startsWith('data:')) {
+                try {
+                    const parsed = JSON.parse(sseBuffer.trim().slice(5).trim());
+                    if (parsed.text) {
+                        gotAnyText = true;
+                        fullReply += parsed.text;
+                    } else if (parsed.error) {
+                        streamError = parsed.error;
+                    }
+                } catch (_) {}
+            }
+
+            queueLiveRender(true);
 
             if (requestId !== activeRequestId) return;
 
@@ -2480,7 +2649,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (!fileEntry) continue;
 
             const { content, appliedCount, failedCount } = applyFileEdits(fileEntry.content, editsByFile[fileName]);
-            if (appliedCount === 0) continue;
+            if (appliedCount === 0) {
+                // هیچ ادیتی اعمال نشد (متن مبدأ با محتوای فایل مطابقت نداشت) —
+                // به‌جای سکوت کامل، به کاربر بگو چرا دکمه دانلودی نمی‌بینه.
+                html += `<div class="code-card"><div class="code-card-head"><span><i class="fa-solid fa-triangle-exclamation" style="color:var(--warning);"></i> ویرایش «${escapeHtml(fileName)}» انجام نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">متن مبدأ ویرایش با محتوای فعلی فایل مطابقت نداشت (${failedCount} مورد رد شد). دوباره امتحان کن یا دقیق‌تر بگو چه بخشی را عوض کنم.</div></div>`;
+                continue;
+            }
 
             // حافظه‌ی فایل رو با نسخه‌ی ویرایش‌شده آپدیت کن تا پیام بعدی روی همین نسخه ادامه بده.
             fileEntry.content = content;
