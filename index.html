@@ -2855,6 +2855,25 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             .replace(/'/g, '&#039;');
     }
 
+    // FIX: formatReply() escapes the WHOLE reply (including the contents of
+    // ```code``` blocks) before splitting it into code cards, so the text
+    // stashed in each button's data-code is HTML-escaped source — e.g. real
+    // "<html>" becomes the literal characters "&lt;html&gt;". copyCode()
+    // works fine either way (clipboard just gets escaped text), but
+    // runHtmlCode()/downloadHtmlCode() were opening/saving that escaped text
+    // AS-IS: the browser then has no real "<" or ">" characters to parse as
+    // tags, so it renders the whole page as plain visible text on a blank
+    // page instead of running it. Un-escaping right before running/saving
+    // restores the real HTML without touching how code is displayed/copied.
+    function unescapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#039;/g, "'");
+    }
+
     function formatInline(value) {
         return value
             .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -2934,7 +2953,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function runHtmlCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
+        const code = unescapeHtml(decodeURIComponent(btn.dataset.code || ''));
         const blob = new Blob([code], {type:'text/html;charset=utf-8'});
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank', 'noopener');
@@ -2942,7 +2961,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function downloadHtmlCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
+        const code = unescapeHtml(decodeURIComponent(btn.dataset.code || ''));
         const blob = new Blob([code], {type:'text/html;charset=utf-8'});
         const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='virtual-bot-code.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
     }
