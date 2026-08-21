@@ -303,6 +303,12 @@ export default async function handler(req, res) {
             res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
             res.setHeader('Cache-Control', 'no-cache, no-transform');
             res.setHeader('Connection', 'keep-alive');
+            // Prevents Vercel's edge/proxy layer (and any nginx-like layer)
+            // from buffering the whole response before sending it to the
+            // client — without this, res.write() calls only reach the
+            // browser after res.end(), so the reply looks like it "pops in"
+            // instead of streaming in gradually.
+            res.setHeader('X-Accel-Buffering', 'no');
             res.setHeader('X-Search-Performed', String(isSearchNeeded));
             if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
@@ -356,6 +362,9 @@ export default async function handler(req, res) {
                                     if (piece) {
                                         sentAny = true;
                                         res.write(`data: ${JSON.stringify({ text: piece })}\n\n`);
+                                        // Force the chunk out immediately instead of letting
+                                        // Node/Vercel batch it with the next write.
+                                        if (typeof res.flush === 'function') res.flush();
                                     }
                                 } catch (_) { /* ignore partial/malformed lines */ }
                             }
