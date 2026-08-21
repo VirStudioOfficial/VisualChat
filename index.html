@@ -656,6 +656,18 @@
         .image-result-preview:hover .image-result-zoom-hint { opacity: 1; }
         .image-result-zoom-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.28); color: #fff; font-size: 1.4rem; opacity: 0; transition: opacity .15s; }
         .image-result-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
+
+        /* Truncation notice: shown when a reply is cut off by the model's
+           output-token limit (heavy code / long content) so the user can
+           continue it instead of seeing a silently incomplete answer. */
+        .truncation-notice {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+            margin-top: 10px; padding: 10px 12px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 10px; font-size: 0.82rem; color: var(--warning);
+        }
+        .truncation-notice span { display: flex; align-items: center; gap: 6px; }
+        .truncation-notice .code-action { color: var(--text-main); }
         .image-result-actions .code-action { display: inline-flex; align-items: center; gap: 5px; }
 
         .image-lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 24px; }
@@ -2645,6 +2657,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let gotAnyText = false;
             let receivedImage = null;
             let liveRenderTimer = null;
+            // FIX: the backend now forwards Gemini's finishReason on the
+            // final {done:true} event. When it's MAX_TOKENS the reply was
+            // cut off by the model's own output-token cap — not an error,
+            // not the user pressing Stop — most commonly on heavy replies
+            // (large code files / long multi-file edits). We track that
+            // here so a real "ادامه بده" action can be offered instead of
+            // silently showing a half-finished answer as if it were done.
+            let wasTruncated = false;
 
             const flushLiveRender = () => {
                 liveRenderTimer = null;
@@ -2702,6 +2722,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamErrorDetail = parsed.error;
                         }
                     }
+                    if (parsed.done && parsed.truncated) {
+                        wasTruncated = true;
+                    }
                 }
             }
 
@@ -2721,6 +2744,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamError = parsed.error.message || 'خطای نامشخص';
                             streamErrorDetail = parsed.error;
                         }
+                    }
+                    if (parsed.done && parsed.truncated) {
+                        wasTruncated = true;
                     }
                 } catch (_) {}
             }
@@ -2755,6 +2781,21 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
                 finalHtml += buildFileEditResultHtml(edits);
                 if (!finalHtml) finalHtml = formatReply('');
+
+                // FIX (continuation feature): when the model was cut off by
+                // its own output-token limit — common on heavy replies like
+                // large code files — offer a real "ادامه بده" action instead
+                // of silently presenting the truncated reply as final. The
+                // raw (unsanitized-for-display) text is stashed on the
+                // wrapper so continueGeneration() can send it back as
+                // context and append the continuation to this same message.
+                if (wasTruncated) {
+                    wrapperDiv.dataset.truncatedReply = encodeURIComponent(reply);
+                    finalHtml += `<div class="truncation-notice">
+                        <span><i class="fa-solid fa-triangle-exclamation"></i> پاسخ به‌دلیل حجم زیاد کامل نشد.</span>
+                        <button class="code-action" type="button" onclick="continueGeneration(this)"><i class="fa-solid fa-forward"></i> ادامه بده</button>
+                    </div>`;
+                }
 
                 loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
@@ -3123,6 +3164,134 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const prompt = image?.prompt;
         if (!prompt) { if (typeof showToast === 'function') showToast('prompt این تصویر در دسترس نیست.', 'warning'); return; }
         sendToGemini(prompt, null);
+    }
+
+    // ===== Continuation for truncated (heavy) replies =====
+    // Triggered by the "ادامه بده" button rendered on a message whose
+    // stream ended with finishReason=MAX_TOKENS (see sendToGemini). Rather
+    // than starting a brand-new bot message, this:
+    //   1) reads the partial reply stashed on the message wrapper
+    //   2) sends a normal /api/chat request asking the model to continue
+    //      exactly where it stopped (the partial text is included as
+    //      context so the model doesn't repeat itself or restart)
+    //   3) appends the new text into the SAME message element and keeps
+    //      offering another "ادامه بده" if it gets cut off again
+    async function continueGeneration(btn) {
+        if (isGenerating) return;
+        const wrapperDiv = btn.closest('.message-wrapper');
+        const msgDiv = wrapperDiv?.querySelector('.message');
+        if (!wrapperDiv || !msgDiv) return;
+
+        const partial = decodeURIComponent(wrapperDiv.dataset.truncatedReply || '');
+        if (!partial) return;
+
+        // Remove the notice/button while we fetch more.
+        const notice = msgDiv.querySelector('.truncation-notice');
+        if (notice) notice.remove();
+
+        const continuePrompt = 'پاسخ قبلی‌ات ناقص ماند (به‌دلیل محدودیت حجم پاسخ قطع شد). دقیقاً از همان نقطه‌ای که متوقف شدی ادامه بده؛ چیزی را از ابتدا تکرار نکن و مقدمه‌ی جدید ننویس. این متن ناقص قبلی توست:\n\n' + partial;
+
+        // Update the history entry for this message in-place instead of
+        // pushing a duplicate 'model' turn, so future turns see one
+        // continuous reply rather than two separate messages.
+        const requestId = ++activeRequestId;
+        setGeneratingState(true);
+
+        const loaderSpan = document.createElement('span');
+        loaderSpan.className = 'loader-dots';
+        loaderSpan.innerHTML = '<span></span><span></span><span></span>';
+        msgDiv.appendChild(loaderSpan);
+        scrollToLatest();
+
+        currentAbortController = new AbortController();
+        try {
+            const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userName: uName,
+                    text: continuePrompt,
+                    rawText: continuePrompt,
+                    file: null,
+                    files: lastCodeFilesForEdit,
+                    webSearch: false,
+                    history: chatHistoryData[currentChatId],
+                    model: currentModel,
+                    styleHint: virtualPersona,
+                    stream: true
+                }),
+                signal: currentAbortController.signal
+            });
+
+            if (requestId !== activeRequestId) return;
+            if (!response.ok || !response.body) {
+                loaderSpan.remove();
+                if (typeof showToast === 'function') showToast('ادامه‌ی پاسخ ممکن نشد.', 'error');
+                setGeneratingState(false);
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let sseBuffer = '', extraText = '', truncatedAgain = false;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (requestId !== activeRequestId) return;
+                if (done) break;
+                sseBuffer += decoder.decode(value, { stream: true });
+                const lines = sseBuffer.split('\n');
+                sseBuffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data:')) continue;
+                    const jsonStr = line.slice(5).trim();
+                    if (!jsonStr) continue;
+                    let parsed;
+                    try { parsed = JSON.parse(jsonStr); } catch (_) { continue; }
+                    if (parsed.text) extraText += parsed.text;
+                    if (parsed.done && parsed.truncated) truncatedAgain = true;
+                }
+            }
+
+            if (requestId !== activeRequestId) return;
+            loaderSpan.remove();
+
+            const cleanExtra = sanitizeVirtualIdentity(extraText).trim();
+            if (cleanExtra) {
+                const { displayText, edits } = stripFileEditBlock(cleanExtra);
+                if (displayText) msgDiv.insertAdjacentHTML('beforeend', formatReply(displayText));
+                msgDiv.insertAdjacentHTML('beforeend', buildFileEditResultHtml(edits));
+
+                const fullText = partial + '\n' + cleanExtra;
+                const last = chatHistoryData[currentChatId]?.at(-1);
+                if (last && last.role === 'model') last.text = fullText;
+                else chatHistoryData[currentChatId].push({ role: 'model', text: fullText });
+
+                if (truncatedAgain) {
+                    wrapperDiv.dataset.truncatedReply = encodeURIComponent(fullText);
+                    msgDiv.insertAdjacentHTML('beforeend', `<div class="truncation-notice">
+                        <span><i class="fa-solid fa-triangle-exclamation"></i> پاسخ هنوز کامل نشد.</span>
+                        <button class="code-action" type="button" onclick="continueGeneration(this)"><i class="fa-solid fa-forward"></i> ادامه بده</button>
+                    </div>`);
+                } else {
+                    delete wrapperDiv.dataset.truncatedReply;
+                }
+            } else if (typeof showToast === 'function') {
+                showToast('چیزی برای ادامه دریافت نشد.', 'warning');
+            }
+
+            setGeneratingState(false);
+            saveCurrentChat();
+            scrollToLatest();
+        } catch (error) {
+            if (requestId !== activeRequestId) return;
+            loaderSpan.remove();
+            if (typeof showToast === 'function') showToast('خطا در ادامه‌ی پاسخ.', 'error');
+            setGeneratingState(false);
+        } finally {
+            if (requestId === activeRequestId) currentAbortController = null;
+        }
     }
 
     function downloadEditedFile(btn) {
