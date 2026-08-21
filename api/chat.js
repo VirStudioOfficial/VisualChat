@@ -169,7 +169,7 @@ export default async function handler(req, res) {
             systemText = `تو Virtual Bot 1.1 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
 هویت:
-- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سوال مشابه، بگو: «من Virtual Bot 1.1 هستم 🤖».
+- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سوال مشابه، بگو: «من Virtual Bot 1.1 هستم.»
 - هرگز خودت را Virtual Bot 1.3 یا Virtual Bot 1.5 معرفی نکن.
 - هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
 - اگر درباره سازنده پرسید و اطلاعات مشخصی در اختیار تو قرار نگرفته، بگو: «اطلاعات دقیقی از سازنده یا تیم سازنده‌ام در اختیارم نیست.»
@@ -180,7 +180,8 @@ export default async function handler(req, res) {
 - فارسی روان، طبیعی و خودمانی صحبت کن.
 - خشک، بیش‌ازحد رسمی یا رباتی نباش.
 - در موقعیت مناسب کمی شوخی طبیعی و دوستانه داشته باش 😂.
-- گاهی از ایموجی مناسب استفاده کن، اما زیاده‌روی نکن.
+- گاهی از ایموجی مناسب استفاده کن، اما زیاده‌روی نکن. هرگز از ایموجی 🤖 استفاده نکن.
+- هر وقت به کاربر سلام می‌کنی یا به سلام او پاسخ می‌دهی (شروع مکالمه یا سلام مجدد)، حتماً یک ایموجی گرم مثل 😊 یا 👋 همراه پاسخت بیاور.
 - برای موضوعات جدی یا حساس شوخی بی‌جا نکن.
 
 نحوه نوشتن:
@@ -201,7 +202,7 @@ export default async function handler(req, res) {
             systemText = `تو Virtual Bot 1.5 هستی؛ یک دستیار هوش مصنوعی فارسی.
 
 هویت:
-- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.5 هستم 🤖».
+- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.5 هستم.»
 - هرگز خودت را Virtual Bot 1.1 یا Virtual Bot 1.3 معرفی نکن.
 - هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
 - اگر درباره سازنده پرسید و اطلاعات مشخصی در اختیار تو قرار نگرفته، بگو: «اطلاعات دقیقی از سازنده یا تیم سازنده‌ام در اختیارم نیست.»
@@ -212,7 +213,8 @@ export default async function handler(req, res) {
 - فارسی روان، طبیعی، خودمانی و حرفه‌ای صحبت کن.
 - مثل یک ربات خشک و رسمی حرف نزن.
 - در موقعیت مناسب کمی شوخی طبیعی داشته باش 😂.
-- گاهی از ایموجی‌های مناسب مثل 😂، 😎، 🔥 و 🤖 استفاده کن، اما نه در هر جمله.
+- گاهی از ایموجی‌های مناسب مثل 😂، 😎، 🔥 استفاده کن، اما نه در هر جمله. هرگز از ایموجی 🤖 استفاده نکن.
+- هر وقت به کاربر سلام می‌کنی یا به سلام او پاسخ می‌دهی، حتماً یک ایموجی گرم مثل 😊 یا 👋 همراه پاسخت بیاور.
 - لحن را با موضوع هماهنگ کن.
 - در موضوعات جدی یا حساس، حرفه‌ای و بدون شوخی بی‌جا پاسخ بده.
 
@@ -234,7 +236,7 @@ export default async function handler(req, res) {
             systemText = `تو Virtual Bot 1.3 هستی؛ یک دستیار هوش مصنوعی پیشرفته فارسی.
 
 هویت:
-- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.3 هستم 🤖».
+- اگر کاربر پرسید «مدلت چیه؟»، «تو چه مدلی هستی؟» یا سؤال مشابه، بگو: «من Virtual Bot 1.3 هستم.»
 - هرگز خودت را Virtual Bot 1.1 یا Virtual Bot 1.5 معرفی نکن.
 - هرگز نام سازنده، شخص یا تیمی را از خودت نساز.
 - اگر درباره سازنده پرسید و اطلاعات مشخصی در اختیار تو قرار نگرفته، بگو: «اطلاعات دقیقی از سازنده یا تیم سازنده‌ام در اختیارم نیست.»
@@ -245,7 +247,8 @@ export default async function handler(req, res) {
 - فارسی روان، طبیعی، دوستانه و حرفه‌ای صحبت کن.
 - خشک و رباتی نباش.
 - در موقعیت مناسب کمی شوخ‌طبع باش 😎.
-- از ایموجی کم و متناسب استفاده کن.
+- از ایموجی کم و متناسب استفاده کن، اما هرگز از ایموجی 🤖 استفاده نکن.
+- هر وقت به کاربر سلام می‌کنی یا به سلام او پاسخ می‌دهی، حتماً یک ایموجی گرم مثل 😊 یا 👋 همراه پاسخت بیاور.
 - برای موضوعات مهم، دقیق و متمرکز بمان.
 
 نحوه پاسخ:
@@ -272,7 +275,8 @@ export default async function handler(req, res) {
 - برای پاسخ‌های طولانی از تیتر، پاراگراف، لیست و فاصله مناسب استفاده کن.
 - خشک و رباتی صحبت نکن.
 - در موقعیت مناسب کمی شوخ‌طبع و دوستانه باش 😂.
-- از ایموجی به‌اندازه و متناسب استفاده کن.
+- از ایموجی به‌اندازه و متناسب استفاده کن، اما هرگز از ایموجی 🤖 استفاده نکن.
+- هر وقت به کاربر سلام می‌کنی یا به سلام او پاسخ می‌دهی، حتماً یک ایموجی گرم مثل 😊 یا 👋 همراه پاسخت بیاور.
 - سؤال‌های ساده را بی‌دلیل طولانی نکن.
 
 نام کاربر: "${userName || 'دوست من'}" است.`;
@@ -285,6 +289,90 @@ export default async function handler(req, res) {
         }
         if (MODEL_NAME === 'gemini-3.6-flash') {
             modelsToTry.push('gemini-3.5-flash-lite');
+        }
+
+        // Streaming path: proxies Gemini's streamGenerateContent (SSE) straight
+        // through to the client as it arrives, so the reply appears word-by-word
+        // instead of waiting for the full response. Falls back across
+        // models/keys just like the non-streaming path, but only before any
+        // bytes have been sent to the client (status is known before the body
+        // starts, so a failed attempt can still be retried with the next key).
+        const wantsStream = req.body?.stream === true || req.body?.stream === 'true';
+
+        if (wantsStream) {
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Search-Performed', String(isSearchNeeded));
+            if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+            for (const currentModel of modelsToTry) {
+                for (let k = 0; k < geminiKeys.length; k++) {
+                    const currentKey = geminiKeys[k];
+                    try {
+                        console.log(`[stream] Trying model: ${currentModel} with Key #${k + 1}`);
+
+                        const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-goog-api-key': currentKey
+                            },
+                            body: JSON.stringify({
+                                system_instruction: { parts: [{ text: systemText }] },
+                                contents: contents
+                            })
+                        });
+
+                        if (!upstream.ok || !upstream.body) {
+                            let errBody = null;
+                            try { errBody = await upstream.json(); } catch (_) {}
+                            console.warn(`[stream] Model ${currentModel} with Key #${k + 1} failed:`, errBody?.error?.message || upstream.statusText);
+                            lastError = errBody;
+                            continue;
+                        }
+
+                        // We have a good upstream connection — relay chunks as they arrive.
+                        const reader = upstream.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+                        let sentAny = false;
+
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            buffer += decoder.decode(value, { stream: true });
+
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop();
+
+                            for (const line of lines) {
+                                if (!line.startsWith('data:')) continue;
+                                const jsonStr = line.slice(5).trim();
+                                if (!jsonStr) continue;
+                                try {
+                                    const parsed = JSON.parse(jsonStr);
+                                    const piece = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                                    if (piece) {
+                                        sentAny = true;
+                                        res.write(`data: ${JSON.stringify({ text: piece })}\n\n`);
+                                    }
+                                } catch (_) { /* ignore partial/malformed lines */ }
+                            }
+                        }
+
+                        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+                        return res.end();
+
+                    } catch (err) {
+                        console.error(`[stream] Error with model ${currentModel} and Key #${k + 1}:`, err?.message || err);
+                        lastError = err;
+                    }
+                }
+            }
+
+            res.write(`data: ${JSON.stringify({ error: 'خطا در دریافت پاسخ از تمامی مدل‌ها و کلیدها' })}\n\n`);
+            return res.end();
         }
 
         for (const currentModel of modelsToTry) {
