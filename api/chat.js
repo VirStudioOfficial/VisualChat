@@ -1561,6 +1561,8 @@ async function handler(req, res) {
                         geminiKeys[k];
 
                     try {
+                        const attemptStartedAt = Date.now();
+
                         log.info('model.attempt', {
                             mode: 'stream',
                             model: currentModel,
@@ -1570,11 +1572,25 @@ async function handler(req, res) {
                         const controller =
                             new AbortController();
 
+                        // FIX: 15s per key/model attempt was the main source
+                        // of the "20-30s for a simple message" complaint.
+                        // This timeout only guards how long we wait for the
+                        // upstream connection/headers to start — not the
+                        // whole reply — so it should be short: a healthy key
+                        // responds in well under a second, and a bad/rate-
+                        // limited one (429, quota, transient network issue)
+                        // should be abandoned quickly so the loop can fail
+                        // over to the next key instead of stalling. With
+                        // several keys configured, a couple of bad ones at
+                        // 15s each was enough on its own to explain the
+                        // delay, even before any model output. Actual reply
+                        // generation time is unaffected — this is purely
+                        // about how fast we give up on a bad connection.
                         const timeoutId =
                             setTimeout(
                                 () =>
                                     controller.abort(),
-                                15000
+                                6000
                             );
 
                         let upstream;
@@ -1631,13 +1647,19 @@ async function handler(req, res) {
                             log.warn('model.failed', {
                                 mode: 'stream',
                                 model: currentModel,
-                                status: upstream.status
+                                status: upstream.status,
+                                connectMs: Date.now() - attemptStartedAt
                             });
 
                             continue;
                         }
 
                         markKeyResult(currentKey, true);
+                        log.info('model.connected', {
+                            mode: 'stream',
+                            model: currentModel,
+                            connectMs: Date.now() - attemptStartedAt
+                        });
 
                         const reader =
                             upstream.body.getReader();
@@ -1784,7 +1806,9 @@ async function handler(req, res) {
                         markKeyResult(currentKey, false);
                         log.error('model.stream_error', {
                             model: currentModel,
-                            message: error?.message || String(error)
+                            message: error?.message || String(error),
+                            wasTimeout: error?.name === 'AbortError',
+                            connectMs: Date.now() - attemptStartedAt
                         });
 
                         lastError = error;
@@ -1846,11 +1870,13 @@ async function handler(req, res) {
                     const controller =
                         new AbortController();
 
+                    // Same reasoning as the streaming path above: fail over
+                    // to the next key/model quickly instead of stalling.
                     const timeoutId =
                         setTimeout(
                             () =>
                                 controller.abort(),
-                            15000
+                            6000
                         );
 
                     let response;
