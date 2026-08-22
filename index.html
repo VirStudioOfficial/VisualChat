@@ -771,6 +771,23 @@
         }
         .loader-searching .loader-dots span { background: var(--accent-2); }
 
+        .agent-step-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 0.85rem; color: var(--text-muted);
+            padding: 4px 2px 8px 2px;
+            animation: agentStepFadeIn 0.25s ease;
+        }
+        .agent-step-label .agent-step-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--accent-2);
+            animation: loaderPulse 1s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+        @keyframes agentStepFadeIn {
+            from { opacity: 0; transform: translateY(-3px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
         .scroll-latest-btn { position:absolute; top:-48px; left:50%; transform:translateX(-50%) translateY(8px); width:36px; height:36px; border-radius:50%; border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); box-shadow:0 8px 24px var(--shadow-b); cursor:pointer; opacity:0; pointer-events:none; transition:opacity .18s, transform .18s; z-index:4; }
         .scroll-latest-btn.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
         .scroll-latest-btn:hover { border-color:var(--accent-2); }
@@ -2034,16 +2051,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         sendMessage();
     }
 
-    function shouldSearchWeb(userText) {
-        if (!userText) return false;
-        const cleanText = userText.trim().toLowerCase();
-        if (cleanText.length < 3) return false;
-        const ignoreList = ['سلام', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'ممنون', 'خداحافظ'];
-        const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
-        if (ignoreList.includes(normalized)) return false;
-        const allowedKeywords = ['سرچ', 'جستجو', 'گوگل', 'اینترنت', 'قیمت', 'اخبار', 'خبر', 'امشب', 'امروز', 'فعلی', 'بازار', 'سیستم', 'قطعات', 'خرید', 'بودجه', 'پیشنهاد خرید'];
-        return allowedKeywords.some(kw => normalized.includes(kw));
-    }
+    // FIX: this used to guess (via the same fixed keyword list as the old
+    // backend logic) whether a search was probably about to happen, just to
+    // show a "searching" loader animation early. Now that the backend
+    // reports real tool-call steps over SSE (see the {step} event handling
+    // in sendMessage), we don't need to guess anymore - the loader switches
+    // to "searching" mode only when the server actually calls web_search.
 
     function toggleSearch() {
         // دکمه‌ی دستی سرچ حذف شده؛ سرچ همیشه خودکاره. این تابع فقط برای
@@ -2705,9 +2718,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             chatBox.appendChild(wrapperDiv);
         }
 
-        const willSearch = isSearchEnabled && shouldSearchWeb(textPrompt);
         loadingDiv.innerHTML = `<span class="loader-dots"><span></span><span></span><span></span></span>`;
-        loadingDiv.classList.toggle('loader-searching', !!willSearch);
         scrollToLatest();
 
         const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
@@ -2806,9 +2817,24 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                         // the UI only ever saw the markdown fallback text.
                         receivedImage = parsed.image;
                     }
+                    if (parsed.step) {
+                        // Real, model-driven progress narration (e.g. "دارم
+                        // توی وب سرچ می‌کنم...") sent right before the
+                        // backend actually calls a tool, so a slow search
+                        // doesn't look like a silent hang. Shown above the
+                        // loading dots until real answer text starts.
+                        if (requestId === activeRequestId) {
+                            loadingDiv.classList.add('loader-searching');
+                            loadingDiv.innerHTML =
+                                `<div class="agent-step-label"><span class="agent-step-dot"></span>${escapeHtml(parsed.step)}</div>` +
+                                `<span class="loader-dots"><span></span><span></span><span></span></span>`;
+                            scrollToLatest();
+                        }
+                    }
                     if (parsed.text) {
                         gotAnyText = true;
                         fullReply += parsed.text;
+                        loadingDiv.classList.remove('loader-searching');
                         queueLiveRender();
                     } else if (parsed.error) {
                         if (typeof parsed.error === 'string') {
