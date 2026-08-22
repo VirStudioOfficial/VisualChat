@@ -1545,9 +1545,23 @@ async function handler(req, res) {
             for (
                 const currentModel of modelsToTry
             ) {
+                // FIX: try keys in health order (fewest recent consecutive
+                // failures first) instead of always starting from index 0.
+                // Previously `rotateKeysByHealth` was defined but never
+                // called here, so a bad/rate-limited key at index 0 would
+                // eat a full 6s timeout on *every single request* before
+                // falling through to a healthy key — this was the other
+                // big contributor to multi-second delays on non-lite
+                // models (which, unlike flash-lite, have >1 key attempt
+                // in the common case). Sorting first means a key that
+                // just failed drops to the back of the line for this
+                // request and subsequent ones, until it recovers.
+                const orderedKeys =
+                    rotateKeysByHealth(geminiKeys);
+
                 for (
                     let k = 0;
-                    k < geminiKeys.length;
+                    k < orderedKeys.length;
                     k++
                 ) {
                     if (
@@ -1558,7 +1572,7 @@ async function handler(req, res) {
                     }
 
                     const currentKey =
-                        geminiKeys[k];
+                        orderedKeys[k];
 
                     // Declared OUTSIDE the try so it's always defined by the
                     // time the catch block below runs — this was previously
@@ -1856,9 +1870,13 @@ async function handler(req, res) {
         for (
             const currentModel of modelsToTry
         ) {
+            // Same health-ordering fix as the streaming loop above.
+            const orderedKeysNonStream =
+                rotateKeysByHealth(geminiKeys);
+
             for (
                 let k = 0;
-                k < geminiKeys.length;
+                k < orderedKeysNonStream.length;
                 k++
             ) {
                 if (
@@ -1869,7 +1887,7 @@ async function handler(req, res) {
                 }
 
                 const currentKey =
-                    geminiKeys[k];
+                    orderedKeysNonStream[k];
 
                 try {
                     log.info('model.attempt', {
