@@ -2544,6 +2544,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const payloadFile = selectedFileData;
         removeFile();
         hideCodeFilesBar();
+        // FIX: previously only the preview bar was hidden here —
+        // codeFilesMemory itself stayed populated, so every future message
+        // in this chat silently kept re-attaching the same old file(s) with
+        // no visual indicator. A file attachment should apply to the message
+        // it was sent with, not persist invisibly forever. Clear it here,
+        // same as removeFile() already does for image/video/pdf attachments.
+        clearCodeFilesMemory();
         await sendToGemini(text, payloadFile);
     }
 
@@ -3231,6 +3238,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // Safe localStorage writer: on quota errors, prunes the oldest saved chats
     // (chat ids are Date.now() timestamps, so lowest id = oldest) and retries,
     // instead of silently losing the newest chat or throwing mid-flow.
+    // FIX: pruning used to happen completely silently — a chat with a few
+    // attached images/videos (stored as base64 directly in the saved HTML)
+    // can push localStorage over its ~5-10MB quota easily, and the user
+    // would just find older chats missing after a refresh with no idea why.
+    // Now it surfaces a toast so it's visible instead of "my chat vanished".
     function safeSetItem(key, value, opts = {}) {
         try {
             localStorage.setItem(key, value);
@@ -3243,12 +3255,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const stored = JSON.parse(localStorage.getItem(chatsKey) || '{}');
                 const ids = Object.keys(stored).sort((a, b) => Number(a) - Number(b));
                 const toDrop = Math.max(1, Math.ceil(ids.length * 0.2));
-                ids.slice(0, toDrop).forEach(id => { delete stored[id]; });
+                const droppedIds = ids.slice(0, toDrop);
+                droppedIds.forEach(id => { delete stored[id]; });
                 localStorage.setItem(chatsKey, JSON.stringify(stored));
                 localStorage.setItem(key, value);
+                if (typeof showToast === 'function') {
+                    showToast(
+                        `حافظه‌ی مرورگر پر شد؛ ${droppedIds.length} گفتگوی قدیمی‌تر (معمولاً به‌خاطر فایل/تصویر ضمیمه) حذف شد تا گفتگوی فعلی ذخیره بماند.`,
+                        'warning',
+                        5000
+                    );
+                }
                 return true;
             } catch (retryErr) {
                 console.error('localStorage write failed even after pruning:', retryErr);
+                if (typeof showToast === 'function') {
+                    showToast('حافظه‌ی مرورگر پر است و این گفتگو ذخیره نشد. فایل‌های حجیم را حذف کن یا گفتگوهای قدیمی را پاک کن.', 'error', 5000);
+                }
                 return false;
             }
         }
@@ -3270,6 +3293,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // HTML (keep the lighter text history) rather than lose everything.
             delete chats[currentChatId];
             safeSetItem(storageKey, JSON.stringify(chats), {});
+            if (typeof showToast === 'function') {
+                showToast('این گفتگو به‌خاطر حجم زیاد (فایل/تصویر ضمیمه) ذخیره نشد.', 'error', 5000);
+            }
         }
         safeSetItem(historyKey, JSON.stringify(chatHistoryData), {});
         safeSetItem('last_active_chat_id', currentChatId, {});
