@@ -86,10 +86,10 @@
         })();
     </script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/bold/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="manifest" href="/manifest.json">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
@@ -1220,8 +1220,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .message.bot li { margin:6px 0; padding-right:3px; }
         .message.bot blockquote { margin:14px 0; padding:10px 14px; border-right:3px solid var(--accent-2); background:rgba(34,211,238,.05); border-radius:10px; }
         @media (max-width:768px) {
-            .sidebar.collapsed { width:272px; }
-            .sidebar.collapsed > * { opacity:1; pointer-events:auto; }
             .sidebar-close-btn { display:flex !important; }
         }
         .stopped-state {
@@ -1524,7 +1522,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="segmented" id="themeSegmented">
                 <button class="segmented-btn" data-value="light"><i class="ph-fill ph-sun"></i> روشن</button>
                 <button class="segmented-btn" data-value="dark"><i class="ph-fill ph-moon-stars"></i> تاریک</button>
-                <button class="segmented-btn" data-value="auto"><i class="lucide-icon" data-lucide="circle-half"></i> خودکار</button>
+                <button class="segmented-btn" data-value="auto"><i class="lucide-icon" data-lucide="contrast"></i> خودکار</button>
             </div>
         </div>
 
@@ -1684,7 +1682,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // کل صفحه می‌ذاریم که با هر تغییر DOM، آیکون‌های جدید [data-lucide]
         // رو خودکار رندر می‌کنه.
         if (window.lucide) {
-            lucide.createIcons();
+            try { lucide.createIcons(); } catch (e) {}
             const iconObserver = new MutationObserver(() => {
                 clearTimeout(window.__lucideRefreshTimer);
                 window.__lucideRefreshTimer = setTimeout(() => {
