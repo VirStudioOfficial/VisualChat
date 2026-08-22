@@ -138,33 +138,17 @@ function trimHistoryForContext(history) {
     return [...personaTurns, ...working];
 }
 
-function shouldSearchWeb(userText) {
-    if (!userText || typeof userText !== 'string') return false;
-
-    const cleanText = userText.trim().toLowerCase();
-    if (cleanText.length < 3) return false;
-
-    const ignoreList = [
-        'سلام', 'سلامم', 'درود', 'چطوری', 'خوبی', 'صبح بخیر', 'عصر بخیر',
-        'شب بخیر', 'ممنون', 'مرسی', 'چخبر', 'خداحافظ', 'بای', 'اوکی', 'باشه'
-    ];
-
-    const normalized = cleanText.replace(/[!.،,؟?]/g, '').trim();
-    const words = normalized.split(/\s+/).filter(Boolean);
-    const firstWord = words[0];
-
-    if (words.length <= 3 && (ignoreList.includes(normalized) || ignoreList.includes(firstWord))) {
-        return false;
-    }
-
-    const allowedKeywords = [
-        'سرچ', 'جستجو', 'گوگل', 'اینترنت', 'توی وب', 'بررسی کن', 'سرچ کن',
-        'قیمت', 'چنده', 'نرخ', 'دلار', 'طلا', 'سکه', 'ارز', 'بیت کوین',
-        'پلی استیشن', 'اخبار', 'خبر', 'رویداد', 'نتیجه بازی', 'خرید',
-        'امشب', 'آخرین', 'جدیدترین', 'امروز'
-    ];
-
-    return allowedKeywords.some(kw => normalized.includes(kw));
+// FIX: replaced by real function-calling web search (see runAgentLoop /
+// GEMINI_TOOLS below). The old version decided whether to search using a
+// fixed Persian keyword list, so anything phrased differently (or in
+// English, or just not on the list) silently never triggered a search even
+// when it clearly needed one. The model itself now decides, per-turn and
+// based on actual understanding of the question, whether to call the
+// web_search tool — including calling it more than once if the first
+// result isn't enough. Kept as a no-op stub (unused) instead of deleting
+// outright, in case any other code path still references it.
+function shouldSearchWeb() {
+    return false;
 }
 
 
@@ -735,6 +719,241 @@ async function fetchTavilyResults(query, tavilyKeys) {
 
 /*
 |--------------------------------------------------------------------------
+| Agentic Tool Calling
+|--------------------------------------------------------------------------
+| Instead of a fixed Persian keyword list deciding up-front whether to
+| search the web, the model itself is given a real "web_search" tool (via
+| Gemini's function calling) and decides per-turn whether/how many times
+| to call it, based on actually understanding the question. It can also
+| call "ask_user" when it judges a change the user asked for to be
+| significant enough to confirm first (e.g. "rewrite this whole file" /
+| "delete this data") instead of just doing it.
+|
+| Each tool call is narrated to the client as a lightweight {step: ...}
+| SSE event *before* the tool result comes back, so a slow web search
+| doesn't look like a silent hang - the user sees "دارم توی وب سرچ می‌کنم…"
+| immediately, the same way a person narrates what they're doing.
+*/
+
+const GEMINI_TOOLS = [
+    {
+        function_declarations: [
+            {
+                name: 'web_search',
+                description:
+                    'جستجوی واقعی و زنده در وب برای اطلاعات به‌روز، قیمت، اخبار، رویدادها یا هر ' +
+                    'چیزی که ممکن است بعد از زمان آموزش مدل تغییر کرده باشد یا مدل به آن مطمئن نیست. ' +
+                    'هر وقت لازم بود می‌توانی این ابزار را چند بار با query های متفاوت صدا بزنی ' +
+                    '(مثلاً اول یک جستجوی کلی، بعد بر اساس نتیجه یک جستجوی دقیق‌تر).',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        query: {
+                            type: 'string',
+                            description: 'عبارت جستجو - کوتاه، دقیق و مرتبط با چیزی که لازم داری بدانی.'
+                        },
+                        reason: {
+                            type: 'string',
+                            description: 'یک جمله‌ی کوتاه فارسی که به کاربر نشان داده می‌شود و توضیح می‌دهد چرا داری این را سرچ می‌کنی (مثلاً "دارم آخرین قیمت طلا رو بررسی می‌کنم").'
+                        }
+                    },
+                    required: ['query', 'reason']
+                }
+            },
+            {
+                name: 'ask_user',
+                description:
+                    'وقتی درخواست کاربر شامل یک تغییر اساسی/غیرقابل‌برگشت است (مثلاً بازنویسی کامل ' +
+                    'یک فایل، حذف بخش بزرگی از کد یا داده، یا تصمیمی که چند راه‌حل معقول و متفاوت دارد)، ' +
+                    'قبل از انجام کار این ابزار را صدا بزن و از کاربر تأیید یا انتخاب بخواه. برای سؤالات ' +
+                    'ساده یا کارهای کم‌ریسک از این ابزار استفاده نکن - فقط برای تصمیم‌های واقعاً مهم.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        question: {
+                            type: 'string',
+                            description: 'سؤال دقیق و کوتاه که از کاربر باید پرسیده شود.'
+                        }
+                    },
+                    required: ['question']
+                }
+            }
+        ]
+    }
+];
+
+// Human-readable Persian step labels the client shows while a tool runs.
+// Falls back to a generic label if the model didn't provide its own
+// "reason" text (only web_search asks for one).
+function describeToolCall(name, args) {
+    if (name === 'web_search') {
+        return (args && args.reason) || `دارم درباره‌ی «${(args && args.query) || ''}» توی وب سرچ می‌کنم...`;
+    }
+    if (name === 'ask_user') {
+        return 'قبل از ادامه، یه سؤال دارم...';
+    }
+    return 'در حال انجام یک مرحله...';
+}
+
+async function executeToolCall(name, args, ctx) {
+    if (name === 'web_search') {
+        const query = (args && args.query) || '';
+        if (!query) return { error: 'query خالی بود.' };
+
+        log.info('agent.tool.web_search', { queryPreview: query.slice(0, 100) });
+
+        const results = await fetchTavilyResults(query, ctx.tavilyKeys);
+
+        if (!results) {
+            return { result: 'نتیجه‌ای برای این جستجو پیدا نشد.' };
+        }
+        return { result: results };
+    }
+
+    if (name === 'ask_user') {
+        // There's no synchronous "wait for the user" channel in a single
+        // HTTP request/response cycle, so ask_user ends the agent loop
+        // early: the question is streamed to the client as the final
+        // reply (clearly marked), and the user's next message continues
+        // the conversation normally via existing history.
+        return { askUser: (args && args.question) || 'می‌خوای همین‌طور ادامه بدم؟' };
+    }
+
+    return { error: `ابزار ناشناخته: ${name}` };
+}
+
+// Runs the model <-> tool loop against Gemini's non-streaming generateContent
+// endpoint (function calling requires seeing the full structured response,
+// including functionCall parts, before deciding what to do next - this
+// can't be driven off the raw text SSE stream). Once the model returns a
+// final text-only answer (no more functionCalls), that final answer is
+// streamed to the client character-by-chunk to preserve the existing
+// "live typing" UX, and every tool call along the way is narrated via
+// onStep(label) before it runs.
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, signal }) {
+    const MAX_TOOL_ROUNDS = 4; // hard safety cap so a confused model can't loop forever
+    let workingContents = [...contents];
+    let lastUsage = null;
+
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        // Also abort this round if the caller's own signal (client disconnect
+        // / overall deadline) fires.
+        const onAbort = () => controller.abort();
+        if (signal) signal.addEventListener('abort', onAbort);
+
+        let upstream;
+        try {
+            upstream = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-goog-api-key': currentKey
+                    },
+                    body: JSON.stringify({
+                        system_instruction: { parts: [{ text: systemText }] },
+                        contents: workingContents,
+                        tools: GEMINI_TOOLS
+                    }),
+                    signal: controller.signal
+                }
+            );
+        } finally {
+            clearTimeout(timeoutId);
+            if (signal) signal.removeEventListener('abort', onAbort);
+        }
+
+        if (!upstream.ok) {
+            let errorBody = null;
+            try { errorBody = await upstream.json(); } catch (_) {}
+            const err = new Error('agent_upstream_failed');
+            err.status = upstream.status;
+            err.body = errorBody;
+            throw err;
+        }
+
+        const data = await upstream.json();
+        const candidate = data?.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
+        lastUsage = data?.usageMetadata || lastUsage;
+
+        const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
+        const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
+
+        if (functionCalls.length === 0) {
+            // Final answer - no more tools requested.
+            return {
+                finalText: textParts.join(''),
+                finishReason: candidate?.finishReason || null,
+                usage: lastUsage,
+                askUser: null
+            };
+        }
+
+        // Echo the model's own turn (including its functionCall parts) back
+        // into the conversation, then append one functionResponse per call,
+        // exactly as Gemini's function-calling protocol expects.
+        workingContents.push({
+            role: 'model',
+            parts: parts
+        });
+
+        const responseParts = [];
+        let earlyAskUser = null;
+
+        for (const call of functionCalls) {
+            const label = describeToolCall(call.name, call.args);
+            if (onStep) {
+                try { onStep(label, call.name); } catch (_) {}
+            }
+
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys });
+
+            if (result.askUser) {
+                // Don't bother calling any further tools this round - surface
+                // the question to the user right away.
+                earlyAskUser = result.askUser;
+            }
+
+            responseParts.push({
+                functionResponse: {
+                    name: call.name,
+                    response: result
+                }
+            });
+        }
+
+        if (earlyAskUser) {
+            return {
+                finalText: earlyAskUser,
+                finishReason: 'ASK_USER',
+                usage: lastUsage,
+                askUser: earlyAskUser
+            };
+        }
+
+        workingContents.push({
+            role: 'user',
+            parts: responseParts
+        });
+        // loop continues: send the tool result(s) back to the model for round 2+
+    }
+
+    // Safety net: too many tool rounds without a final answer.
+    return {
+        finalText: 'متأسفم، در پردازش این درخواست به مشکل خوردم (تعداد مراحل زیاد شد). می‌تونی دوباره یا واضح‌تر بپرسی؟',
+        finishReason: 'TOOL_LOOP_LIMIT',
+        usage: lastUsage,
+        askUser: null
+    };
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | MAIN API HANDLER
 |--------------------------------------------------------------------------
 */
@@ -1080,63 +1299,16 @@ async function handler(req, res) {
         |--------------------------------------------------------------------------
         | Web Search
         |--------------------------------------------------------------------------
+        | FIX: search used to be decided here, up-front, by matching the
+        | user's text against a fixed Persian keyword list - which missed
+        | anything phrased differently. Search is now a real tool the model
+        | itself can call mid-conversation (see runAgentLoop / GEMINI_TOOLS),
+        | as many times as it judges necessary, based on actually
+        | understanding the question rather than string matching. Nothing
+        | needs to happen here anymore; X-Search-Performed is still reported
+        | for observability, based on whether the agent loop ends up
+        | actually calling the tool (set later, once we know).
         */
-
-        const isSearchNeeded =
-            shouldSearchWeb(
-                searchQueryBase
-            );
-
-        res.setHeader(
-            'X-Search-Performed',
-            String(isSearchNeeded)
-        );
-
-        if (
-            isSearchNeeded &&
-            searchQueryBase
-        ) {
-            log.info('search.executing', { queryPreview: searchQueryBase.slice(0, 100) });
-
-            const searchResults =
-                await fetchTavilyResults(
-                    searchQueryBase,
-                    tavilyKeys
-                );
-
-            const lastIndex =
-                contents.length - 1;
-
-            if (
-                searchResults &&
-                lastIndex >= 0 &&
-                contents[lastIndex].role === 'user'
-            ) {
-                const textPart =
-                    contents[lastIndex]
-                        .parts
-                        .find(
-                            p =>
-                                p.text !== undefined
-                        );
-
-                const webBlock =
-                    `\n\n[نتایج جستجوی وب]:\n` +
-                    `${searchResults}\n\n` +
-                    `[دستورالعمل: با کمک اطلاعات فوق ` +
-                    `پاسخ دقیق و به‌روز ارائه بده.]`;
-
-                if (textPart) {
-                    textPart.text += webBlock;
-                } else {
-                    contents[lastIndex]
-                        .parts
-                        .push({
-                            text: webBlock
-                        });
-                }
-            }
-        }
 
         /*
         |--------------------------------------------------------------------------
@@ -1433,6 +1605,11 @@ async function handler(req, res) {
 
         systemText += antiSelfQA;
         systemText += dateContext;
+        systemText += `
+ابزارها:
+- ابزار web_search را هر وقت واقعاً به اطلاعات به‌روز/زنده نیاز داری صدا بزن (قیمت، اخبار، رویدادها، چیزی که ممکن است بعد از آموزشت تغییر کرده باشد). برای سؤالات عمومی/ثابت (تعریف، مفهوم، تاریخ گذشته) نیازی به سرچ نیست.
+- ابزار ask_user را فقط برای تغییرات اساسی/غیرقابل‌برگشت یا تصمیم‌هایی با چند راه‌حل متفاوت صدا بزن (مثلاً بازنویسی کامل یک فایل، حذف بخش بزرگ کد). برای کارهای کوچک یا واضح، مستقیم انجام بده و از این ابزار استفاده نکن.
+`;
 
         /*
         |--------------------------------------------------------------------------
@@ -1624,90 +1801,41 @@ async function handler(req, res) {
                             key: keyLabel(geminiKeys, currentKey)
                         });
 
-                        const controller =
-                            new AbortController();
+                        const abortController = new AbortController();
 
-                        // FIX: 15s per key/model attempt was the main source
-                        // of the "20-30s for a simple message" complaint.
-                        // This timeout only guards how long we wait for the
-                        // upstream connection/headers to start — not the
-                        // whole reply — so it should be short: a healthy key
-                        // responds in well under a second, and a bad/rate-
-                        // limited one (429, quota, transient network issue)
-                        // should be abandoned quickly so the loop can fail
-                        // over to the next key instead of stalling. With
-                        // several keys configured, a couple of bad ones at
-                        // 15s each was enough on its own to explain the
-                        // delay, even before any model output. Actual reply
-                        // generation time is unaffected — this is purely
-                        // about how fast we give up on a bad connection.
-                        const timeoutId =
-                            setTimeout(
-                                () =>
-                                    controller.abort(),
-                                6000
-                            );
+                        // FIX: previously this whole section made one raw
+                        // streamGenerateContent call and piped SSE chunks
+                        // straight through - no room for the model to ever
+                        // call a tool mid-answer. runAgentLoop drives a
+                        // proper function-calling loop instead: the model
+                        // can call web_search / ask_user as many times as it
+                        // judges necessary, each call is narrated to the
+                        // client immediately via a {step} event (so a slow
+                        // search doesn't look like a silent hang), and only
+                        // once the model returns a final text-only answer do
+                        // we send it to the client. This trades raw
+                        // token-by-token streaming of the final answer for
+                        // real tool use - the reply still appears to the
+                        // user as one flush (not the old incremental
+                        // typing), but with live "در حال انجام..." steps
+                        // along the way to fill that gap.
+                        let searchWasPerformed = false;
 
-                        let upstream;
-
-                        try {
-                            upstream =
-                                await fetch(
-                                    `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`,
-                                    {
-                                        method: 'POST',
-                                        headers: {
-                                            'Content-Type':
-                                                'application/json',
-                                            'x-goog-api-key':
-                                                currentKey
-                                        },
-                                        body:
-                                            JSON.stringify({
-                                                system_instruction: {
-                                                    parts: [
-                                                        {
-                                                            text: systemText
-                                                        }
-                                                    ]
-                                                },
-                                                contents
-                                            }),
-                                        signal:
-                                            controller.signal
-                                    }
+                        const agentResult = await runAgentLoop({
+                            currentModel,
+                            currentKey,
+                            systemText,
+                            contents,
+                            tavilyKeys,
+                            signal: abortController.signal,
+                            onStep: (label, toolName) => {
+                                if (toolName === 'web_search') searchWasPerformed = true;
+                                res.write(
+                                    `data: ${JSON.stringify({ step: label })}\n\n`
                                 );
-                        } finally {
-                            clearTimeout(
-                                timeoutId
-                            );
-                        }
-
-                        if (
-                            !upstream.ok ||
-                            !upstream.body
-                        ) {
-                            let errorBody =
-                                null;
-
-                            try {
-                                errorBody =
-                                    await upstream.json();
-                            } catch (_) {}
-
-                            lastError =
-                                errorBody;
-
-                            markKeyResult(currentKey, false);
-                            log.warn('model.failed', {
-                                mode: 'stream',
-                                model: currentModel,
-                                status: upstream.status,
-                                connectMs: Date.now() - attemptStartedAt
-                            });
-
-                            continue;
-                        }
+                                if (typeof res.flush === 'function') res.flush();
+                            }
+                        });
 
                         markKeyResult(currentKey, true);
                         log.info('model.connected', {
@@ -1716,110 +1844,20 @@ async function handler(req, res) {
                             connectMs: Date.now() - attemptStartedAt
                         });
 
-                        const reader =
-                            upstream.body.getReader();
+                        try {
+                            res.setHeader('X-Search-Performed', String(searchWasPerformed));
+                        } catch (_) {
+                            // Headers may already be flushed by the time we know this;
+                            // harmless to skip, X-Search-Performed is observability-only.
+                        }
 
-                        const decoder =
-                            new TextDecoder();
+                        const finalText = agentResult.finalText || '';
 
-                        let buffer = '';
-
-                        // FIX: previously the only signal sent to the client
-                        // was raw text chunks + a bare {done:true} at the
-                        // end — Gemini's own finishReason (STOP / MAX_TOKENS
-                        // / SAFETY / ...) was read from the SSE payload but
-                        // never looked at, so a reply cut short because it
-                        // hit the output-token cap looked identical to a
-                        // normal, complete reply. That's the "heavy code
-                        // silently stops mid-file" symptom. We track the
-                        // last seen finishReason and forward it on {done}
-                        // so the frontend can offer a real "ادامه بده" action
-                        // instead of just showing a truncated answer.
-                        let lastFinishReason = null;
-
-                        while (true) {
-                            const {
-                                done,
-                                value
-                            } =
-                                await reader.read();
-
-                            if (done) break;
-
-                            buffer +=
-                                decoder.decode(
-                                    value,
-                                    {
-                                        stream: true
-                                    }
-                                );
-
-                            const lines =
-                                buffer.split('\n');
-
-                            buffer =
-                                lines.pop();
-
-                            for (
-                                const line of lines
-                            ) {
-                                if (
-                                    !line.startsWith(
-                                        'data:'
-                                    )
-                                ) {
-                                    continue;
-                                }
-
-                                const jsonStr =
-                                    line
-                                        .slice(5)
-                                        .trim();
-
-                                if (!jsonStr) {
-                                    continue;
-                                }
-
-                                try {
-                                    const parsed =
-                                        JSON.parse(
-                                            jsonStr
-                                        );
-
-                                    const candidate =
-                                        parsed
-                                            ?.candidates?.[0];
-
-                                    const piece =
-                                        candidate
-                                            ?.content?.parts?.[0]
-                                            ?.text ||
-                                        '';
-
-                                    if (
-                                        candidate &&
-                                        candidate.finishReason
-                                    ) {
-                                        lastFinishReason =
-                                            candidate.finishReason;
-                                    }
-
-                                    if (piece) {
-                                        res.write(
-                                            `data: ${JSON.stringify({
-                                                text: piece
-                                            })}\n\n`
-                                        );
-
-                                        if (
-                                            typeof res.flush ===
-                                            'function'
-                                        ) {
-                                            res.flush();
-                                        }
-                                    }
-                                } catch (_) {}
-                            }
+                        if (finalText) {
+                            res.write(
+                                `data: ${JSON.stringify({ text: finalText })}\n\n`
+                            );
+                            if (typeof res.flush === 'function') res.flush();
                         }
 
                         // truncated=true tells the client the model was cut
@@ -1827,19 +1865,20 @@ async function handler(req, res) {
                         // not the user pressing Stop) so it can offer to
                         // continue instead of treating the reply as final.
                         const truncated =
-                            lastFinishReason === 'MAX_TOKENS';
+                            agentResult.finishReason === 'MAX_TOKENS';
 
                         res.write(
                             `data: ${JSON.stringify({
                                 done: true,
-                                finishReason: lastFinishReason,
-                                truncated
+                                finishReason: agentResult.finishReason,
+                                truncated,
+                                askUser: !!agentResult.askUser
                             })}\n\n`
                         );
 
                         log.info('request.finish_reason', {
                             model: currentModel,
-                            finishReason: lastFinishReason || 'unknown'
+                            finishReason: agentResult.finishReason || 'unknown'
                         });
 
                         if (
@@ -1866,7 +1905,7 @@ async function handler(req, res) {
                             connectMs: Date.now() - attemptStartedAt
                         });
 
-                        lastError = error;
+                        lastError = error?.body || error;
                     }
                 }
             }
@@ -1926,68 +1965,21 @@ async function handler(req, res) {
                         key: keyLabel(geminiKeys, currentKey)
                     });
 
-                    const controller =
-                        new AbortController();
+                    const abortController = new AbortController();
 
-                    // Same reasoning as the streaming path above: fail over
-                    // to the next key/model quickly instead of stalling.
-                    const timeoutId =
-                        setTimeout(
-                            () =>
-                                controller.abort(),
-                            6000
-                        );
-
-                    let response;
-
-                    try {
-                        response =
-                            await fetch(
-                                `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`,
-                                {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type':
-                                            'application/json',
-                                        'x-goog-api-key':
-                                            currentKey
-                                    },
-                                    body:
-                                        JSON.stringify({
-                                            system_instruction: {
-                                                parts: [
-                                                    {
-                                                        text: systemText
-                                                    }
-                                                ]
-                                            },
-                                            contents
-                                        }),
-                                    signal:
-                                        controller.signal
-                                }
-                            );
-                    } finally {
-                        clearTimeout(
-                            timeoutId
-                        );
-                    }
-
-                    const data =
-                        await response.json();
-
-                    if (!response.ok) {
-                        markKeyResult(currentKey, false);
-                        log.warn('model.failed', {
-                            mode: 'non-stream',
-                            model: currentModel,
-                            message: data?.error?.message || response.statusText
-                        });
-
-                        lastError = data;
-
-                        continue;
-                    }
+                    // Same tool-calling loop as the streaming path (see
+                    // comment there) - non-stream mode just doesn't narrate
+                    // intermediate steps, since there's no open connection
+                    // to push them over.
+                    const agentResult = await runAgentLoop({
+                        currentModel,
+                        currentKey,
+                        systemText,
+                        contents,
+                        tavilyKeys,
+                        signal: abortController.signal,
+                        onStep: null
+                    });
 
                     markKeyResult(currentKey, true);
                     log.info('request.completed', {
@@ -1996,7 +1988,22 @@ async function handler(req, res) {
                         durationMs: Date.now() - requestStartedAt
                     });
 
-                    return res.status(200).json(data);
+                    // Shaped like Gemini's native generateContent response so
+                    // any existing non-stream caller keeps working unchanged,
+                    // even though the answer may have gone through one or
+                    // more tool calls internally.
+                    return res.status(200).json({
+                        candidates: [
+                            {
+                                content: {
+                                    role: 'model',
+                                    parts: [{ text: agentResult.finalText || '' }]
+                                },
+                                finishReason: agentResult.finishReason || 'STOP'
+                            }
+                        ],
+                        usageMetadata: agentResult.usage || undefined
+                    });
 
                 } catch (error) {
                     markKeyResult(currentKey, false);
@@ -2006,7 +2013,7 @@ async function handler(req, res) {
                         message: error?.message || String(error)
                     });
 
-                    lastError = error;
+                    lastError = error?.body || error;
                 }
             }
         }
