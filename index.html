@@ -2966,19 +2966,26 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function formatReply(text) {
-        const escaped = escapeHtml(text);
-        const parts = escaped.split(/```/);
-        const html = parts.map((part, index) => {
+        const rawParts = String(text ?? '').split(/```/);
+        const html = rawParts.map((rawPart, index) => {
             if (index % 2 === 1) {
-                const firstLine = part.split('\n')[0].trim().toLowerCase();
+                // این بخش کدِ داخل بلاک ``` است — باید نسخه‌ی خامش (بدون
+                // escape) برای کپی/دانلود/پیش‌نمایش نگه داشته شود، و فقط
+                // موقع نمایش داخل <pre><code> escape شود؛ وگرنه چیزی که
+                // کپی/دانلود می‌شود همان کد entity-encode شده (&lt; به‌جای <)
+                // خواهد بود، نه کد واقعی.
+                const firstLine = rawPart.split('\n')[0].trim().toLowerCase();
                 const lang = /^[a-zA-Z0-9+#.-]+$/.test(firstLine) ? firstLine : '';
-                const code = (lang ? part.slice(part.indexOf('\n') + 1) : part).trim();
-                const encoded = encodeURIComponent(code);
-                const canRun = isRunnableCode(lang, code);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang || 'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun ? `<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>` : ''}</div></div><pre><code>${code}</code></pre></div>`;
+                const rawCode = (lang ? rawPart.slice(rawPart.indexOf('\n') + 1) : rawPart).trim();
+                const displayCode = escapeHtml(rawCode);
+                const encoded = encodeURIComponent(rawCode);
+                const canRun = isRunnableCode(lang, rawCode);
+                return `<div class="code-card"><div class="code-card-head"><span>${lang || 'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun ? `<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>` : ''}</div></div><pre><code>${displayCode}</code></pre></div>`;
             }
 
-            const lines = part.split('\n');
+            const escapedPart = escapeHtml(rawPart);
+
+            const lines = escapedPart.split('\n');
             let out = [], listType = null, listItems = [], paragraph = [];
             const flushParagraph = () => {
                 if (!paragraph.length) return;
@@ -3736,17 +3743,21 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     // More reliable formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit.
     formatReply = function(text){
-        const escaped=escapeHtml(text);
-        const parts=escaped.split(/```/);
-        const rendered=parts.map((part,index)=>{
+        const rawParts=String(text ?? '').split(/```/);
+        const rendered=rawParts.map((rawPart,index)=>{
             if(index%2===1){
-                const raw=part.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
+                // نسخه‌ی خام کد (بدون escape) باید برای کپی/دانلود/پیش‌نمایش
+                // نگه داشته شود؛ فقط موقع نمایش داخل <pre><code> escape می‌شود.
+                const raw=rawPart.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
                 const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
-                const code=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim(); const encoded=encodeURIComponent(code);
-                const canRun=isRunnableCode(lang, code);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang||'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun?`<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>`:''}</div></div><pre><code>${code}</code></pre></div>`;
+                const rawCode=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim();
+                const displayCode=escapeHtml(rawCode);
+                const encoded=encodeURIComponent(rawCode);
+                const canRun=isRunnableCode(lang, rawCode);
+                return `<div class="code-card"><div class="code-card-head"><span>${lang||'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun?`<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>`:''}</div></div><pre><code>${displayCode}</code></pre></div>`;
             }
-            const lines=part.split('\n');let out=[],para=[],list=null,items=[];
+            const escapedPart=escapeHtml(rawPart);
+            const lines=escapedPart.split('\n');let out=[],para=[],list=null,items=[];
             const flushP=()=>{if(para.length){out.push(`<p>${formatInline(para.join(' '))}</p>`);para=[]}};
             const flushL=()=>{if(items.length){const tag=list==='ol'?'ol':'ul';out.push(`<${tag}>${items.map(x=>`<li>${formatInline(x)}</li>`).join('')}</${tag}>`);items=[];list=null}};
             for(const raw of lines){const line=raw.trim();if(!line){flushP();flushL();continue}
