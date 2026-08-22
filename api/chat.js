@@ -1560,8 +1560,19 @@ async function handler(req, res) {
                     const currentKey =
                         geminiKeys[k];
 
+                    // Declared OUTSIDE the try so it's always defined by the
+                    // time the catch block below runs — this was previously
+                    // declared inside try{}, which is normally fine (same
+                    // block scope as its catch), but a stale/partial deploy
+                    // once left a version where the two were out of sync and
+                    // threw "attemptStartedAt is not defined" here, which
+                    // then hit the mid-stream error path instead of just
+                    // logging the connect time. Hoisting it removes that
+                    // class of bug entirely, regardless of deploy state.
+                    let attemptStartedAt = Date.now();
+
                     try {
-                        const attemptStartedAt = Date.now();
+                        attemptStartedAt = Date.now();
 
                         log.info('model.attempt', {
                             mode: 'stream',
