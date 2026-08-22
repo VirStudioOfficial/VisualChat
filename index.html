@@ -1804,15 +1804,147 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
     }
 
-    function initUserData() {
-        updateUserUI();
-        renderHistory();
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
+    // IndexedDB storage for conversations: each chat is a separate record,
+    // so adding one message never rewrites the entire history in localStorage.
+    const CHAT_DB_NAME = 'VirtualChatDB';
+    const CHAT_DB_VERSION = 1;
+    const CHAT_STORE = 'chats';
+    const HISTORY_STORE = 'histories';
+    let chatDbPromise = null;
+    let chatSaveQueue = Promise.resolve();
+
+    function getChatOwnerKey() {
+        return currentUser?.email ? String(currentUser.email).toLowerCase() : 'guest';
+    }
+
+    function openChatDB() {
+        if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB is not supported'));
+        if (chatDbPromise) return chatDbPromise;
+        chatDbPromise = new Promise((resolve, reject) => {
+            const req = indexedDB.open(CHAT_DB_NAME, CHAT_DB_VERSION);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(CHAT_STORE)) {
+                    const store = db.createObjectStore(CHAT_STORE, { keyPath: 'id' });
+                    store.createIndex('owner', 'owner', { unique: false });
+                }
+                if (!db.objectStoreNames.contains(HISTORY_STORE)) {
+                    const store = db.createObjectStore(HISTORY_STORE, { keyPath: 'id' });
+                    store.createIndex('owner', 'owner', { unique: false });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+        });
+        return chatDbPromise;
+    }
+
+    function idbRequest(req) {
+        return new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error('IndexedDB request failed'));
+        });
+    }
+
+    async function idbGetAllByOwner(storeName, owner) {
+        const db = await openChatDB();
+        const tx = db.transaction(storeName, 'readonly');
+        return idbRequest(tx.objectStore(storeName).index('owner').getAll(IDBKeyRange.only(owner)));
+    }
+
+    async function idbPut(storeName, record) {
+        const db = await openChatDB();
+        const tx = db.transaction(storeName, 'readwrite');
+        await idbRequest(tx.objectStore(storeName).put(record));
+    }
+
+    async function idbDelete(storeName, id) {
+        const db = await openChatDB();
+        const tx = db.transaction(storeName, 'readwrite');
+        await idbRequest(tx.objectStore(storeName).delete(id));
+    }
+
+    async function migrateLegacyChatStorage() {
+        const owner = getChatOwnerKey();
+        const chatKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
-        chatHistoryData = JSON.parse(localStorage.getItem(historyKey)) || {};
+        const migrationKey = `virtual_chat_idb_migrated_${owner}`;
+        if (localStorage.getItem(migrationKey) === '1') return;
+
+        let legacyChats = {}, legacyHistory = {};
+        try { legacyChats = JSON.parse(localStorage.getItem(chatKey) || '{}') || {}; } catch (_) {}
+        try { legacyHistory = JSON.parse(localStorage.getItem(historyKey) || '{}') || {}; } catch (_) {}
+
+        try {
+            for (const [chatId, chat] of Object.entries(legacyChats)) {
+                if (!chat) continue;
+                await idbPut(CHAT_STORE, {
+                    id: `${owner}:${chatId}`, owner, chatId: String(chatId),
+                    title: chat.title || 'گفتگوی جدید', html: chat.html || '',
+                    updatedAt: Number(chatId) || Date.now()
+                });
+            }
+            for (const [chatId, history] of Object.entries(legacyHistory)) {
+                if (!Array.isArray(history)) continue;
+                await idbPut(HISTORY_STORE, {
+                    id: `${owner}:${chatId}`, owner, chatId: String(chatId), history
+                });
+            }
+            // Remove the old large localStorage blobs first; this also works when
+            // the browser is already at its localStorage quota.
+            localStorage.removeItem(chatKey);
+            localStorage.removeItem(historyKey);
+            try { localStorage.setItem(migrationKey, '1'); } catch (_) {}
+        } catch (e) {
+            console.error('Legacy chat migration failed:', e);
+        }
+    }
+
+    async function loadChatsFromIndexedDB() {
+        const owner = getChatOwnerKey();
+        const [chatRecords, historyRecords] = await Promise.all([
+            idbGetAllByOwner(CHAT_STORE, owner), idbGetAllByOwner(HISTORY_STORE, owner)
+        ]);
+        chats = {}; chatHistoryData = {};
+        chatRecords.forEach(r => { chats[r.chatId] = { title: r.title || 'گفتگوی جدید', html: r.html || '' }; });
+        historyRecords.forEach(r => { chatHistoryData[r.chatId] = Array.isArray(r.history) ? r.history : []; });
+    }
+
+    function queueChatSave(chatId) {
+        const owner = getChatOwnerKey();
+        const chat = chats[chatId];
+        if (!chat) return;
+        const history = chatHistoryData[chatId] || [];
+        chatSaveQueue = chatSaveQueue.catch(() => {}).then(async () => {
+            await idbPut(CHAT_STORE, {
+                id: `${owner}:${chatId}`, owner, chatId: String(chatId),
+                title: chat.title || 'گفتگوی جدید', html: chat.html || '', updatedAt: Date.now()
+            });
+            await idbPut(HISTORY_STORE, {
+                id: `${owner}:${chatId}`, owner, chatId: String(chatId), history
+            });
+        }).catch(e => {
+            console.error('IndexedDB chat save failed:', e);
+            if (typeof showToast === 'function') showToast('ذخیره‌ی گفتگو با مشکل روبه‌رو شد؛ اطلاعات فعلی در صفحه باقی مانده است.', 'error', 5000);
+        });
+    }
+
+    async function initUserData() {
+        updateUserUI();
+        try {
+            await migrateLegacyChatStorage();
+            await loadChatsFromIndexedDB();
+        } catch (e) {
+            console.error('IndexedDB initialization failed:', e);
+            const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+            const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+            try { chats = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch (_) { chats = {}; }
+            try { chatHistoryData = JSON.parse(localStorage.getItem(historyKey) || '{}') || {}; } catch (_) { chatHistoryData = {}; }
+        }
+        renderHistoryList();
         if (chats[currentChatId]) loadChat(currentChatId, true);
     }
+
 
     function updateUserUI() {
         if (!currentUser) return;
@@ -3218,7 +3350,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function startNewChat() {
         if (isGenerating) stopGeneration();
         currentChatId = Date.now();
-        localStorage.setItem('last_active_chat_id', currentChatId);
+        try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
         isFirstMessage = true;
         document.getElementById("chatBox").innerHTML = "";
         document.getElementById("chatBox").style.display = 'none';
@@ -3344,25 +3476,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let __historyRenderQueued = false;
     function saveCurrentChat() {
         const chatBox = document.getElementById("chatBox");
+        if (!chatBox) return;
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
         chats[currentChatId] = {
             title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
         };
-        const ok = safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
-        if (!ok) {
-            // Even after pruning we couldn't fit it — drop this chat's stored
-            // HTML (keep the lighter text history) rather than lose everything.
-            delete chats[currentChatId];
-            safeSetItem(storageKey, JSON.stringify(chats), {});
-            if (typeof showToast === 'function') {
-                showToast('این گفتگو به‌خاطر حجم زیاد (فایل/تصویر ضمیمه) ذخیره نشد.', 'error', 5000);
-            }
-        }
-        safeSetItem(historyKey, JSON.stringify(chatHistoryData), {});
-        safeSetItem('last_active_chat_id', currentChatId, {});
+        queueChatSave(currentChatId);
+        try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
         renderHistoryList();
     }
 
@@ -3392,9 +3513,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // Full reload from localStorage — use only when `chats` may be stale
     // (initial page load, after login/switch account). Everywhere else,
     // renderHistoryList() reuses the already-current in-memory `chats`.
-    function renderHistory() {
-        const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-        chats = JSON.parse(localStorage.getItem(storageKey)) || {};
+    async function renderHistory() {
+        try {
+            await loadChatsFromIndexedDB();
+        } catch (e) {
+            console.error('History load failed:', e);
+        }
         renderHistoryList();
     }
 
@@ -3429,11 +3553,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function loadChat(id, isInitialLoad = false) {
         if (isGenerating) stopGeneration();
+        if (!chats[id]) return;
         currentChatId = id;
-        localStorage.setItem('last_active_chat_id', currentChatId);
+        try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
         isFirstMessage = false;
-        // FIX: switching chats must not keep a pending file/upload from the
-        // previously open chat attached to the composer of this one.
         removeFile();
         clearCodeFilesMemory();
         lastCodeFilesForEdit = [];
@@ -3441,7 +3564,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const chatBox = document.getElementById("chatBox");
         document.getElementById("homeScreen").style.display = 'none';
         chatBox.style.display = 'flex';
-        chatBox.innerHTML = chats[id].html;
+        chatBox.innerHTML = chats[id].html || '';
         repairLoadedChatButtons(chatBox);
         renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
@@ -3467,11 +3590,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function clearCurrentChat(){
         const ok = await showConfirm('این گفتگو پاک شود؟ این کار قابل بازگشت نیست.');
         if(!ok) return;
-        const id=currentChatId; delete chats[id]; delete chatHistoryData[id];
-        const storageKey=currentUser?`virtual_chat_${currentUser.email}`:'virtual_chat_history';const historyKey=currentUser?`virtual_history_${currentUser.email}`:'virtual_history_data';
-        safeSetItem(storageKey,JSON.stringify(chats),{pruneChatsKey:storageKey});safeSetItem(historyKey,JSON.stringify(chatHistoryData),{});startNewChat();closeSettings();
+        const id = currentChatId;
+        const owner = getChatOwnerKey();
+        delete chats[id];
+        delete chatHistoryData[id];
+        try {
+            await Promise.all([
+                idbDelete(CHAT_STORE, `${owner}:${id}`),
+                idbDelete(HISTORY_STORE, `${owner}:${id}`)
+            ]);
+        } catch (e) {
+            console.error('IndexedDB chat delete failed:', e);
+        }
+        startNewChat();
+        closeSettings();
         showToast('گفتگو حذف شد', 'success');
     }
+
 
     // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
     const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل، تمیز و با ایندنت درست و منظم بده؛ تگ‌ها را به‌ترتیب و خوانا بنویس، نه فشرده و درهم. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
