@@ -685,12 +685,12 @@
         .message.bot ul, .message.bot ol { margin: 0.5rem 0 1.1rem; padding-right: 1.35rem; }
         .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
         .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
-        .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; }
-        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+        .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
+        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
         .code-actions { display:flex; gap:6px; }
         .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:5px 9px; cursor:pointer; font-family:inherit; font-size:0.76rem; }
         .code-action:hover { border-color:var(--accent-2); }
-        .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; tab-size: 2; border-radius: 0 0 14px 14px; }
+        .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; tab-size: 2; border-radius: 0 0 14px 14px; flex-shrink: 0; }
         .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.85rem; color: var(--code-text); }
         .code-card pre::-webkit-scrollbar { height: 8px; }
         .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
