@@ -1277,6 +1277,35 @@ async function handler(req, res) {
 
         let systemText = '';
 
+        // FIX: مدل هیچ‌وقت تاریخ واقعی امروز رو نمی‌دونه — فقط از دیتای
+        // آموزشیش (که قدیمیه) حدس می‌زنه، برای همین وقتی می‌پرسی "امروز
+        // چندمه" جواب اشتباه می‌ده. این‌جا تاریخ واقعی سرور (شمسی + میلادی
+        // + ساعت، به وقت تهران) رو مستقیم بهش می‌گیم تا همیشه درست باشه.
+        const now = new Date();
+        const jalaliDate = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+            timeZone: 'Asia/Tehran',
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        }).format(now);
+        const gregorianDate = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Tehran',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).format(now);
+        const tehranTime = new Intl.DateTimeFormat('fa-IR', {
+            timeZone: 'Asia/Tehran',
+            hour: '2-digit',
+            minute: '2-digit'
+        }).format(now);
+        const dateContext = `
+اطلاعات زمان واقعی (این تاریخ همیشه درست است، حتی اگر با دانش قبلی‌ات فرق دارد؛ همیشه همین را ملاک بده):
+امروز: ${jalaliDate} (میلادی: ${gregorianDate})
+ساعت فعلی به وقت تهران: ${tehranTime}
+`;
+
         const antiSelfQA = `
 قانون سخت‌گیرانه:
 جمله‌ی معرفی مدل («من Virtual Bot ... هستم») را فقط و فقط زمانی بنویس که خودِ کاربر همین الان مستقیم پرسیده باشد «مدلت چیه» یا سؤال هم‌معنی.
@@ -1403,6 +1432,7 @@ async function handler(req, res) {
         }
 
         systemText += antiSelfQA;
+        systemText += dateContext;
 
         /*
         |--------------------------------------------------------------------------
