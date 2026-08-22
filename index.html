@@ -2659,7 +2659,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // clean fetch rejection or AbortError — the promise can simply never
         // settle. Without this, isGenerating stays stuck true forever and the
         // composer (#userInput / send button) stays disabled in that chat until
-        // the page is reloaded. This timer force-resets the UI after 90s no matter
+        // the page is reloaded. This timer force-resets the UI after 340s no matter
         // what went wrong upstream, so the user is never permanently locked out. =====
         const watchdogId = setTimeout(() => {
             if (requestId === activeRequestId && isGenerating) {
