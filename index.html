@@ -43,7 +43,26 @@
                     root.style.setProperty('--accent-1', c1);
                     root.style.setProperty('--accent-2', c2);
 
-                    if (isCharcoal) {
+                    if (isCharcoal && resolved === 'light') {
+                        root.style.setProperty('--bg-main', '#f4f4f6');
+                        root.style.setProperty('--bg-sidebar', '#ffffff');
+                        root.style.setProperty('--bg-card', '#eceef1');
+                        root.style.setProperty('--bg-card-hover', '#e2e4e8');
+                        root.style.setProperty('--bg-input', '#ffffff');
+                        root.style.setProperty('--border', '#dcdee2');
+                        root.style.setProperty('--border-soft', 'rgba(0,0,0,0.07)');
+                        root.style.setProperty('--text-main', '#1d1f24');
+                        root.style.setProperty('--text-muted', '#63666e');
+                        root.style.setProperty('--code-bg', '#eceef1');
+                        root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
+                        root.style.setProperty('--code-text', '#1d1f24');
+                        root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.08)');
+                        root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.16)');
+                        root.style.setProperty('--accent-1', '#6b7078');
+                        root.style.setProperty('--accent-2', '#3a3c42');
+                        root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #b6bac1, #6b7078 52%, #3a3c42)');
+                        document.documentElement.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.10), transparent 45%), radial-gradient(circle at -10% 110%, rgba(58,60,66,0.06), transparent 40%)');
+                    } else if (isCharcoal) {
                         root.style.setProperty('--bg-main', '#1d1f24');
                         root.style.setProperty('--bg-sidebar', '#24262c');
                         root.style.setProperty('--bg-card', '#2b2e35');
@@ -125,20 +144,20 @@
         }
 
         :root[data-theme="light"] {
-            --bg-main: #f8fafc;
+            --bg-main: #f6f7fb;
             --bg-sidebar: #ffffff;
-            --bg-card: #f1f5f9;
-            --bg-card-hover: #e2e8f0;
+            --bg-card: #f0f2f8;
+            --bg-card-hover: #e6e9f3;
             --bg-input: #ffffff;
-            --text-main: #0f172a;
-            --text-muted: #64748b;
-            --border: #cbd5e1;
-            --code-bg: #f8fafc;
-            --code-head-bg: rgba(0,0,0,0.03);
-            --code-text: #0f172a;
-            --border-soft: rgba(15,23,42,0.1);
-            --shadow-a: rgba(15,23,42,0.08);
-            --shadow-b: rgba(15,23,42,0.12);
+            --text-main: #1a1d29;
+            --text-muted: #6b7280;
+            --border: #e2e5ef;
+            --code-bg: #1e2530;
+            --code-head-bg: rgba(255,255,255,0.05);
+            --code-text: #e8eaf0;
+            --border-soft: rgba(15,23,42,0.08);
+            --shadow-a: rgba(30,41,59,0.10);
+            --shadow-b: rgba(30,41,59,0.16);
         }
 
         :root[data-theme="light"] body {
@@ -1878,7 +1897,29 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function applyWholeUiPalette(s, resolvedTheme) {
         const root = document.documentElement;
         const isCharcoal = s.uiPalette === 'charcoal';
+        const light = resolvedTheme === 'light';
 
+        if (isCharcoal && light) {
+            root.style.setProperty('--bg-main', '#f4f4f6');
+            root.style.setProperty('--bg-sidebar', '#ffffff');
+            root.style.setProperty('--bg-card', '#eceef1');
+            root.style.setProperty('--bg-card-hover', '#e2e4e8');
+            root.style.setProperty('--bg-input', '#ffffff');
+            root.style.setProperty('--border', '#dcdee2');
+            root.style.setProperty('--border-soft', 'rgba(0,0,0,0.07)');
+            root.style.setProperty('--text-main', '#1d1f24');
+            root.style.setProperty('--text-muted', '#63666e');
+            root.style.setProperty('--code-bg', '#eceef1');
+            root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
+            root.style.setProperty('--code-text', '#1d1f24');
+            root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.08)');
+            root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.16)');
+            root.style.setProperty('--accent-1', '#6b7078');
+            root.style.setProperty('--accent-2', '#3a3c42');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #b6bac1, #6b7078 52%, #3a3c42)');
+            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.10), transparent 45%), radial-gradient(circle at -10% 110%, rgba(58,60,66,0.06), transparent 40%)');
+            return;
+        }
         if (isCharcoal) {
             root.style.setProperty('--bg-main', '#1d1f24');
             root.style.setProperty('--bg-sidebar', '#24262c');
@@ -1903,7 +1944,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
         const c1 = s.c1 || defaultSettings.c1;
         const c2 = s.c2 || defaultSettings.c2;
-        const light = resolvedTheme === 'light';
         root.style.setProperty('--accent-1', c1);
         root.style.setProperty('--accent-2', c2);
         root.style.setProperty('--accent-grad', 'linear-gradient(135deg, var(--accent-1), var(--accent-2))');
