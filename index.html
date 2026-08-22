@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Virtual Chat</title>
-    <link id="dynamicFavicon" rel="icon" type="image/png" href="">
-
     <script>
         (function () {
             try {
@@ -16,9 +14,10 @@
                     : mode;
                 document.documentElement.setAttribute('data-theme', resolved);
 
-                var c1 = saved.c1 || '#8b5cf6';
-                var c2 = saved.c2 || '#22d3ee';
-                var isCharcoal = saved.uiPalette === 'charcoal';
+                // انتخاب رنگ حذف شده؛ مشکی (charcoal) همیشه پالت ثابت است.
+                var c1 = '#6b7078';
+                var c2 = '#b6bac1';
+                var isCharcoal = true;
                 var root = document.documentElement;
 
                 function hexToRgb(hex) {
@@ -87,19 +86,24 @@
         })();
     </script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="manifest" href="/manifest.json">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
     <style>
+        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.1; }
+        [class*="ph-"] { vertical-align: -0.09em; }
         :root {
-            --bg-main: #0a0c12;
-            --bg-sidebar: #10131c;
-            --bg-card: #161a24;
-            --bg-card-hover: #1c2130;
-            --bg-input: #191e29;
-            --accent-1: #8b5cf6;
-            --accent-2: #22d3ee;
+            --bg-main: #090d16;
+            --bg-sidebar: #0f1523;
+            --bg-card: #161f33;
+            --bg-card-hover: #1e2a44;
+            --bg-input: #121929;
+            --accent-1: #6366f1;
+            --accent-2: #a855f7;
             --accent-grad: linear-gradient(135deg, var(--accent-1), var(--accent-2));
             --danger: #f87171;
             --text-main: #f4f6fb;
@@ -176,6 +180,7 @@
         body {
             display: flex;
             position: relative;
+            background: linear-gradient(135deg, #090d16, #111827, #1e1b4b);
             background-image: var(--app-bg-image);
         }
 
@@ -289,7 +294,7 @@
             content: "";
             position: absolute;
             inset: 0;
-            background: linear-gradient(120deg, color-mix(in srgb, var(--accent-1) 10%, transparent), color-mix(in srgb, var(--accent-2) 14%, transparent), color-mix(in srgb, var(--accent-1) 10%, transparent));
+            background: linear-gradient(120deg, rgba(139,92,246,0.10), rgba(34,211,238,0.14), rgba(139,92,246,0.10));
             background-size: 200% 200%;
             animation: accentShimmer 3.2s ease infinite;
             pointer-events: none;
@@ -358,7 +363,7 @@
             background: var(--accent-grad);
             display: flex; align-items: center; justify-content: center;
             font-size: 0.75rem; color: #fff; flex-shrink: 0;
-            box-shadow: 0 0 18px color-mix(in srgb, var(--accent-1) 45%, transparent);
+            box-shadow: 0 0 18px rgba(139,92,246,0.45);
         }
         .brand-text {
             background: var(--accent-grad);
@@ -399,7 +404,7 @@
             font-size: 0.9rem;
             transition: all 0.2s ease;
         }
-        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: rgba(139,92,246,0.4); }
         .new-chat-btn i { color: var(--accent-2); }
 
         .history-list {
@@ -430,7 +435,7 @@
         }
         .history-item i { font-size: 0.75rem; flex-shrink: 0; }
         .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
-        .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: color-mix(in srgb, var(--accent-1) 35%, transparent); }
+        .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: rgba(139,92,246,0.35); }
         .history-item.active i { color: var(--accent-2); }
 
         .main-content {
@@ -472,7 +477,7 @@
             position: relative;
         }
         .model-selector:hover {
-            border-color: color-mix(in srgb, var(--accent-1) 40%, transparent);
+            border-color: rgba(139,92,246,0.4);
             color: var(--text-main);
         }
         .model-selector .model-name {
@@ -518,7 +523,7 @@
         .model-dropdown-item.active {
             background: var(--bg-card);
             color: var(--text-main);
-            border: 1px solid color-mix(in srgb, var(--accent-1) 30%, transparent);
+            border: 1px solid rgba(139,92,246,0.3);
         }
         .model-dropdown-item .item-name { font-weight: 600; }
         .model-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
@@ -570,7 +575,7 @@
             background: var(--accent-grad);
             display: flex; align-items: center; justify-content: center;
             font-size: 1.5rem; color: #fff;
-            box-shadow: 0 0 40px color-mix(in srgb, var(--accent-1) 35%, transparent);
+            box-shadow: 0 0 40px rgba(139,92,246,0.35);
             animation: glowPulse 3.5s ease-in-out infinite;
         }
 
@@ -589,7 +594,7 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        .suggestion-chip:hover { color: var(--text-main); border-color: var(--accent-1); background: var(--bg-card-hover); }
+        .suggestion-chip:hover { color: var(--text-main); border-color: rgba(139,92,246,0.4); background: var(--bg-card-hover); }
 
         .chat-box {
             flex: 1;
@@ -639,7 +644,7 @@
         .message.bot h3 { font-size: 1.08rem; }
         .message.bot ul, .message.bot ol { margin: 0.5rem 0 1.1rem; padding-right: 1.35rem; }
         .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
-        .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
+        .message.bot code { font-family: Consolas, monospace; background: rgba(139,92,246,0.12); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--code-bg); direction: ltr; text-align: left; }
         .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; background:var(--code-head-bg); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); }
         .code-actions { display:flex; gap:6px; }
@@ -658,18 +663,6 @@
         .image-result-preview:hover .image-result-zoom-hint { opacity: 1; }
         .image-result-zoom-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.28); color: #fff; font-size: 1.4rem; opacity: 0; transition: opacity .15s; }
         .image-result-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
-
-        /* Truncation notice: shown when a reply is cut off by the model's
-           output-token limit (heavy code / long content) so the user can
-           continue it instead of seeing a silently incomplete answer. */
-        .truncation-notice {
-            display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
-            margin-top: 10px; padding: 10px 12px;
-            background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: 10px; font-size: 0.82rem; color: var(--warning);
-        }
-        .truncation-notice span { display: flex; align-items: center; gap: 6px; }
-        .truncation-notice .code-action { color: var(--text-main); }
         .image-result-actions .code-action { display: inline-flex; align-items: center; gap: 5px; }
 
         .image-lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 24px; }
@@ -700,6 +693,15 @@
         .file-preview-body { overflow: auto; padding: 0; direction: ltr; text-align: left; background: var(--code-bg); }
         .file-preview-body pre { margin: 0; padding: 10px 0; }
         .file-preview-body code { font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.82rem; color: var(--code-text); }
+
+        .code-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); display: none; align-items: center; justify-content: center; z-index: 3100; padding: 20px; }
+        .code-preview-overlay.active { display: flex; }
+        .code-preview-modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; width: min(94vw, 1100px); height: min(88vh, 800px); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px var(--shadow-b); }
+        .code-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+        .code-preview-head span { font-weight: 600; font-size: 0.9rem; color: var(--text-main); }
+        .code-preview-head-actions { display: flex; align-items: center; gap: 8px; }
+        .code-preview-body { flex: 1; background: #fff; }
+        .code-preview-body iframe { width: 100%; height: 100%; border: 0; display: block; }
         .fp-line { display: block; padding: 0 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
         .fp-line:hover { background: rgba(255,255,255,0.04); }
         .fp-lineno { display: inline-block; min-width: 2.6em; margin-inline-end: 12px; color: var(--text-muted); opacity: 0.55; user-select: none; text-align: right; }
@@ -754,8 +756,8 @@
             transition: border-color 0.2s, box-shadow 0.2s;
         }
         .input-box:focus-within {
-            border-color: color-mix(in srgb, var(--accent-1) 55%, transparent);
-            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-1) 12%, transparent), 0 6px 24px var(--shadow-a);
+            border-color: rgba(139,92,246,0.55);
+            box-shadow: 0 0 0 3px rgba(139,92,246,0.12), 0 6px 24px var(--shadow-a);
         }
 
         textarea#userInput {
@@ -822,7 +824,7 @@
 
         .icon-btn.search-active {
             color: var(--accent-2) !important;
-            background-color: color-mix(in srgb, var(--accent-2) 14%, transparent) !important;
+            background-color: rgba(34, 211, 238, 0.14) !important;
         }
 
         .icon-btn.recording { animation: pulseMic 1.2s infinite; }
@@ -1012,8 +1014,8 @@
         }
         body {
             background-image:
-                radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent 32%),
-                radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--accent-1) 12%, transparent), transparent 36%);
+                radial-gradient(circle at 100% 0%, rgba(34,211,238,0.10), transparent 32%),
+                radial-gradient(circle at 0% 100%, rgba(139,92,246,0.12), transparent 36%);
         }
         .sidebar { background: var(--bg-sidebar); backdrop-filter: blur(18px); }
         .chat-header {
@@ -1034,7 +1036,7 @@
         }
         .home-mark {
             width: 72px; height: 72px; border-radius: 24px;
-            box-shadow: 0 18px 55px color-mix(in srgb, var(--accent-2) 14%, transparent), 0 0 35px color-mix(in srgb, var(--accent-1) 22%, transparent);
+            box-shadow: 0 18px 55px rgba(34,211,238,0.14), 0 0 35px rgba(139,92,246,0.22);
         }
         .home-title {
             font-size: clamp(1.7rem, 3vw, 2.35rem);
@@ -1063,7 +1065,7 @@
             letter-spacing: 0.005em;
         }
         .message.user {
-            background: linear-gradient(135deg, color-mix(in srgb, var(--accent-1) 14%, transparent), color-mix(in srgb, var(--accent-2) 7%, transparent));
+            background: linear-gradient(135deg, rgba(139,92,246,0.14), rgba(34,211,238,0.07));
             border-radius: 18px 18px 4px 18px;
             padding: 14px 18px;
         }
@@ -1110,8 +1112,8 @@
         textarea#userInput { font-size: 1rem; line-height: 1.7; }
         .action-btn { border-radius: 12px; }
         .new-chat-btn {
-            background: linear-gradient(135deg, color-mix(in srgb, var(--accent-1) 18%, transparent), color-mix(in srgb, var(--accent-2) 10%, transparent));
-            border-color: color-mix(in srgb, var(--accent-1) 28%, transparent);
+            background: linear-gradient(135deg, rgba(139,92,246,0.18), rgba(34,211,238,0.10));
+            border-color: rgba(139,92,246,0.28);
         }
         @media (max-width: 768px) {
             .chat-box { padding: 18px 14px; }
@@ -1124,7 +1126,7 @@
         /* ===== v3 fixes: input alignment, drag & drop, readable long answers ===== */
         .input-wrapper.drag-over .input-box {
             border-color: var(--accent-2);
-            box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 12%, transparent), 0 12px 34px rgba(0,0,0,0.18);
+            box-shadow: 0 0 0 4px rgba(34,211,238,0.12), 0 12px 34px rgba(0,0,0,0.18);
         }
         .input-wrapper.drag-over::after {
             content: "فایل را اینجا رها کن";
@@ -1167,10 +1169,10 @@
 
 /* ===== Virtual Chat UX upgrade ===== */
 :root { --msg-font-size: .92rem; --surface-2: rgba(255,255,255,.035); }
-body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,color-mix(in srgb, var(--accent-1) 2.5%, transparent) 50%,transparent 56%);opacity:.8}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,rgba(139,92,246,.025) 50%,transparent 56%);opacity:.8}
 .header{backdrop-filter:blur(18px);background:color-mix(in srgb,var(--bg-main) 72%,transparent)}
 .home-screen{position:relative;overflow:hidden}
-.home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb, var(--accent-1) 12%, transparent),transparent 65%);filter:blur(10px);pointer-events:none}
+.home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(139,92,246,.12),transparent 65%);filter:blur(10px);pointer-events:none}
 .home-text,.suggestion-chips,.home-mark{position:relative;z-index:1}
 .suggestion-chip{box-shadow:0 8px 24px rgba(0,0,0,.08)}
 .message-wrapper{position:relative;gap:5px}
@@ -1183,16 +1185,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .message-actions{display:flex;gap:4px;opacity:0;transform:translateY(-2px);transition:.18s;min-height:26px;padding:0 4px;direction:rtl}
 .message-wrapper:hover .message-actions,.message-wrapper:focus-within .message-actions{opacity:1;transform:none}
 .msg-action{width:28px;height:28px;border:1px solid var(--border-soft);border-radius:8px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);display:inline-flex;align-items:center;justify-content:center;font-size:.72rem}
-.msg-action:hover{color:var(--text-main);border-color:color-mix(in srgb, var(--accent-2) 42%, transparent)}
-.input-wrapper{padding-top:8px}.input-wrapper.drag-over .input-box{outline:2px dashed var(--accent-2);outline-offset:4px;box-shadow:0 0 0 8px color-mix(in srgb, var(--accent-2) 8%, transparent)}
+.msg-action:hover{color:var(--text-main);border-color:rgba(34,211,238,.42)}
+.input-wrapper{padding-top:8px}body.drag-over .input-box{outline:2px dashed var(--accent-2);outline-offset:4px;box-shadow:0 0 0 8px rgba(34,211,238,.08)}body.drag-over::after{content:'فایل را رها کنید';position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:var(--text-main);background:rgba(0,0,0,0.45);backdrop-filter:blur(3px);pointer-events:none;border:3px dashed var(--accent-2);margin:14px;border-radius:18px}
 .composer-hint{position:absolute;bottom:4px;right:22px;color:var(--text-muted);font-size:.67rem;opacity:.75;pointer-events:none}
 .composer-hint kbd{font-family:inherit;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:0 4px;margin:0 2px;background:var(--bg-card)}
 .input-box{box-shadow:0 14px 42px var(--shadow-a)}
 .chat-search{display:none;position:fixed;top:76px;left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 28px));z-index:60;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:10px;animation:fadeIn .18s ease}
 .chat-search.active{display:block}.chat-search-row{display:flex;align-items:center;gap:8px}.chat-search input{flex:1;color:var(--text-main);padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:10px;font-family:inherit}.chat-search-count{font-size:.72rem;color:var(--text-muted);white-space:nowrap}
-.message.search-hit{box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent),0 0 28px color-mix(in srgb, var(--accent-2) 12%, transparent)}
+.message.search-hit{box-shadow:0 0 0 2px rgba(34,211,238,.55),0 0 28px rgba(34,211,238,.12)}
 .command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
-.chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:color-mix(in srgb, var(--accent-1) 45%, transparent)}
+.chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:rgba(139,92,246,.45)}
 @media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
 
     
@@ -1200,7 +1202,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .sidebar-close-btn { display:flex !important; }
         .history-tools { display:flex; align-items:center; gap:7px; margin-top:10px; }
         .history-search-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
-        .history-search-toggle:hover { color:var(--text-main); border-color:color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .history-search-toggle:hover { color:var(--text-main); border-color:rgba(139,92,246,.4); }
         .history-search-input { display:none; min-width:0; flex:1; height:36px; padding:0 11px; border:1px solid var(--border-soft); outline:none; background:var(--bg-input); color:var(--text-main); border-radius:10px; font-family:inherit; font-size:.78rem; }
         .history-tools.active .history-search-input { display:block; animation:fadeIn .16s ease; }
         .history-empty { color:var(--text-muted); font-size:.75rem; text-align:center; padding:18px 8px; line-height:1.7; }
@@ -1216,7 +1218,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .message.bot h2, .message.bot h3, .message.bot h4 { margin:20px 0 9px; line-height:1.45; }
         .message.bot ul, .message.bot ol { margin:9px 0 16px; padding-right:24px; }
         .message.bot li { margin:6px 0; padding-right:3px; }
-        .message.bot blockquote { margin:14px 0; padding:10px 14px; border-right:3px solid var(--accent-2); background:color-mix(in srgb, var(--accent-2) 5%, transparent); border-radius:10px; }
+        .message.bot blockquote { margin:14px 0; padding:10px 14px; border-right:3px solid var(--accent-2); background:rgba(34,211,238,.05); border-radius:10px; }
         @media (max-width:768px) {
             .sidebar.collapsed { width:272px; }
             .sidebar.collapsed > * { opacity:1; pointer-events:auto; }
@@ -1351,11 +1353,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         </div>
     </div>
 
-    <div id="connectionStatus"><i class="fa-solid fa-wifi-slash"></i><span>اتصال اینترنت قطع شده</span></div>
+    <div id="connectionStatus"><i class="lucide-icon" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span></div>
 
     <div id="authOverlay">
         <div class="auth-card">
-            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
+            <div class="home-mark"><i class="ph-fill ph-sparkle"></i></div>
             <h2>ورود به Virtual Chat</h2>
             <p>برای شروع گفتگو و ذخیره ایمن اطلاعات، لطفاً با حساب گوگل خود وارد شوید.</p>
             <div class="google-btn-wrapper">
@@ -1374,10 +1376,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     <div class="sidebar" id="sidebar">
         <div class="brand-title">
             <div class="brand-name">
-                <span class="brand-mark"><i class="fa-solid fa-sparkles"></i></span>
+                <span class="brand-mark"><i class="ph-fill ph-sparkle"></i></span>
                 <span class="brand-text">Virtual Chat</span>
             </div>
-            <button class="icon-btn sidebar-close-btn" onclick="toggleSidebar()" title="بستن پنل گفتگوها"><i class="fa-solid fa-xmark"></i></button>
+            <button class="icon-btn sidebar-close-btn" onclick="toggleSidebar()" title="بستن پنل گفتگوها"><i class="lucide-icon" data-lucide="x"></i></button>
         </div>
 
         <div class="user-profile" id="userProfile">
@@ -1385,10 +1387,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         </div>
 
         <button class="new-chat-btn" id="newChatBtn" onclick="startNewChat()">
-            <i class="fa-solid fa-plus"></i> گفتگوی تازه
+            <i class="lucide-icon" data-lucide="plus"></i> گفتگوی تازه
         </button>
         <div class="history-tools">
-            <button class="history-search-toggle" type="button" onclick="toggleHistorySearch()" title="جستجو بین گفتگوها"><i class="fa-solid fa-magnifying-glass"></i></button>
+            <button class="history-search-toggle" type="button" onclick="toggleHistorySearch()" title="جستجو بین گفتگوها"><i class="lucide-icon" data-lucide="search"></i></button>
             <input id="historySearchInput" class="history-search-input" type="search" placeholder="جستجو بین گفتگوها..." oninput="filterHistory(this.value)" autocomplete="off">
         </div>
         <div class="history-list" id="historyList"></div>
@@ -1399,22 +1401,22 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-header">
             <div class="header-left">
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
-                    <i class="fa-solid fa-bars"></i>
+                    <i class="lucide-icon" data-lucide="menu"></i>
                 </button>
                 <span class="header-brand-text">Virtual Chat</span>
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
-                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <i class="lucide-icon" data-lucide="search"></i>
                 </button>
                 <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
-                    <i class="fa-solid fa-gear"></i>
+                    <i class="lucide-icon" data-lucide="settings-2"></i>
                 </button>
             </div>
         </div>
 
         <div class="home-screen" id="homeScreen">
-            <div class="home-mark"><i class="fa-solid fa-sparkles"></i></div>
+            <div class="home-mark"><i class="ph-fill ph-sparkle"></i></div>
             <div class="home-text">
                 <h1 class="home-title" id="welcomeHomeTitle">سلام! بریم یه چیز باحال بسازیم؟</h1>
                 <p class="home-subtitle">سؤال بپرس، ایده بساز، کد بنویس یا یه فایل بنداز اینجا؛ از همون‌جا ادامه می‌دیم.</p>
@@ -1434,20 +1436,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <img id="previewImg" src="" alt="preview">
                 <span id="fileName"></span>
                 <span class="file-status" id="fileStatus">در حال پردازش...</span>
-                <i class="fa-solid fa-xmark icon-btn" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"></i>
+                <i class="lucide-icon icon-btn" data-lucide="x" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"></i>
             </div>
             <div id="codeFilesBar" style="display:none; flex-wrap:wrap; gap:6px; padding:6px 4px;"></div>
 
             <div class="command-menu" id="commandMenu">
-                <div class="command-item" onclick="runComposerCommand('web')"><span><i class="fa-solid fa-globe"></i> جستجو در وب</span><span>/web</span></div>
-                <div class="command-item" onclick="runComposerCommand('code')"><span><i class="fa-solid fa-code"></i> حالت کدنویسی</span><span>/code</span></div>
-                <div class="command-item" onclick="runComposerCommand('clear')"><span><i class="fa-solid fa-eraser"></i> پاک کردن متن</span><span>/clear</span></div>
+                <div class="command-item" onclick="runComposerCommand('web')"><span><i class="lucide-icon" data-lucide="globe"></i> جستجو در وب</span><span>/web</span></div>
+                <div class="command-item" onclick="runComposerCommand('code')"><span><i class="lucide-icon" data-lucide="code"></i> حالت کدنویسی</span><span>/code</span></div>
+                <div class="command-item" onclick="runComposerCommand('clear')"><span><i class="lucide-icon" data-lucide="eraser"></i> پاک کردن متن</span><span>/clear</span></div>
             </div>
             <div class="composer-hint"><kbd>Enter</kbd> ارسال <span>·</span> <kbd>Shift</kbd>+<kbd>Enter</kbd> خط جدید <span>·</span> / فرمان‌ها</div>
-            <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="fa-solid fa-arrow-down"></i></button>
+            <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="lucide-icon" data-lucide="arrow-down"></i></button>
             <div class="input-box">
                 <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
-                    <i class="fa-solid fa-paper-plane" id="actionIcon"></i>
+                    <i class="ph-fill ph-paper-plane-tilt" id="actionIcon"></i>
                 </button>
 
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
@@ -1455,40 +1457,40 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
                 <input type="file" id="fileInput" hidden multiple onchange="handleFileSelect(event)">
                 <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
-                    <i class="fa-solid fa-plus"></i>
+                    <i class="lucide-icon" data-lucide="plus"></i>
                 </button>
 
                 <div class="model-selector composer-model-selector" id="modelSelector" onclick="toggleModelDropdown()">
                     <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
-                    <span class="model-chevron"><i class="fa-solid fa-chevron-up"></i></span>
+                    <span class="model-chevron"><i class="lucide-icon" data-lucide="chevron-up"></i></span>
                     <div class="model-dropdown" id="modelDropdown">
                         <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.1</div>
                                 <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
                             </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
                         </div>
                         <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.5', 'gemini-3.6-flash')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.5</div>
                                 <div class="item-desc">جدیدترین مدل</div>
                             </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
                         </div>
                         <div class="model-dropdown-item" data-model="gemini-3.1-pro-preview" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro-preview')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.3</div>
                                 <div class="item-desc">مناسب کدنویسی</div>
                             </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
                         </div>
                        <div class="model-dropdown-item" data-model="gemini-3.1-flash-image" onclick="selectModel(this, 'تصویرساز (Nano Banana 2)', 'gemini-3.1-flash-image')">
                             <span>
                                 <div class="item-name">تصویرساز (Virtual bot image 1)</div>
                                 <div class="item-desc">تولید عکس با هوش مصنوعی</div>
                             </span>
-                            <span class="item-check"><i class="fa-solid fa-check"></i></span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
                         </div>
                     </div>
                 </div>
@@ -1499,7 +1501,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     <div class="chat-search" id="chatSearchPanel" role="dialog" aria-label="جستجو در گفتگو">
         <div class="chat-search-row">
-            <button class="msg-action" type="button" onclick="closeChatSearch()" title="بستن"><i class="fa-solid fa-xmark"></i></button>
+            <button class="msg-action" type="button" onclick="closeChatSearch()" title="بستن"><i class="lucide-icon" data-lucide="x"></i></button>
             <input id="chatSearchInput" type="search" placeholder="جستجو داخل همین گفتگو..." oninput="searchInCurrentChat(this.value)">
             <span class="chat-search-count" id="chatSearchCount"></span>
         </div>
@@ -1508,8 +1510,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     <div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
     <div class="settings-modal" id="settingsModal">
         <div class="settings-header">
-            <h2><i class="fa-solid fa-sliders"></i> تنظیمات و شخصی‌سازی</h2>
-            <i class="fa-solid fa-xmark icon-btn" onclick="closeSettings()"></i>
+            <h2><i class="lucide-icon" data-lucide="sliders-horizontal"></i> تنظیمات و شخصی‌سازی</h2>
+            <i class="lucide-icon icon-btn" data-lucide="x" onclick="closeSettings()"></i>
         </div>
 
         <div class="settings-section">
@@ -1520,21 +1522,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="settings-section">
             <div class="settings-label">حالت نمایش</div>
             <div class="segmented" id="themeSegmented">
-                <button class="segmented-btn" data-value="light"><i class="fa-solid fa-sun"></i> روشن</button>
-                <button class="segmented-btn" data-value="dark"><i class="fa-solid fa-moon"></i> تاریک</button>
-                <button class="segmented-btn" data-value="auto"><i class="fa-solid fa-circle-half-stroke"></i> خودکار</button>
-            </div>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">رنگ اصلی</div>
-            <div class="accent-swatches" id="accentSwatches">
-                <button class="accent-swatch" data-c1="#8b5cf6" data-c2="#22d3ee" style="background: linear-gradient(135deg,#8b5cf6,#22d3ee);" title="بنفش و فیروزه‌ای — کل محیط"></button>
-                <button class="accent-swatch" data-c1="#f97316" data-c2="#ec4899" style="background: linear-gradient(135deg,#f97316,#ec4899);" title="نارنجی و صورتی — کل محیط"></button>
-                <button class="accent-swatch" data-c1="#10b981" data-c2="#3b82f6" style="background: linear-gradient(135deg,#10b981,#3b82f6);" title="سبز و آبی — کل محیط"></button>
-                <button class="accent-swatch" data-c1="#ef4444" data-c2="#f59e0b" style="background: linear-gradient(135deg,#ef4444,#f59e0b);" title="قرمز و کهربایی — کل محیط"></button>
-                <button class="accent-swatch" data-c1="#6366f1" data-c2="#a855f7" style="background: linear-gradient(135deg,#6366f1,#a855f7);" title="نیلی و بنفش — کل محیط"></button>
-                <button class="accent-swatch accent-swatch-charcoal" data-palette="charcoal" data-c1="#6b7078" data-c2="#b6bac1" style="background: linear-gradient(160deg,#686b71 0%,#3a3c42 48%,#1d1f24 100%);" title="Charcoal Gradient — مدرن"></button>
+                <button class="segmented-btn" data-value="light"><i class="ph-fill ph-sun"></i> روشن</button>
+                <button class="segmented-btn" data-value="dark"><i class="ph-fill ph-moon-stars"></i> تاریک</button>
+                <button class="segmented-btn" data-value="auto"><i class="lucide-icon" data-lucide="circle-half"></i> خودکار</button>
             </div>
         </div>
 
@@ -1550,9 +1540,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="settings-section">
             <div class="settings-label">ابزار گفتگو</div>
             <div class="chat-empty-tools">
-                <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="fa-solid fa-file-arrow-down"></i> خروجی Markdown</button>
-                <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="fa-regular fa-copy"></i> خروجی متن</button>
-                <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="fa-solid fa-trash"></i> پاک کردن گفتگو</button>
+                <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="lucide-icon" data-lucide="file-down"></i> خروجی Markdown</button>
+                <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="lucide-icon" data-lucide="copy"></i> خروجی متن</button>
+                <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="lucide-icon" data-lucide="trash-2"></i> پاک کردن گفتگو</button>
             </div>
         </div>
 
@@ -1560,7 +1550,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="settings-label">گزارش مشکل</div>
             <textarea id="bugReportText" class="settings-input-text" rows="3" style="width:100%; resize:vertical; font-family:inherit;" placeholder="چه مشکلی دیدی؟ هرچی دقیق‌تر بنویسی بهتره..."></textarea>
             <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
-                <button class="mini-tool" type="button" id="bugReportSendBtn" onclick="sendBugReport()"><i class="fa-solid fa-bug"></i> ارسال گزارش</button>
+                <button class="mini-tool" type="button" id="bugReportSendBtn" onclick="sendBugReport()"><i class="ph-bold ph-bug"></i> ارسال گزارش</button>
                 <span id="bugReportStatus" style="font-size:0.82em; color:var(--text-muted, #94a3b8);"></span>
             </div>
         </div>
@@ -1688,6 +1678,22 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         checkSavedUser();
         loadSettings();
 
+        // ===== آیکون‌های Lucide =====
+        // چون خیلی از پیام‌ها/کارت‌ها به‌صورت دینامیک با innerHTML ساخته می‌شن،
+        // به‌جای صدا زدن دستی lucide.createIcons() در هر نقطه، یک ناظر روی
+        // کل صفحه می‌ذاریم که با هر تغییر DOM، آیکون‌های جدید [data-lucide]
+        // رو خودکار رندر می‌کنه.
+        if (window.lucide) {
+            lucide.createIcons();
+            const iconObserver = new MutationObserver(() => {
+                clearTimeout(window.__lucideRefreshTimer);
+                window.__lucideRefreshTimer = setTimeout(() => {
+                    try { lucide.createIcons(); } catch (e) {}
+                }, 60);
+            });
+            iconObserver.observe(document.body, { childList: true, subtree: true });
+        }
+
         if (window.innerWidth <= 768) {
             document.documentElement.style.setProperty('--mobile-close', 'block');
         }
@@ -1769,8 +1775,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <img src="${currentUser.picture}" class="user-avatar" alt="User">
             <div class="user-info"><div class="user-name">${nameToDisplay}</div></div>
             <div class="user-actions">
-                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="fa-solid fa-arrows-rotate"></i></button>
-                <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="fa-solid fa-right-from-bracket" style="color:var(--danger);"></i></button>
+                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="ph-bold ph-arrows-clockwise"></i></button>
+                <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="lucide-icon" data-lucide="log-out" style="color:var(--danger);"></i></button>
             </div>
         `;
         const titleEl = document.getElementById('welcomeHomeTitle');
@@ -1808,10 +1814,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         updateUserUI();
     }
 
-    const defaultSettings = { theme: 'auto', c1: '#8b5cf6', c2: '#22d3ee', fontSize: 'normal', uiPalette: 'accent' };
+    const defaultSettings = { theme: 'auto', c1: '#6b7078', c2: '#b6bac1', fontSize: 'normal', uiPalette: 'charcoal' };
 
+    // انتخاب رنگ حذف شده و مشکی (charcoal) همیشه پالت ثابت است، صرف‌نظر از هر
+    // چیزی که قبلاً در localStorage ذخیره شده باشد.
     function getSettings() {
-        try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') }; }
+        try {
+            const stored = { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') };
+            stored.uiPalette = 'charcoal';
+            stored.c1 = '#6b7078';
+            stored.c2 = '#b6bac1';
+            return stored;
+        }
         catch (e) { return { ...defaultSettings }; }
     }
 
@@ -1901,13 +1915,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         document.querySelectorAll('#fontSegmented .segmented-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.value === s.fontSize);
         });
-        document.querySelectorAll('#accentSwatches .accent-swatch').forEach(btn => {
-            const isCharcoal = btn.dataset.palette === 'charcoal';
-            btn.classList.toggle('active',
-                isCharcoal ? s.uiPalette === 'charcoal'
-                    : s.uiPalette !== 'charcoal' && btn.dataset.c1 === s.c1 && btn.dataset.c2 === s.c2
-            );
-        });
     }
 
     function saveSettings() {
@@ -1931,18 +1938,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (!btn) return;
         const s = getSettings();
         s.fontSize = btn.dataset.value;
-        localStorage.setItem('virtual_settings', JSON.stringify(s));
-        applySettings(s);
-        renderSettingsUI(s);
-    });
-
-    document.getElementById('accentSwatches').addEventListener('click', (e) => {
-        const btn = e.target.closest('.accent-swatch');
-        if (!btn) return;
-        const s = getSettings();
-        s.uiPalette = btn.dataset.palette === 'charcoal' ? 'charcoal' : 'accent';
-        s.c1 = btn.dataset.c1;
-        s.c2 = btn.dataset.c2;
         localStorage.setItem('virtual_settings', JSON.stringify(s));
         applySettings(s);
         renderSettingsUI(s);
@@ -2179,8 +2174,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         bar.style.display = 'flex';
         bar.innerHTML = codeFilesMemory.map(f => `
             <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;">
-                <i class="fa-solid fa-file-code"></i> ${escapeHtml(f.name)}
-                <i class="fa-solid fa-xmark icon-btn" style="width:16px;height:16px;font-size:0.75rem;cursor:pointer;" onclick="removeCodeFile('${f.name.replace(/'/g, "\\'")}')"></i>
+                <i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}
+                <i class="lucide-icon icon-btn" data-lucide="x" style="width:16px;height:16px;font-size:0.75rem;cursor:pointer;" onclick="removeCodeFile('${f.name.replace(/'/g, "\\'")}')"></i>
             </span>
         `).join('');
     }
@@ -2333,13 +2328,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function setupFileDropAndPaste() {
-        const wrapper = document.querySelector('.input-wrapper');
+        const wrapper = document.body;
         const input = document.getElementById('userInput');
         if (!wrapper || !input || wrapper.dataset.fileDnDReady) return;
         wrapper.dataset.fileDnDReady = '1';
 
         ['dragenter', 'dragover'].forEach(type => wrapper.addEventListener(type, (e) => {
             if (isGenerating) return;
+            if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
             e.preventDefault();
             e.stopPropagation();
             wrapper.classList.add('drag-over');
@@ -2347,6 +2343,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         ['dragleave', 'drop'].forEach(type => wrapper.addEventListener(type, (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (type === 'dragleave' && e.relatedTarget) return; // still inside the page
             wrapper.classList.remove('drag-over');
         }));
         wrapper.addEventListener('drop', async (e) => {
@@ -2388,16 +2385,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
         if (generating) {
             actionBtn.classList.add("stop-mode");
-            actionIcon.className = "fa-solid fa-square";
+            actionIcon.className = "ph-fill ph-stop";
             actionBtn.title = "توقف";
         } else {
             actionBtn.classList.remove("stop-mode");
-            actionIcon.className = "fa-solid fa-paper-plane";
+            actionIcon.className = "ph-fill ph-paper-plane-tilt";
             actionBtn.title = "ارسال";
         }
-
-        // آیکون تب مرورگر رو هم به‌روزرسانی کن: قرمز = در حال پاسخ/کدنویسی، سبز = تمام شد.
-        if (typeof updateFaviconStatus === 'function') updateFaviconStatus(generating);
     }
 
     function stopGeneration() {
@@ -2414,7 +2408,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
 
         if (activeLoadingDiv && activeLoadingDiv.isConnected) {
-            activeLoadingDiv.innerHTML = '<span class="stopped-state"><i class="fa-solid fa-stop"></i> پاسخ متوقف شد</span>';
+            activeLoadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
         }
 
         setGeneratingState(false);
@@ -2442,7 +2436,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
         if (codeFilesMemory.length > 0) {
             userContentHtml += codeFilesMemory.map(f =>
-                `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="fa-solid fa-file-code"></i> ${escapeHtml(f.name)}</span>`
+                `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}</span>`
             ).join('');
         }
 
@@ -2522,7 +2516,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 </div>`;
         }
 
-        loadingDiv.innerHTML = `<div class="error-message"><i class="fa-solid fa-circle-exclamation"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
     }
@@ -2662,14 +2656,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let gotAnyText = false;
             let receivedImage = null;
             let liveRenderTimer = null;
-            // FIX: the backend now forwards Gemini's finishReason on the
-            // final {done:true} event. When it's MAX_TOKENS the reply was
-            // cut off by the model's own output-token cap — not an error,
-            // not the user pressing Stop — most commonly on heavy replies
-            // (large code files / long multi-file edits). We track that
-            // here so a real "ادامه بده" action can be offered instead of
-            // silently showing a half-finished answer as if it were done.
-            let wasTruncated = false;
 
             const flushLiveRender = () => {
                 liveRenderTimer = null;
@@ -2727,9 +2713,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamErrorDetail = parsed.error;
                         }
                     }
-                    if (parsed.done && parsed.truncated) {
-                        wasTruncated = true;
-                    }
                 }
             }
 
@@ -2749,9 +2732,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamError = parsed.error.message || 'خطای نامشخص';
                             streamErrorDetail = parsed.error;
                         }
-                    }
-                    if (parsed.done && parsed.truncated) {
-                        wasTruncated = true;
                     }
                 } catch (_) {}
             }
@@ -2787,21 +2767,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 finalHtml += buildFileEditResultHtml(edits);
                 if (!finalHtml) finalHtml = formatReply('');
 
-                // FIX (continuation feature): when the model was cut off by
-                // its own output-token limit — common on heavy replies like
-                // large code files — offer a real "ادامه بده" action instead
-                // of silently presenting the truncated reply as final. The
-                // raw (unsanitized-for-display) text is stashed on the
-                // wrapper so continueGeneration() can send it back as
-                // context and append the continuation to this same message.
-                if (wasTruncated) {
-                    wrapperDiv.dataset.truncatedReply = encodeURIComponent(reply);
-                    finalHtml += `<div class="truncation-notice">
-                        <span><i class="fa-solid fa-triangle-exclamation"></i> پاسخ به‌دلیل حجم زیاد کامل نشد.</span>
-                        <button class="code-action" type="button" onclick="continueGeneration(this)"><i class="fa-solid fa-forward"></i> ادامه بده</button>
-                    </div>`;
-                }
-
                 loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
@@ -2813,7 +2778,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (requestId !== activeRequestId) return;
 
             if (error.name === 'AbortError') {
-                loadingDiv.innerHTML = '<span class="stopped-state"><i class="fa-solid fa-stop"></i> پاسخ متوقف شد</span>';
+                loadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
             } else {
                 makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request, { type: 'network_error', stage: 'fetch', detail: error?.message || String(error) });
             }
@@ -2855,25 +2820,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             .replace(/'/g, '&#039;');
     }
 
-    // FIX: formatReply() escapes the WHOLE reply (including the contents of
-    // ```code``` blocks) before splitting it into code cards, so the text
-    // stashed in each button's data-code is HTML-escaped source — e.g. real
-    // "<html>" becomes the literal characters "&lt;html&gt;". copyCode()
-    // works fine either way (clipboard just gets escaped text), but
-    // runHtmlCode()/downloadHtmlCode() were opening/saving that escaped text
-    // AS-IS: the browser then has no real "<" or ">" characters to parse as
-    // tags, so it renders the whole page as plain visible text on a blank
-    // page instead of running it. Un-escaping right before running/saving
-    // restores the real HTML without touching how code is displayed/copied.
-    function unescapeHtml(value) {
-        return String(value ?? '')
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#039;/g, "'");
-    }
-
     function formatInline(value) {
         return value
             .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -2897,8 +2843,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const lang = /^[a-zA-Z0-9+#.-]+$/.test(firstLine) ? firstLine : '';
                 const code = (lang ? part.slice(part.indexOf('\n') + 1) : part).trim();
                 const encoded = encodeURIComponent(code);
-                const canRun = ['html', 'htm'].includes(lang) || /<!doctype html|<html|<body|<div|<script/i.test(code);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang || 'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun ? `<button class="code-action" onclick="runHtmlCode(this)" data-code="${encoded}">اجرا</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>` : ''}</div></div><pre><code>${code}</code></pre></div>`;
+                const canRun = isRunnableCode(lang, code);
+                return `<div class="code-card"><div class="code-card-head"><span>${lang || 'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun ? `<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>` : ''}</div></div><pre><code>${code}</code></pre></div>`;
             }
 
             const lines = part.split('\n');
@@ -2952,16 +2898,87 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const old=btn.textContent; btn.textContent='کپی شد'; setTimeout(()=>btn.textContent=old,1200);
     }
 
-    function runHtmlCode(btn) {
-        const code = unescapeHtml(decodeURIComponent(btn.dataset.code || ''));
-        const blob = new Blob([code], {type:'text/html;charset=utf-8'});
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener');
-        setTimeout(()=>URL.revokeObjectURL(url), 60000);
+    // تشخیص اینکه آیا این بلاک کد قابل اجرا/پیش‌نمایش هست یا نه.
+    // علاوه بر HTML کامل، کدهای فقط-JS یا فقط-CSS هم قابل پیش‌نمایش هستن
+    // (داخل یک قالب HTML خالی بسته‌بندی می‌شن تا اجرا بشن).
+    function isRunnableCode(lang, code) {
+        const l = (lang || '').toLowerCase();
+        if (['html', 'htm', 'xhtml'].includes(l)) return true;
+        if (/<!doctype html|<html[\s>]|<body[\s>]/i.test(code)) return true;
+        if (['js', 'javascript', 'jsx'].includes(l)) return true;
+        if (['css'].includes(l)) return true;
+        // بدون زبان مشخص ولی شامل تگ/اسکریپت HTML
+        if (!l && /<div|<script|<style|<section|<canvas/i.test(code)) return true;
+        return false;
+    }
+
+    // کد را در صورت نیاز داخل یک قالب HTML می‌پیچد تا مستقل قابل اجرا باشد.
+    function wrapCodeForPreview(lang, code) {
+        const l = (lang || '').toLowerCase();
+        if (/<!doctype html|<html[\s>]/i.test(code)) return code;
+        if (['css'].includes(l)) {
+            return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"><style>${code}</style></head><body><p>پیش‌نمایش CSS — این متن نمونه برای دیدن استایل است.</p><div class="box">Box</div></body></html>`;
+        }
+        if (['js', 'javascript', 'jsx'].includes(l)) {
+            return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"></head><body><script>${code}<\/script></body></html>`;
+        }
+        // fallback: fragment HTML بدون تگ‌های اصلی
+        return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"></head><body>${code}</body></html>`;
+    }
+
+    // پیش‌نمایش کاملاً داخل خود ربات (مودال + iframe) — بدون باز شدن تب جدید.
+    function runHtmlCode(btn, lang) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        const finalHtml = wrapCodeForPreview(lang, code);
+        openCodePreviewModal(finalHtml);
+    }
+
+    function openCodePreviewModal(html) {
+        let overlay = document.getElementById('codePreviewOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'codePreviewOverlay';
+            overlay.className = 'code-preview-overlay';
+            overlay.innerHTML = `
+                <div class="code-preview-modal" role="dialog" aria-modal="true">
+                    <div class="code-preview-head">
+                        <span>پیش‌نمایش</span>
+                        <div class="code-preview-head-actions">
+                            <button class="code-action" onclick="reloadCodePreview()"><i class="lucide-icon" data-lucide="rotate-cw"></i></button>
+                            <button class="code-action" onclick="closeCodePreviewModal()"><i class="lucide-icon" data-lucide="x"></i></button>
+                        </div>
+                    </div>
+                    <div class="code-preview-body">
+                        <iframe id="codePreviewFrame" sandbox="allow-scripts allow-forms allow-modals allow-popups" referrerpolicy="no-referrer"></iframe>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCodePreviewModal(); });
+        }
+        overlay.dataset.html = html;
+        const frame = document.getElementById('codePreviewFrame');
+        frame.srcdoc = html;
+        overlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function reloadCodePreview() {
+        const overlay = document.getElementById('codePreviewOverlay');
+        const frame = document.getElementById('codePreviewFrame');
+        if (overlay && frame) frame.srcdoc = overlay.dataset.html || '';
+    }
+
+    function closeCodePreviewModal() {
+        const overlay = document.getElementById('codePreviewOverlay');
+        if (!overlay) return;
+        overlay.classList.remove('active');
+        document.body.style.overflow = '';
+        const frame = document.getElementById('codePreviewFrame');
+        if (frame) frame.srcdoc = 'about:blank';
     }
 
     function downloadHtmlCode(btn) {
-        const code = unescapeHtml(decodeURIComponent(btn.dataset.code || ''));
+        const code = decodeURIComponent(btn.dataset.code || '');
         const blob = new Blob([code], {type:'text/html;charset=utf-8'});
         const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='virtual-bot-code.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
     }
@@ -2981,76 +2998,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return { displayText, edits };
     }
 
-    // هر {old,new} را اعمال می‌کند اگر "old" دقیقاً و فقط یک‌بار در فایل پیدا
-    // شود؛ اگر تطابق دقیق نبود (مثلاً به‌خاطر فاصله/تب/شکست‌خط متفاوت که مدل
-    // گاهی هنگام کپی متن جابه‌جا می‌کند)، یک تلاش دوم با نرمال‌سازی سطحی
-    // whitespace انجام می‌دهد. این هنوز خیلی محافظه‌کارانه است: محتوای واقعی
-    // خط‌ها باید یکی باشد و باز هم فقط روی تطابق یکتا اعمال می‌شود — بنابراین
-    // ریسک خراب کردن فایل را اضافه نمی‌کند، فقط رد شدن بی‌دلیل ویرایش‌های
-    // معتبر را کم می‌کند.
-    function normalizeForMatch(s) {
-        return String(s)
-            .replace(/\r\n/g, '\n')
-            .split('\n')
-            .map(line => line.replace(/[ \t]+$/g, '').replace(/[ \t]+/g, ' ').trim())
-            .join('\n')
-            .trim();
-    }
-
-    function findUniqueFuzzyMatch(content, oldText) {
-        // Slide a window of the same line-count over the content, comparing
-        // the whitespace-normalized form. Returns {index, length} for the
-        // ORIGINAL (non-normalized) text if exactly one window matches.
-        const contentLines = content.split('\n');
-        const oldLines = oldText.replace(/\r\n/g, '\n').split('\n');
-        const target = normalizeForMatch(oldText);
-        const wanted = oldLines.length;
-        if (wanted === 0 || wanted > contentLines.length) return null;
-
-        let match = null, matchCount = 0;
-        let runningIndex = 0;
-        const lineStarts = [];
-        for (let i = 0; i < contentLines.length; i++) {
-            lineStarts.push(runningIndex);
-            runningIndex += contentLines[i].length + 1; // +1 for the '\n' we split on
-        }
-
-        for (let i = 0; i + wanted <= contentLines.length; i++) {
-            const windowLines = contentLines.slice(i, i + wanted);
-            if (normalizeForMatch(windowLines.join('\n')) === target) {
-                matchCount++;
-                if (matchCount > 1) return null; // not unique, bail out
-                const startIdx = lineStarts[i];
-                const endIdx = (i + wanted < lineStarts.length ? lineStarts[i + wanted] : content.length + 1) - 1;
-                match = { index: startIdx, length: Math.min(endIdx, content.length) - startIdx };
-            }
-        }
-        return matchCount === 1 ? match : null;
-    }
-
+    // هر {old,new} را فقط وقتی اعمال می‌کند که old دقیقاً و فقط یک‌بار در فایل
+    // پیدا شود؛ در غیر این‌صورت آن مورد را نادیده می‌گیرد (بدون خراب کردن بقیه فایل).
     function applyFileEdits(originalContent, edits) {
         let content = originalContent;
         let appliedCount = 0, failedCount = 0;
         for (const edit of (edits || [])) {
             if (!edit || typeof edit.old !== 'string' || typeof edit.new !== 'string' || !edit.old) { failedCount++; continue; }
-
             const firstIndex = content.indexOf(edit.old);
             const lastIndex = content.lastIndexOf(edit.old);
-            if (firstIndex !== -1 && firstIndex === lastIndex) {
-                content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
-                appliedCount++;
-                continue;
-            }
-            if (firstIndex !== -1 && firstIndex !== lastIndex) { failedCount++; continue; } // ambiguous exact match — don't guess
-
-            const fuzzy = findUniqueFuzzyMatch(content, edit.old);
-            if (fuzzy) {
-                content = content.slice(0, fuzzy.index) + edit.new + content.slice(fuzzy.index + fuzzy.length);
-                appliedCount++;
-                continue;
-            }
-
-            failedCount++;
+            if (firstIndex === -1 || firstIndex !== lastIndex) { failedCount++; continue; }
+            content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
+            appliedCount++;
         }
         return { content, appliedCount, failedCount };
     }
@@ -3078,7 +3037,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (appliedCount === 0) {
                 // هیچ ادیتی اعمال نشد (متن مبدأ با محتوای فایل مطابقت نداشت) —
                 // به‌جای سکوت کامل، به کاربر بگو چرا دکمه دانلودی نمی‌بینه.
-                html += `<div class="code-card"><div class="code-card-head"><span><i class="fa-solid fa-triangle-exclamation" style="color:var(--warning);"></i> ویرایش «${escapeHtml(fileName)}» انجام نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">متن مبدأ ویرایش با محتوای فعلی فایل مطابقت نداشت (${failedCount} مورد رد شد). دوباره امتحان کن یا دقیق‌تر بگو چه بخشی را عوض کنم.</div></div>`;
+                html += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> ویرایش «${escapeHtml(fileName)}» انجام نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">متن مبدأ ویرایش با محتوای فعلی فایل مطابقت نداشت (${failedCount} مورد رد شد). دوباره امتحان کن یا دقیق‌تر بگو چه بخشی را عوض کنم.</div></div>`;
                 continue;
             }
 
@@ -3096,11 +3055,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
             html += `<div class="code-card edited-file-card">
                 <div class="code-card-head">
-                    <span><i class="fa-solid fa-file-circle-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}</span>
+                    <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}</span>
                     <div class="code-actions">
-                        <button class="code-action" onclick="openFilePreview('${encoded}','${escapeAttr(fileName)}')"><i class="fa-solid fa-eye"></i> پیش‌نمایش</button>
-                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="fa-regular fa-copy"></i> کپی</button>
-                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="fa-solid fa-download"></i> دانلود</button>
+                        <button class="code-action" onclick="openFilePreview('${encoded}','${escapeAttr(fileName)}')"><i class="lucide-icon" data-lucide="eye"></i> پیش‌نمایش</button>
+                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
+                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
                     </div>
                 </div>
                 <div class="edited-file-meta">${sizeKb} KB &middot; آماده</div>
@@ -3136,15 +3095,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="image-result-card" id="${cardId}" data-image="${encodedImage}">
                 <div class="image-result-preview" onclick="openImageLightbox('${cardId}')" role="button" tabindex="0" aria-label="بزرگ‌نمایی تصویر" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openImageLightbox('${cardId}')}">
                     <img src="${src}" alt="تصویر تولیدشده" loading="lazy">
-                    <span class="image-result-zoom-hint"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
+                    <span class="image-result-zoom-hint"><i class="lucide-icon" data-lucide="zoom-in"></i></span>
                 </div>
                 <div class="image-result-actions">
-                    <button class="code-action" type="button" onclick="openImageLightbox('${cardId}')"><i class="fa-solid fa-expand"></i> پیش‌نمایش</button>
-                    <button class="code-action" type="button" onclick="downloadResultImage('${cardId}')"><i class="fa-solid fa-download"></i> دانلود</button>
-                    ${hasUrl ? `<button class="code-action" type="button" onclick="openResultImageTab('${cardId}')"><i class="fa-solid fa-arrow-up-right-from-square"></i> باز کردن</button>` : ''}
-                    ${hasUrl ? `<button class="code-action" type="button" onclick="copyImageUrl('${cardId}', this)"><i class="fa-regular fa-copy"></i> کپی لینک</button>` : ''}
-                    ${hasPrompt ? `<button class="code-action" type="button" onclick="copyImagePrompt('${cardId}', this)"><i class="fa-regular fa-copy"></i> کپی prompt</button>` : ''}
-                    <button class="code-action" type="button" onclick="regenerateImage('${cardId}')"><i class="fa-solid fa-rotate"></i> تولید دوباره</button>
+                    <button class="code-action" type="button" onclick="openImageLightbox('${cardId}')"><i class="lucide-icon" data-lucide="maximize-2"></i> پیش‌نمایش</button>
+                    <button class="code-action" type="button" onclick="downloadResultImage('${cardId}')"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
+                    ${hasUrl ? `<button class="code-action" type="button" onclick="openResultImageTab('${cardId}')"><i class="lucide-icon" data-lucide="external-link"></i> باز کردن</button>` : ''}
+                    ${hasUrl ? `<button class="code-action" type="button" onclick="copyImageUrl('${cardId}', this)"><i class="lucide-icon" data-lucide="copy"></i> کپی لینک</button>` : ''}
+                    ${hasPrompt ? `<button class="code-action" type="button" onclick="copyImagePrompt('${cardId}', this)"><i class="lucide-icon" data-lucide="copy"></i> کپی prompt</button>` : ''}
+                    <button class="code-action" type="button" onclick="regenerateImage('${cardId}')"><i class="lucide-icon" data-lucide="rotate-cw"></i> تولید دوباره</button>
                 </div>
             </div>`;
     }
@@ -3164,7 +3123,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             overlay = document.createElement('div');
             overlay.id = 'imageLightboxOverlay';
             overlay.className = 'image-lightbox-overlay';
-            overlay.innerHTML = `<div class="image-lightbox-inner"><img id="imageLightboxImg" alt="پیش‌نمایش تصویر"><button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeImageLightbox()"><i class="fa-solid fa-xmark"></i></button></div>`;
+            overlay.innerHTML = `<div class="image-lightbox-inner"><img id="imageLightboxImg" alt="پیش‌نمایش تصویر"><button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeImageLightbox()"><i class="lucide-icon" data-lucide="x"></i></button></div>`;
             document.body.appendChild(overlay);
             overlay.addEventListener('click', (e) => { if (e.target === overlay) closeImageLightbox(); });
         }
@@ -3227,7 +3186,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (!image?.url) return;
         try { await navigator.clipboard.writeText(image.url); }
         catch { const ta = document.createElement('textarea'); ta.value = image.url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
+        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
         if (typeof showToast === 'function') showToast('لینک تصویر کپی شد', 'success');
     }
 
@@ -3236,7 +3195,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (!image?.prompt) return;
         try { await navigator.clipboard.writeText(image.prompt); }
         catch { const ta = document.createElement('textarea'); ta.value = image.prompt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
+        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
         if (typeof showToast === 'function') showToast('prompt کپی شد', 'success');
     }
 
@@ -3246,134 +3205,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const prompt = image?.prompt;
         if (!prompt) { if (typeof showToast === 'function') showToast('prompt این تصویر در دسترس نیست.', 'warning'); return; }
         sendToGemini(prompt, null);
-    }
-
-    // ===== Continuation for truncated (heavy) replies =====
-    // Triggered by the "ادامه بده" button rendered on a message whose
-    // stream ended with finishReason=MAX_TOKENS (see sendToGemini). Rather
-    // than starting a brand-new bot message, this:
-    //   1) reads the partial reply stashed on the message wrapper
-    //   2) sends a normal /api/chat request asking the model to continue
-    //      exactly where it stopped (the partial text is included as
-    //      context so the model doesn't repeat itself or restart)
-    //   3) appends the new text into the SAME message element and keeps
-    //      offering another "ادامه بده" if it gets cut off again
-    async function continueGeneration(btn) {
-        if (isGenerating) return;
-        const wrapperDiv = btn.closest('.message-wrapper');
-        const msgDiv = wrapperDiv?.querySelector('.message');
-        if (!wrapperDiv || !msgDiv) return;
-
-        const partial = decodeURIComponent(wrapperDiv.dataset.truncatedReply || '');
-        if (!partial) return;
-
-        // Remove the notice/button while we fetch more.
-        const notice = msgDiv.querySelector('.truncation-notice');
-        if (notice) notice.remove();
-
-        const continuePrompt = 'پاسخ قبلی‌ات ناقص ماند (به‌دلیل محدودیت حجم پاسخ قطع شد). دقیقاً از همان نقطه‌ای که متوقف شدی ادامه بده؛ چیزی را از ابتدا تکرار نکن و مقدمه‌ی جدید ننویس. این متن ناقص قبلی توست:\n\n' + partial;
-
-        // Update the history entry for this message in-place instead of
-        // pushing a duplicate 'model' turn, so future turns see one
-        // continuous reply rather than two separate messages.
-        const requestId = ++activeRequestId;
-        setGeneratingState(true);
-
-        const loaderSpan = document.createElement('span');
-        loaderSpan.className = 'loader-dots';
-        loaderSpan.innerHTML = '<span></span><span></span><span></span>';
-        msgDiv.appendChild(loaderSpan);
-        scrollToLatest();
-
-        currentAbortController = new AbortController();
-        try {
-            const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    userName: uName,
-                    text: continuePrompt,
-                    rawText: continuePrompt,
-                    file: null,
-                    files: lastCodeFilesForEdit,
-                    webSearch: false,
-                    history: chatHistoryData[currentChatId],
-                    model: currentModel,
-                    styleHint: virtualPersona,
-                    stream: true
-                }),
-                signal: currentAbortController.signal
-            });
-
-            if (requestId !== activeRequestId) return;
-            if (!response.ok || !response.body) {
-                loaderSpan.remove();
-                if (typeof showToast === 'function') showToast('ادامه‌ی پاسخ ممکن نشد.', 'error');
-                setGeneratingState(false);
-                return;
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let sseBuffer = '', extraText = '', truncatedAgain = false;
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (requestId !== activeRequestId) return;
-                if (done) break;
-                sseBuffer += decoder.decode(value, { stream: true });
-                const lines = sseBuffer.split('\n');
-                sseBuffer = lines.pop();
-                for (const line of lines) {
-                    if (!line.startsWith('data:')) continue;
-                    const jsonStr = line.slice(5).trim();
-                    if (!jsonStr) continue;
-                    let parsed;
-                    try { parsed = JSON.parse(jsonStr); } catch (_) { continue; }
-                    if (parsed.text) extraText += parsed.text;
-                    if (parsed.done && parsed.truncated) truncatedAgain = true;
-                }
-            }
-
-            if (requestId !== activeRequestId) return;
-            loaderSpan.remove();
-
-            const cleanExtra = sanitizeVirtualIdentity(extraText).trim();
-            if (cleanExtra) {
-                const { displayText, edits } = stripFileEditBlock(cleanExtra);
-                if (displayText) msgDiv.insertAdjacentHTML('beforeend', formatReply(displayText));
-                msgDiv.insertAdjacentHTML('beforeend', buildFileEditResultHtml(edits));
-
-                const fullText = partial + '\n' + cleanExtra;
-                const last = chatHistoryData[currentChatId]?.at(-1);
-                if (last && last.role === 'model') last.text = fullText;
-                else chatHistoryData[currentChatId].push({ role: 'model', text: fullText });
-
-                if (truncatedAgain) {
-                    wrapperDiv.dataset.truncatedReply = encodeURIComponent(fullText);
-                    msgDiv.insertAdjacentHTML('beforeend', `<div class="truncation-notice">
-                        <span><i class="fa-solid fa-triangle-exclamation"></i> پاسخ هنوز کامل نشد.</span>
-                        <button class="code-action" type="button" onclick="continueGeneration(this)"><i class="fa-solid fa-forward"></i> ادامه بده</button>
-                    </div>`);
-                } else {
-                    delete wrapperDiv.dataset.truncatedReply;
-                }
-            } else if (typeof showToast === 'function') {
-                showToast('چیزی برای ادامه دریافت نشد.', 'warning');
-            }
-
-            setGeneratingState(false);
-            saveCurrentChat();
-            scrollToLatest();
-        } catch (error) {
-            if (requestId !== activeRequestId) return;
-            loaderSpan.remove();
-            if (typeof showToast === 'function') showToast('خطا در ادامه‌ی پاسخ.', 'error');
-            setGeneratingState(false);
-        } finally {
-            if (requestId === activeRequestId) currentAbortController = null;
-        }
     }
 
     function downloadEditedFile(btn) {
@@ -3408,8 +3239,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     <div class="file-preview-head">
                         <span id="filePreviewTitle"></span>
                         <div class="file-preview-head-actions">
-                            <button class="code-action" type="button" id="filePreviewCopyBtn"><i class="fa-regular fa-copy"></i> کپی همه</button>
-                            <button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeFilePreview()"><i class="fa-solid fa-xmark"></i></button>
+                            <button class="code-action" type="button" id="filePreviewCopyBtn"><i class="lucide-icon" data-lucide="copy"></i> کپی همه</button>
+                            <button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeFilePreview()"><i class="lucide-icon" data-lucide="x"></i></button>
                         </div>
                     </div>
                     <div class="file-preview-body"><pre><code id="filePreviewCode"></code></pre></div>
@@ -3426,7 +3257,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         copyBtn.onclick = async () => {
             try { await navigator.clipboard.writeText(content); }
             catch { const ta = document.createElement('textarea'); ta.value = content; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-            const old = copyBtn.innerHTML; copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد';
+            const old = copyBtn.innerHTML; copyBtn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد';
             setTimeout(() => copyBtn.innerHTML = old, 1200);
             if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
         };
@@ -3448,7 +3279,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const code = decodeURIComponent(btn.dataset.code || '');
         try { await navigator.clipboard.writeText(code); }
         catch { const ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-check"></i> کپی شد';
+        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد';
         setTimeout(() => btn.innerHTML = old, 1200);
         if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
     }
@@ -3555,16 +3386,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
         const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
         const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
-        // FIX: this used to always rebuild {title, html} from scratch, which
-        // silently overwrote any AI-generated title (see
-        // maybeGenerateChatTitle) back to the truncated "سلام..."-style
-        // fallback on the very next message. Now it only sets the truncated
-        // title the first time a chat is saved, and preserves whatever
-        // title (generated or not) is already there afterward.
-        const existing = chats[currentChatId];
         chats[currentChatId] = {
-            title: existing?.title || (firstUserMsg.substring(0, 20) + "..."),
-            titleGenerated: existing?.titleGenerated || false,
+            title: firstUserMsg.substring(0, 20) + "...",
             html: chatBox.innerHTML
         };
         const ok = safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
@@ -3594,7 +3417,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             visible++;
             const item = document.createElement("div");
             item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
-            item.innerHTML = `<i class="fa-regular fa-message"></i><span>${escapeHtml(title)}</span>`;
+            item.innerHTML = `<i class="lucide-icon" data-lucide="message-circle"></i><span>${escapeHtml(title)}</span>`;
             item.onclick = () => { if (!isGenerating) loadChat(id); };
             list.appendChild(item);
         });
@@ -3697,14 +3520,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const bar = document.createElement('div');
         bar.className = 'message-actions';
         const copy = document.createElement('button');
-        copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="fa-regular fa-copy"></i>';
-        copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="fa-solid fa-check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
+        copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="lucide-icon" data-lucide="copy"></i>';
+        copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="lucide-icon" data-lucide="check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
         bar.appendChild(copy);
         if(sender==='bot'){
-            const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="fa-solid fa-rotate"></i>';
+            const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="lucide-icon" data-lucide="rotate-cw"></i>';
             regen.onclick=()=>regenerateMessage(wrapper);bar.appendChild(regen);
         } else {
-            const edit=document.createElement('button');edit.className='msg-action';edit.type='button';edit.title='ویرایش و ارسال دوباره';edit.innerHTML='<i class="fa-solid fa-pen"></i>';
+            const edit=document.createElement('button');edit.className='msg-action';edit.type='button';edit.title='ویرایش و ارسال دوباره';edit.innerHTML='<i class="lucide-icon" data-lucide="pencil"></i>';
             edit.onclick=()=>editUserMessage(wrapper);bar.appendChild(edit);
         }
         wrapper.appendChild(bar);
@@ -3789,8 +3612,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const raw=part.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
                 const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
                 const code=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim(); const encoded=encodeURIComponent(code);
-                const canRun=['html','htm'].includes(lang)||/<!doctype html|<html|<body|<div|<script/i.test(code);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang||'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun?`<button class="code-action" onclick="runHtmlCode(this)" data-code="${encoded}">اجرا</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>`:''}</div></div><pre><code>${code}</code></pre></div>`;
+                const canRun=isRunnableCode(lang, code);
+                return `<div class="code-card"><div class="code-card-head"><span>${lang||'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun?`<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>`:''}</div></div><pre><code>${code}</code></pre></div>`;
             }
             const lines=part.split('\n');let out=[],para=[],list=null,items=[];
             const flushP=()=>{if(para.length){out.push(`<p>${formatInline(para.join(' '))}</p>`);para=[]}};
@@ -3828,62 +3651,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const result=await __oldSendToGemini(...args);
         const last=document.getElementById('chatBox')?.lastElementChild;
         if(last) addMessageActions(last,'bot');
-        maybeGenerateChatTitle();
         return result;
     };
     setTimeout(decorateMessages,50);
 
-    // ===== Smart chat titles (sidebar) =====
-    // Sidebar titles previously came from truncating the user's FIRST
-    // message to 20 chars (see saveCurrentChat). Since almost every chat
-    // opens with "سلام..."/"سلام..." etc, the whole history list read as
-    // near-identical rows — a big reason the UI felt less polished than
-    // ChatGPT/Claude, which generate a real short title from the topic.
-    // This calls the new mode:'title' branch in /api/chat once, right after
-    // the FIRST exchange in a chat finishes, and swaps the stored title in
-    // place. Cheap (one small non-streamed call, only once per chat) and
-    // fails silently to the old truncated title if anything goes wrong.
-    const __titledChats = new Set();
-    async function maybeGenerateChatTitle() {
-        try {
-            if (!currentChatId || __titledChats.has(currentChatId)) return;
-            const hist = chatHistoryData[currentChatId] || [];
-            const realTurns = hist.filter(m => !m.__virtualPersona);
-            if (realTurns.length < 2) return; // need at least one full user+bot exchange
-            if (chats[currentChatId]?.titleGenerated) { __titledChats.add(currentChatId); return; }
-
-            __titledChats.add(currentChatId); // claim immediately so overlapping calls don't double-fire
-            const userText = realTurns.find(m => m.role === 'user')?.text || '';
-            const botText = realTurns.find(m => m.role === 'model')?.text || '';
-            if (!userText) return;
-
-            const res = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: 'title', userText, botText })
-            });
-            if (!res.ok) return;
-            const data = await res.json();
-            const title = (data?.title || '').trim();
-            if (!title || !chats[currentChatId]) return;
-
-            chats[currentChatId].title = title;
-            chats[currentChatId].titleGenerated = true;
-            const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
-            safeSetItem(storageKey, JSON.stringify(chats), { pruneChatsKey: storageKey });
-            renderHistoryList();
-        } catch (_) {
-            // Silent: sidebar keeps the truncated fallback title, no user-facing error needed.
-        }
-    }
-
     // ===== Toast notifications =====
     // showToast(message, type) — type: 'success' | 'error' | 'info' | 'warning'
     const TOAST_ICONS = {
-        success: 'fa-solid fa-circle-check',
-        error: 'fa-solid fa-circle-exclamation',
-        warning: 'fa-solid fa-triangle-exclamation',
-        info: 'fa-solid fa-circle-info'
+        success: 'ph-fill ph-check-circle',
+        error: 'ph-fill ph-warning-circle',
+        warning: 'ph-fill ph-warning',
+        info: 'ph-fill ph-info'
     };
     function showToast(message, type = 'info', duration = 3200) {
         const container = document.getElementById('toastContainer');
@@ -3940,119 +3718,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 if (pill.classList.contains('show')) {
                     // Only show the "back online" pill if we were previously offline.
                     pill.classList.add('reconnected');
-                    pill.innerHTML = '<i class="fa-solid fa-wifi"></i><span>اتصال اینترنت برقرار شد</span>';
+                    pill.innerHTML = '<i class="lucide-icon" data-lucide="wifi"></i><span>اتصال اینترنت برقرار شد</span>';
                     hideTimer = setTimeout(() => pill.classList.remove('show'), 2200);
                 }
             } else {
                 pill.classList.remove('reconnected');
-                pill.innerHTML = '<i class="fa-solid fa-wifi-slash"></i><span>اتصال اینترنت قطع شده</span>';
+                pill.innerHTML = '<i class="lucide-icon" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span>';
                 pill.classList.add('show');
             }
         }
         window.addEventListener('online', updateStatus);
         window.addEventListener('offline', updateStatus);
         if (!navigator.onLine) updateStatus();
-    })();
-
-    // ===== Dynamic favicon (globe icon + status dot) =====
-    // Draws a small "globe" favicon on a canvas (site never had a real
-    // favicon file), then updates it with a colored status dot: red while
-    // the bot is generating a reply / writing code, green when it's idle
-    // and done. Rebuilt with the site's own accent colors so it matches
-    // whatever theme/palette the user has picked (see the inline theme
-    // script at the very top of <head>).
-    (function setupDynamicFavicon() {
-        const link = document.getElementById('dynamicFavicon');
-        if (!link) return;
-
-        const SIZE = 64;
-        const canvas = document.createElement('canvas');
-        canvas.width = SIZE; canvas.height = SIZE;
-        const ctx = canvas.getContext('2d');
-
-        function cssVar(name, fallback) {
-            const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-            return v || fallback;
-        }
-
-        function drawGlobe(ctx) {
-            const c1 = cssVar('--accent-1', '#8b5cf6');
-            const c2 = cssVar('--accent-2', '#22d3ee');
-            const cx = SIZE / 2, cy = SIZE / 2, r = SIZE / 2 - 3;
-
-            const grad = ctx.createLinearGradient(0, 0, SIZE, SIZE);
-            grad.addColorStop(0, c1);
-            grad.addColorStop(1, c2);
-
-            // Globe body
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.fillStyle = grad;
-            ctx.fill();
-
-            // Latitude/longitude lines to read clearly as a globe at 16x16.
-            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-            ctx.lineWidth = 2;
-
-            ctx.beginPath();
-            ctx.moveTo(cx - r, cy);
-            ctx.lineTo(cx + r, cy);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.ellipse(cx, cy, r * 0.42, r, 0, 0, Math.PI * 2);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.moveTo(cx, cy - r);
-            ctx.lineTo(cx, cy + r);
-            ctx.stroke();
-        }
-
-        function drawStatusDot(ctx, color) {
-            if (!color) return;
-            const r = SIZE * 0.16;
-            const cx = SIZE - r - 2, cy = SIZE - r - 2;
-
-            // White ring around the dot so it stays visible against any
-            // globe color and any browser tab background (light/dark).
-            ctx.beginPath();
-            ctx.arc(cx, cy, r + 3, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff';
-            ctx.fill();
-
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.fill();
-        }
-
-        // color: null = no dot (initial load), '#f87171' red = generating,
-        // '#34d399' green = idle/done.
-        function render(color) {
-            ctx.clearRect(0, 0, SIZE, SIZE);
-            drawGlobe(ctx);
-            drawStatusDot(ctx, color);
-            link.href = canvas.toDataURL('image/png');
-        }
-
-        let idleHideTimer = null;
-
-        window.updateFaviconStatus = function (generating) {
-            clearTimeout(idleHideTimer);
-            if (generating) {
-                render(cssVar('--danger', '#f87171'));
-            } else {
-                render(cssVar('--success', '#34d399'));
-                // The green "done" dot fades back to a plain globe after a
-                // bit, so the icon doesn't look permanently "flagged" once
-                // the user has clearly seen the reply finished.
-                idleHideTimer = setTimeout(() => render(null), 4000);
-            }
-        };
-
-        // Plain globe on first load, before any message has been sent.
-        render(null);
     })();
 
 </script>
