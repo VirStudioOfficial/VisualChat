@@ -697,22 +697,6 @@
         .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
         .code-card-head span:first-child { text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: var(--accent-2); }
 
-        /* ===== Image Result Card (§10-12) ===== */
-        .image-result-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--bg-card); max-width: 420px; }
-        .image-result-preview { position: relative; cursor: pointer; display: block; background: var(--code-bg); }
-        .image-result-preview img { display: block; width: 100%; max-height: 320px; object-fit: contain; }
-        .image-result-preview:hover .image-result-zoom-hint { opacity: 1; }
-        .image-result-zoom-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.28); color: #fff; font-size: 1.4rem; opacity: 0; transition: opacity .15s; }
-        .image-result-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
-        .image-result-actions .code-action { display: inline-flex; align-items: center; gap: 5px; }
-
-        .image-lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.82); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 24px; }
-        .image-lightbox-overlay.active { display: flex; }
-        .image-lightbox-inner { position: relative; max-width: min(92vw, 1100px); max-height: 92vh; }
-        .image-lightbox-inner img { max-width: 100%; max-height: 92vh; border-radius: 10px; display: block; }
-        .image-lightbox-close { position: absolute; top: -14px; left: -14px; width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--bg-card); color: var(--text-main); font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px var(--shadow-a); }
-        .image-lightbox-close:hover { background: var(--danger); color: #fff; }
-
         /* ===== Error / More Details (§8) ===== */
         .error-message { display: flex; align-items: flex-start; gap: 8px; color: var(--danger); font-size: 0.9rem; line-height: 1.6; }
         .error-message i { margin-top: 2px; flex-shrink: 0; }
@@ -1542,13 +1526,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             </span>
                             <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
                         </div>
-                       <div class="model-dropdown-item" data-model="gemini-3.1-flash-image" onclick="selectModel(this, 'تصویرساز (Nano Banana 2)', 'gemini-3.1-flash-image')">
-                            <span>
-                                <div class="item-name">تصویرساز (Virtual bot image 1)</div>
-                                <div class="item-desc">تولید عکس با هوش مصنوعی</div>
-                            </span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -1667,8 +1644,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let currentModelDisplay = {
         'gemini-3.5-flash-lite': 'Virtual Bot 1.1',
         'gemini-3.6-flash': 'Virtual Bot 1.5',
-        'gemini-3.1-pro-preview': 'Virtual Bot 1.3',
-        'gemini-3.1-flash-image': 'تصویرساز (Nano Banana 2)'
+        'gemini-3.1-pro-preview': 'Virtual Bot 1.3'
     };
 
     function toggleModelDropdown() {
@@ -2773,7 +2749,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let streamError = null;
             let streamErrorDetail = null;
             let gotAnyText = false;
-            let receivedImage = null;
             let liveRenderTimer = null;
 
             const flushLiveRender = () => {
@@ -2810,16 +2785,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     let parsed;
                     try { parsed = JSON.parse(jsonStr); } catch (_) { continue; }
 
-                    if (parsed.image) {
-                        // FIX: the backend sends a structured image payload
-                        // (url/base64/dataUrl/mimeType/filename/prompt) on a
-                        // dedicated SSE event, but this loop previously only
-                        // read parsed.text/parsed.error and silently dropped
-                        // it. Without capturing it here, no Image Result
-                        // Card (preview/download/regenerate) is possible —
-                        // the UI only ever saw the markdown fallback text.
-                        receivedImage = parsed.image;
-                    }
                     if (parsed.step) {
                         // Real, model-driven progress narration (e.g. "دارم
                         // توی وب سرچ می‌کنم...") sent right before the
@@ -2853,9 +2818,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (sseBuffer.trim().startsWith('data:')) {
                 try {
                     const parsed = JSON.parse(sseBuffer.trim().slice(5).trim());
-                    if (parsed.image) {
-                        receivedImage = parsed.image;
-                    }
                     if (parsed.text) {
                         gotAnyText = true;
                         fullReply += parsed.text;
@@ -2875,8 +2837,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (requestId !== activeRequestId) return;
 
             const reply = sanitizeVirtualIdentity(fullReply);
-            if ((gotAnyText && reply) || receivedImage) {
-                const historyText = reply || (receivedImage ? '[تصویر تولید شد]' : '');
+            if (gotAnyText && reply) {
+                const historyText = reply;
                 if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
                 else {
                     const last = chatHistoryData[currentChatId]?.at(-1);
@@ -2884,20 +2846,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
                 lastFailedRequest = null;
 
-                // FIX: when a structured image payload is present, drop the
-                // markdown "![Generated Image](url)" fallback line from the
-                // displayed text so the image isn't rendered twice (once by
-                // formatReply's markdown handling, once by the Image Card).
-                let textForDisplay = reply;
-                if (receivedImage) {
-                    textForDisplay = textForDisplay.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim();
-                }
-
-                const { displayText, edits } = stripFileEditBlock(textForDisplay);
+                const { displayText, edits } = stripFileEditBlock(reply);
                 let finalHtml = displayText ? formatReply(displayText) : '';
-                if (receivedImage) {
-                    finalHtml += buildImageResultCardHtml(receivedImage);
-                }
                 finalHtml += buildFileEditResultHtml(edits);
                 if (!finalHtml) finalHtml = formatReply('');
 
@@ -3149,145 +3099,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return html;
     }
 
-    // ===== Image Result Card (§10-12) =====
-    // Renders the structured image payload the backend sends
-    // ({url,base64,dataUrl,mimeType,filename,prompt}) as a real card with
-    // Preview (lightbox), Download, Open, Copy URL, Copy prompt and
-    // Regenerate — instead of a bare markdown image with no controls.
-    let __imageCardSeq = 0;
-
-    // FIX: image cards previously would have kept their data only in a
-    // volatile in-memory JS object, keyed by a per-session id. Since saved
-    // chats are restored by re-inserting stored innerHTML (see loadChat()),
-    // that registry is empty after a reload/chat-switch, and every button
-    // on an old image card (Preview/Download/Copy/Regenerate) would silently
-    // do nothing — violating §24 (previous image outputs must still work).
-    // Storing the payload directly on the element via data-image (URI-encoded
-    // JSON) makes each card self-contained and reload-proof, matching the
-    // same pattern already used for code blocks (data-code).
-    function buildImageResultCardHtml(image) {
-        if (!image) return '';
-        const cardId = 'imgcard-' + (++__imageCardSeq) + '-' + Date.now();
-        const src = image.dataUrl || (image.base64 ? `data:${image.mimeType || 'image/jpeg'};base64,${image.base64}` : image.url) || '';
-        const hasUrl = !!image.url;
-        const hasPrompt = !!image.prompt;
-        const encodedImage = encodeURIComponent(JSON.stringify(image));
-        return `
-            <div class="image-result-card" id="${cardId}" data-image="${encodedImage}">
-                <div class="image-result-preview" onclick="openImageLightbox('${cardId}')" role="button" tabindex="0" aria-label="بزرگ‌نمایی تصویر" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openImageLightbox('${cardId}')}">
-                    <img src="${src}" alt="تصویر تولیدشده" loading="lazy">
-                    <span class="image-result-zoom-hint"><i class="lucide-icon" data-lucide="zoom-in"></i></span>
-                </div>
-                <div class="image-result-actions">
-                    <button class="code-action" type="button" onclick="openImageLightbox('${cardId}')"><i class="lucide-icon" data-lucide="maximize-2"></i> پیش‌نمایش</button>
-                    <button class="code-action" type="button" onclick="downloadResultImage('${cardId}')"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
-                    ${hasUrl ? `<button class="code-action" type="button" onclick="openResultImageTab('${cardId}')"><i class="lucide-icon" data-lucide="external-link"></i> باز کردن</button>` : ''}
-                    ${hasUrl ? `<button class="code-action" type="button" onclick="copyImageUrl('${cardId}', this)"><i class="lucide-icon" data-lucide="copy"></i> کپی لینک</button>` : ''}
-                    ${hasPrompt ? `<button class="code-action" type="button" onclick="copyImagePrompt('${cardId}', this)"><i class="lucide-icon" data-lucide="copy"></i> کپی prompt</button>` : ''}
-                    <button class="code-action" type="button" onclick="regenerateImage('${cardId}')"><i class="lucide-icon" data-lucide="rotate-cw"></i> تولید دوباره</button>
-                </div>
-            </div>`;
-    }
-
-    function getImageCardData(cardId) {
-        const el = document.getElementById(cardId);
-        if (!el || !el.dataset.image) return null;
-        try { return JSON.parse(decodeURIComponent(el.dataset.image)); } catch (_) { return null; }
-    }
-
-    function openImageLightbox(cardId) {
-        const image = getImageCardData(cardId);
-        if (!image) return;
-        const src = image.dataUrl || (image.base64 ? `data:${image.mimeType || 'image/jpeg'};base64,${image.base64}` : image.url) || '';
-        let overlay = document.getElementById('imageLightboxOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'imageLightboxOverlay';
-            overlay.className = 'image-lightbox-overlay';
-            overlay.innerHTML = `<div class="image-lightbox-inner"><img id="imageLightboxImg" alt="پیش‌نمایش تصویر"><button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeImageLightbox()"><i class="lucide-icon" data-lucide="x"></i></button></div>`;
-            document.body.appendChild(overlay);
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeImageLightbox(); });
-        }
-        document.getElementById('imageLightboxImg').src = src;
-        overlay.classList.add('active');
-        document.addEventListener('keydown', __lightboxEscHandler);
-    }
-
-    function __lightboxEscHandler(e) {
-        if (e.key === 'Escape') closeImageLightbox();
-    }
-
-    function closeImageLightbox() {
-        const overlay = document.getElementById('imageLightboxOverlay');
-        if (overlay) overlay.classList.remove('active');
-        document.removeEventListener('keydown', __lightboxEscHandler);
-    }
-
-    function downloadResultImage(cardId) {
-        const image = getImageCardData(cardId);
-        if (!image) return;
-        // §11 download priority: dataURL/base64 first (guaranteed to work
-        // and avoids CORS), falling back to the remote URL only if neither
-        // is available.
-        let href = image.dataUrl || (image.base64 ? `data:${image.mimeType || 'image/jpeg'};base64,${image.base64}` : null);
-        const ext = (image.mimeType && image.mimeType.split('/')[1]) || 'jpg';
-        const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
-        const filename = image.filename && image.filename !== 'image.jpg' ? image.filename : `virtual-bot-image-${stamp}.${ext}`;
-
-        if (href) {
-            const a = document.createElement('a');
-            a.href = href; a.download = filename;
-            document.body.appendChild(a); a.click(); a.remove();
-            return;
-        }
-        if (image.url) {
-            // Fallback: fetch as blob so browsers don't just navigate to/open
-            // the image instead of downloading it (a bare <a href=url> can
-            // do that for cross-origin images without Content-Disposition).
-            fetch(image.url).then(r => r.blob()).then(blob => {
-                const blobUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = blobUrl; a.download = filename;
-                document.body.appendChild(a); a.click(); a.remove();
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-            }).catch(() => {
-                window.open(image.url, '_blank', 'noopener');
-                if (typeof showToast === 'function') showToast('دانلود مستقیم ممکن نشد؛ تصویر در تب جدید باز شد.', 'warning');
-            });
-        }
-    }
-
-    function openResultImageTab(cardId) {
-        const image = getImageCardData(cardId);
-        if (image?.url) window.open(image.url, '_blank', 'noopener');
-    }
-
-    async function copyImageUrl(cardId, btn) {
-        const image = getImageCardData(cardId);
-        if (!image?.url) return;
-        try { await navigator.clipboard.writeText(image.url); }
-        catch { const ta = document.createElement('textarea'); ta.value = image.url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
-        if (typeof showToast === 'function') showToast('لینک تصویر کپی شد', 'success');
-    }
-
-    async function copyImagePrompt(cardId, btn) {
-        const image = getImageCardData(cardId);
-        if (!image?.prompt) return;
-        try { await navigator.clipboard.writeText(image.prompt); }
-        catch { const ta = document.createElement('textarea'); ta.value = image.prompt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد'; setTimeout(() => btn.innerHTML = old, 1200);
-        if (typeof showToast === 'function') showToast('prompt کپی شد', 'success');
-    }
-
-    function regenerateImage(cardId) {
-        if (isGenerating) return;
-        const image = getImageCardData(cardId);
-        const prompt = image?.prompt;
-        if (!prompt) { if (typeof showToast === 'function') showToast('prompt این تصویر در دسترس نیست.', 'warning'); return; }
-        sendToGemini(prompt, null);
-    }
-
     function downloadEditedFile(btn) {
         const code = decodeURIComponent(btn.dataset.code || '');
         const filename = btn.dataset.filename || 'edited-file.txt';
@@ -3383,26 +3194,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             }
         });
         // Make every saved code action explicitly usable after history restore.
-        // FIX: this used to disable ANY .code-action button lacking
-        // data-code — but image-card buttons (Preview/Download/Open/Copy/
-        // Regenerate) intentionally reuse the .code-action class without a
-        // data-code attribute (they carry their payload on the parent
-        // .image-result-card's data-image instead). The old check silently
-        // disabled every restored image card's buttons. Only disable code
-        // buttons that are actually supposed to have data-code (copy/run/
-        // download-html/download-edited-file) and skip anything living
-        // inside an image-result-card.
         chatBox.querySelectorAll('.code-action').forEach(btn => {
-            if (btn.closest('.image-result-card')) return;
             if (!btn.dataset.code) btn.disabled = true;
-        });
-        // Image cards restored from storage lose nothing (their data lives
-        // in data-image on the card itself), but re-check integrity so a
-        // corrupted/edited save doesn't leave a broken card silently clickable.
-        chatBox.querySelectorAll('.image-result-card').forEach(card => {
-            if (!getImageCardData(card.id)) {
-                card.querySelectorAll('.code-action').forEach(btn => btn.disabled = true);
-            }
         });
     }
 
