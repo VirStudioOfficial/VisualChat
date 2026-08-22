@@ -3235,14 +3235,53 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
     }
 
-    // Safe localStorage writer: on quota errors, prunes the oldest saved chats
-    // (chat ids are Date.now() timestamps, so lowest id = oldest) and retries,
-    // instead of silently losing the newest chat or throwing mid-flow.
-    // FIX: pruning used to happen completely silently — a chat with a few
-    // attached images/videos (stored as base64 directly in the saved HTML)
-    // can push localStorage over its ~5-10MB quota easily, and the user
-    // would just find older chats missing after a refresh with no idea why.
-    // Now it surfaces a toast so it's visible instead of "my chat vanished".
+    // Strips heavy base64 data-URL media (img/video/source src="data:...")
+    // out of a saved chat's HTML, replacing each with a small placeholder.
+    // Returns {html, bytesFreed, changed}. Used by pruneHeavyMedia() below —
+    // this is what actually frees space without deleting the conversation.
+    function stripHeavyMediaFromHtml(html) {
+        if (!html || html.indexOf('data:') === -1) return { html, bytesFreed: 0, changed: false };
+        let bytesFreed = 0;
+        let changed = false;
+        const placeholder = '<span class="pruned-media-notice" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;color:var(--text-muted);"><i class="lucide-icon" data-lucide="image-off"></i> فایل ضمیمه (برای آزاد شدن حافظه حذف شد)</span>';
+        const newHtml = html.replace(/(<(?:img|source)\b[^>]*\bsrc=")data:[^"]*(")/gi, (match, pre, post) => {
+            bytesFreed += match.length;
+            changed = true;
+            return pre + '#' + post; // keep tag structurally valid, just drop the payload
+        });
+        if (!changed) return { html, bytesFreed: 0, changed: false };
+        return { html: newHtml, bytesFreed, changed: true };
+    }
+
+    // FIX: pruning previously deleted whole chats (oldest 20%) the moment
+    // localStorage filled up — a single heavy image/video attachment could
+    // wipe out several complete conversations. Now, before deleting any
+    // conversation, we first strip the heavy base64 media out of each
+    // chat's saved HTML (oldest messages / oldest chats first), which is
+    // almost always enough to free the needed space on its own since the
+    // base64 attachments are what actually bloat storage — the text of the
+    // conversation itself is tiny by comparison. Whole-chat deletion is now
+    // the last resort, only if stripping media everywhere still isn't enough.
+    function pruneHeavyMedia(stored) {
+        let freedAny = false;
+        const ids = Object.keys(stored).sort((a, b) => Number(a) - Number(b)); // oldest first
+        for (const id of ids) {
+            const chat = stored[id];
+            if (!chat || !chat.html) continue;
+            const { html, changed } = stripHeavyMediaFromHtml(chat.html);
+            if (changed) {
+                stored[id] = { ...chat, html };
+                freedAny = true;
+            }
+        }
+        return freedAny;
+    }
+
+    // Safe localStorage writer: on quota errors, first strips heavy base64
+    // media from saved chats (oldest first) to free space without losing
+    // any conversation text; only deletes whole chats as a last resort if
+    // that still isn't enough. Surfaces a toast either way so it's visible
+    // instead of a chat just silently vanishing after a refresh.
     function safeSetItem(key, value, opts = {}) {
         try {
             localStorage.setItem(key, value);
@@ -3251,6 +3290,31 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             const isQuotaError = err && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22);
             if (!isQuotaError || !opts.pruneChatsKey) return false;
             const chatsKey = opts.pruneChatsKey;
+
+            // Step 1: strip heavy embedded media from stored chats (oldest first).
+            // This is almost always enough on its own — a chat's real text content
+            // is tiny; it's the base64 images/videos that blow up storage.
+            try {
+                const stored = JSON.parse(localStorage.getItem(chatsKey) || '{}');
+                const freedAny = pruneHeavyMedia(stored);
+                if (freedAny) {
+                    localStorage.setItem(chatsKey, JSON.stringify(stored));
+                    localStorage.setItem(key, value);
+                    if (typeof showToast === 'function') {
+                        showToast(
+                            'حافظه‌ی مرورگر پر شده بود؛ فایل/تصویرهای ضمیمه‌ی گفتگوهای قدیمی‌تر برای آزاد شدن جا حذف شدند (خود گفتگوها دست‌نخورده ماندند).',
+                            'warning',
+                            5000
+                        );
+                    }
+                    return true;
+                }
+            } catch (mediaErr) {
+                console.error('media pruning failed:', mediaErr);
+            }
+
+            // Step 2: last resort — no media left to strip (or it wasn't
+            // enough), so fall back to deleting the oldest whole chats.
             try {
                 const stored = JSON.parse(localStorage.getItem(chatsKey) || '{}');
                 const ids = Object.keys(stored).sort((a, b) => Number(a) - Number(b));
@@ -3261,7 +3325,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 localStorage.setItem(key, value);
                 if (typeof showToast === 'function') {
                     showToast(
-                        `حافظه‌ی مرورگر پر شد؛ ${droppedIds.length} گفتگوی قدیمی‌تر (معمولاً به‌خاطر فایل/تصویر ضمیمه) حذف شد تا گفتگوی فعلی ذخیره بماند.`,
+                        `حافظه‌ی مرورگر همچنان پر بود؛ ${droppedIds.length} گفتگوی قدیمی‌تر کامل حذف شد تا گفتگوی فعلی ذخیره بماند.`,
                         'warning',
                         5000
                     );
