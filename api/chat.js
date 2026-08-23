@@ -430,22 +430,24 @@ async function executeToolCall(name, args, ctx) {
     return { error: `ابزار ناشناخته: ${name}` };
 }
 
-// Runs the model <-> tool loop against Gemini's non-streaming generateContent
-// endpoint (function calling requires seeing the full structured response,
-// including functionCall parts, before deciding what to do next - this
-// can't be driven off the raw text SSE stream). Once the model returns a
-// final text-only answer (no more functionCalls), that final answer is
-// streamed to the client character-by-chunk to preserve the existing
-// "live typing" UX, and every tool call along the way is narrated via
-// onStep(label) before it runs.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, signal }) {
+// Runs the model <-> tool loop. Each round now calls Gemini's real
+// streamGenerateContent endpoint (Server-Sent-Events of JSON chunks) instead
+// of generateContent, and forwards text chunks to the client live via
+// onChunk() AS THEY ARRIVE from Google - not batched into one write at the
+// end. functionCall parts can still show up in a streamed response (Gemini
+// sends them as a complete part inside one of the chunks, same shape as the
+// non-streaming response), so tool-calling keeps working exactly as before;
+// we just no longer throw away real token-by-token streaming to get it.
+// Every tool call along the way is still narrated via onStep(label) before
+// it runs, same as before.
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, onChunk, signal }) {
     const MAX_TOOL_ROUNDS = 4; // hard safety cap so a confused model can't loop forever
     let workingContents = [...contents];
     let lastUsage = null;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
         // Also abort this round if the caller's own signal (client disconnect
         // / overall deadline) fires.
         const onAbort = () => controller.abort();
@@ -454,7 +456,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         let upstream;
         try {
             upstream = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`,
+                `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`,
                 {
                     method: 'POST',
                     headers: {
@@ -483,19 +485,78 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             throw err;
         }
 
-        const data = await upstream.json();
-        const candidate = data?.candidates?.[0];
-        const parts = candidate?.content?.parts || [];
-        lastUsage = data?.usageMetadata || lastUsage;
+        // Read the upstream SSE stream chunk-by-chunk, forwarding text parts
+        // to the client the moment each one arrives, while also accumulating
+        // everything (text + functionCall parts + finishReason/usage) so we
+        // still know at the end whether a tool needs to run.
+        const reader = upstream.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = '';
+        let accumulatedParts = [];
+        let finishReason = null;
 
+        const handleEventPayload = (jsonStr) => {
+            let evt;
+            try { evt = JSON.parse(jsonStr); } catch (_) { return; }
+            const candidate = evt?.candidates?.[0];
+            if (!candidate) return;
+            if (evt.usageMetadata) lastUsage = evt.usageMetadata;
+            if (candidate.finishReason) finishReason = candidate.finishReason;
+
+            const parts = candidate?.content?.parts || [];
+            for (const part of parts) {
+                if (typeof part.text === 'string') {
+                    accumulatedParts.push({ text: part.text });
+                    // Forward this text chunk to the client the instant it
+                    // arrives from Google - this is the actual fix for
+                    // "everything shows up at once with a delay": previously
+                    // nothing was sent to onChunk/onStep until the *entire*
+                    // model turn had finished.
+                    if (onChunk) {
+                        try { onChunk(part.text); } catch (_) {}
+                    }
+                } else if (part.functionCall) {
+                    accumulatedParts.push({ functionCall: part.functionCall });
+                }
+            }
+        };
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                sseBuffer += decoder.decode(value, { stream: true });
+                const lines = sseBuffer.split('\n');
+                sseBuffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data:')) continue;
+                    const jsonStr = line.slice(5).trim();
+                    if (!jsonStr) continue;
+                    handleEventPayload(jsonStr);
+                }
+            }
+            if (sseBuffer.trim().startsWith('data:')) {
+                handleEventPayload(sseBuffer.trim().slice(5).trim());
+            }
+        } catch (streamErr) {
+            if (streamErr?.name === 'AbortError') throw streamErr;
+            const err = new Error('agent_stream_read_failed');
+            err.body = { message: streamErr?.message || String(streamErr) };
+            throw err;
+        }
+
+        const parts = accumulatedParts;
         const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
         if (functionCalls.length === 0) {
-            // Final answer - no more tools requested.
+            // Final answer - no more tools requested. Text has already been
+            // streamed to the client chunk-by-chunk via onChunk above; we
+            // still return the joined text too, so non-stream callers (and
+            // history-saving) keep working unchanged.
             return {
                 finalText: textParts.join(''),
-                finishReason: candidate?.finishReason || null,
+                finishReason: finishReason,
                 usage: lastUsage,
                 askUser: null
             };
@@ -1341,6 +1402,83 @@ async function handler(req, res) {
                         // along the way to fill that gap.
                         let searchWasPerformed = false;
 
+                        // FIX (heavy code UX): streaming raw code character-
+                        // by-character looked bad for big code answers (the
+                        // user watches the whole file "type" out). This gate
+                        // sits between Gemini's real token stream and what
+                        // actually goes out over SSE: normal prose still
+                        // streams live as before, but once a fenced code
+                        // block (```lang ... ```) starts, its contents are
+                        // buffered instead of forwarded chunk-by-chunk - the
+                        // client instead gets a single narrated `step` event
+                        // ("در حال نوشتن کد..."), and the whole code block is
+                        // flushed as one piece the moment its closing fence
+                        // arrives. Detection is done on the raw text stream
+                        // via a small state machine, so it needs no per-file
+                        // special-casing and works for any number of code
+                        // blocks in one answer.
+                        const codeStreamGate = (() => {
+                            let insideFence = false;
+                            let fenceBuffer = '';
+                            let sawFirstFenceLineBreak = false;
+                            let carry = ''; // holds a partial ``` at chunk boundary
+
+                            const emitText = (t) => {
+                                if (!t) return;
+                                res.write(`data: ${JSON.stringify({ text: t })}\n\n`);
+                                if (typeof res.flush === 'function') res.flush();
+                            };
+                            const emitStep = (label) => {
+                                res.write(`data: ${JSON.stringify({ step: label })}\n\n`);
+                                if (typeof res.flush === 'function') res.flush();
+                            };
+
+                            return function feed(rawChunk) {
+                                let chunk = carry + rawChunk;
+                                carry = '';
+
+                                // If the chunk ends mid-fence-marker (e.g. "``"),
+                                // hold the tail back until the next chunk so we
+                                // don't misdetect/split a ``` marker.
+                                const tailBackticks = chunk.match(/`{1,2}$/);
+                                if (tailBackticks && !chunk.endsWith('```')) {
+                                    carry = tailBackticks[0];
+                                    chunk = chunk.slice(0, -carry.length);
+                                }
+
+                                while (chunk.length) {
+                                    if (!insideFence) {
+                                        const openIdx = chunk.indexOf('```');
+                                        if (openIdx === -1) {
+                                            emitText(chunk);
+                                            chunk = '';
+                                        } else {
+                                            emitText(chunk.slice(0, openIdx));
+                                            chunk = chunk.slice(openIdx + 3);
+                                            insideFence = true;
+                                            fenceBuffer = '';
+                                            sawFirstFenceLineBreak = false;
+                                            emitStep('در حال نوشتن کد...');
+                                        }
+                                    } else {
+                                        const closeIdx = chunk.indexOf('```');
+                                        if (closeIdx === -1) {
+                                            fenceBuffer += chunk;
+                                            chunk = '';
+                                        } else {
+                                            fenceBuffer += chunk.slice(0, closeIdx);
+                                            chunk = chunk.slice(closeIdx + 3);
+                                            insideFence = false;
+                                            // Flush the whole code block (including
+                                            // its ```lang fences) as one piece.
+                                            emitText('```' + fenceBuffer + '```');
+                                            fenceBuffer = '';
+                                        }
+                                    }
+                                }
+                            };
+                        })();
+
                         const agentResult = await runAgentLoop({
                             currentModel,
                             currentKey,
@@ -1354,6 +1492,9 @@ async function handler(req, res) {
                                     `data: ${JSON.stringify({ step: label })}\n\n`
                                 );
                                 if (typeof res.flush === 'function') res.flush();
+                            },
+                            onChunk: (textChunk) => {
+                                codeStreamGate(textChunk);
                             }
                         });
 
@@ -1371,11 +1512,16 @@ async function handler(req, res) {
                             // harmless to skip, X-Search-Performed is observability-only.
                         }
 
-                        const finalText = agentResult.finalText || '';
-
-                        if (finalText) {
+                        // NOTE: a normal final answer's text has already been
+                        // sent to the client incrementally via onChunk above,
+                        // so it must NOT be written again here (that would
+                        // duplicate the reply). The one exception is the
+                        // ask_user path: that text comes from the tool result
+                        // itself, never passed through onChunk, so it still
+                        // needs to be sent once here.
+                        if (agentResult.askUser && agentResult.finalText) {
                             res.write(
-                                `data: ${JSON.stringify({ text: finalText })}\n\n`
+                                `data: ${JSON.stringify({ text: agentResult.finalText })}\n\n`
                             );
                             if (typeof res.flush === 'function') res.flush();
                         }
