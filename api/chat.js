@@ -1290,25 +1290,23 @@ async function handler(req, res) {
         */
 
         if (wantsStream) {
-            res.setHeader(
-                'Content-Type',
-                'text/event-stream; charset=utf-8'
-            );
-
-            res.setHeader(
-                'Cache-Control',
-                'no-cache, no-transform'
-            );
-
-            res.setHeader(
-                'Connection',
-                'keep-alive'
-            );
-
-            res.setHeader(
-                'X-Accel-Buffering',
-                'no'
-            );
+            // FIX (real streaming on Vercel): setHeader()+flushHeaders() was
+            // relying on Node's default behavior, but Vercel's Node.js
+            // Serverless Function runtime only switches a response into true
+            // chunked/streaming mode once writeHead() is called explicitly
+            // with the headers passed directly to it - without that exact
+            // call, Vercel's platform layer can buffer the whole response
+            // and flush it all at once when the function returns, no matter
+            // how many times res.write()/res.flush() are called afterward.
+            // This was the actual root cause of "the whole reply lands at
+            // once with a delay" even though the SSE writes themselves were
+            // already correct.
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream; charset=utf-8',
+                'Cache-Control': 'no-cache, no-transform',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no'
+            });
 
             if (
                 typeof res.flushHeaders ===
