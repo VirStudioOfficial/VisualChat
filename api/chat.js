@@ -1400,34 +1400,23 @@ async function handler(req, res) {
                         // along the way to fill that gap.
                         let searchWasPerformed = false;
 
-                        // FIX (heavy code UX): streaming raw code character-
-                        // by-character looked bad for big code answers (the
-                        // user watches the whole file "type" out). This gate
-                        // sits between Gemini's real token stream and what
-                        // actually goes out over SSE: normal prose still
-                        // streams live as before, but once a fenced code
-                        // block (```lang ... ```) starts, its contents are
-                        // buffered instead of forwarded chunk-by-chunk - the
-                        // client instead gets a single narrated `step` event
-                        // ("در حال نوشتن کد..."), and the whole code block is
-                        // flushed as one piece the moment its closing fence
-                        // arrives. Detection is done on the raw text stream
-                        // via a small state machine, so it needs no per-file
-                        // special-casing and works for any number of code
-                        // blocks in one answer.
+                        // FIX (heavy code UX): code blocks now stream live,
+                        // chunk-by-chunk, exactly like normal prose - no more
+                        // buffering the whole fenced block and flushing it in
+                        // one piece, and no more fake "در حال نوشتن کد..."
+                        // step event standing in for it (that event used to
+                        // fire on ANY ``` fence, including ones that weren't
+                        // real code, which made it misleading). We still keep
+                        // a tiny carry buffer so a ``` marker split across two
+                        // raw chunks isn't sent as two separate backticks -
+                        // that's purely a transport-safety detail and has no
+                        // effect on what the user sees typed out.
                         const codeStreamGate = (() => {
-                            let insideFence = false;
-                            let fenceBuffer = '';
-                            let sawFirstFenceLineBreak = false;
                             let carry = ''; // holds a partial ``` at chunk boundary
 
                             const emitText = (t) => {
                                 if (!t) return;
                                 res.write(`data: ${JSON.stringify({ text: t })}\n\n`);
-                                if (typeof res.flush === 'function') res.flush();
-                            };
-                            const emitStep = (label) => {
-                                res.write(`data: ${JSON.stringify({ step: label })}\n\n`);
                                 if (typeof res.flush === 'function') res.flush();
                             };
 
@@ -1437,43 +1426,14 @@ async function handler(req, res) {
 
                                 // If the chunk ends mid-fence-marker (e.g. "``"),
                                 // hold the tail back until the next chunk so we
-                                // don't misdetect/split a ``` marker.
+                                // don't split a ``` marker across two SSE events.
                                 const tailBackticks = chunk.match(/`{1,2}$/);
                                 if (tailBackticks && !chunk.endsWith('```')) {
                                     carry = tailBackticks[0];
                                     chunk = chunk.slice(0, -carry.length);
                                 }
 
-                                while (chunk.length) {
-                                    if (!insideFence) {
-                                        const openIdx = chunk.indexOf('```');
-                                        if (openIdx === -1) {
-                                            emitText(chunk);
-                                            chunk = '';
-                                        } else {
-                                            emitText(chunk.slice(0, openIdx));
-                                            chunk = chunk.slice(openIdx + 3);
-                                            insideFence = true;
-                                            fenceBuffer = '';
-                                            sawFirstFenceLineBreak = false;
-                                            emitStep('در حال نوشتن کد...');
-                                        }
-                                    } else {
-                                        const closeIdx = chunk.indexOf('```');
-                                        if (closeIdx === -1) {
-                                            fenceBuffer += chunk;
-                                            chunk = '';
-                                        } else {
-                                            fenceBuffer += chunk.slice(0, closeIdx);
-                                            chunk = chunk.slice(closeIdx + 3);
-                                            insideFence = false;
-                                            // Flush the whole code block (including
-                                            // its ```lang fences) as one piece.
-                                            emitText('```' + fenceBuffer + '```');
-                                            fenceBuffer = '';
-                                        }
-                                    }
-                                }
+                                emitText(chunk);
                             };
                         })();
 
