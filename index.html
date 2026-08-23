@@ -757,6 +757,23 @@
         }
         .loader-searching .loader-dots span { background: var(--accent-2); }
 
+        /* FIX: added a live "typing cursor" so real token-by-token
+           streaming is visually obvious as text lands, instead of the
+           reply just silently growing. */
+        .stream-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            margin-inline-start: 2px;
+            vertical-align: -0.15em;
+            background: var(--accent-2, currentColor);
+            animation: streamCursorBlink 0.9s steps(1) infinite;
+        }
+        @keyframes streamCursorBlink {
+            0%, 49% { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+
         .agent-step-label {
             display: flex; align-items: center; gap: 8px;
             font-size: 0.85rem; color: var(--text-muted);
@@ -1473,12 +1490,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            <div class="file-preview" id="filePreview">
-                <img id="previewImg" src="" alt="preview">
-                <span id="fileName"></span>
-                <span class="file-status" id="fileStatus">در حال پردازش...</span>
-                <button class="icon-btn" type="button" onclick="removeFile()" style="width:24px; height:24px; font-size:0.9rem;"><i class="lucide-icon" data-lucide="x"></i></button>
-            </div>
+            <div id="filePreviewList" style="display:none; flex-direction:column; gap:6px; padding:6px 4px;"></div>
             <div id="codeFilesBar" style="display:none; flex-wrap:wrap; gap:6px; padding:6px 4px;"></div>
 
             <div class="command-menu" id="commandMenu">
@@ -1680,7 +1692,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let currentUser = null;
     let chats = {};
     let chatHistoryData = {};
-    let selectedFileData = null;
+    // FIX (multi-file upload bug): این قبلاً یک آبجکت تکی بود، پس وقتی چند
+    // عکس/ویدیو/PDF با هم انتخاب می‌شدند هر کدوم که آخر پردازش می‌شد بقیه
+    // رو بازنویسی می‌کرد و فقط آخرین فایل واقعاً ارسال می‌شد. حالا آرایه‌ست
+    // تا همه‌ی فایل‌های باینری انتخاب‌شده نگه داشته بشن.
+    let selectedFilesData = [];
     let lastCodeFilesForEdit = [];
     let codeFilesMemory = []; // [{name, content}] — فایل‌های کد ضمیمه‌شده که تا وقتی کاربر پاکشون نکنه تو مکالمه می‌مونن
     let isFirstMessage = true;
@@ -2404,18 +2420,55 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         event.target.value = '';
     }
 
+    // یک آیتم موقت با وضعیت "در حال پردازش" به لیست پیش‌نمایش اضافه می‌کند و
+    // شناسه‌ی یکتای همان آیتم رو برمی‌گردونه تا بعداً بشه وضعیتش رو آپدیت کرد.
+    // این‌طوری وقتی چند فایل با هم انتخاب میشن، هر کدوم ردیف/وضعیت جدای خودشو
+    // داره و پردازش موازی یکی، وضعیت بقیه رو خراب نمی‌کنه.
+    let __filePreviewSeq = 0;
+    function addFilePreviewItem(name) {
+        const id = 'fp' + (++__filePreviewSeq);
+        const list = document.getElementById('filePreviewList');
+        list.style.display = 'flex';
+        const row = document.createElement('div');
+        row.className = 'file-preview';
+        row.style.display = 'flex';
+        row.id = id;
+        row.innerHTML = `
+            <img class="fp-thumb" src="" alt="" style="display:none;">
+            <span class="fp-name">${escapeHtml(name || 'فایل بدون‌نام')}</span>
+            <span class="file-status loading fp-status">در حال پردازش...</span>
+            <button class="icon-btn" type="button" onclick="removeFileItem('${id}')" style="width:24px; height:24px; font-size:0.9rem;"><i class="lucide-icon" data-lucide="x"></i></button>
+        `;
+        list.appendChild(row);
+        return id;
+    }
+
+    function updateFilePreviewItem(id, { status, statusClass, thumbSrc }) {
+        const row = document.getElementById(id);
+        if (!row) return;
+        const statusEl = row.querySelector('.fp-status');
+        if (statusEl && status !== undefined) {
+            statusEl.textContent = status;
+            statusEl.className = 'file-status fp-status ' + (statusClass || '');
+        }
+        if (thumbSrc) {
+            const img = row.querySelector('.fp-thumb');
+            if (img) { img.src = thumbSrc; img.style.display = 'block'; }
+        }
+    }
+
+    function removeFileItem(id) {
+        const row = document.getElementById(id);
+        if (row) row.remove();
+        selectedFilesData = selectedFilesData.filter(f => f.__previewId !== id);
+        const list = document.getElementById('filePreviewList');
+        if (list && !list.children.length) list.style.display = 'none';
+    }
+
     async function processIncomingFile(file) {
         if (isGenerating || !file) return;
 
-        const fileNameSpan = document.getElementById('fileName');
-        const previewImg = document.getElementById('previewImg');
-        const statusEl = document.getElementById('fileStatus');
-        const previewContainer = document.getElementById('filePreview');
-        
-        previewContainer.style.display = 'flex';
-        fileNameSpan.innerText = file.name || 'فایل بدون‌نام';
-        statusEl.textContent = 'در حال پردازش...';
-        statusEl.className = 'file-status loading';
+        const previewId = addFilePreviewItem(file.name);
 
         // FIX/§2: a genuinely empty (0-byte) file used to sail through every
         // branch below as if it were valid content — for a text file that
@@ -2423,8 +2476,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // later "reads" a file that has nothing in it without ever being
         // told so. Reject it explicitly and don't pretend it was processed.
         if (file.size === 0) {
-            statusEl.textContent = 'فایل خالی است';
-            statusEl.className = 'file-status error';
+            updateFilePreviewItem(previewId, { status: 'فایل خالی است', statusClass: 'error' });
             showToast('این فایل خالی است و قابل پردازش نیست.', 'warning');
             return;
         }
@@ -2441,16 +2493,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
             if (isImage) {
                 const compressedBase64 = await compressImage(file, 1024, 0.7);
-                selectedFileData = { name: file.name, type: 'image/jpeg', base64: compressedBase64 };
-                previewImg.src = compressedBase64;
-                previewImg.style.display = 'block';
-                statusEl.textContent = 'تصویر آماده';
-                statusEl.className = 'file-status success';
+                // FIX (multi-file bug): push a new entry instead of
+                // overwriting the single selectedFileData object, so
+                // multiple images selected/pasted/dropped together are all
+                // kept and all sent to the backend.
+                selectedFilesData.push({ __previewId: previewId, name: file.name, type: 'image/jpeg', base64: compressedBase64 });
+                updateFilePreviewItem(previewId, { status: 'تصویر آماده', statusClass: 'success', thumbSrc: compressedBase64 });
             } else if (isVideo) {
                 let videoBase64 = '';
-                
+
                 if (file.size > MAX_DIRECT_SIZE) {
-                    statusEl.textContent = 'در حال فشرده‌سازی ویدیو...';
+                    updateFilePreviewItem(previewId, { status: 'در حال فشرده‌سازی ویدیو...', statusClass: 'loading' });
                     videoBase64 = await compressVideo(file, 480, 500000);
                 } else {
                     videoBase64 = await new Promise((resolve) => {
@@ -2460,15 +2513,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     });
                 }
 
-                selectedFileData = { name: file.name, type: 'video/webm', base64: videoBase64 };
-                previewImg.style.display = 'none';
-                statusEl.textContent = 'ویدیو آماده';
-                statusEl.className = 'file-status success';
+                selectedFilesData.push({ __previewId: previewId, name: file.name, type: 'video/webm', base64: videoBase64 });
+                updateFilePreviewItem(previewId, { status: 'ویدیو آماده', statusClass: 'success' });
             } else if (isCodeOrTextFile(file)) {
                 const MAX_TEXT_SIZE = 300 * 1024;
                 if (file.size > MAX_TEXT_SIZE) {
-                    statusEl.textContent = 'فایل خیلی بزرگ است (حداکثر ۳۰۰ کیلوبایت)';
-                    statusEl.className = 'file-status error';
+                    updateFilePreviewItem(previewId, { status: 'فایل خیلی بزرگ است (حداکثر ۳۰۰ کیلوبایت)', statusClass: 'error' });
                     showToast('فایل خیلی بزرگه — حداکثر ۳۰۰ کیلوبایت برای فایل متنی/کد.', 'warning');
                 } else {
                     const text = await new Promise((resolve, reject) => {
@@ -2481,7 +2531,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     if (existingIndex >= 0) codeFilesMemory[existingIndex] = { name: file.name, content: text, mode: 'text' };
                     else codeFilesMemory.push({ name: file.name, content: text, mode: 'text' });
                     renderCodeFilesBar();
-                    previewContainer.style.display = 'none';
+                    // Text/code files show up in the codeFilesBar, not the
+                    // binary-file preview list, so remove this row.
+                    removeFileItem(previewId);
                 }
             } else {
                 // Covers PDFs and any other binary file type. PDFs get an explicit
@@ -2491,36 +2543,34 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const isPdf = mimeType === 'application/pdf' || /\.pdf$/i.test(file.name || '');
                 const MAX_PDF_SIZE = 8 * 1024 * 1024; // 8MB
                 if (isPdf && file.size > MAX_PDF_SIZE) {
-                    statusEl.textContent = 'فایل PDF خیلی بزرگ است (حداکثر ۸ مگابایت)';
-                    statusEl.className = 'file-status error';
+                    updateFilePreviewItem(previewId, { status: 'فایل PDF خیلی بزرگ است (حداکثر ۸ مگابایت)', statusClass: 'error' });
                     showToast('فایل PDF خیلی بزرگه — حداکثر ۸ مگابایت.', 'warning');
                 } else {
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const base64 = e.target.result;
-                        selectedFileData = { name: file.name, type: file.type || guessMimeType(file.name), base64: base64 };                        previewImg.style.display = 'none';
-                        statusEl.textContent = isPdf ? 'PDF آماده' : 'فایل آماده';
-                        statusEl.className = 'file-status success';
+                        selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.type || guessMimeType(file.name), base64: base64 });
+                        updateFilePreviewItem(previewId, { status: isPdf ? 'PDF آماده' : 'فایل آماده', statusClass: 'success' });
                     };
                     reader.onerror = () => {
-                        statusEl.textContent = 'خطا در خواندن فایل';
-                        statusEl.className = 'file-status error';
+                        updateFilePreviewItem(previewId, { status: 'خطا در خواندن فایل', statusClass: 'error' });
                         showToast('فایل خراب است یا خوانده نشد.', 'error');
                     };
                     reader.readAsDataURL(file);
                 }
             }
         } catch (e) {
-            statusEl.textContent = 'خطا';
-            statusEl.className = 'file-status error';
+            updateFilePreviewItem(previewId, { status: 'خطا', statusClass: 'error' });
             showToast('پردازش فایل با خطا مواجه شد.', 'error');
         }
     }
 
     function removeFile() {
-        selectedFileData = null;
+        // Clears every pending binary attachment (images/videos/PDFs/etc).
+        selectedFilesData = [];
         document.getElementById('fileInput').value = '';
-        document.getElementById('filePreview').style.display = 'none';
+        const list = document.getElementById('filePreviewList');
+        if (list) { list.innerHTML = ''; list.style.display = 'none'; }
     }
 
     function setupFileDropAndPaste() {
@@ -2649,7 +2699,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function sendMessage() {
         const inputField = document.getElementById("userInput");
         const text = inputField.value.trim();
-        if (!text && !selectedFileData && codeFilesMemory.length === 0) return;
+        if (!text && selectedFilesData.length === 0 && codeFilesMemory.length === 0) return;
 
         if (isFirstMessage) {
             document.getElementById("homeScreen").style.display = 'none';
@@ -2658,10 +2708,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
 
         let userContentHtml = text || '';
-        if (selectedFileData && selectedFileData.type.startsWith('image/')) {
-            userContentHtml += `<br><img src="${selectedFileData.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
-        } else if (selectedFileData && selectedFileData.type.startsWith('video/')) {
-            userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${selectedFileData.base64}" type="${selectedFileData.type}"></video>`;
+        // FIX (multi-file bug): loop over every attached binary file instead
+        // of only ever showing/sending the single last one.
+        for (const f of selectedFilesData) {
+            if (f.type && f.type.startsWith('image/')) {
+                userContentHtml += `<br><img src="${f.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
+            } else if (f.type && f.type.startsWith('video/')) {
+                userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${f.base64}" type="${f.type}"></video>`;
+            } else {
+                userContentHtml += `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="lucide-icon" data-lucide="file"></i> ${escapeHtml(f.name)}</span>`;
+            }
         }
         if (codeFilesMemory.length > 0) {
             userContentHtml += codeFilesMemory.map(f =>
@@ -2673,7 +2729,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         inputField.value = "";
         inputField.style.height = '24px';
 
-        const payloadFile = selectedFileData;
+        // FIX (multi-file bug): pass the whole array along, not one file.
+        const payloadFiles = selectedFilesData.map(({ __previewId, ...rest }) => rest);
         removeFile();
         hideCodeFilesBar();
         // FIX: previously only the preview bar was hidden here —
@@ -2683,7 +2740,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // it was sent with, not persist invisibly forever. Clear it here,
         // same as removeFile() already does for image/video/pdf attachments.
         clearCodeFilesMemory();
-        await sendToGemini(text, payloadFile);
+        await sendToGemini(text, payloadFiles);
     }
 
     const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
@@ -2719,7 +2776,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function makeRetryError(loadingDiv, message, request, errorDetail = null) {
         const saved = {
             textPrompt: request?.textPrompt || '',
-            payloadFile: request?.payloadFile || null,
+            payloadFiles: request?.payloadFiles || [],
             webSearch: isSearchEnabled,
             model: currentModel
         };
@@ -2777,7 +2834,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (!request) {
             try {
                 const saved = JSON.parse(decodeURIComponent(btn.dataset.retry || ''));
-                request = { textPrompt: saved.textPrompt || '', payloadFile: saved.payloadFile || null };
+                request = { textPrompt: saved.textPrompt || '', payloadFiles: saved.payloadFiles || [] };
             } catch (_) {}
         }
         if (!request) return;
@@ -2786,10 +2843,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     async function retryRequest(request = lastFailedRequest) {
         if (!request || isGenerating) return;
-        await sendToGemini(request.textPrompt, request.payloadFile, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
+        await sendToGemini(request.textPrompt, request.payloadFiles, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
     }
 
-    async function sendToGemini(textPrompt, payloadFile = null, retryContext = null) {
+    async function sendToGemini(textPrompt, payloadFiles = [], retryContext = null) {
+        // Backward-compat: earlier code paths might still call this with a
+        // single file object instead of an array.
+        if (payloadFiles && !Array.isArray(payloadFiles)) payloadFiles = [payloadFiles];
+        if (!payloadFiles) payloadFiles = [];
         const requestId = ++activeRequestId;
         setGeneratingState(true);
 
@@ -2804,7 +2865,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (requestId === activeRequestId && isGenerating) {
                 console.warn('[watchdog] Request took too long — resetting UI so input is usable again.');
                 if (activeLoadingDiv && activeLoadingDiv.isConnected) {
-                    makeRetryError(activeLoadingDiv, 'پاسخ خیلی طول کشید و متوقف شد.', { textPrompt, payloadFile });
+                    makeRetryError(activeLoadingDiv, 'پاسخ خیلی طول کشید و متوقف شد.', { textPrompt, payloadFiles });
                 }
                 activeRequestId++; // invalidate this request so any late response is ignored
                 setGeneratingState(false);
@@ -2818,16 +2879,28 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const isRetry = !!retryContext?.retry;
         const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
         const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
-        const request = { textPrompt, payloadFile, wrapper: wrapperDiv, loadingDiv };
+        const request = { textPrompt, payloadFiles, wrapper: wrapperDiv, loadingDiv };
         activeLoadingDiv = loadingDiv;
 
-        if (payloadFile && payloadFile.mode === 'text' && typeof payloadFile.content === 'string') {
-            lastCodeFilesForEdit = [{ name: payloadFile.name, content: payloadFile.content, mode: 'text' }];
-        } else if (codeFilesMemory.length > 0) {
-            lastCodeFilesForEdit = codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text' }));
-        } else {
-            lastCodeFilesForEdit = [];
+        // FIX (multi-file bug): previously only a single text-mode
+        // payloadFile OR codeFilesMemory was used (never both, never more
+        // than one binary text file), so multi-file edit requests silently
+        // lost every file after the first. Now every text-mode file from
+        // payloadFiles AND every file already in codeFilesMemory are merged
+        // (de-duplicated by name) into what actually gets sent as `files`.
+        const textPayloadFiles = payloadFiles
+            .filter(f => f && f.mode === 'text' && typeof f.content === 'string')
+            .map(f => ({ name: f.name, content: f.content, mode: 'text' }));
+        const mergedTextFiles = [...codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text' }))];
+        for (const f of textPayloadFiles) {
+            const idx = mergedTextFiles.findIndex(m => m.name === f.name);
+            if (idx >= 0) mergedTextFiles[idx] = f; else mergedTextFiles.push(f);
         }
+        lastCodeFilesForEdit = mergedTextFiles;
+
+        // Binary attachments (images/videos/PDFs/etc) go through separately,
+        // all of them — not just the last one selected.
+        const binaryPayloadFiles = payloadFiles.filter(f => f && f.base64);
 
         if (!isRetry) {
             wrapperDiv.className = "message-wrapper bot";
@@ -2854,8 +2927,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     userName: uName,
                     text: textPrompt,
                     rawText: textPrompt,
-                    file: payloadFile,
-                    files: lastCodeFilesForEdit,
+                    file: null,
+                    // FIX (multi-file bug): send ALL attached files —
+                    // text/code files plus every binary file (images,
+                    // videos, PDFs) — through the same array the backend
+                    // already knows how to fan out (see incomingFiles in
+                    // pages/api/chat.js). Previously only one binary file
+                    // (the last one selected) ever made it into the request.
+                    files: [...lastCodeFilesForEdit, ...binaryPayloadFiles],
                     webSearch: isSearchEnabled,
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
@@ -2889,12 +2968,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let streamErrorDetail = null;
             let gotAnyText = false;
             let liveRenderTimer = null;
+            let streamEnded = false;
 
             const flushLiveRender = () => {
                 liveRenderTimer = null;
                 if (requestId !== activeRequestId) return;
                 const liveView = stripFileEditBlock(fullReply).displayText;
-                loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView));
+                let html = formatReply(sanitizeVirtualIdentity(liveView));
+                // Cursor is pure CSS (no JS timers, no extra reflow work),
+                // so it doesn't slow down rendering — it's just appended to
+                // whatever HTML was already going to be written, and removed
+                // automatically once streaming ends (see below).
+                if (!streamEnded) html += '<span class="stream-cursor"></span>';
+                loadingDiv.innerHTML = html;
                 scrollToLatest();
             };
 
@@ -2926,15 +3012,26 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
                     if (parsed.step) {
                         // Real, model-driven progress narration (e.g. "دارم
-                        // توی وب سرچ می‌کنم...") sent right before the
-                        // backend actually calls a tool, so a slow search
-                        // doesn't look like a silent hang. Shown above the
-                        // loading dots until real answer text starts.
+                        // توی وب سرچ می‌کنم..." or "در حال نوشتن کد...") sent
+                        // right before the backend does something that would
+                        // otherwise look like a pause. FIX: this used to
+                        // always replace the ENTIRE loadingDiv, which wiped
+                        // out any prose text already streamed in before a
+                        // code block started. Now, if there's no reply text
+                        // yet, it behaves as before (full loading state);
+                        // once real text exists, the step note is appended
+                        // below what's already rendered instead of erasing it.
                         if (requestId === activeRequestId) {
                             loadingDiv.classList.add('loader-searching');
-                            loadingDiv.innerHTML =
+                            const stepHtml =
                                 `<div class="agent-step-label"><span class="agent-step-dot"></span>${escapeHtml(parsed.step)}</div>` +
                                 `<span class="loader-dots"><span></span><span></span><span></span></span>`;
+                            if (fullReply) {
+                                const liveView = stripFileEditBlock(fullReply).displayText;
+                                loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView)) + stepHtml;
+                            } else {
+                                loadingDiv.innerHTML = stepHtml;
+                            }
                             scrollToLatest();
                         }
                     }
@@ -2971,6 +3068,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 } catch (_) {}
             }
 
+            streamEnded = true;
             queueLiveRender(true);
 
             if (requestId !== activeRequestId) return;
