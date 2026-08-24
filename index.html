@@ -2240,102 +2240,269 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         });
     }
 
-    // ===== فشرده‌سازی ویدیو =====
-    function compressVideo(file, targetWidth = 480, bitrate = 500000) {
+    // ===== فشرده‌سازی ویدیو (بازطراحی‌شده) =====
+    //
+    // نسخه‌ی قبلی روی canvas.captureStream + requestAnimationFrame کار می‌کرد:
+    // یعنی ویدیو باید واقعاً از اول تا آخر "پخش" می‌شد تا فریم‌به‌فریم روی
+    // canvas کشیده و ضبط بشه. این یعنی:
+    //   ۱) فشرده‌سازی به اندازه‌ی خودِ طول ویدیو زمان می‌بره (ویدیوی ۲ دقیقه‌ای
+    //      = ۲ دقیقه پردازش)، بدون هیچ timeout ای -> اگر تب پس‌زمینه بشه یا
+    //      rAF محدود بشه، Promise برای همیشه معلق می‌مونه.
+    //   ۲) صدا کاملاً حذف می‌شد (captureStream روی canvas فقط تصویره).
+    //   ۳) videoBitsPerSecond فقط "پیشنهادی" است و خیلی مرورگرها نادیده‌ش
+    //      می‌گیرن -> گاهی هیچ کاهش حجمی هم اتفاق نمی‌افتاد.
+    //
+    // راه‌حل جدید: از HTMLVideoElement.captureStream() مستقیم استفاده می‌کنیم
+    // (نه از canvas) که هم تصویر و هم صدا رو با هم می‌ده و مرورگر خودش
+    // decode/encode رو به‌صورت داخلی و معمولاً سریع‌تر از real-time انجام
+    // می‌ده (خصوصاً وقتی video.muted=true و در background قابل پخش بمونه).
+    // اگر HTMLVideoElement.captureStream در دسترس نبود (مرورگرهای قدیمی/
+    // بعضی نسخه‌های iOS Safari)، fallback به همون روش canvas قبلی است، اما
+    // این بار با timeout و مدیریت خطای کامل.
+    //
+    // محدودیت‌های سخت‌گیرانه‌ی جدید که باعث می‌شه "پردازش نشدن" دیگه تکرار نشه:
+    //   - MAX_VIDEO_DURATION_SEC: ویدیوهای خیلی طولانی رد می‌شن با پیام واضح،
+    //     به‌جای اینکه دقیقه‌ها بی‌نتیجه پردازش بشن.
+    //   - COMPRESSION_TIMEOUT_MS: اگر فشرده‌سازی در این مدت تموم نشه، به‌جای
+    //      گیر کردن ابدی، خطای صریح می‌ده.
+    //   - METADATA_TIMEOUT_MS: فایل خراب/ناسازگار که loadedmetadata براش
+    //     هیچ‌وقت fire نمی‌شه هم دیگه گیر نمی‌کنه.
+
+    const MAX_VIDEO_DURATION_SEC = 120;       // ویدیوهای بلندتر از ۲ دقیقه رد می‌شوند
+    const METADATA_TIMEOUT_MS = 10000;        // ۱۰ ثانیه برای خواندن متادیتای ویدیو
+    const COMPRESSION_TIMEOUT_MS = 45000;     // ۴۵ ثانیه سقف زمان فشرده‌سازی
+
+    function pickSupportedVideoMime() {
+        const candidates = [
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp8',
+            'video/webm'
+        ];
+        for (const c of candidates) {
+            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) {
+                return c;
+            }
+        }
+        return 'video/webm';
+    }
+
+    function loadVideoMetadata(file) {
         return new Promise((resolve, reject) => {
             const video = document.createElement('video');
-            video.src = URL.createObjectURL(file);
+            const url = URL.createObjectURL(file);
+            video.src = url;
             video.muted = true;
             video.playsInline = true;
+            video.preload = 'metadata';
+
+            const timer = setTimeout(() => {
+                cleanup();
+                reject(new Error('METADATA_TIMEOUT'));
+            }, METADATA_TIMEOUT_MS);
+
+            function cleanup() {
+                clearTimeout(timer);
+                video.onloadedmetadata = null;
+                video.onerror = null;
+            }
 
             video.onloadedmetadata = () => {
-                let width = video.videoWidth;
-                let height = video.videoHeight;
-                if (width > targetWidth) {
-                    height = Math.round((height * targetWidth) / width);
-                    width = targetWidth;
-                }
+                cleanup();
+                resolve({ video, url });
+            };
+            video.onerror = () => {
+                cleanup();
+                URL.revokeObjectURL(url);
+                reject(new Error('CORRUPT_OR_UNSUPPORTED_VIDEO'));
+            };
+        });
+    }
 
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
+    function recordViaVideoElementStream(video, targetWidth, bitrate) {
+        return new Promise((resolve, reject) => {
+            let width = video.videoWidth || targetWidth;
+            let height = video.videoHeight || Math.round(targetWidth * 9 / 16);
+            if (width > targetWidth) {
+                height = Math.round((height * targetWidth) / width);
+                width = targetWidth;
+            }
 
-                const stream = canvas.captureStream(25);
-                
-                let mimeType = 'video/webm';
-                if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
-                    mimeType = 'video/webm;codecs=vp8';
-                }
+            let stream;
+            try {
+                // Direct element capture: includes audio track(s), and the
+                // browser decodes/encodes internally rather than us drawing
+                // frames one at a time - much faster and audio-preserving.
+                stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+            } catch (e) {
+                reject(e);
+                return;
+            }
 
-                // FIX/§2: constructing MediaRecorder can throw synchronously
-                // (unsupported mimeType/options on some browsers), and even
-                // once it's running it can emit an error event (e.g. the
-                // encoder failing mid-stream). Neither case was handled
-                // before, so the file's status would be stuck on "در حال
-                // فشرده‌سازی ویدیو..." forever with no way out except
-                // reloading the page.
-                let mediaRecorder;
-                try {
-                    mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: mimeType,
-                        videoBitsPerSecond: bitrate
-                    });
-                } catch (constructErr) {
-                    URL.revokeObjectURL(video.src);
-                    reject(constructErr);
+            const mimeType = pickSupportedVideoMime();
+            let mediaRecorder;
+            try {
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType,
+                    videoBitsPerSecond: bitrate,
+                    audioBitsPerSecond: 96000
+                });
+            } catch (constructErr) {
+                reject(constructErr);
+                return;
+            }
+
+            const chunks = [];
+            let settled = false;
+
+            const finish = (fn, arg) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(hardTimeout);
+                fn(arg);
+            };
+
+            const hardTimeout = setTimeout(() => {
+                try { if (mediaRecorder.state === 'recording') mediaRecorder.stop(); } catch (_) {}
+                finish(reject, new Error('COMPRESSION_TIMEOUT'));
+            }, COMPRESSION_TIMEOUT_MS);
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+            mediaRecorder.onerror = (err) => {
+                finish(reject, err?.error || err || new Error('MediaRecorder error'));
+            };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                if (blob.size === 0) {
+                    finish(reject, new Error('EMPTY_OUTPUT'));
                     return;
                 }
+                const reader = new FileReader();
+                reader.onloadend = () => finish(resolve, reader.result);
+                reader.onerror = () => finish(reject, new Error('Failed to read compressed video blob'));
+                reader.readAsDataURL(blob);
+            };
 
-                const chunks = [];
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data && e.data.size > 0) chunks.push(e.data);
-                };
+            video.currentTime = 0;
+            video.onended = () => {
+                if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+            };
 
-                mediaRecorder.onerror = (err) => {
-                    URL.revokeObjectURL(video.src);
-                    reject(err?.error || err || new Error('MediaRecorder error'));
-                };
+            video.play().then(() => {
+                mediaRecorder.start(250); // collect data in chunks, not just at the end
+            }).catch((playErr) => {
+                finish(reject, playErr);
+            });
+        });
+    }
 
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: 'video/webm' });
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        URL.revokeObjectURL(video.src);
-                        resolve(reader.result);
-                    };
-                    reader.onerror = () => {
-                        URL.revokeObjectURL(video.src);
-                        reject(new Error('Failed to read compressed video blob'));
-                    };
-                    reader.readAsDataURL(blob);
-                };
+    // Fallback for browsers without HTMLVideoElement.captureStream support:
+    // same canvas-drawing approach as before, but now with a hard timeout so
+    // it can never hang forever, and audio is still lost (unavoidable with
+    // a canvas-only stream) - this path is a last resort, not the default.
+    function recordViaCanvasFallback(video, targetWidth, bitrate) {
+        return new Promise((resolve, reject) => {
+            let width = video.videoWidth;
+            let height = video.videoHeight;
+            if (width > targetWidth) {
+                height = Math.round((height * targetWidth) / width);
+                width = targetWidth;
+            }
 
-                video.play().catch((playErr) => {
-                    URL.revokeObjectURL(video.src);
-                    reject(playErr);
-                });
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            const stream = canvas.captureStream(25);
+            const mimeType = pickSupportedVideoMime();
+
+            let mediaRecorder;
+            try {
+                mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
+            } catch (constructErr) {
+                reject(constructErr);
+                return;
+            }
+
+            const chunks = [];
+            let settled = false;
+            const finish = (fn, arg) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(hardTimeout);
+                fn(arg);
+            };
+
+            const hardTimeout = setTimeout(() => {
+                try { if (mediaRecorder.state === 'recording') mediaRecorder.stop(); } catch (_) {}
+                finish(reject, new Error('COMPRESSION_TIMEOUT'));
+            }, COMPRESSION_TIMEOUT_MS);
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+            mediaRecorder.onerror = (err) => finish(reject, err?.error || err || new Error('MediaRecorder error'));
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                if (blob.size === 0) { finish(reject, new Error('EMPTY_OUTPUT')); return; }
+                const reader = new FileReader();
+                reader.onloadend = () => finish(resolve, reader.result);
+                reader.onerror = () => finish(reject, new Error('Failed to read compressed video blob'));
+                reader.readAsDataURL(blob);
+            };
+
+            video.play().then(() => {
                 mediaRecorder.start();
-
                 function drawFrame() {
+                    if (settled) return;
                     if (video.paused || video.ended) {
-                        if (mediaRecorder.state === 'recording') {
-                            mediaRecorder.stop();
-                        }
+                        if (mediaRecorder.state === 'recording') mediaRecorder.stop();
                         return;
                     }
                     ctx.drawImage(video, 0, 0, width, height);
                     requestAnimationFrame(drawFrame);
                 }
-
                 drawFrame();
-            };
-
-            video.onerror = (err) => {
-                URL.revokeObjectURL(video.src);
-                reject(err);
-            };
+            }).catch((playErr) => finish(reject, playErr));
         });
+    }
+
+    // Public entry point. Resolves to a base64 data URL of a compressed
+    // webm, or rejects with an Error whose .message is one of the specific
+    // codes above (METADATA_TIMEOUT / CORRUPT_OR_UNSUPPORTED_VIDEO /
+    // DURATION_TOO_LONG / COMPRESSION_TIMEOUT / EMPTY_OUTPUT) so the caller
+    // can show a precise, actionable message instead of a generic failure.
+    async function compressVideo(file, targetWidth = 480, bitrate = 700000, onProgress) {
+        let meta;
+        try {
+            meta = await loadVideoMetadata(file);
+        } catch (e) {
+            throw e;
+        }
+
+        const { video, url } = meta;
+
+        try {
+            if (video.duration && video.duration > MAX_VIDEO_DURATION_SEC) {
+                throw new Error('DURATION_TOO_LONG');
+            }
+
+            if (onProgress) onProgress('compressing');
+
+            let resultPromise;
+            if (typeof video.captureStream === 'function' || typeof video.mozCaptureStream === 'function') {
+                resultPromise = recordViaVideoElementStream(video, targetWidth, bitrate);
+            } else {
+                resultPromise = recordViaCanvasFallback(video, targetWidth, bitrate);
+            }
+
+            const result = await resultPromise;
+            return result;
+        } finally {
+            URL.revokeObjectURL(url);
+        }
     }
 
     function guessMimeType(filename) {
@@ -2500,20 +2667,62 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 selectedFilesData.push({ __previewId: previewId, name: file.name, type: 'image/jpeg', base64: compressedBase64 });
                 updateFilePreviewItem(previewId, { status: 'تصویر آماده', statusClass: 'success', thumbSrc: compressedBase64 });
             } else if (isVideo) {
+                // Backend's hard limit on a single binary attachment's
+                // base64 length (kept in sync with MAX_BINARY_BASE64_CHARS
+                // in pages/api/chat.js). Checking against this BEFORE
+                // accepting a "successfully compressed" result means we
+                // never show the user a green "ویدیو آماده" for a file the
+                // server is just going to reject anyway.
+                const MAX_BACKEND_BASE64_CHARS = 15 * 1024 * 1024;
+
                 let videoBase64 = '';
 
                 if (file.size > MAX_DIRECT_SIZE) {
-                    updateFilePreviewItem(previewId, { status: 'در حال فشرده‌سازی ویدیو...', statusClass: 'loading' });
-                    videoBase64 = await compressVideo(file, 480, 500000);
+                    updateFilePreviewItem(previewId, { status: 'در حال بررسی ویدیو...', statusClass: 'loading' });
+
+                    try {
+                        videoBase64 = await compressVideo(file, 480, 700000, (stage) => {
+                            if (stage === 'compressing') {
+                                updateFilePreviewItem(previewId, { status: 'در حال فشرده‌سازی ویدیو...', statusClass: 'loading' });
+                            }
+                        });
+                    } catch (compressErr) {
+                        const code = compressErr && compressErr.message;
+                        const messages = {
+                            'METADATA_TIMEOUT': 'فایل ویدیویی قابل خواندن نبود (فرمت پشتیبانی نمی‌شود).',
+                            'CORRUPT_OR_UNSUPPORTED_VIDEO': 'ویدیو خراب است یا فرمت آن پشتیبانی نمی‌شود.',
+                            'DURATION_TOO_LONG': `ویدیو خیلی طولانی است (حداکثر ${MAX_VIDEO_DURATION_SEC} ثانیه).`,
+                            'COMPRESSION_TIMEOUT': 'فشرده‌سازی ویدیو خیلی طول کشید — لطفاً فایل کوتاه‌تری امتحان کن.',
+                            'EMPTY_OUTPUT': 'فشرده‌سازی ویدیو نتیجه‌ای نداد — لطفاً دوباره امتحان کن.'
+                        };
+                        const msg = messages[code] || 'پردازش ویدیو با خطا مواجه شد.';
+                        updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                        showToast(msg, 'error');
+                        return;
+                    }
+
+                    if (videoBase64.length > MAX_BACKEND_BASE64_CHARS) {
+                        const msg = 'حتی بعد از فشرده‌سازی، ویدیو خیلی بزرگ است برای ارسال.';
+                        updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                        showToast(msg, 'error');
+                        return;
+                    }
                 } else {
-                    videoBase64 = await new Promise((resolve) => {
+                    videoBase64 = await new Promise((resolve, reject) => {
                         const reader = new FileReader();
                         reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = () => reject(new Error('READ_FAILED'));
                         reader.readAsDataURL(file);
+                    }).catch(() => {
+                        const msg = 'خواندن فایل ویدیو با خطا مواجه شد.';
+                        updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                        showToast(msg, 'error');
+                        return '';
                     });
+                    if (!videoBase64) return;
                 }
 
-                selectedFilesData.push({ __previewId: previewId, name: file.name, type: 'video/webm', base64: videoBase64 });
+                selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.size > MAX_DIRECT_SIZE ? 'video/webm' : (file.type || guessMimeType(file.name)), base64: videoBase64 });
                 updateFilePreviewItem(previewId, { status: 'ویدیو آماده', statusClass: 'success' });
             } else if (isCodeOrTextFile(file)) {
                 const MAX_TEXT_SIZE = 300 * 1024;
