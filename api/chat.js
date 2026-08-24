@@ -948,6 +948,11 @@ async function handler(req, res) {
 
         // Backend-side size cap for binary payloads (images/video/PDF), since the
         // frontend's own limits can be bypassed by a direct API call.
+        // NOTE: kept in sync with MAX_BACKEND_BASE64_CHARS in the frontend's
+        // processIncomingFile() video branch (index.html) - the client
+        // checks against this same number BEFORE showing "ویدیو آماده", so
+        // a compressed video that passes client-side never gets silently
+        // 413'd here. If this number changes, update both places.
         const MAX_BINARY_BASE64_CHARS = 15 * 1024 * 1024; // ~15MB of base64 text
 
         for (const bf of binaryFiles) {
