@@ -440,7 +440,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, onChunk, signal }) {
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, onChunk, signal, disableTools }) {
     const MAX_TOOL_ROUNDS = 4; // hard safety cap so a confused model can't loop forever
     let workingContents = [...contents];
     let lastUsage = null;
@@ -466,7 +466,12 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                     body: JSON.stringify({
                         system_instruction: { parts: [{ text: systemText }] },
                         contents: workingContents,
-                        tools: GEMINI_TOOLS
+                        // See hasVideoAttachment / disableTools comment above
+                        // runAgentLoop's call sites: omitted entirely (not
+                        // just emptied) when a video is attached, since some
+                        // Gemini versions treat an empty tools array
+                        // differently from no tools key at all.
+                        ...(disableTools ? {} : { tools: GEMINI_TOOLS })
                     }),
                     signal: controller.signal
                 }
@@ -955,6 +960,21 @@ async function handler(req, res) {
         // 413'd here. If this number changes, update both places.
         const MAX_BINARY_BASE64_CHARS = 15 * 1024 * 1024; // ~15MB of base64 text
 
+        // FIX (root cause of "video attachments hang forever, no reply"):
+        // Gemini's streamGenerateContent endpoint does not reliably support
+        // function-calling `tools` in the same request as an inline video
+        // part - on several model versions the request either gets stuck
+        // with no chunks ever arriving, or errors in a way that looked to
+        // the user like an endless "typing..." indicator, because nothing
+        // ever reached finishReason to end the SSE stream. This affected
+        // ALL videos, including small ones sent uncompressed, since the
+        // trigger is "a video is attached", not file size. We now detect
+        // that up front and skip attaching `tools` for this request - the
+        // model still fully understands/describes the video, it just can't
+        // ALSO call web_search/ask_user in that same turn (extremely rare
+        // to need both at once, and a working reply matters far more).
+        let hasVideoAttachment = false;
+
         for (const bf of binaryFiles) {
             const lastIndex =
                 contents.length - 1;
@@ -1003,6 +1023,7 @@ async function handler(req, res) {
                     videoMimeMap[ext] ||
                     'video/mp4';
 
+                hasVideoAttachment = true;
                 log.info('file.video_detected', { name: bf.name, mimeType });
             } else if (ext === 'pdf' || mimeType === 'application/pdf') {
                 // Gemini supports PDF as an inline_data part the same way as
@@ -1449,6 +1470,7 @@ async function handler(req, res) {
                             contents,
                             tavilyKeys,
                             signal: abortController.signal,
+                            disableTools: hasVideoAttachment,
                             onStep: (label, toolName) => {
                                 if (toolName === 'web_search') searchWasPerformed = true;
                                 res.write(
@@ -1607,6 +1629,7 @@ async function handler(req, res) {
                         contents,
                         tavilyKeys,
                         signal: abortController.signal,
+                        disableTools: hasVideoAttachment,
                         onStep: null
                     });
 
