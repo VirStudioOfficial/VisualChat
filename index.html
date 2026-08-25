@@ -2161,6 +2161,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         try { await idbDelete(FILES_STORE, `${owner}:${chatId}`); } catch (_) {}
     }
 
+    // FEATURE (persistent file memory - recency cap): everything ever sent
+    // stays in chatFileArchive/IndexedDB forever (nothing is deleted here),
+    // but only the N most recently SENT files (by savedAt) are handed to the
+    // model each turn - as names in the prompt and as what get_archived_file
+    // is allowed to return. This bounds how much a long chat's file history
+    // can cost per-request, no matter how many files accumulate over time.
+    const MAX_MODEL_VISIBLE_ARCHIVED_FILES = 3;
+    function recentArchivedFiles(chatId) {
+        const list = chatFileArchive[chatId] || [];
+        return [...list]
+            .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+            .slice(0, MAX_MODEL_VISIBLE_ARCHIVED_FILES);
+    }
+
     function queueChatSave(chatId) {
         const owner = getChatOwnerKey();
         const chat = chats[chatId];
@@ -3577,8 +3591,21 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     // this same request and can hand it back with zero
                     // extra round-trips. Content isn't put in the prompt
                     // itself, so it costs no tokens unless actually used.
-                    archivedFileNames: (chatFileArchive[currentChatId] || []).map(f => f.name),
-                    archivedFiles: chatFileArchive[currentChatId] || [],
+                    //
+                    // FIX (unbounded archive growth -> token/quota risk):
+                    // ALL files are still kept forever in IndexedDB (never
+                    // deleted here), but only the 3 MOST RECENTLY SENT ones
+                    // are exposed to the model each turn - both as names it
+                    // sees in the prompt and as candidates get_archived_file
+                    // can actually return. Older files fall out of the
+                    // model's visibility automatically as new ones come in;
+                    // if the user re-sends an old file, it becomes "recent"
+                    // again like normal. This caps the model's own working
+                    // set instead of letting an ever-growing archive quietly
+                    // increase what a single request costs over the life of
+                    // a long chat.
+                    archivedFileNames: recentArchivedFiles(currentChatId).map(f => f.name),
+                    archivedFiles: recentArchivedFiles(currentChatId),
                     webSearch: isSearchEnabled,
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
