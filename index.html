@@ -3604,8 +3604,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     // set instead of letting an ever-growing archive quietly
                     // increase what a single request costs over the life of
                     // a long chat.
-                    archivedFileNames: recentArchivedFiles(currentChatId).map(f => f.name),
-                    archivedFiles: recentArchivedFiles(currentChatId),
+                    //
+                    // FIX (redundant get_archived_file call on the file just
+                    // sent): a file attached to THIS message already gets
+                    // its full content embedded directly in the prompt text
+                    // (see the backend's textFiles/[محتوای فایل] block), but
+                    // saveFileToArchive() also just saved that same file
+                    // into chatFileArchive - so it was showing up a SECOND
+                    // time in the "archived files" list the model sees,
+                    // with no way for the model to know it's the exact same
+                    // content already right in front of it. That's exactly
+                    // why the model sometimes called get_archived_file on
+                    // index.html right after being GIVEN index.html: it had
+                    // no signal they were the same file. Excluding this
+                    // turn's own attached file names from what's sent as
+                    // archived removes that ambiguity entirely - older
+                    // *different* files are unaffected.
+                    archivedFileNames: recentArchivedFiles(currentChatId)
+                        .map(f => f.name)
+                        .filter(n => !mergedTextFiles.some(mf => mf.name === n)),
+                    archivedFiles: recentArchivedFiles(currentChatId)
+                        .filter(f => !mergedTextFiles.some(mf => mf.name === f.name)),
                     webSearch: isSearchEnabled,
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
