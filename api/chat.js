@@ -369,6 +369,36 @@ const GEMINI_TOOLS = [
                 }
             },
             {
+                // FEATURE (persistent file memory): the client keeps a
+                // permanent per-chat archive of every text/code file ever
+                // sent (in IndexedDB, well past the single "current message"
+                // lifetime of codeFilesMemory). The archive's file NAMES are
+                // listed for the model every turn (cheap - just strings),
+                // but the actual CONTENT only gets pulled into context if
+                // the model calls this tool, i.e. only when the user is
+                // actually referring back to that file's content, not just
+                // mentioning its name in passing. This keeps large/long
+                // chats cheap by default while still letting the model
+                // "remember" old files when it genuinely needs them.
+                name: 'get_archived_file',
+                description:
+                    'محتوای یکی از فایل‌های قبلاً ارسال‌شده در همین گفتگو را برمی‌گرداند. این ابزار را ' +
+                    'فقط زمانی صدا بزن که کاربر واقعاً به محتوای یک فایل قبلی نیاز دارد یا به آن ارجاع ' +
+                    'می‌دهد (مثلاً «همون فایلی که قبلاً فرستادم رو ویرایش کن» یا «توی اون فایل دنبال X ' +
+                    'بگرد») - نه صرفاً وقتی اسم فایل یک‌بار در گفتگو ذکر شده. اسم فایل‌های موجود در آرشیو ' +
+                    'این گفتگو در پرامپت سیستم به تو داده شده است.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        name: {
+                            type: 'string',
+                            description: 'نام دقیق فایلی که محتوایش لازم است (باید دقیقاً با یکی از نام‌های آرشیو مطابقت داشته باشد).'
+                        }
+                    },
+                    required: ['name']
+                }
+            },
+            {
                 name: 'ask_user',
                 description:
                     'وقتی درخواست کاربر شامل یک تغییر اساسی/غیرقابل‌برگشت است (مثلاً بازنویسی کامل ' +
@@ -400,10 +430,24 @@ function describeToolCall(name, args) {
     if (name === 'ask_user') {
         return 'قبل از ادامه، یه سؤال دارم...';
     }
+    if (name === 'get_archived_file') {
+        return `دارم فایل «${(args && args.name) || ''}» رو از آرشیو این گفتگو می‌خونم...`;
+    }
     return 'در حال انجام یک مرحله...';
 }
 
 async function executeToolCall(name, args, ctx) {
+    if (name === 'get_archived_file') {
+        const fileName = (args && args.name) || '';
+        const archive = (ctx && Array.isArray(ctx.archivedFiles)) ? ctx.archivedFiles : [];
+        const found = archive.find(f => f && f.name === fileName);
+        if (!found) {
+            return { error: `فایلی با نام «${fileName}» در آرشیو این گفتگو پیدا نشد.` };
+        }
+        log.info('agent.tool.get_archived_file', { name: fileName, contentLen: (found.content || '').length });
+        return { name: found.name, content: found.content || '' };
+    }
+
     if (name === 'web_search') {
         const query = (args && args.query) || '';
         if (!query) return { error: 'query خالی بود.' };
@@ -440,7 +484,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, onChunk, signal, disableTools, hasVideoAttachment }) {
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment }) {
     const MAX_TOOL_ROUNDS = 4; // hard safety cap so a confused model can't loop forever
     let workingContents = [...contents];
     let lastUsage = null;
@@ -597,7 +641,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                 try { onStep(label, call.name); } catch (_) {}
             }
 
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles });
 
             if (result.askUser) {
                 // Don't bother calling any further tools this round - surface
@@ -727,8 +771,21 @@ async function handler(req, res) {
             file,
             webSearch,
             history: rawHistory,
-            model
+            model,
+            // FEATURE (persistent file memory): archivedFileNames is cheap
+            // (just strings) and always present so the system prompt can
+            // tell the model what's available; archivedFiles carries the
+            // actual content but is only ever read inside executeToolCall
+            // (get_archived_file), never injected into the prompt directly -
+            // that's what keeps this free unless the model actually asks.
+            archivedFileNames: rawArchivedFileNames,
+            archivedFiles: rawArchivedFiles
         } = req.body || {};
+
+        const archivedFileNames = Array.isArray(rawArchivedFileNames) ? rawArchivedFileNames.filter(n => typeof n === 'string') : [];
+        const archivedFiles = Array.isArray(rawArchivedFiles)
+            ? rawArchivedFiles.filter(f => f && typeof f.name === 'string' && typeof f.content === 'string')
+            : [];
 
         const history = trimHistoryForContext(rawHistory);
 
@@ -1240,6 +1297,20 @@ async function handler(req, res) {
 - ابزار ask_user را فقط برای تغییرات اساسی/غیرقابل‌برگشت یا تصمیم‌هایی با چند راه‌حل متفاوت صدا بزن (مثلاً بازنویسی کامل یک فایل، حذف بخش بزرگ کد). برای کارهای کوچک یا واضح، مستقیم انجام بده و از این ابزار استفاده نکن.
 `;
 
+        // FEATURE (persistent file memory): tell the model which files exist
+        // in this chat's permanent archive (names only - the content is
+        // fetched on-demand via get_archived_file, see GEMINI_TOOLS above).
+        // If the archive is empty, say nothing extra so the prompt doesn't
+        // grow for chats that never used this.
+        if (archivedFileNames.length > 0) {
+            systemText += `
+فایل‌های آرشیوشده در این گفتگو (فقط نام - محتوا با ابزار get_archived_file قابل دریافت است):
+${archivedFileNames.map(n => `- ${n}`).join('\n')}
+
+فقط وقتی کاربر واقعاً به محتوای یکی از این فایل‌ها نیاز دارد یا ارجاع می‌دهد (نه صرفاً وقتی اسمش را می‌بینی)، ابزار get_archived_file را با نام دقیق فایل صدا بزن.
+`;
+        }
+
         /*
         |--------------------------------------------------------------------------
         | File Edit Mode
@@ -1491,6 +1562,7 @@ async function handler(req, res) {
                             systemText,
                             contents,
                             tavilyKeys,
+                            archivedFiles,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
@@ -1659,6 +1731,7 @@ async function handler(req, res) {
                         systemText,
                         contents,
                         tavilyKeys,
+                        archivedFiles,
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
                         hasVideoAttachment,
