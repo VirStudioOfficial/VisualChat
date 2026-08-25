@@ -3843,14 +3843,68 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     // هر {old,new} را فقط وقتی اعمال می‌کند که old دقیقاً و فقط یک‌بار در فایل
     // پیدا شود؛ در غیر این‌صورت آن مورد را نادیده می‌گیرد (بدون خراب کردن بقیه فایل).
+    // نرمال‌سازی خطوط: CRLF/CR را به LF یکسان می‌کند تا مقایسه‌ی متن بین
+    // فایل اصلی (که معمولاً \r\n دارد) و متنی که مدل در پاسخش تولید کرده
+    // (که معمولاً فقط \n دارد) درست کار کند.
+    function normalizeLineEndings(str) {
+        return typeof str === 'string' ? str.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : str;
+    }
+
     function applyFileEdits(originalContent, edits) {
         let content = originalContent;
         let appliedCount = 0, failedCount = 0;
         for (const edit of (edits || [])) {
             if (!edit || typeof edit.old !== 'string' || typeof edit.new !== 'string' || !edit.old) { failedCount++; continue; }
-            const firstIndex = content.indexOf(edit.old);
-            const lastIndex = content.lastIndexOf(edit.old);
-            if (firstIndex === -1 || firstIndex !== lastIndex) { failedCount++; continue; }
+
+            // FIX (line-ending mismatch bug): the file on disk is almost
+            // always CRLF (\r\n), but the model virtually never reproduces
+            // \r when it echoes "old" text back in its reply — so a
+            // byte-exact indexOf() against the raw CRLF content failed
+            // every single time for CRLF files, even when the model's
+            // "old" text was otherwise a perfect, intentional copy. That
+            // showed up to the user as "متن مبدأ ویرایش با محتوای فعلی
+            // فایل مطابقت نداشت" on edits that were actually correct.
+            // Now: try an exact match first (unchanged behavior for LF
+            // files); if that fails, retry against a CRLF/CR-normalized
+            // version of both sides, and if THAT single match is found,
+            // splice the edit into the ORIGINAL (un-normalized) content at
+            // the equivalent position so we never silently rewrite the
+            // file's original line endings.
+            let firstIndex = content.indexOf(edit.old);
+            let lastIndex = content.lastIndexOf(edit.old);
+
+            if (firstIndex === -1 || firstIndex !== lastIndex) {
+                const normContent = normalizeLineEndings(content);
+                const normOld = normalizeLineEndings(edit.old);
+                const normFirst = normContent.indexOf(normOld);
+                const normLast = normContent.lastIndexOf(normOld);
+
+                if (normFirst !== -1 && normFirst === normLast) {
+                    // یک match یکتا روی نسخه‌ی نرمال‌شده پیدا شد. چون
+                    // normalizeLineEndings طول رشته را تغییر می‌دهد (\r\n
+                    // به \n)، نمی‌توان همان index را مستقیم روی content
+                    // اصلی استفاده کرد؛ به‌جایش دوباره با یک الگوی regex
+                    // که \r؟ اختیاری بین خطوط را می‌پذیرد، محل واقعی در
+                    // content اصلی را پیدا می‌کنیم.
+                    const pattern = edit.old
+                        .split(/\r\n|\r|\n/)
+                        .map(line => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+                        .join('\\r?\\n');
+                    const re = new RegExp(pattern);
+                    const matches = content.match(new RegExp(pattern, 'g')) || [];
+                    if (matches.length === 1) {
+                        const m = content.match(re);
+                        firstIndex = m.index;
+                        lastIndex = m.index;
+                        content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + m[0].length);
+                        appliedCount++;
+                        continue;
+                    }
+                }
+                failedCount++;
+                continue;
+            }
+
             content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
             appliedCount++;
         }
