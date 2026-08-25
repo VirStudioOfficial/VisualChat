@@ -696,6 +696,8 @@
         .code-card pre::-webkit-scrollbar { height: 8px; }
         .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
         .code-card-head span:first-child { text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: var(--accent-2); }
+        .code-card-collapsed .code-card-filelabel { display:flex; align-items:center; gap:7px; text-transform:none; letter-spacing:normal; font-weight:600; color: var(--text-main); }
+        .code-card-collapsed .code-card-meta { padding: 10px 14px 14px; font-size: 0.78rem; color: var(--text-muted); }
 
         /* ===== Error / More Details (§8) ===== */
         .error-message { display: flex; align-items: flex-start; gap: 8px; color: var(--danger); font-size: 0.9rem; line-height: 1.6; }
@@ -3052,7 +3054,31 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     async function retryRequest(request = lastFailedRequest) {
         if (!request || isGenerating) return;
-        await sendToGemini(request.textPrompt, request.payloadFiles, { retry: true, wrapper: request.wrapper, loadingDiv: request.loadingDiv });
+        // FIX (retry button broken): the object handed to retryRequest can
+        // come from two different places — the in-memory lastFailedRequest
+        // (which has real wrapper/loadingDiv DOM nodes attached) OR the
+        // JSON decoded from the button's data-retry attribute after a page
+        // reload (which only ever has textPrompt/payloadFiles - no DOM
+        // nodes, since those can't survive being saved to disk). Blindly
+        // passing request.wrapper / request.loadingDiv through as retry:true
+        // meant that in the second case sendToGemini received `undefined`
+        // for both, tried to reuse a non-existent loadingDiv, and silently
+        // failed to show anything. Only take the "reuse existing bubble"
+        // path when both nodes are real and still attached to the page;
+        // otherwise fall back to a normal new message bubble.
+        const canReuseBubble =
+            request.wrapper && request.wrapper.isConnected &&
+            request.loadingDiv && request.loadingDiv.isConnected;
+
+        if (canReuseBubble) {
+            await sendToGemini(request.textPrompt, request.payloadFiles, {
+                retry: true,
+                wrapper: request.wrapper,
+                loadingDiv: request.loadingDiv
+            });
+        } else {
+            await sendToGemini(request.textPrompt, request.payloadFiles);
+        }
     }
 
     async function sendToGemini(textPrompt, payloadFiles = [], retryContext = null) {
@@ -3073,6 +3099,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const watchdogId = setTimeout(() => {
             if (requestId === activeRequestId && isGenerating) {
                 console.warn('[watchdog] Request took too long — resetting UI so input is usable again.');
+                // FIX: same dangling-history bug as Stop/error - the watchdog
+                // firing means this turn never got a real reply, so the
+                // pushed user turn must be removed here too, or the next
+                // message gets answered as a continuation of this one.
+                removePushedUserTurnIfUnanswered();
                 if (activeLoadingDiv && activeLoadingDiv.isConnected) {
                     makeRetryError(activeLoadingDiv, 'پاسخ خیلی طول کشید و متوقف شد.', { textPrompt, payloadFiles });
                 }
@@ -3122,10 +3153,36 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         scrollToLatest();
 
         const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
+        // FIX (stop → next message gets answered as if it were the old one):
+        // this used to push the user's turn into chatHistoryData immediately,
+        // before the request even started. If the user then pressed Stop (or
+        // the request errored/timed out) before any model reply came back,
+        // nothing ever removed that turn - so history ended up with two
+        // consecutive 'user' turns and no 'model' turn between them. Gemini
+        // then had no clear signal about which user turn was the "current"
+        // one to answer, and would often reply to the first (stopped) one
+        // instead of the new message. Track exactly which index this turn
+        // lives at, so it can be cleanly removed if the request doesn't
+        // finish with a real reply (stopped, errored, or empty).
+        let pushedHistoryIndex = -1;
         if (!isRetry) {
             ensureVirtualPersona();
             chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
+            pushedHistoryIndex = chatHistoryData[currentChatId].length - 1;
         }
+        const removePushedUserTurnIfUnanswered = () => {
+            if (pushedHistoryIndex === -1) return;
+            const hist = chatHistoryData[currentChatId];
+            const entry = hist && hist[pushedHistoryIndex];
+            // Only remove if it's still exactly the turn we pushed (still a
+            // 'user' turn at that index, nothing else appended after it that
+            // would shift things) - keeps this safe even if something else
+            // touched history in the meantime.
+            if (entry && entry.role === 'user' && hist.length === pushedHistoryIndex + 1) {
+                hist.splice(pushedHistoryIndex, 1);
+            }
+            pushedHistoryIndex = -1;
+        };
         currentAbortController = new AbortController();
 
         try {
@@ -3156,12 +3213,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (requestId !== activeRequestId) return;
 
             if (response.status === 429) {
+                removePushedUserTurnIfUnanswered();
                 makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request, { type: 'timeout', stage: 'request', detail: 'HTTP 429' });
                 setGeneratingState(false); saveCurrentChat(); return;
             }
             if (!response.ok || !response.body) {
                 let bodyDetail = null;
                 try { const j = await response.clone().json(); bodyDetail = j?.error || null; } catch (_) {}
+                removePushedUserTurnIfUnanswered();
                 makeRetryError(loadingDiv, bodyDetail?.message || `خطای سرور (${response.status})`, request, bodyDetail || { type: 'network_error', stage: 'request', detail: `HTTP ${response.status}` });
                 setGeneratingState(false); saveCurrentChat(); return;
             }
@@ -3290,6 +3349,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     const last = chatHistoryData[currentChatId]?.at(-1);
                     if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
                 }
+                // Reply arrived and was saved right after the user turn -
+                // nothing left to clean up.
+                pushedHistoryIndex = -1;
                 lastFailedRequest = null;
 
                 const { displayText, edits } = stripFileEditBlock(reply);
@@ -3300,6 +3362,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
+                removePushedUserTurnIfUnanswered();
                 makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request, streamErrorDetail);
                 setGeneratingState(false); saveCurrentChat();
             }
@@ -3308,8 +3371,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (requestId !== activeRequestId) return;
 
             if (error.name === 'AbortError') {
+                // FIX: the user's turn was already pushed to history before the
+                // request started - stopping the request must remove it, or
+                // the NEXT message sent will be answered as if it were a
+                // continuation of this stopped/unanswered turn (see fix above).
+                removePushedUserTurnIfUnanswered();
                 loadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
             } else {
+                removePushedUserTurnIfUnanswered();
                 makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request, { type: 'network_error', stage: 'fetch', detail: error?.message || String(error) });
             }
             setGeneratingState(false);
@@ -3458,6 +3527,36 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const code = decodeURIComponent(btn.dataset.code || '');
         const blob = new Blob([code], {type:'text/html;charset=utf-8'});
         const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='virtual-bot-code.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    }
+
+    // FIX (requested): previously only HTML/"runnable" code blocks had a
+    // download button - any other language (Python, plain JS/CSS files,
+    // JSON, etc.) only ever rendered as inline <pre><code> text, which is
+    // what made long code replies look messy in the chat. This adds a
+    // generic "دانلود فایل" button to EVERY code block, picking a sensible
+    // file extension from the fenced language tag so the user gets an
+    // actual file to save/open in an editor instead of scrolling raw code
+    // in the chat.
+    const CODE_LANG_EXTENSIONS = {
+        python: 'py', py: 'py', javascript: 'js', js: 'js', jsx: 'jsx',
+        typescript: 'ts', ts: 'ts', tsx: 'tsx', html: 'html', htm: 'html',
+        css: 'css', json: 'json', java: 'java', c: 'c', cpp: 'cpp', 'c++': 'cpp',
+        csharp: 'cs', 'c#': 'cs', cs: 'cs', php: 'php', ruby: 'rb', rb: 'rb',
+        go: 'go', rust: 'rs', rs: 'rs', swift: 'swift', kotlin: 'kt',
+        sql: 'sql', sh: 'sh', bash: 'sh', shell: 'sh', yaml: 'yaml', yml: 'yaml',
+        xml: 'xml', markdown: 'md', md: 'md', dart: 'dart'
+    };
+
+    function downloadCodeAsFile(btn) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        const lang = (btn.dataset.lang || '').toLowerCase();
+        const ext = CODE_LANG_EXTENSIONS[lang] || 'txt';
+        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `virtual-bot-code.${ext}`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
     // ===== قابلیت ویرایش فایل کد =====
@@ -4014,15 +4113,30 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const rawParts=String(text ?? '').split(/```/);
         const rendered=rawParts.map((rawPart,index)=>{
             if(index%2===1){
-                // نسخه‌ی خام کد (بدون escape) باید برای کپی/دانلود/پیش‌نمایش
-                // نگه داشته شود؛ فقط موقع نمایش داخل <pre><code> escape می‌شود.
+                // نسخه‌ی خام کد (بدون escape) برای کپی/دانلود/پیش‌نمایش نگه
+                // داشته می‌شود، اما دیگر به‌صورت متن داخل چت نمایش داده
+                // نمی‌شود - طبق درخواست، فقط یک کارت فایل (اسم/تعداد خط)
+                // نشان داده می‌شود و خودِ کد فقط از طریق دکمه‌ها قابل دسترسی
+                // است (کپی، دانلود فایل، پیش‌نمایش).
                 const raw=rawPart.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
                 const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
                 const rawCode=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim();
-                const displayCode=escapeHtml(rawCode);
                 const encoded=encodeURIComponent(rawCode);
                 const canRun=isRunnableCode(lang, rawCode);
-                return `<div class="code-card"><div class="code-card-head"><span>${lang||'code'}</span><div class="code-actions"><button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>${canRun?`<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button><button class="code-action" onclick="downloadHtmlCode(this)" data-code="${encoded}">فایل HTML</button>`:''}</div></div><pre><code>${displayCode}</code></pre></div>`;
+                const lineCount=rawCode?rawCode.split('\n').length:0;
+                const ext=(CODE_LANG_EXTENSIONS[(lang||'').toLowerCase()]||'txt');
+                const fileLabel=`code.${ext}`;
+                return `<div class="code-card code-card-collapsed">
+                    <div class="code-card-head">
+                        <span class="code-card-filelabel"><i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(fileLabel)}</span>
+                        <div class="code-actions">
+                            <button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>
+                            <button class="code-action" onclick="downloadCodeAsFile(this)" data-code="${encoded}" data-lang="${lang}">دانلود فایل</button>
+                            ${canRun?`<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button>`:''}
+                        </div>
+                    </div>
+                    <div class="code-card-meta">${lineCount} خط ${lang?('· '+escapeHtml(lang)):''}</div>
+                </div>`;
             }
             const escapedPart=escapeHtml(rawPart);
             const lines=escapedPart.split('\n');let out=[],para=[],list=null,items=[];
