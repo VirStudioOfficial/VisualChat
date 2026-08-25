@@ -3439,8 +3439,21 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // clean fetch rejection or AbortError — the promise can simply never
         // settle. Without this, isGenerating stays stuck true forever and the
         // composer (#userInput / send button) stays disabled in that chat until
-        // the page is reloaded. This timer force-resets the UI after 600s no matter
-        // what went wrong upstream, so the user is never permanently locked out. =====
+        // the page is reloaded. This timer force-resets the UI after 210s no matter
+        // what went wrong upstream, so the user is never permanently locked out.
+        //
+        // BUGFIX (mismatched timeout - "took too long" fires while the server
+        // is still legitimately working): this used to be 90000 (90s), but the
+        // backend's own overall deadline is 180s, and a reply that needs the
+        // get_archived_file tool (e.g. re-reading a large saved file) genuinely
+        // takes two full Gemini rounds - each with up to a 60s budget - plus
+        // the tool call itself. 90s could (and did) fire WHILE the server was
+        // still mid-request, killing the client-side UI first; the user would
+        // then see "took too long", but the original request kept running
+        // server-side and its (unretrieved) result, or the key-rotation state
+        // it touched, could surface confusingly on the next manual retry. Set
+        // this comfortably above the server's real 180s ceiling so the server
+        // always gets to finish (and return its OWN specific error) first. =====
         const watchdogId = setTimeout(() => {
             if (requestId === activeRequestId && isGenerating) {
                 console.warn('[watchdog] Request took too long — resetting UI so input is usable again.');
@@ -3458,7 +3471,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 activeLoadingDiv = null;
                 saveCurrentChat();
             }
-        }, 90000);
+        }, 210000);
 
         const chatBox = document.getElementById("chatBox");
         const isRetry = !!retryContext?.retry;
