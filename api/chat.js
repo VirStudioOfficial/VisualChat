@@ -530,9 +530,28 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
     // budget; everything else (text/image/PDF-only turns, which really do
     // answer fast) keeps the original tight 60s so a genuinely stuck
     // request still fails fast instead of hanging the connection.
-    const ROUND_TIMEOUT_MS = hasVideoAttachment ? 170000 : 60000;
+    //
+    // FIX (persistent-file-memory follow-up): a round that comes right
+    // after a get_archived_file tool response has up to ~40,000 extra
+    // characters of dense code/HTML freshly added to context - genuinely
+    // more for Gemini to read and reason about than a normal turn, and it
+    // can legitimately take longer than the standard 60s to produce a real
+    // answer. The old fixed timeout aborted that round via AbortError,
+    // which the outer per-attempt catch treated exactly like a real key
+    // failure (markKeyResult(..., false)) and moved to the NEXT key -
+    // repeating the same slow "read this same big file from scratch" work
+    // on every single one of the 12 keys in a row, burning through all of
+    // them on what was never actually a quota problem, and only then
+    // surfacing the generic "quota exhausted" message. Rounds that follow a
+    // get_archived_file call now get the same longer budget as video.
+    const roundNeedsMoreTime = (round) =>
+        hasVideoAttachment ||
+        (round > 0 && lastToolCallWasArchiveRead);
+    let lastToolCallWasArchiveRead = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
+        lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), ROUND_TIMEOUT_MS);
         // Also abort this round if the caller's own signal (client disconnect
@@ -696,6 +715,12 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             }
 
             const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles });
+
+            // Marks the NEXT round as needing the longer timeout budget -
+            // see roundNeedsMoreTime comment above.
+            if (call.name === 'get_archived_file') {
+                lastToolCallWasArchiveRead = true;
+            }
 
             if (result.askUser) {
                 // Don't bother calling any further tools this round - surface
