@@ -616,6 +616,30 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             // streamed to the client chunk-by-chunk via onChunk above; we
             // still return the joined text too, so non-stream callers (and
             // history-saving) keep working unchanged.
+            //
+            // BUGFIX (silent empty reply after a tool call): if Gemini's
+            // very next turn after a functionResponse (e.g. get_archived_file
+            // handing back a large file's content) comes back with NO text
+            // parts and a finishReason other than a normal stop (MAX_TOKENS,
+            // SAFETY, RECITATION, OTHER...), this used to be returned as a
+            // seemingly-successful empty finalText - the client then shows
+            // the tool's "step" label for a moment, gets zero text chunks,
+            // and finally falls into its generic retry-error path. That's
+            // exactly the "پیام یه لحظه میاد بعد غیب میشه" symptom. Detect
+            // that specific case and surface a real, explained error instead
+            // of a silent empty success.
+            const normalStop = !finishReason || finishReason === 'STOP';
+            if (!normalStop && textParts.length === 0 && round > 0) {
+                log.warn('agent.empty_after_tool_call', { finishReason, round });
+                const err = new Error('agent_empty_after_tool_call');
+                err.status = 502;
+                err.body = {
+                    message: 'مدل بعد از خوندن فایل آرشیوشده جواب خالی برگردوند. لطفاً دوباره امتحان کن.',
+                    type: 'empty_after_tool_call',
+                    finishReason
+                };
+                throw err;
+            }
             return {
                 finalText: textParts.join(''),
                 finishReason: finishReason,
@@ -1652,6 +1676,20 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         });
 
                         lastError = error?.body || error;
+
+                        // BUGFIX (silent empty reply after a tool call): this
+                        // specific error means the model itself returned an
+                        // empty/blocked reply right after reading an
+                        // archived file - it's not a key/quota problem, so
+                        // retrying with another key or model will almost
+                        // certainly reproduce the exact same empty result.
+                        // Stop immediately and tell the user what actually
+                        // happened instead of silently burning through every
+                        // remaining key/model and only then showing the
+                        // generic "server busy" message.
+                        if (error?.body?.type === 'empty_after_tool_call') {
+                            break outerLoop;
+                        }
                     }
                 }
             }
@@ -1659,8 +1697,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             res.write(
                 `data: ${JSON.stringify({
                     error: {
-                        message: 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
-                        type: 'model_error',
+                        message:
+                            (lastError && lastError.type === 'empty_after_tool_call')
+                                ? lastError.message
+                                : 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
+                        type: (lastError && lastError.type) || 'model_error',
                         stage: 'stream_generation',
                         detail: (lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed'
                     }
@@ -1771,6 +1812,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     });
 
                     lastError = error?.body || error;
+
+                    // See identical comment in the streaming path above.
+                    if (error?.body?.type === 'empty_after_tool_call') {
+                        break outerLoopNonStream;
+                    }
                 }
             }
         }
@@ -1779,10 +1825,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             lastError: (lastError && (lastError.message || lastError.error?.message)) || 'unknown'
         });
 
-        return res.status(500).json({
+        return res.status(lastError && lastError.type === 'empty_after_tool_call' ? 502 : 500).json({
             error: {
-                message: 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
-                type: 'model_error',
+                message:
+                    (lastError && lastError.type === 'empty_after_tool_call')
+                        ? lastError.message
+                        : 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
+                type: (lastError && lastError.type) || 'model_error',
                 stage: 'non_stream_generation',
                 detail: (lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed'
             }
