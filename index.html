@@ -3202,14 +3202,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const payloadFiles = selectedFilesData.map(({ __previewId, ...rest }) => rest);
         removeFile();
         hideCodeFilesBar();
-        // FIX: previously only the preview bar was hidden here —
-        // codeFilesMemory itself stayed populated, so every future message
-        // in this chat silently kept re-attaching the same old file(s) with
-        // no visual indicator. A file attachment should apply to the message
-        // it was sent with, not persist invisibly forever. Clear it here,
-        // same as removeFile() already does for image/video/pdf attachments.
-        clearCodeFilesMemory();
+        // FIX (lost-file-content bug): clearCodeFilesMemory() used to run
+        // BEFORE sendToGemini() — but sendToGemini reads codeFilesMemory
+        // internally (to build mergedTextFiles/lastCodeFilesForEdit) to
+        // decide what file content actually gets sent to the model. Clearing
+        // it first meant that any code/text file (html/js/css/etc — the ones
+        // that go through codeFilesMemory instead of selectedFilesData) was
+        // wiped from memory before sendToGemini ever got a chance to read it.
+        // The model then only ever saw the '[فایل ارسال شده]' placeholder
+        // text with no actual file content attached, and correctly reported
+        // back that it couldn't see any content. Binary attachments (image/
+        // video/pdf) were never affected, since those flow through
+        // payloadFiles/selectedFilesData, which is captured above BEFORE
+        // this point. Fix: only clear codeFilesMemory AFTER sendToGemini has
+        // finished reading it (i.e. after the await below), same as the
+        // comment above originally intended.
         await sendToGemini(text, payloadFiles);
+        clearCodeFilesMemory();
     }
 
     const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
