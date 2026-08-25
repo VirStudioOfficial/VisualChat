@@ -1807,7 +1807,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (!res.ok) throw new Error('bad response');
             const data = await res.json();
             notifItems = Array.isArray(data) ? data : (data.items || data.notifications || []);
-            notifItems = notifItems.map(n => ({
+            notifItems = notifItems.slice(0, 20).map(n => ({
                 id: n.id,
                 title: n.title,
                 body: n.body,
