@@ -4531,7 +4531,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
                 const rawCode=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim();
                 const encoded=encodeURIComponent(rawCode);
-                const canRun=isRunnableCode(lang, rawCode);
+                // دکمه‌ی پیش‌نمایش زنده (iframe) عمداً حذف شده — طبق درخواست،
+                // کد تولیدشده توسط مدل هم باید فقط به‌صورت کارت فایل (با
+                // امکان کپی/دانلود) نمایش داده بشود، بدون اجرای زنده.
                 const lineCount=rawCode?rawCode.split('\n').length:0;
                 const ext=(CODE_LANG_EXTENSIONS[(lang||'').toLowerCase()]||'txt');
                 const fileLabel=`code.${ext}`;
@@ -4541,7 +4543,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                         <div class="code-actions">
                             <button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>
                             <button class="code-action" onclick="downloadCodeAsFile(this)" data-code="${encoded}" data-lang="${lang}">دانلود فایل</button>
-                            ${canRun?`<button class="code-action" onclick="runHtmlCode(this, '${lang}')" data-code="${encoded}">پیش‌نمایش</button>`:''}
                         </div>
                     </div>
                     <div class="code-card-meta">${lineCount} خط ${lang?('· '+escapeHtml(lang)):''}</div>
