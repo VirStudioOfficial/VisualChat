@@ -1465,10 +1465,22 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             // that just to finish one stream, and this file already has no
             // per-chunk timeout, so raising the deadline doesn't reduce
             // safety, it just stops penalizing large-but-healthy streams.
+            // FIX (false "all 12 keys exhausted" after just 1-2 tries): this
+            // used to be a flat 180s no matter how many keys/models exist to
+            // try. A single slow attempt (e.g. a round that needs
+            // get_archived_file - up to ~120s across two Gemini rounds) could
+            // eat almost the whole budget, so the loop would then bail out
+            // via the deadline check after only 1-2 attempts and surface
+            // that one attempt's error as if it applied to every key. Scale
+            // the deadline with how many keys actually exist so a real fleet
+            // of keys gets a real chance to be tried, while a fast failure
+            // (quota/429, which fails immediately at the upstream.ok check,
+            // not after a timeout) barely uses any of that budget anyway.
             const overallDeadline =
-                Date.now() + 180000;
+                Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
 
             let lastError = null;
+            let attemptsTried = 0; // diagnostic: how many model/key combos actually got a real try
 
             outerLoop:
             for (
@@ -1502,6 +1514,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
                     const currentKey =
                         orderedKeys[k];
+
+                    attemptsTried++;
 
                     // Declared OUTSIDE the try so it's always defined by the
                     // time the catch block below runs — this was previously
@@ -1694,6 +1708,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 }
             }
 
+            log.error('request.all_models_failed', {
+                mode: 'stream',
+                attemptsTried,
+                totalPossible: modelsToTry.length * geminiKeys.length,
+                lastError: (lastError && (lastError.message || lastError.error?.message)) || 'unknown'
+            });
+
             res.write(
                 `data: ${JSON.stringify({
                     error: {
@@ -1703,7 +1724,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                 : 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
                         type: (lastError && lastError.type) || 'model_error',
                         stage: 'stream_generation',
-                        detail: (lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed'
+                        detail:
+                            ((lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed') +
+                            ` (attempts: ${attemptsTried}/${modelsToTry.length * geminiKeys.length})`
                     }
                 })}\n\n`
             );
@@ -1725,10 +1748,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         // طول کشید" timeout being reported. Matching it to the same 180s
         // (and further via hasVideoAttachment inside runAgentLoop's own
         // per-round timeout) keeps both code paths consistent.
+        // FIX (false "all keys exhausted" after just 1-2 tries): same
+        // reasoning as the streaming path above - scale with key count.
         const overallDeadline =
-            Date.now() + 180000;
+            Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
 
         let lastError = null;
+        let attemptsTried = 0;
 
         outerLoopNonStream:
         for (
@@ -1752,6 +1778,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
                 const currentKey =
                     orderedKeysNonStream[k];
+
+                attemptsTried++;
 
                 try {
                     log.info('model.attempt', {
@@ -1822,6 +1850,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         }
 
         log.error('request.all_models_failed', {
+            mode: 'non-stream',
+            attemptsTried,
+            totalPossible: modelsToTry.length * geminiKeys.length,
             lastError: (lastError && (lastError.message || lastError.error?.message)) || 'unknown'
         });
 
@@ -1833,7 +1864,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         : 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
                 type: (lastError && lastError.type) || 'model_error',
                 stage: 'non_stream_generation',
-                detail: (lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed'
+                detail:
+                    ((lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed') +
+                    ` (attempts: ${attemptsTried}/${modelsToTry.length * geminiKeys.length})`
             }
         });
 
