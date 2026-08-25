@@ -83,7 +83,7 @@ function keyLabel(keys, key) {
 | lost. This is a lightweight heuristic summary (not a model call) so it
 | never adds latency or extra API cost.
 */
-const MAX_HISTORY_TURNS = 24;       // most recent user+model turns kept verbatim
+const MAX_HISTORY_TURNS = 60;       // most recent user+model turns kept verbatim (~30 user messages, since each user turn has a matching model turn)
 const MAX_HISTORY_CHARS = 60000;    // rough safety cap on total history text size
 
 function summarizeOldTurns(oldTurns) {
@@ -444,8 +444,38 @@ async function executeToolCall(name, args, ctx) {
         if (!found) {
             return { error: `فایلی با نام «${fileName}» در آرشیو این گفتگو پیدا نشد.` };
         }
-        log.info('agent.tool.get_archived_file', { name: fileName, contentLen: (found.content || '').length });
-        return { name: found.name, content: found.content || '' };
+
+        // FIX (token/quota exhaustion): a single archived file (e.g. a full
+        // index.html) can be tens of thousands of tokens. Handing back the
+        // ENTIRE file every time it's referenced - especially since it then
+        // rides along in workingContents for every subsequent tool round in
+        // the same turn - was spiking single-request token usage well above
+        // a normal message and burning through per-minute token quota fast,
+        // even across just 1-2 user messages. Cap what's returned so a huge
+        // file can still be searched/discussed without blowing the budget;
+        // the model is told the file was truncated so it doesn't silently
+        // assume it saw everything.
+        const MAX_ARCHIVED_FILE_CHARS = 40000; // ~ safely under one round's comfortable budget
+        let content = found.content || '';
+        let truncated = false;
+        if (content.length > MAX_ARCHIVED_FILE_CHARS) {
+            content = content.slice(0, MAX_ARCHIVED_FILE_CHARS);
+            truncated = true;
+        }
+
+        log.info('agent.tool.get_archived_file', {
+            name: fileName,
+            contentLen: (found.content || '').length,
+            truncated
+        });
+
+        return {
+            name: found.name,
+            content,
+            ...(truncated ? {
+                note: 'این فایل خیلی بزرگ بود و فقط بخش ابتدایی آن (۴۰ هزار کاراکتر اول) بازگردانده شد. اگر بخش دیگری لازم است، به کاربر بگو که فایل کامل در دسترس نیست و باید بخش خاصی از آن را دوباره بفرستد.'
+            } : {})
+        };
     }
 
     if (name === 'web_search') {
@@ -802,6 +832,11 @@ async function handler(req, res) {
             // actual content but is only ever read inside executeToolCall
             // (get_archived_file), never injected into the prompt directly -
             // that's what keeps this free unless the model actually asks.
+            // The client only ever sends its 3 most-recently-sent files here
+            // (see recentArchivedFiles() in index.html) - older files stay
+            // in the client's IndexedDB but are simply not part of this
+            // request at all, which is what actually bounds per-request
+            // token cost as a chat's file history grows over time.
             archivedFileNames: rawArchivedFileNames,
             archivedFiles: rawArchivedFiles
         } = req.body || {};
