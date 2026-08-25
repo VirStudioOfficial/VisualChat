@@ -440,14 +440,27 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, onChunk, signal, disableTools }) {
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, onStep, onChunk, signal, disableTools, hasVideoAttachment }) {
     const MAX_TOOL_ROUNDS = 4; // hard safety cap so a confused model can't loop forever
     let workingContents = [...contents];
     let lastUsage = null;
 
+    // FIX (root cause of "video reads extremely slowly / times out"):
+    // Gemini has to ingest and effectively transcode/sample the whole video
+    // (extracting frames at ~1fps) before it can emit the first output
+    // token, which routinely takes well past 60s for anything more than a
+    // few seconds of footage - even after client-side compression. The old
+    // fixed 60s per-round timeout aborted these requests before Gemini ever
+    // got a chance to respond, which is exactly the "پاسخ بیش از حد طول
+    // کشید" error being seen. Video attachments now get a longer per-round
+    // budget; everything else (text/image/PDF-only turns, which really do
+    // answer fast) keeps the original tight 60s so a genuinely stuck
+    // request still fails fast instead of hanging the connection.
+    const ROUND_TIMEOUT_MS = hasVideoAttachment ? 170000 : 60000;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const timeoutId = setTimeout(() => controller.abort(), ROUND_TIMEOUT_MS);
         // Also abort this round if the caller's own signal (client disconnect
         // / overall deadline) fires.
         const onAbort = () => controller.abort();
@@ -641,7 +654,16 @@ const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 // Requests bigger than this almost certainly indicate an oversized
 // file/base64 payload slipping past frontend checks; reject early instead
 // of doing expensive work first.
-const MAX_REQUEST_BYTES = 12 * 1024 * 1024; // 12MB
+// FIX: this was set to 12MB while the binary-file-specific check further
+// down (MAX_BINARY_BASE64_CHARS) allows up to 15MB of base64 for a single
+// file. Since a request also includes JSON overhead (history, headers,
+// other fields) on top of the file's base64, a video sitting anywhere near
+// that 15MB per-file limit was being rejected HERE FIRST with a generic
+// "file too large" error, before ever reaching the video-specific logic -
+// even though it was technically within the documented per-file limit.
+// Raised so the outer guard only ever catches requests the inner check
+// wouldn't already accept, with headroom for JSON overhead.
+const MAX_REQUEST_BYTES = 20 * 1024 * 1024; // 20MB
 
 async function handler(req, res) {
     res.setHeader(
@@ -1471,6 +1493,7 @@ async function handler(req, res) {
                             tavilyKeys,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
+                            hasVideoAttachment,
                             onStep: (label, toolName) => {
                                 if (toolName === 'web_search') searchWasPerformed = true;
                                 res.write(
@@ -1581,8 +1604,16 @@ async function handler(req, res) {
         |--------------------------------------------------------------------------
         */
 
+        // FIX: this deadline was left at the old 60s value while the
+        // streaming path above was already raised to 180s. A video
+        // attachment routed through the non-stream path (or a slow non-video
+        // reply that needed a second model/key retry) could get cut off here
+        // well before Gemini finished, producing the exact "پاسخ بیش از حد
+        // طول کشید" timeout being reported. Matching it to the same 180s
+        // (and further via hasVideoAttachment inside runAgentLoop's own
+        // per-round timeout) keeps both code paths consistent.
         const overallDeadline =
-            Date.now() + 60000;
+            Date.now() + 180000;
 
         let lastError = null;
 
@@ -1630,6 +1661,7 @@ async function handler(req, res) {
                         tavilyKeys,
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
+                        hasVideoAttachment,
                         onStep: null
                     });
 
