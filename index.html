@@ -1806,8 +1806,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             const res = await fetch(NOTIF_API_URL + '?t=' + Date.now(), { cache: 'no-store' });
             if (!res.ok) throw new Error('bad response');
             const data = await res.json();
-            notifItems = Array.isArray(data) ? data : (data.notifications || []);
-            notifItems.sort((a, b) => (b.id > a.id ? 1 : -1));
+            notifItems = Array.isArray(data) ? data : (data.items || data.notifications || []);
+            notifItems = notifItems.map(n => ({
+                id: n.id,
+                title: n.title,
+                body: n.body,
+                date: n.date || (n.createdAt ? new Date(n.createdAt).toLocaleDateString('fa-IR') : '')
+            }));
             renderNotifList();
             updateNotifBadge();
         } catch (e) {
