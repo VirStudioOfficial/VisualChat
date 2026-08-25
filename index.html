@@ -468,15 +468,40 @@
             align-items: center;
             gap: 9px;
             white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
             transition: 0.15s;
             border: 1px solid transparent;
         }
         .history-item i { font-size: 0.75rem; flex-shrink: 0; }
+        .history-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
         .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: color-mix(in srgb, var(--accent-1) 35%, transparent); }
         .history-item.active i { color: var(--accent-2); }
+        .history-item-menu-btn {
+            width: 26px; height: 26px; flex-shrink: 0;
+            opacity: 0; transition: opacity 0.15s;
+        }
+        .history-item:hover .history-item-menu-btn,
+        .history-item-menu-btn:focus { opacity: 1; }
+        .history-item-menu {
+            position: fixed;
+            z-index: 10002;
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            box-shadow: 0 16px 40px var(--shadow-b);
+            padding: 6px;
+            min-width: 170px;
+            animation: fadeIn 0.14s ease-out;
+        }
+        .history-item-menu button {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%; padding: 9px 10px; border-radius: 8px;
+            background: transparent; border: none; color: var(--text-main);
+            font-family: inherit; font-size: 0.82rem; cursor: pointer; text-align: right;
+        }
+        .history-item-menu button:hover { background: var(--border-soft); }
+        .history-item-menu button.danger { color: var(--danger, #e5484d); }
+        .history-item-menu button i { font-size: 0.85rem; }
 
         .main-content {
             flex: 1;
@@ -1383,6 +1408,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             justify-content: center;
         }
         #confirmOverlay.active { display: flex; }
+        #promptOverlay {
+            position: fixed; inset: 0;
+            background: rgba(10, 12, 18, 0.6);
+            backdrop-filter: blur(6px);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #promptOverlay.active { display: flex; }
+        .prompt-input {
+            width: 100%; box-sizing: border-box; padding: 10px 12px;
+            margin-bottom: 16px; border-radius: 10px;
+            border: 1px solid var(--border-soft); background: var(--bg-input);
+            color: var(--text-main); font-family: inherit; font-size: 0.88rem;
+        }
+        .prompt-input:focus { outline: none; border-color: color-mix(in srgb, var(--accent-1) 45%, transparent); }
         .confirm-card {
             background: var(--bg-sidebar);
             border: 1px solid var(--border-soft);
@@ -1441,6 +1483,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="confirm-actions">
                 <button type="button" class="confirm-cancel" id="confirmCancelBtn">انصراف</button>
                 <button type="button" class="confirm-ok" id="confirmOkBtn">تأیید</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="promptOverlay">
+        <div class="confirm-card">
+            <p id="promptMessage">نام جدید را وارد کن</p>
+            <input type="text" id="promptInput" class="prompt-input" autocomplete="off">
+            <div class="confirm-actions">
+                <button type="button" class="confirm-cancel" id="promptCancelBtn">انصراف</button>
+                <button type="button" class="confirm-ok" id="promptOkBtn">ذخیره</button>
             </div>
         </div>
     </div>
@@ -2053,7 +2106,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             idbGetAllByOwner(CHAT_STORE, owner), idbGetAllByOwner(HISTORY_STORE, owner)
         ]);
         chats = {}; chatHistoryData = {};
-        chatRecords.forEach(r => { chats[r.chatId] = { title: r.title || 'گفتگوی جدید', html: r.html || '' }; });
+        chatRecords.forEach(r => { chats[r.chatId] = { title: r.title || 'گفتگوی جدید', html: r.html || '', pinned: !!r.pinned }; });
         historyRecords.forEach(r => { chatHistoryData[r.chatId] = Array.isArray(r.history) ? r.history : []; });
     }
 
@@ -2065,7 +2118,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         chatSaveQueue = chatSaveQueue.catch(() => {}).then(async () => {
             await idbPut(CHAT_STORE, {
                 id: `${owner}:${chatId}`, owner, chatId: String(chatId),
-                title: chat.title || 'گفتگوی جدید', html: chat.html || '', updatedAt: Date.now()
+                title: chat.title || 'گفتگوی جدید', html: chat.html || '', updatedAt: Date.now(),
+                pinned: !!chat.pinned
             });
             await idbPut(HISTORY_STORE, {
                 id: `${owner}:${chatId}`, owner, chatId: String(chatId), history
@@ -2759,14 +2813,24 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const row = document.getElementById(id);
         if (row) row.remove();
         selectedFilesData = selectedFilesData.filter(f => f.__previewId !== id);
+        // FIX (zombie-file bug): if this file is still being compressed/read
+        // in the background, mark it cancelled so the in-flight
+        // processIncomingFile() call knows not to push its result into
+        // selectedFilesData once it finishes — otherwise a file the user
+        // just removed silently reappears in the send payload a moment later.
+        cancelledPreviewIds.add(id);
         const list = document.getElementById('filePreviewList');
         if (list && !list.children.length) list.style.display = 'none';
     }
+
+    let filesProcessingCount = 0;
+    const cancelledPreviewIds = new Set();
 
     async function processIncomingFile(file) {
         if (isGenerating || !file) return;
 
         const previewId = addFilePreviewItem(file.name);
+        filesProcessingCount++;
 
         // FIX/§2: a genuinely empty (0-byte) file used to sail through every
         // branch below as if it were valid content — for a text file that
@@ -2776,6 +2840,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (file.size === 0) {
             updateFilePreviewItem(previewId, { status: 'فایل خالی است', statusClass: 'error' });
             showToast('این فایل خالی است و قابل پردازش نیست.', 'warning');
+            filesProcessingCount = Math.max(0, filesProcessingCount - 1);
             return;
         }
 
@@ -2791,6 +2856,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
             if (isImage) {
                 const compressedBase64 = await compressImage(file, 1024, 0.7);
+                // FIX (zombie-file bug): user may have clicked the ✕ while
+                // this compression was still running — check before pushing.
+                if (cancelledPreviewIds.has(previewId)) return;
                 // FIX (multi-file bug): push a new entry instead of
                 // overwriting the single selectedFileData object, so
                 // multiple images selected/pasted/dropped together are all
@@ -2853,6 +2921,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     if (!videoBase64) return;
                 }
 
+                if (cancelledPreviewIds.has(previewId)) return;
                 selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.size > MAX_DIRECT_SIZE ? 'video/webm' : (file.type || guessMimeType(file.name)), base64: videoBase64 });
                 updateFilePreviewItem(previewId, { status: 'ویدیو آماده', statusClass: 'success' });
             } else if (isCodeOrTextFile(file)) {
@@ -2886,27 +2955,46 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     updateFilePreviewItem(previewId, { status: 'فایل PDF خیلی بزرگ است (حداکثر ۸ مگابایت)', statusClass: 'error' });
                     showToast('فایل PDF خیلی بزرگه — حداکثر ۸ مگابایت.', 'warning');
                 } else {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const base64 = e.target.result;
-                        selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.type || guessMimeType(file.name), base64: base64 });
-                        updateFilePreviewItem(previewId, { status: isPdf ? 'PDF آماده' : 'فایل آماده', statusClass: 'success' });
-                    };
-                    reader.onerror = () => {
-                        updateFilePreviewItem(previewId, { status: 'خطا در خواندن فایل', statusClass: 'error' });
-                        showToast('فایل خراب است یا خوانده نشد.', 'error');
-                    };
-                    reader.readAsDataURL(file);
+                    // FIX: converted from an onload/onerror callback pair to
+                    // an awaited Promise. Previously this function returned
+                    // (and decremented filesProcessingCount) before the file
+                    // was actually finished reading, so "در حال آپلود" state
+                    // ended early and the send button unblocked while a PDF
+                    // was still being read into memory.
+                    await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const base64 = e.target.result;
+                            if (cancelledPreviewIds.has(previewId)) { resolve(); return; }
+                            selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.type || guessMimeType(file.name), base64: base64 });
+                            updateFilePreviewItem(previewId, { status: isPdf ? 'PDF آماده' : 'فایل آماده', statusClass: 'success' });
+                            resolve();
+                        };
+                        reader.onerror = () => {
+                            updateFilePreviewItem(previewId, { status: 'خطا در خواندن فایل', statusClass: 'error' });
+                            showToast('فایل خراب است یا خوانده نشد.', 'error');
+                            resolve();
+                        };
+                        reader.readAsDataURL(file);
+                    });
                 }
             }
         } catch (e) {
             updateFilePreviewItem(previewId, { status: 'خطا', statusClass: 'error' });
             showToast('پردازش فایل با خطا مواجه شد.', 'error');
+        } finally {
+            filesProcessingCount = Math.max(0, filesProcessingCount - 1);
         }
     }
 
     function removeFile() {
         // Clears every pending binary attachment (images/videos/PDFs/etc).
+        // FIX (zombie-file bug): also cancel any in-flight processing for
+        // files currently shown in the preview list, so a compression/read
+        // that finishes after this doesn't silently re-add itself.
+        document.querySelectorAll('#filePreviewList .file-preview').forEach(row => {
+            if (row.id) cancelledPreviewIds.add(row.id);
+        });
         selectedFilesData = [];
         document.getElementById('fileInput').value = '';
         const list = document.getElementById('filePreviewList');
@@ -3041,11 +3129,52 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const text = inputField.value.trim();
         if (!text && selectedFilesData.length === 0 && codeFilesMemory.length === 0) return;
 
+        // FIX (compression bug): previously, if the user hit send while a
+        // file was still being compressed/read (it hadn't been pushed into
+        // selectedFilesData yet), the length checks above and below saw an
+        // "empty" state and sendMessage silently no-op'd — nothing sent, no
+        // feedback. Now we explicitly block send and tell the user to wait.
+        if (filesProcessingCount > 0) {
+            showToast('صبر کن فایل آماده بشه، بعد ارسال کن.', 'warning');
+            return;
+        }
+
         if (isFirstMessage) {
             document.getElementById("homeScreen").style.display = 'none';
             document.getElementById("chatBox").style.display = 'flex';
             isFirstMessage = false;
         }
+
+        // FIX (edit-does-nothing bug): the pencil/edit button previously
+        // only copied text into the input box — dataset.editingWrapper was
+        // set but never read anywhere, .editing class was never used by any
+        // CSS/JS, so hitting send just appended a brand-new message below
+        // the old one instead of replacing it. Now: if we're editing, remove
+        // the old user message (and its immediate bot reply, if any) from
+        // both the DOM and chatHistoryData before appending the new one.
+        const editingWrapper = document.querySelector('.message-wrapper.user.editing');
+        if (inputField.dataset.editingWrapper === '1' && editingWrapper) {
+            const allWrappers = [...document.querySelectorAll('#chatBox .message-wrapper')];
+            const editIndex = allWrappers.indexOf(editingWrapper);
+            const nextWrapper = allWrappers[editIndex + 1];
+            const removesBotReply = nextWrapper && nextWrapper.classList.contains('bot');
+
+            const hist = chatHistoryData[currentChatId] || [];
+            // Find the matching user entry from the end (most recent edit target)
+            // and drop it plus the model reply that immediately follows it.
+            for (let i = hist.length - 1; i >= 0; i--) {
+                if (hist[i].role === 'user') {
+                    const deleteCount = (removesBotReply && hist[i + 1] && hist[i + 1].role === 'model') ? 2 : 1;
+                    hist.splice(i, deleteCount);
+                    break;
+                }
+            }
+
+            if (removesBotReply) nextWrapper.remove();
+            editingWrapper.remove();
+        }
+        delete inputField.dataset.editingWrapper;
+        document.querySelectorAll('.message-wrapper.user.editing').forEach(w => w.classList.remove('editing'));
 
         let userContentHtml = text || '';
         // FIX (multi-file bug): loop over every attached binary file instead
@@ -4031,18 +4160,112 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const query = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
         list.innerHTML = "";
         let visible = 0;
-        Object.keys(chats).reverse().forEach(id => {
+        // Pinned chats first (most-recently-created pinned chat on top),
+        // then the rest in the existing most-recent-first order.
+        const ids = Object.keys(chats).reverse();
+        const pinnedIds = ids.filter(id => chats[id].pinned);
+        const restIds = ids.filter(id => !chats[id].pinned);
+        [...pinnedIds, ...restIds].forEach(id => {
             const title = chats[id].title || 'گفتگوی جدید';
             if (query && !title.toLowerCase().includes(query)) return;
             visible++;
             const item = document.createElement("div");
             item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
-            item.innerHTML = `<i class="lucide-icon" data-lucide="message-circle"></i><span>${escapeHtml(title)}</span>`;
+            item.innerHTML = `
+                ${chats[id].pinned ? '<i class="lucide-icon" data-lucide="pin" style="color:var(--accent-2);"></i>' : '<i class="lucide-icon" data-lucide="message-circle"></i>'}
+                <span>${escapeHtml(title)}</span>
+                <button class="icon-btn history-item-menu-btn" type="button" title="گزینه‌ها" onclick="event.stopPropagation(); toggleHistoryItemMenu('${id}', this)">
+                    <i class="lucide-icon" data-lucide="more-vertical"></i>
+                </button>
+            `;
             item.onclick = () => { if (!isGenerating) loadChat(id); };
             list.appendChild(item);
         });
         const empty = document.getElementById('historyEmpty');
         if (empty) empty.style.display = visible ? 'none' : 'block';
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    }
+
+    // ===== منوی سه‌نقطه‌ی هر چت: پین/حذف/تغییرنام =====
+    function closeHistoryItemMenu() {
+        document.getElementById('historyItemMenu')?.remove();
+        document.removeEventListener('click', closeHistoryItemMenu);
+    }
+
+    function toggleHistoryItemMenu(chatId, btnEl) {
+        const existing = document.getElementById('historyItemMenu');
+        if (existing) {
+            const wasForSameChat = existing.dataset.chatId === chatId;
+            closeHistoryItemMenu();
+            if (wasForSameChat) return;
+        }
+
+        const chat = chats[chatId];
+        if (!chat) return;
+
+        const menu = document.createElement('div');
+        menu.id = 'historyItemMenu';
+        menu.className = 'history-item-menu';
+        menu.dataset.chatId = chatId;
+        menu.innerHTML = `
+            <button type="button" data-action="pin"><i class="lucide-icon" data-lucide="pin"></i> ${chat.pinned ? 'برداشتن پین' : 'پین کردن'}</button>
+            <button type="button" data-action="rename"><i class="lucide-icon" data-lucide="pencil"></i> تغییر نام</button>
+            <button type="button" data-action="delete" class="danger"><i class="lucide-icon" data-lucide="trash-2"></i> حذف گفتگو</button>
+        `;
+
+        document.body.appendChild(menu);
+        const rect = btnEl.getBoundingClientRect();
+        menu.style.top = (rect.bottom + 4 + window.scrollY) + 'px';
+        // RTL layout: anchor menu's right edge to the button's right edge.
+        menu.style.right = (window.innerWidth - rect.right) + 'px';
+
+        menu.querySelector('[data-action="pin"]').onclick = (e) => { e.stopPropagation(); togglePinChat(chatId); closeHistoryItemMenu(); };
+        menu.querySelector('[data-action="rename"]').onclick = (e) => { e.stopPropagation(); renameChat(chatId); closeHistoryItemMenu(); };
+        menu.querySelector('[data-action="delete"]').onclick = (e) => { e.stopPropagation(); deleteChatById(chatId); closeHistoryItemMenu(); };
+
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+        setTimeout(() => document.addEventListener('click', closeHistoryItemMenu), 0);
+    }
+
+    function togglePinChat(chatId) {
+        const chat = chats[chatId];
+        if (!chat) return;
+        chat.pinned = !chat.pinned;
+        queueChatSave(chatId);
+        renderHistoryList();
+    }
+
+    async function renameChat(chatId) {
+        const chat = chats[chatId];
+        if (!chat) return;
+        const newTitle = await showPrompt('نام جدید گفتگو را وارد کن:', chat.title || 'گفتگوی جدید');
+        if (!newTitle) return; // cancelled or empty
+        chat.title = newTitle.slice(0, 120);
+        queueChatSave(chatId);
+        renderHistoryList();
+    }
+
+    async function deleteChatById(chatId) {
+        const ok = await showConfirm('این گفتگو پاک شود؟ این کار قابل بازگشت نیست.');
+        if (!ok) return;
+        const owner = getChatOwnerKey();
+        const wasCurrent = chatId == currentChatId;
+        delete chats[chatId];
+        delete chatHistoryData[chatId];
+        try {
+            await Promise.all([
+                idbDelete(CHAT_STORE, `${owner}:${chatId}`),
+                idbDelete(HISTORY_STORE, `${owner}:${chatId}`)
+            ]);
+        } catch (e) {
+            console.error('IndexedDB chat delete failed:', e);
+        }
+        if (wasCurrent) {
+            startNewChat();
+        } else {
+            renderHistoryList();
+        }
+        showToast('گفتگو حذف شد', 'success');
     }
 
     // Full reload from localStorage — use only when `chats` may be stale
@@ -4192,8 +4415,65 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function editUserMessage(wrapper){
         if(isGenerating) return;
-        const text=wrapper.querySelector('.message')?.innerText||'';
-        const input=document.getElementById('userInput'); input.value=text; autoResizeTextarea(input); input.focus();
+        const msgEl = wrapper.querySelector('.message');
+        if (!msgEl) return;
+
+        // FIX (edit-loses-files bug): previously this only read innerText,
+        // which for image/video tags returns nothing and for the file-name
+        // <span> returns the icon+filename as plain text — so editing a
+        // message that had an attachment silently dropped the actual file
+        // and left a garbled filename string in its place. Now we walk the
+        // message's child nodes, split out any file/image/video tags back
+        // into selectedFilesData (so they're re-attached and sent again
+        // exactly like a fresh upload), and keep only the real text.
+        const clone = msgEl.cloneNode(true);
+        const restoredFiles = [];
+
+        clone.querySelectorAll('img').forEach(img => {
+            restoredFiles.push({ name: 'image.jpg', type: 'image/jpeg', base64: img.getAttribute('src') || '' });
+            img.remove();
+        });
+        clone.querySelectorAll('video source').forEach(source => {
+            const type = source.getAttribute('type') || 'video/webm';
+            restoredFiles.push({ name: 'video.webm', type, base64: source.getAttribute('src') || '' });
+        });
+        clone.querySelectorAll('video').forEach(v => v.remove());
+        clone.querySelectorAll('span').forEach(span => {
+            // Only the file-chip spans have this icon; message text never does.
+            if (span.querySelector('i[data-lucide="file"]')) {
+                const name = span.textContent.trim();
+                restoredFiles.push({ name: name || 'file', type: guessMimeType(name || ''), base64: '' });
+                span.remove();
+            }
+        });
+        clone.querySelectorAll('br').forEach(br => br.remove());
+
+        const text = clone.innerText || clone.textContent || '';
+
+        // File-chip attachments (non-image/video) have no base64 recorded in
+        // the DOM, so we can't actually resend their binary content — warn
+        // the user instead of silently sending a message that looks
+        // attached but isn't.
+        const filesWithoutData = restoredFiles.filter(f => !f.base64);
+        const filesWithData = restoredFiles.filter(f => f.base64);
+
+        if (filesWithoutData.length > 0) {
+            showToast('فایل(های) غیرتصویری این پیام هنگام ویرایش دوباره ضمیمه نمی‌شن — لازمه دوباره آپلودشون کنی.', 'warning');
+        }
+
+        if (filesWithData.length > 0) {
+            selectedFilesData = filesWithData.map(f => {
+                const previewId = addFilePreviewItem(f.name);
+                updateFilePreviewItem(previewId, {
+                    status: f.type.startsWith('image/') ? 'تصویر آماده' : 'ویدیو آماده',
+                    statusClass: 'success',
+                    thumbSrc: f.type.startsWith('image/') ? f.base64 : undefined
+                });
+                return { __previewId: previewId, name: f.name, type: f.type, base64: f.base64 };
+            });
+        }
+
+        const input=document.getElementById('userInput'); input.value=text.trim(); autoResizeTextarea(input); input.focus();
         wrapper.classList.add('editing');
         input.dataset.editingWrapper='1';
     }
@@ -4356,6 +4636,45 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             okBtn.addEventListener('click', onOk);
             cancelBtn.addEventListener('click', onCancel);
             overlay.addEventListener('click', onOverlayClick);
+        });
+    }
+
+    // ===== Custom prompt modal (replaces native prompt()) =====
+    // showPrompt(message, defaultValue) returns a Promise<string|null>
+    function showPrompt(message, defaultValue = '') {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('promptOverlay');
+            const msgEl = document.getElementById('promptMessage');
+            const input = document.getElementById('promptInput');
+            const okBtn = document.getElementById('promptOkBtn');
+            const cancelBtn = document.getElementById('promptCancelBtn');
+            if (!overlay || !msgEl || !input || !okBtn || !cancelBtn) { resolve(window.prompt(message, defaultValue)); return; }
+
+            msgEl.textContent = message;
+            input.value = defaultValue;
+            overlay.classList.add('active');
+            setTimeout(() => { input.focus(); input.select(); }, 30);
+
+            const cleanup = (result) => {
+                overlay.classList.remove('active');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                overlay.removeEventListener('click', onOverlayClick);
+                input.removeEventListener('keydown', onKeydown);
+                resolve(result);
+            };
+            const onOk = () => cleanup(input.value.trim() || null);
+            const onCancel = () => cleanup(null);
+            const onOverlayClick = (e) => { if (e.target === overlay) cleanup(null); };
+            const onKeydown = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); onOk(); }
+                else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+            };
+
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+            overlay.addEventListener('click', onOverlayClick);
+            input.addEventListener('keydown', onKeydown);
         });
     }
 
