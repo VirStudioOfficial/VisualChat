@@ -324,7 +324,8 @@
         .model-selector:has(.model-dropdown.active) .model-chevron i { transform: rotate(180deg); transition: transform 0.2s ease; }
         .model-chevron i { transition: transform 0.2s ease; }
 
-        .icon-btn:active, .msg-action:active { animation: cardPress 0.22s ease; }
+        .icon-btn:active, .msg-action:active { opacity: 0.75; }
+        button > *, .icon-btn > *, .msg-action > * { pointer-events: none; }
 
         .suggestion-chip { position: relative; overflow: hidden; }
         .suggestion-chip::after {
@@ -903,7 +904,7 @@
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            transition: all 0.2s;
+            transition: color 0.15s, background-color 0.15s, border-color 0.15s, opacity 0.15s;
         }
         .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); }
         .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -1791,6 +1792,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let currentUser = null;
     let chats = {};
     let chatHistoryData = {};
+    // FEATURE (persistent file memory): chatFileArchive[chatId] = [{name, content, savedAt}]
+    // - permanent, IndexedDB-backed copy of every text/code file ever sent in
+    // that chat. Unlike codeFilesMemory/lastCodeFilesForEdit (in-memory only,
+    // wiped after every send), this survives across messages, page reloads,
+    // and browser restarts, so a much later message can still ask about an
+    // old file. Loaded in loadChatsFromIndexedDB(), written in
+    // saveFileToArchive().
+    let chatFileArchive = {};
     // FIX (multi-file upload bug): این قبلاً یک آبجکت تکی بود، پس وقتی چند
     // عکس/ویدیو/PDF با هم انتخاب می‌شدند هر کدوم که آخر پردازش می‌شد بقیه
     // رو بازنویسی می‌کرد و فقط آخرین فایل واقعاً ارسال می‌شد. حالا آرایه‌ست
@@ -2007,9 +2016,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // IndexedDB storage for conversations: each chat is a separate record,
     // so adding one message never rewrites the entire history in localStorage.
     const CHAT_DB_NAME = 'VirtualChatDB';
-    const CHAT_DB_VERSION = 1;
+    // FEATURE (persistent file memory): bumped from 1 -> 2 to add FILES_STORE
+    // below. IndexedDB only runs onupgradeneeded when the version number
+    // increases, so this bump is what actually creates the new object store
+    // for existing users who already have a v1 database on disk.
+    const CHAT_DB_VERSION = 2;
     const CHAT_STORE = 'chats';
     const HISTORY_STORE = 'histories';
+    // FEATURE (persistent file memory): every text/code file the user ever
+    // sends in a chat gets a permanent copy here, keyed by chatId - separate
+    // from codeFilesMemory (which is only for the CURRENT message and gets
+    // wiped after every send). This is what lets the model find a file's
+    // content again several messages later, instead of only ever seeing its
+    // name in the chat HTML.
+    const FILES_STORE = 'chatFiles';
     let chatDbPromise = null;
     let chatSaveQueue = Promise.resolve();
 
@@ -2030,6 +2050,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
                 if (!db.objectStoreNames.contains(HISTORY_STORE)) {
                     const store = db.createObjectStore(HISTORY_STORE, { keyPath: 'id' });
+                    store.createIndex('owner', 'owner', { unique: false });
+                }
+                if (!db.objectStoreNames.contains(FILES_STORE)) {
+                    const store = db.createObjectStore(FILES_STORE, { keyPath: 'id' });
                     store.createIndex('owner', 'owner', { unique: false });
                 }
             };
@@ -2102,12 +2126,39 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     async function loadChatsFromIndexedDB() {
         const owner = getChatOwnerKey();
-        const [chatRecords, historyRecords] = await Promise.all([
-            idbGetAllByOwner(CHAT_STORE, owner), idbGetAllByOwner(HISTORY_STORE, owner)
+        const [chatRecords, historyRecords, fileRecords] = await Promise.all([
+            idbGetAllByOwner(CHAT_STORE, owner), idbGetAllByOwner(HISTORY_STORE, owner), idbGetAllByOwner(FILES_STORE, owner)
         ]);
-        chats = {}; chatHistoryData = {};
+        chats = {}; chatHistoryData = {}; chatFileArchive = {};
         chatRecords.forEach(r => { chats[r.chatId] = { title: r.title || 'گفتگوی جدید', html: r.html || '', pinned: !!r.pinned }; });
         historyRecords.forEach(r => { chatHistoryData[r.chatId] = Array.isArray(r.history) ? r.history : []; });
+        fileRecords.forEach(r => { chatFileArchive[r.chatId] = Array.isArray(r.files) ? r.files : []; });
+    }
+
+    // FEATURE (persistent file memory): saves/updates one file inside a
+    // chat's permanent archive. De-duplicated by name - re-sending a file
+    // with the same name overwrites its stored content (the user almost
+    // always means "here's the updated version"), it doesn't pile up
+    // duplicate entries.
+    async function saveFileToArchive(chatId, name, content) {
+        if (!chatId || !name || typeof content !== 'string') return;
+        const owner = getChatOwnerKey();
+        if (!chatFileArchive[chatId]) chatFileArchive[chatId] = [];
+        const list = chatFileArchive[chatId];
+        const idx = list.findIndex(f => f.name === name);
+        const entry = { name, content, savedAt: Date.now() };
+        if (idx >= 0) list[idx] = entry; else list.push(entry);
+        try {
+            await idbPut(FILES_STORE, { id: `${owner}:${chatId}`, owner, chatId: String(chatId), files: list });
+        } catch (e) {
+            console.error('saveFileToArchive failed:', e);
+        }
+    }
+
+    async function deleteFileArchive(chatId) {
+        delete chatFileArchive[chatId];
+        const owner = getChatOwnerKey();
+        try { await idbDelete(FILES_STORE, `${owner}:${chatId}`); } catch (_) {}
     }
 
     function queueChatSave(chatId) {
@@ -3125,6 +3176,33 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     async function sendMessage() {
+        // FIX (double-submit race condition): setGeneratingState(true) only
+        // runs later, inside sendToGemini(), after several async steps
+        // (appendMessage, building payloadFiles, etc). If the send button/
+        // Enter key fires twice in very quick succession (double-click,
+        // duplicate touch events, a fast double-tap), a second sendMessage()
+        // call could start and run through this function BEFORE the first
+        // call's setGeneratingState(true) had landed — isGenerating was
+        // still false, so the `isGenerating` guards elsewhere didn't stop
+        // it. Two concurrent sendMessage() calls each read/clear the SAME
+        // codeFilesMemory: whichever one reached clearCodeFilesMemory()
+        // first could wipe out the attached file's content before the other
+        // call's sendToGemini() had a chance to read it — so the model only
+        // ever saw the '[فایل ارسال شده]' placeholder with no real content,
+        // intermittently, with no clear repro. This synchronous flag closes
+        // that gap: it's set immediately, before any `await`, so a second
+        // call arriving microtasks later is rejected here regardless of
+        // where the first call currently is.
+        if (sendMessage.__inFlight) return;
+        sendMessage.__inFlight = true;
+        try {
+            await sendMessageInner();
+        } finally {
+            sendMessage.__inFlight = false;
+        }
+    }
+
+    async function sendMessageInner() {
         const inputField = document.getElementById("userInput");
         const text = inputField.value.trim();
         if (!text && selectedFilesData.length === 0 && codeFilesMemory.length === 0) return;
@@ -3405,6 +3483,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
         lastCodeFilesForEdit = mergedTextFiles;
 
+        // FEATURE (persistent file memory): every text/code file actually
+        // being sent this turn also gets saved into this chat's permanent
+        // archive (IndexedDB), independent of codeFilesMemory which gets
+        // wiped right after send. This is what makes a file's content still
+        // findable many messages later.
+        for (const f of mergedTextFiles) {
+            saveFileToArchive(currentChatId, f.name, f.content);
+        }
+
         // Binary attachments (images/videos/PDFs/etc) go through separately,
         // all of them — not just the last one selected.
         const binaryPayloadFiles = payloadFiles.filter(f => f && f.base64);
@@ -3468,6 +3555,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     // pages/api/chat.js). Previously only one binary file
                     // (the last one selected) ever made it into the request.
                     files: [...lastCodeFilesForEdit, ...binaryPayloadFiles],
+                    // FEATURE (persistent file memory): let the backend know
+                    // WHICH files exist in this chat's permanent archive
+                    // (names only - cheap, always sent) plus their full
+                    // content (archivedFiles) so that if the model decides
+                    // via the get_archived_file tool that it actually needs
+                    // an old file's content, the server already has it in
+                    // this same request and can hand it back with zero
+                    // extra round-trips. Content isn't put in the prompt
+                    // itself, so it costs no tokens unless actually used.
+                    archivedFileNames: (chatFileArchive[currentChatId] || []).map(f => f.name),
+                    archivedFiles: chatFileArchive[currentChatId] || [],
                     webSearch: isSearchEnabled,
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
@@ -4315,10 +4413,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const wasCurrent = chatId == currentChatId;
         delete chats[chatId];
         delete chatHistoryData[chatId];
+        delete chatFileArchive[chatId];
         try {
             await Promise.all([
                 idbDelete(CHAT_STORE, `${owner}:${chatId}`),
-                idbDelete(HISTORY_STORE, `${owner}:${chatId}`)
+                idbDelete(HISTORY_STORE, `${owner}:${chatId}`),
+                idbDelete(FILES_STORE, `${owner}:${chatId}`)
             ]);
         } catch (e) {
             console.error('IndexedDB chat delete failed:', e);
@@ -4415,10 +4515,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const owner = getChatOwnerKey();
         delete chats[id];
         delete chatHistoryData[id];
+        delete chatFileArchive[id];
         try {
             await Promise.all([
                 idbDelete(CHAT_STORE, `${owner}:${id}`),
-                idbDelete(HISTORY_STORE, `${owner}:${id}`)
+                idbDelete(HISTORY_STORE, `${owner}:${id}`),
+                idbDelete(FILES_STORE, `${owner}:${id}`)
             ]);
         } catch (e) {
             console.error('IndexedDB chat delete failed:', e);
