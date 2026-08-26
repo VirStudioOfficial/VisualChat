@@ -91,33 +91,55 @@ function classifyGeminiError(error) {
     }
 
     if (status === 429 || /resource_exhausted|quota|rate.?limit|too many requests/.test(normalized)) {
-        // A bare 429 is NOT automatically a broken-key signal. Google can
-        // return RESOURCE_EXHAUSTED for project/model quota or shared RPM/TPM
-        // limits, and rotating 12 keys from the same project will not fix it.
-        // Only classify it as key-specific when the provider message clearly
-        // points at that individual credential rather than a shared quota.
-        const dailyOrPlanQuota =
-            /generate_content_.*requests|free.?tier|daily.?quota|quota.?exceeded|limit:?\s*\d+.*model:|exceeded your current quota/.test(normalized);
-        const sharedQuota =
-            /resource_exhausted|quota|project.?quota|resource.?exhausted|\brpm\b|\btpm\b|requests?.*minute|rate.?limit/.test(normalized);
+        // HARD QUOTA: Google's free-tier generate_content quota is shared by
+        // the project/model. Rotating API keys or fallback models cannot
+        // repair it, so the outer retry loop must stop immediately.
+        const hardQuota =
+            /generate_content_[^\s]*free_tier[^\s]*requests/.test(normalized) ||
+            (/free.?tier/.test(normalized) && /quota|exceeded|resource_exhausted/.test(normalized)) ||
+            /daily.?quota|quota.?exceeded|exceeded your current quota/.test(normalized);
 
-        // A daily/free-tier quota is not recoverable by rotating API keys
-        // from the same project. Do not retry it, otherwise one user action
-        // can burn through every configured key and model immediately.
-        const quotaExhausted = dailyOrPlanQuota || sharedQuota;
+        const sharedProjectLimit =
+            /project.?quota|shared.?quota|\brpm\b|\btpm\b|requests?.*minute/.test(normalized);
+
+        const retryAfterMatch = normalized.match(/retry in\s+([0-9]+(?:\.[0-9]+)?)s/);
+        const retryAfterSeconds = retryAfterMatch ? Number(retryAfterMatch[1]) : null;
+
+        if (hardQuota) {
+            return {
+                category: 'quota_exhausted',
+                retryable: false,
+                keySpecific: false,
+                message: 'سهمیه مصرف Free Tier این مدل تمام یا محدود شده است؛ تعویض کلید یا مدل کمکی نمی‌کند. لطفاً بعد از آزاد شدن سهمیه دوباره تلاش کن.',
+                status: status || 429,
+                providerCode,
+                rawMessage,
+                retryAfterSeconds
+            };
+        }
+
+        if (sharedProjectLimit) {
+            return {
+                category: 'rate_limit',
+                retryable: false,
+                keySpecific: false,
+                message: 'محدودیت نرخ مصرف پروژه فعال شده است؛ این درخواست فعلاً قابل تکرار نیست.',
+                status: status || 429,
+                providerCode,
+                rawMessage,
+                retryAfterSeconds
+            };
+        }
 
         return {
-            category: quotaExhausted ? 'quota_exhausted' : 'rate_limit',
-            retryable: dailyOrPlanQuota ? false : !sharedQuota,
-            keySpecific: false,
-            message: dailyOrPlanQuota
-                ? 'سهمیه مصرف این مدل/پلن تمام یا محدود شده است؛ تعویض کلید کمکی نمی‌کند. لطفاً بعد از آزاد شدن سهمیه دوباره تلاش کن.'
-                : sharedQuota
-                    ? 'محدودیت سهمیه یا نرخ مصرف سرویس/پروژه فعال شده است؛ این مورد لزوماً خرابی این کلید نیست.'
-                    : 'این کلید به محدودیت سرعت درخواست رسیده است؛ کلید بعدی بررسی می‌شود.',
+            category: 'rate_limit',
+            retryable: true,
+            keySpecific: true,
+            message: 'این کلید به محدودیت سرعت درخواست رسیده است؛ کلید بعدی بررسی می‌شود.',
             status: status || 429,
             providerCode,
-            rawMessage
+            rawMessage,
+            retryAfterSeconds
         };
     }
 
@@ -581,30 +603,18 @@ ${String(botText || '').slice(0, 500)}
 
     for (let i = 0; i < geminiKeys.length; i++) {
         const key = geminiKeys[i];
-
+        const keyIndex = i + 1;
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 8000);
-
             let response;
-
             try {
                 response = await fetch(
                     'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
                     {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': key
-                        },
-                        body: JSON.stringify({
-                            contents: [
-                                {
-                                    role: 'user',
-                                    parts: [{ text: titlePrompt }]
-                                }
-                            ]
-                        }),
+                        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+                        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: titlePrompt }] }] }),
                         signal: controller.signal
                     }
                 );
@@ -612,40 +622,40 @@ ${String(botText || '').slice(0, 500)}
                 clearTimeout(timeoutId);
             }
 
-            if (!response.ok) continue;
+            // Title generation is a real Gemini request too, so it must appear
+            // in the same usage dashboard as the main chat requests.
+            await recordGoogleAttempt(key, response.status, keyIndex);
 
-            const data = await response.json();
-
-            let title =
-                data?.candidates?.[0]?.content?.parts
-                    ?.map(p => p?.text || '')
-                    .join('')
-                    .trim();
-
-            if (title) {
-                // Strip stray quotes/markdown the model sometimes adds despite
-                // the "no quotes" instruction, and hard-cap length as a safety
-                // net so a runaway response can't blow up the sidebar layout.
-                title = title.replace(/^["'«»]+|["'«»]+$/g, '').replace(/\.$/, '').trim();
-                if (title.length > 40) title = title.slice(0, 40).trim() + '…';
-                if (title) {
-                    log.info('chat.title_generated', {});
-                    return title;
-                }
+            if (!response.ok) {
+                let body = null;
+                try { body = await response.json(); } catch (_) {}
+                const classified = classifyGeminiError({ status: response.status, body });
+                if (!classified.retryable) break;
+                continue;
             }
 
+            const data = await response.json();
+            let title = data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('').trim();
+            if (title) {
+                title = title.replace(/^["'«»]+|["'«»]+$/g, '').replace(/\.$/, '').trim();
+                if (title.length > 40) title = title.slice(0, 40).trim() + '…';
+                log.info('chat.title_generated', {});
+                return title;
+            }
         } catch (error) {
+            const classified = classifyGeminiError(error);
             log.warn('chat.title_generation_failed', {
-                keyIndex: i + 1,
-                message: error?.message || String(error)
+                keyIndex,
+                category: classified.category,
+                status: classified.status
             });
+            if (!classified.retryable) break;
         }
     }
 
-    log.warn('chat.title_generation_fallback', { reason: 'all keys failed, using truncated fallback' });
+    log.warn('chat.title_generation_fallback', { reason: 'title unavailable' });
     return fallback;
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -2684,7 +2694,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         // Daily/free-tier/project quota exhaustion is a shared
                         // limit. Rotating keys or models cannot fix it, so stop
                         // the retry loop immediately and surface the real reason.
-                        if (classified.category === 'quota_exhausted' && !classified.retryable) {
+                        if (!classified.retryable) {
                             break outerLoop;
                         }
 
@@ -2734,10 +2744,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         type: classification.category,
                         category: classification.category,
                         retryable: classification.retryable,
+                        retryAfterSeconds: classification.retryAfterSeconds ?? null,
                         stage: 'stream_generation',
                         detail:
                             `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${geminiReasonMessage}` +
-                            ` (attempts: ${attemptsTried}/${modelsToTry.length * geminiKeys.length})`
+                            ` (actual attempts: ${attemptsTried})`
                     }
                 })}\n\n`
             );
@@ -2866,7 +2877,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
                     // Same rule as streaming: a shared/daily quota cannot be
                     // repaired by trying another configured API key.
-                    if (classified.category === 'quota_exhausted' && !classified.retryable) {
+                    if (!classified.retryable) {
                         break outerLoopNonStream;
                     }
 
@@ -2894,10 +2905,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 type: classification.category,
                 category: classification.category,
                 retryable: classification.retryable,
+                retryAfterSeconds: classification.retryAfterSeconds ?? null,
                 stage: 'non_stream_generation',
                 detail:
                     `Gemini${classification.status ? ' [' + classification.status + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${classification.rawMessage || 'unknown'}` +
-                    ` (attempts: ${attemptsTried}/${modelsToTry.length * geminiKeys.length})`
+                    ` (actual attempts: ${attemptsTried})`
             }
         });
 
