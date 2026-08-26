@@ -4271,6 +4271,29 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         let content = originalContent;
         let appliedCount = 0, failedCount = 0, fuzzyCount = 0;
         for (const edit of (edits || [])) {
+            // Line-anchored edit: startLine/endLine + new. No string
+            // matching at all - the range was read directly from
+            // get_file_chunk on the backend, so it's authoritative as long
+            // as the file hasn't changed since. Always applied against the
+            // CURRENT `content` (not originalContent), so multiple
+            // line-anchored edits in one batch still stack correctly as
+            // long as they're given in descending line order by the model
+            // (system prompt asks for that); as a safety net we re-split
+            // fresh each iteration rather than caching stale line arrays.
+            if (edit && Number.isFinite(edit.startLine) && Number.isFinite(edit.endLine) && typeof edit.new === 'string') {
+                const lines = content.split(/\r?\n/);
+                const s = edit.startLine, e = edit.endLine;
+                if (s >= 1 && e >= s && e <= lines.length) {
+                    const before = lines.slice(0, s - 1);
+                    const after = lines.slice(e);
+                    content = [...before, ...edit.new.split(/\r?\n/), ...after].join('\n');
+                    appliedCount++;
+                    continue;
+                }
+                failedCount++;
+                continue;
+            }
+
             if (!edit || typeof edit.old !== 'string' || typeof edit.new !== 'string' || !edit.old) { failedCount++; continue; }
 
             // Stage 1: exact, unique match (unchanged from before).
