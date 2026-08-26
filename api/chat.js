@@ -537,13 +537,24 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache }) {
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState }) {
     const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
+    // If the outer handler is retrying Gemini after a search already happened,
+    // keep the first search result available to the replacement model without
+    // exposing web_search (or any other tool) again. This preserves key/model
+    // fallback while enforcing one logical search for the whole HTTP request.
+    if (searchState?.used && searchState?.result?.result) {
+        systemText = `${systemText}\n\n[نتیجه جستجوی وب که قبلاً در همین درخواست انجام شده است — از جستجوی مجدد خودداری کن]:\n${searchState.result.result}`;
+    }
     let lastUsage = null;
     // Question-scoped search lock: after one web_search, no tool is exposed
-    // for the remainder of this question.
-    let webSearchUsedForQuestion = false;
+    // for the remainder of this request, including Gemini key/model retries.
+    // Request-scoped search lock. This object is shared across Gemini key/model
+    // retries, so a retry can NEVER start a second logical web_search for the
+    // same incoming user question.
+    const scopedSearchState = searchState || { used: false, result: null };
+
 
     // FIX (root cause of "video reads extremely slowly / times out"):
     // Gemini has to ingest and effectively transcode/sample the whole video
@@ -603,7 +614,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                         // just emptied) when a video is attached, since some
                         // Gemini versions treat an empty tools array
                         // differently from no tools key at all.
-                        ...((disableTools || webSearchUsedForQuestion) ? {} : { tools: GEMINI_TOOLS })
+                        ...((disableTools || scopedSearchState.used) ? {} : { tools: GEMINI_TOOLS })
                     }),
                     signal: controller.signal
                 }
@@ -644,7 +655,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             for (const part of parts) {
                 if (typeof part.text === 'string') {
                     accumulatedParts.push({ text: part.text });
-                    if (disableTools || webSearchUsedForQuestion) {
+                    if (disableTools || scopedSearchState.used) {
                         if (onChunk) {
                             try { onChunk(part.text); } catch (_) {}
                         }
@@ -686,7 +697,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         if (functionCalls.length === 0) {
             // Final answer. If this round had tools enabled, flush the
             // buffered text only now; no pre-tool prose can leak.
-            if (!(disableTools || webSearchUsedForQuestion) && onChunk && textParts.length) {
+            if (!(disableTools || scopedSearchState.used) && onChunk && textParts.length) {
                 try { onChunk(textParts.join('')); } catch (_) {}
             }
             //
@@ -748,7 +759,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
 
             if (call.name === 'web_search') {
                 webSearchesThisRound++;
-                if (webSearchesThisRound > MAX_WEB_SEARCHES_PER_ROUND || webSearchUsedForQuestion) {
+                if (webSearchesThisRound > MAX_WEB_SEARCHES_PER_ROUND || scopedSearchState.used) {
                     responseParts.push({
                         functionResponse: {
                             name: call.name,
@@ -758,7 +769,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                     continue;
                 }
                 searchTriggeredThisRound = true;
-            } else if (searchTriggeredThisRound || webSearchUsedForQuestion) {
+            } else if (searchTriggeredThisRound || scopedSearchState.used) {
                 responseParts.push({
                     functionResponse: {
                         name: call.name,
@@ -772,9 +783,18 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                 try { onStep(label, call.name); } catch (_) {}
             }
 
+            // Lock BEFORE executing the request. This matters if the model
+            // emits multiple web_search calls in the same turn or if the
+            // surrounding request later retries on another Gemini key.
+            // The first logical search owns the question for the rest of the
+            // request; all later model rounds receive no tools at all.
+            if (call.name === 'web_search') {
+                scopedSearchState.used = true;
+            }
+
             const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, searchCache });
 
-            if (call.name === 'web_search') webSearchUsedForQuestion = true;
+            if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
 
             if (result.askUser) earlyAskUser = result.askUser;
@@ -952,6 +972,10 @@ async function handler(req, res) {
         // incoming request only (never persisted, never shared across
         // requests) - see fetchTavilyResults comment for why this exists.
         const searchCache = new Map();
+        // Hard request-scoped guard: survives Gemini model/key retries.
+        // Once one logical web_search starts, no later retry is allowed to
+        // expose tools or issue another web_search for this question.
+        const searchState = { used: false, result: null };
 
         /*
         |--------------------------------------------------------------------------
@@ -1108,7 +1132,7 @@ async function handler(req, res) {
         | user's text against a fixed Persian keyword list - which missed
         | anything phrased differently. Search is now a real tool the model
         | itself can call mid-conversation (see runAgentLoop / GEMINI_TOOLS),
-        | as many times as it judges necessary, based on actually
+        | at most once per incoming question, based on actually
         | understanding the question rather than string matching. Nothing
         | needs to happen here anymore; X-Search-Performed is still reported
         | for observability, based on whether the agent loop ends up
@@ -1721,6 +1745,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             tavilyKeys,
                             archivedFiles,
                             searchCache,
+                            searchState,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
@@ -1935,6 +1960,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         tavilyKeys,
                         archivedFiles,
                         searchCache,
+                        searchState,
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
                         hasVideoAttachment,
