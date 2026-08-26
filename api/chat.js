@@ -633,10 +633,16 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             throw err;
         }
 
-        // Read the upstream SSE stream chunk-by-chunk. In a tool-enabled
-        // round, buffer text until we know no functionCall occurred; this
-        // prevents temporary prose from appearing before a tool call. Once
-        // tools are disabled, final-answer text streams normally.
+        // Read the upstream SSE stream chunk-by-chunk.
+        //
+        // IMPORTANT latency fix: the previous implementation buffered the
+        // ENTIRE first round whenever tools were enabled. That meant even a
+        // normal answer which never used a tool had to finish upstream before
+        // the user saw its first token. We now stream tool-enabled text as it
+        // arrives, while the system prompt explicitly requires Gemini to emit
+        // a functionCall before any narration when it decides to use a tool.
+        // This keeps normal answers truly live without re-introducing the old
+        // "I'm going to search..." preamble in the common tool-call path.
         const reader = upstream.body.getReader();
         const decoder = new TextDecoder();
         let sseBuffer = '';
@@ -652,13 +658,18 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             if (candidate.finishReason) finishReason = candidate.finishReason;
 
             const parts = candidate?.content?.parts || [];
+            const eventHasFunctionCall = parts.some(part => !!part?.functionCall);
+
             for (const part of parts) {
                 if (typeof part.text === 'string') {
                     accumulatedParts.push({ text: part.text });
-                    if (disableTools || scopedSearchState.used) {
-                        if (onChunk) {
-                            try { onChunk(part.text); } catch (_) {}
-                        }
+                    // Stream immediately for normal answers. For tool-enabled
+                    // rounds this relies on the strict system instruction that
+                    // a functionCall must be emitted before any tool narration.
+                    // If a functionCall is present in THIS SSE event, do not
+                    // leak any sibling text from that event.
+                    if (onChunk && (disableTools || scopedSearchState.used || !eventHasFunctionCall)) {
+                        try { onChunk(part.text); } catch (_) {}
                     }
                 } else if (part.functionCall) {
                     accumulatedParts.push({ functionCall: part.functionCall });
@@ -695,10 +706,12 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
         if (functionCalls.length === 0) {
-            // Final answer. If this round had tools enabled, flush the
-            // buffered text only now; no pre-tool prose can leak.
-            if (!(disableTools || scopedSearchState.used) && onChunk && textParts.length) {
-                try { onChunk(textParts.join('')); } catch (_) {}
+            // Final answer. Text is already streamed live above. There is
+            // normally nothing left to flush here; keep a fallback for any
+            // unusual provider event that was not emitted incrementally.
+            if (onChunk && textParts.length && !disableTools && !scopedSearchState.used) {
+                // The normal path has already emitted these chunks. Do not
+                // emit them again; this branch intentionally remains empty.
             }
             //
             // BUGFIX (silent empty reply after a tool call): if Gemini's
@@ -1459,6 +1472,7 @@ async function handler(req, res) {
 ابزارها:
 - ابزار web_search را هر وقت واقعاً به اطلاعات به‌روز/زنده نیاز داری صدا بزن (قیمت، اخبار، رویدادها، چیزی که ممکن است بعد از آموزشت تغییر کرده باشد). برای سؤالات عمومی/ثابت (تعریف، مفهوم، تاریخ گذشته) نیازی به سرچ نیست.
 - برای یک سؤال ساده، فقط یک‌بار سرچ کن و با همان نتایج جواب بده. دوباره سرچ کردن (با کوئری متفاوت یا حتی مشابه) فقط وقتی مجاز است که نتیجه‌ی سرچ اول واقعاً ناکافی/نامرتبط بود یا سؤال چند بخش جدا از هم دارد که هرکدام نیاز به سرچ مجزا دارند. سرچ‌های تکراری روی همان موضوع را انجام نده.
+- اگر تصمیم گرفتی هر ابزار را صدا بزنی، مخصوصاً web_search، قبل از Function Call هیچ متن توضیحی، مقدمه یا جمله‌ای تولید نکن؛ Function Call باید اولین خروجی مدل در آن نوبت باشد. بعد از دریافت نتیجه‌ی ابزار، پاسخ نهایی را به‌صورت عادی و streaming تولید کن.
 - ابزار ask_user را فقط برای تغییرات اساسی/غیرقابل‌برگشت یا تصمیم‌هایی با چند راه‌حل متفاوت صدا بزن (مثلاً بازنویسی کامل یک فایل، حذف بخش بزرگ کد). برای کارهای کوچک یا واضح، مستقیم انجام بده و از این ابزار استفاده نکن.
 `;
 
