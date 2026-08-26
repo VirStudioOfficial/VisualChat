@@ -32,6 +32,174 @@ const log = {
     error(event, meta) { this._base('error', event, meta); }
 };
 
+
+/*
+|--------------------------------------------------------------------------
+| Error classification
+|--------------------------------------------------------------------------
+| Never label every failure as "API error". We keep the provider's raw code
+| for diagnostics, but classify it into a small set of actionable categories
+| for the UI and for key-rotation decisions.
+*/
+function classifyGeminiError(error) {
+    const status = Number(
+        error?.status ??
+        error?.error?.code ??
+        error?.body?.status ??
+        error?.body?.error?.code ??
+        0
+    ) || null;
+
+    const providerCode =
+        error?.error?.status ||
+        error?.body?.error?.status ||
+        error?.statusText ||
+        null;
+
+    const rawMessage = String(
+        error?.message ||
+        error?.error?.message ||
+        error?.body?.message ||
+        error?.body?.error?.message ||
+        ''
+    ).trim();
+
+    const normalized = `${providerCode || ''} ${rawMessage}`.toLowerCase();
+
+    if (error?.type === 'empty_after_tool_call') {
+        return {
+            category: 'empty_response',
+            retryable: false,
+            keySpecific: false,
+            message: 'مدل بعد از اجرای ابزار پاسخ قابل‌استفاده‌ای برنگرداند. دوباره امتحان کن.',
+            status,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (error?.name === 'AbortError' || /timeout|timed out|deadline exceeded/.test(normalized)) {
+        return {
+            category: 'timeout',
+            retryable: true,
+            keySpecific: false,
+            message: 'پاسخ سرویس بیش از زمان مجاز طول کشید. دوباره امتحان کن.',
+            status,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (status === 429 || /resource_exhausted|quota|rate.?limit|too many requests/.test(normalized)) {
+        const quota = /resource_exhausted|quota/.test(normalized);
+        return {
+            category: quota ? 'quota_exhausted' : 'rate_limit',
+            retryable: true,
+            keySpecific: true,
+            message: quota
+                ? 'سهمیه مصرف این کلید/پروژه برای این درخواست در دسترس نیست. کلید بعدی بررسی می‌شود.'
+                : 'سرعت درخواست به حد مجاز رسیده است. کلید بعدی بررسی می‌شود.',
+            status: status || 429,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (status === 401 || /api key|invalid.*key|unauthenticated|authentication/.test(normalized)) {
+        return {
+            category: 'invalid_api_key',
+            retryable: true,
+            keySpecific: true,
+            message: 'این کلید API معتبر نیست یا احراز هویت آن رد شده است. کلید بعدی بررسی می‌شود.',
+            status: status || 401,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (status === 403 || /permission|forbidden|access denied|not authorized/.test(normalized)) {
+        return {
+            category: 'permission_denied',
+            retryable: true,
+            keySpecific: true,
+            message: 'دسترسی این کلید به سرویس یا مدل رد شده است. کلید بعدی بررسی می‌شود.',
+            status: status || 403,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (status === 404 || /model.*not found|not_found|unknown model/.test(normalized)) {
+        return {
+            category: 'model_not_found',
+            retryable: true,
+            keySpecific: false,
+            message: 'مدل در سرویس پیدا نشد یا در دسترس این مسیر نیست.',
+            status: status || 404,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (status === 400 || /invalid argument|invalid request|bad request|malformed/.test(normalized)) {
+        return {
+            category: 'invalid_request',
+            retryable: false,
+            keySpecific: false,
+            message: 'درخواست ارسالی نامعتبر بود. احتمالاً یکی از ورودی‌ها یا تنظیمات درخواست مشکل دارد.',
+            status: status || 400,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (status === 413 || /too large|payload.*large|request.*size|token limit|context length/.test(normalized)) {
+        return {
+            category: 'request_too_large',
+            retryable: false,
+            keySpecific: false,
+            message: 'حجم درخواست یا فایل‌ها بیش از حد مجاز است.',
+            status: status || 413,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (status >= 500 && status <= 599 || /service unavailable|internal server error|bad gateway|temporarily unavailable/.test(normalized)) {
+        return {
+            category: 'provider_unavailable',
+            retryable: true,
+            keySpecific: false,
+            message: 'سرویس هوش مصنوعی موقتاً در دسترس نیست. دوباره امتحان می‌کنیم.',
+            status,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    if (error instanceof TypeError || /fetch failed|network|socket|econn|enotfound|connection/.test(normalized)) {
+        return {
+            category: 'network_error',
+            retryable: true,
+            keySpecific: false,
+            message: 'ارتباط Virtual Bot با سرویس هوش مصنوعی قطع شد. اتصال را بررسی کن و دوباره امتحان کن.',
+            status,
+            providerCode,
+            rawMessage
+        };
+    }
+
+    return {
+        category: 'unknown_error',
+        retryable: true,
+        keySpecific: false,
+        message: 'یک خطای ناشناخته هنگام پردازش درخواست رخ داد.',
+        status,
+        providerCode,
+        rawMessage
+    };
+}
+
 /*
 |--------------------------------------------------------------------------
 | Key Rotation Manager
@@ -1286,8 +1454,9 @@ async function handler(req, res) {
             return res.status(500).json({
                 error: {
                     message: 'سرویس هوش مصنوعی موقتاً پیکربندی نشده است. لطفاً بعداً امتحان کن.',
-                    type: 'api_error',
-                    stage: 'config'
+                    type: 'configuration_error',
+                    stage: 'config',
+                    category: 'missing_api_keys'
                 }
             });
         }
@@ -2103,15 +2272,23 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         return res.end();
 
                     } catch (error) {
-                        markKeyResult(currentKey, false);
+                        const classified = classifyGeminiError(error?.body || error);
+                        if (classified.keySpecific) markKeyResult(currentKey, false);
                         log.error('model.stream_error', {
                             model: currentModel,
-                            message: error?.message || String(error),
-                            wasTimeout: error?.name === 'AbortError',
+                            category: classified.category,
+                            status: classified.status,
+                            providerCode: classified.providerCode,
+                            message: classified.rawMessage || error?.message || String(error),
+                            wasTimeout: classified.category === 'timeout',
+                            keySpecific: classified.keySpecific,
                             connectMs: Date.now() - attemptStartedAt
                         });
 
-                        lastError = error?.body || error;
+                        lastError = {
+                            ...(error?.body && typeof error.body === 'object' ? error.body : {}),
+                            _classification: classified
+                        };
 
                         // BUGFIX (silent empty reply after a tool call): this
                         // specific error means the model itself returned an
@@ -2139,11 +2316,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             // permission, model-not-found, etc). Both live only in the
             // "detail" field the client already renders behind "جزئیات
             // بیشتر", so no UI changes are needed to see them.
-            const geminiStatusCode = lastError?.status || lastError?.error?.code || null;
-            const geminiReasonMessage = (lastError && (lastError.message || lastError.error?.message)) || 'unknown';
+            const classification = lastError?._classification || classifyGeminiError(lastError);
+            const geminiStatusCode = classification.status;
+            const geminiReasonMessage = classification.rawMessage || 'unknown';
 
             log.error('request.all_models_failed', {
                 mode: 'stream',
+                category: classification.category,
                 attemptsTried,
                 totalPossible: modelsToTry.length * geminiKeys.length,
                 geminiStatusCode,
@@ -2153,14 +2332,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             res.write(
                 `data: ${JSON.stringify({
                     error: {
-                        message:
-                            (lastError && lastError.type === 'empty_after_tool_call')
-                                ? lastError.message
-                                : 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
-                        type: (lastError && lastError.type) || 'model_error',
+                        message: classification.message,
+                        type: classification.category,
+                        category: classification.category,
+                        retryable: classification.retryable,
                         stage: 'stream_generation',
                         detail:
-                            `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}: ${geminiReasonMessage}` +
+                            `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${geminiReasonMessage}` +
                             ` (attempts: ${attemptsTried}/${modelsToTry.length * geminiKeys.length})`
                     }
                 })}\n\n`
@@ -2269,14 +2447,22 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     });
 
                 } catch (error) {
-                    markKeyResult(currentKey, false);
+                    const classified = classifyGeminiError(error?.body || error);
+                    if (classified.keySpecific) markKeyResult(currentKey, false);
                     log.error('model.error', {
                         mode: 'non-stream',
                         model: currentModel,
-                        message: error?.message || String(error)
+                        category: classified.category,
+                        status: classified.status,
+                        providerCode: classified.providerCode,
+                        message: classified.rawMessage || error?.message || String(error),
+                        keySpecific: classified.keySpecific
                     });
 
-                    lastError = error?.body || error;
+                    lastError = {
+                        ...(error?.body && typeof error.body === 'object' ? error.body : {}),
+                        _classification: classified
+                    };
 
                     // See identical comment in the streaming path above.
                     if (error?.body?.type === 'empty_after_tool_call') {
@@ -2286,23 +2472,25 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             }
         }
 
+        const classification = lastError?._classification || classifyGeminiError(lastError);
         log.error('request.all_models_failed', {
             mode: 'non-stream',
+            category: classification.category,
             attemptsTried,
             totalPossible: modelsToTry.length * geminiKeys.length,
-            lastError: (lastError && (lastError.message || lastError.error?.message)) || 'unknown'
+            status: classification.status,
+            lastError: classification.rawMessage || 'unknown'
         });
 
-        return res.status(lastError && lastError.type === 'empty_after_tool_call' ? 502 : 500).json({
+        return res.status(classification.category === 'empty_response' ? 502 : (classification.status && classification.status >= 400 && classification.status < 600 ? classification.status : 500)).json({
             error: {
-                message:
-                    (lastError && lastError.type === 'empty_after_tool_call')
-                        ? lastError.message
-                        : 'سرور شلوغه یا کلیدهای فعال سهمیه‌شون تموم شده — چند لحظه دیگه دوباره امتحان کن.',
-                type: (lastError && lastError.type) || 'model_error',
+                message: classification.message,
+                type: classification.category,
+                category: classification.category,
+                retryable: classification.retryable,
                 stage: 'non_stream_generation',
                 detail:
-                    ((lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed') +
+                    `Gemini${classification.status ? ' [' + classification.status + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${classification.rawMessage || 'unknown'}` +
                     ` (attempts: ${attemptsTried}/${modelsToTry.length * geminiKeys.length})`
             }
         });
@@ -2332,7 +2520,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         `data: ${JSON.stringify({
                             error: {
                                 message: 'خطای داخلی سرور در میانه‌ی پاسخ. لطفاً دوباره امتحان کن.',
-                                type: 'api_error',
+                                type: 'internal_error',
+                                category: 'handler_mid_stream',
                                 stage: 'handler_mid_stream',
                                 detail: globalError?.message || String(globalError)
                             }
@@ -2352,7 +2541,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         return res.status(500).json({
             error: {
                 message: 'خطای داخلی سرور. لطفاً دوباره امتحان کن.',
-                type: 'api_error',
+                type: 'internal_error',
+                category: 'handler',
                 stage: 'handler',
                 detail: globalError?.message || String(globalError)
             }
