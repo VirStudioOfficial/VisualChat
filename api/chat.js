@@ -91,39 +91,27 @@ function classifyGeminiError(error) {
     }
 
     if (status === 429 || /resource_exhausted|quota|rate.?limit|too many requests/.test(normalized)) {
-        // HARD QUOTA: Google's free-tier generate_content quota is shared by
-        // the project/model. Rotating API keys or fallback models cannot
-        // repair it, so the outer retry loop must stop immediately.
-        const hardQuota =
+        // NOTE: Google's free-tier generate_content quota (RPM/RPD) is scoped
+        // PER API KEY / PER PROJECT, not shared across unrelated projects.
+        // When each key comes from its own separate Google account/project
+        // (as is the case here), one key hitting "free_tier ... quota
+        // exceeded" says nothing about the other keys' quota - so this must
+        // stay keySpecific + retryable so the outer loop rotates to the next
+        // key instead of aborting the whole request.
+        const freeTierPerKeyQuota =
             /generate_content_[^\s]*free_tier[^\s]*requests/.test(normalized) ||
             (/free.?tier/.test(normalized) && /quota|exceeded|resource_exhausted/.test(normalized)) ||
             /daily.?quota|quota.?exceeded|exceeded your current quota/.test(normalized);
 
-        const sharedProjectLimit =
-            /project.?quota|shared.?quota|\brpm\b|\btpm\b|requests?.*minute/.test(normalized);
-
         const retryAfterMatch = normalized.match(/retry in\s+([0-9]+(?:\.[0-9]+)?)s/);
         const retryAfterSeconds = retryAfterMatch ? Number(retryAfterMatch[1]) : null;
 
-        if (hardQuota) {
+        if (freeTierPerKeyQuota) {
             return {
                 category: 'quota_exhausted',
-                retryable: false,
-                keySpecific: false,
-                message: 'سهمیه مصرف Free Tier این مدل تمام یا محدود شده است؛ تعویض کلید یا مدل کمکی نمی‌کند. لطفاً بعد از آزاد شدن سهمیه دوباره تلاش کن.',
-                status: status || 429,
-                providerCode,
-                rawMessage,
-                retryAfterSeconds
-            };
-        }
-
-        if (sharedProjectLimit) {
-            return {
-                category: 'rate_limit',
-                retryable: false,
-                keySpecific: false,
-                message: 'محدودیت نرخ مصرف پروژه فعال شده است؛ این درخواست فعلاً قابل تکرار نیست.',
+                retryable: true,
+                keySpecific: true,
+                message: 'سهمیه Free Tier این کلید تمام شده؛ کلید بعدی بررسی می‌شود.',
                 status: status || 429,
                 providerCode,
                 rawMessage,
@@ -2737,10 +2725,20 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 lastError: geminiReasonMessage
             });
 
+            // At this point every model/key combo has already been tried and
+            // failed, so a per-key "try the next key" message would be
+            // misleading here - there is no next key left. If the final
+            // failure was a per-key quota/rate-limit hit, say plainly that
+            // it was ALL keys, not just the last one tried.
+            const allKeysExhaustedMessage =
+                (classification.category === 'quota_exhausted' || classification.category === 'rate_limit') && classification.keySpecific
+                    ? `همهٔ ${geminiKeys.length} کلید تنظیم‌شده در سهمیه/محدودیت نرخ گیر کردند؛ لطفاً کمی بعد دوباره تلاش کن.`
+                    : classification.message;
+
             res.write(
                 `data: ${JSON.stringify({
                     error: {
-                        message: classification.message,
+                        message: allKeysExhaustedMessage,
                         type: classification.category,
                         category: classification.category,
                         retryable: classification.retryable,
@@ -2899,9 +2897,17 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             lastError: classification.rawMessage || 'unknown'
         });
 
+        // See the streaming path above for why this needs an "all keys"
+        // message instead of the raw per-key message once every key/model
+        // combo has already been tried and failed.
+        const allKeysExhaustedMessageNonStream =
+            (classification.category === 'quota_exhausted' || classification.category === 'rate_limit') && classification.keySpecific
+                ? `همهٔ ${geminiKeys.length} کلید تنظیم‌شده در سهمیه/محدودیت نرخ گیر کردند؛ لطفاً کمی بعد دوباره تلاش کن.`
+                : classification.message;
+
         return res.status(classification.category === 'empty_response' ? 502 : (classification.status && classification.status >= 400 && classification.status < 600 ? classification.status : 500)).json({
             error: {
-                message: classification.message,
+                message: allKeysExhaustedMessageNonStream,
                 type: classification.category,
                 category: classification.category,
                 retryable: classification.retryable,
