@@ -914,7 +914,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent }) {
+async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent }) {
     const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
@@ -996,7 +996,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                     signal: controller.signal
                 }
             );
-            recordGoogleAttempt(currentKey, upstream.status, geminiKeys.indexOf(currentKey) + 1);
+            recordGoogleAttempt(currentKey, upstream.status, keyIndex);
         } finally {
             clearTimeout(timeoutId);
             if (signal) signal.removeEventListener('abort', onAbort);
@@ -2185,6 +2185,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         const agentResult = await runAgentLoop({
                             currentModel,
                             currentKey,
+                            keyIndex: geminiKeys.indexOf(currentKey) + 1,
                             systemText,
                             contents,
                             tavilyKeys,
@@ -2410,6 +2411,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     const agentResult = await runAgentLoop({
                         currentModel,
                         currentKey,
+                        keyIndex: geminiKeys.indexOf(currentKey) + 1,
                         systemText,
                         contents,
                         tavilyKeys,
