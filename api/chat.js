@@ -151,6 +151,18 @@ function shouldSearchWeb() {
     return false;
 }
 
+// Fast client/request-side hint used only to protect the first streamed
+// chunks when the user explicitly asks for live/searchable information.
+// This does NOT decide whether Gemini should search; Gemini still makes that
+// decision with the real web_search tool. It only prevents a friendly
+// preamble such as "سلام ..." from leaking before that tool call.
+function looksLikeWebSearchIntent(text) {
+    const s = String(text || '').toLowerCase();
+    if (!s.trim()) return false;
+    return /(?:سرچ|جستجو|گوگل|وب|اینترنت|قیمت(?:\s|‌)*(?:الان|امروز|فعلی|جدید|لحظه)|الان چنده|قیمتش|قیمتش چنده|آخرین|امروز|امشب|اخبار|خبرهای|آب[\u200c ]?وهوا|هوا(?:ی|\s)|نرخ|ارز|دلار|یورو|طلا|سهام|موجودی|قیمت فعلی|current|latest|today|right now|now|search|google|look up|news|weather|price|stock|exchange rate|availability)/i.test(s);
+}
+
+
 
 /*
 |--------------------------------------------------------------------------
@@ -282,7 +294,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 
             const timeoutId = setTimeout(
                 () => controller.abort(),
-                6000
+                4500
             );
 
             let response;
@@ -299,7 +311,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
                             api_key: currentKey,
                             query,
                             search_depth: 'basic',
-                            max_results: 4
+                            max_results: 3
                         }),
                         signal: controller.signal
                     }
@@ -325,7 +337,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
                         r =>
                             `عنوان: ${r.title}\n` +
                             `منبع: ${r.url}\n` +
-                            `محتوا: ${r.content}`
+                            `محتوا: ${String(r.content || '').slice(0, 2800)}`
                     )
                     .join('\n\n---\n\n');
 
@@ -537,7 +549,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState }) {
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent }) {
     const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
@@ -648,6 +660,33 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         let sseBuffer = '';
         let accumulatedParts = [];
         let finishReason = null;
+        // Only hold obvious greeting/preamble text on turns that look like a
+        // search request. Normal answers remain fully live. If Gemini follows
+        // its tool-calling instruction and emits a functionCall next, the
+        // buffered preamble is discarded; if it turns out not to need a tool,
+        // the buffer is released as soon as substantive text arrives.
+        let pendingToolPreamble = '';
+        let sawFunctionCall = false;
+
+        const emitStreamText = (text) => {
+            if (!onChunk || !text) return;
+            try { onChunk(text); } catch (_) {}
+        };
+
+        const handleStreamText = (text) => {
+            if (!searchIntent || disableTools || scopedSearchState.used || sawFunctionCall) {
+                emitStreamText(text);
+                return;
+            }
+
+            // This is an explicit/current-info search turn. Keep the entire
+            // pre-tool stream off the wire until Gemini either emits the
+            // functionCall (then the buffer is discarded) or finishes without
+            // a tool (then the buffer is flushed below). This is intentionally
+            // scoped ONLY to likely search requests, so ordinary chat keeps the
+            // zero-buffer live streaming path.
+            pendingToolPreamble += text;
+        };
 
         const handleEventPayload = (jsonStr) => {
             let evt;
@@ -659,17 +698,21 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
 
             const parts = candidate?.content?.parts || [];
             const eventHasFunctionCall = parts.some(part => !!part?.functionCall);
+            if (eventHasFunctionCall) {
+                sawFunctionCall = true;
+                // Anything held so far was pre-tool narration. Do NOT flush it.
+                pendingToolPreamble = '';
+            }
 
             for (const part of parts) {
                 if (typeof part.text === 'string') {
                     accumulatedParts.push({ text: part.text });
-                    // Stream immediately for normal answers. For tool-enabled
-                    // rounds this relies on the strict system instruction that
-                    // a functionCall must be emitted before any tool narration.
-                    // If a functionCall is present in THIS SSE event, do not
-                    // leak any sibling text from that event.
-                    if (onChunk && (disableTools || scopedSearchState.used || !eventHasFunctionCall)) {
-                        try { onChunk(part.text); } catch (_) {}
+                    // If this event also contains the tool call, its text is
+                    // not a valid user-facing preamble. Otherwise use the
+                    // selective guard above: normal turns stream immediately,
+                    // search-intent turns suppress only obvious preambles.
+                    if (!eventHasFunctionCall) {
+                        handleStreamText(part.text);
                     }
                 } else if (part.functionCall) {
                     accumulatedParts.push({ functionCall: part.functionCall });
@@ -706,6 +749,12 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
         if (functionCalls.length === 0) {
+            // No tool call arrived after all. Release any selectively held
+            // preamble so the final answer is not lost.
+            if (pendingToolPreamble) {
+                emitStreamText(pendingToolPreamble);
+                pendingToolPreamble = '';
+            }
             // Final answer. Text is already streamed live above. There is
             // normally nothing left to flush here; keep a fallback for any
             // unusual provider event that was not emitted incrementally.
@@ -1713,6 +1762,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         // typing), but with live "در حال انجام..." steps
                         // along the way to fill that gap.
                         let searchWasPerformed = false;
+                        const requestSearchIntent = looksLikeWebSearchIntent(searchQueryBase || text);
 
                         // FIX (heavy code UX): code blocks now stream live,
                         // chunk-by-chunk, exactly like normal prose - no more
@@ -1760,6 +1810,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             archivedFiles,
                             searchCache,
                             searchState,
+                            searchIntent: requestSearchIntent,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
