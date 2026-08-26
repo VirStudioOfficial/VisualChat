@@ -3636,7 +3636,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const retryButtonHtml = canRetry
             ? `<button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button>`
             : `<span class="retry-disabled-note">این خطا قابل تکرار خودکار نیست.</span>`;
-        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
+
+        // FEATURE (Continue button): when the backend already applied one or
+        // more patches before it went silent / got cut off, it sends those
+        // back as errorDetail.partialFiles so editing can resume from there
+        // instead of starting over on the original file. Store this on the
+        // saved retry payload (not just in memory) so the button still
+        // works even after a page reload, same as the normal retry button.
+        let continueButtonHtml = '';
+        if (errorDetail && typeof errorDetail === 'object' && errorDetail.canContinue && Array.isArray(errorDetail.partialFiles) && errorDetail.partialFiles.length) {
+            const continuePayload = {
+                textPrompt: request?.textPrompt || '',
+                originalPayloadFiles: request?.payloadFiles || [],
+                partialFiles: errorDetail.partialFiles,
+                webSearch: isSearchEnabled,
+                model: currentModel
+            };
+            const continueData = encodeURIComponent(JSON.stringify(continuePayload));
+            continueButtonHtml = `<button class="retry-btn" type="button" data-continue="${continueData}" onclick="continueFromButton(this)">ادامه بده</button>`;
+        }
+
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${continueButtonHtml}${retryButtonHtml}<button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
         if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
@@ -3667,6 +3687,47 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
         if (!request) return;
         await retryRequest(request);
+    }
+
+    // FEATURE (Continue button): resumes a file edit that stopped partway
+    // through (empty reply after a tool call, or MAX_TOKENS cutoff) by
+    // swapping the original file(s) for the already-patched version the
+    // backend returned in errorDetail.partialFiles, and asking the model to
+    // finish the rest of the edit instead of starting over. Reads from the
+    // button's data-continue attribute (survives a page reload) rather than
+    // relying on in-memory state, mirroring how retryFromButton works.
+    async function continueFromButton(btn) {
+        if (isGenerating) return;
+        let saved;
+        try {
+            saved = JSON.parse(decodeURIComponent(btn.dataset.continue || ''));
+        } catch (_) {
+            return;
+        }
+        if (!saved) return;
+
+        const originalFiles = Array.isArray(saved.originalPayloadFiles) ? saved.originalPayloadFiles : [];
+        const partialFiles = Array.isArray(saved.partialFiles) ? saved.partialFiles : [];
+        if (!partialFiles.length) return;
+
+        // Replace each original file with its partially-edited version by
+        // name; keep any original file untouched if it has no matching
+        // partial (e.g. the model never got to patching it).
+        const mergedFiles = originalFiles.map(f => {
+            const match = partialFiles.find(p => p && p.name === f.name);
+            return match ? { name: f.name, content: match.content, mode: 'text' } : f;
+        });
+        // In case a partial file somehow has no matching original entry,
+        // still include it so its progress isn't silently dropped.
+        partialFiles.forEach(p => {
+            if (!mergedFiles.some(f => f.name === p.name)) {
+                mergedFiles.push({ name: p.name, content: p.content, mode: 'text' });
+            }
+        });
+
+        const continuePrompt = 'ادامه‌ی همون ویرایش قبلی رو تموم کن. بخشی از تغییرات قبلاً روی همین فایل اعمال شده - از inspect_file برای دیدن وضعیت فعلی فایل استفاده کن و فقط قسمت باقی‌مانده را کامل کن.';
+
+        await sendToGemini(continuePrompt, mergedFiles);
     }
 
     async function retryRequest(request = lastFailedRequest) {
