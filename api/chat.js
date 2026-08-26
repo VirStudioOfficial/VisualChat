@@ -159,7 +159,7 @@ function shouldSearchWeb() {
 function looksLikeWebSearchIntent(text) {
     const s = String(text || '').toLowerCase();
     if (!s.trim()) return false;
-    return /(?:سرچ|جستجو|گوگل|وب|اینترنت|قیمت(?:\s|‌)*(?:الان|امروز|فعلی|جدید|لحظه)|الان چنده|قیمتش|قیمتش چنده|آخرین|امروز|امشب|اخبار|خبرهای|آب[\u200c ]?وهوا|هوا(?:ی|\s)|نرخ|ارز|دلار|یورو|طلا|سهام|موجودی|قیمت فعلی|current|latest|today|right now|now|search|google|look up|news|weather|price|stock|exchange rate|availability)/i.test(s);
+    return /(?:سرچ|جستجو|گوگل|وب|اینترنت|قیمت(?:\s|‌)*(?:الان|امروز|فعلی|جدید|لحظه)|الان چنده|چنده|چقدر(?:ه|ه؟)|چقدره|قیمتش|قیمتش چنده|هزینه|هزینش|آخرین|امروز|امشب|اخبار|خبرهای|آب[\u200c ]?وهوا|هوا(?:ی|\s)|نرخ|ارز|دلار|یورو|طلا|سهام|موجودی|قیمت فعلی|current|latest|today|right now|now|search|google|look up|news|weather|price|stock|exchange rate|availability)/i.test(s);
 }
 
 
@@ -311,7 +311,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
                             api_key: currentKey,
                             query,
                             search_depth: 'basic',
-                            max_results: 3
+                            max_results: 2
                         }),
                         signal: controller.signal
                     }
@@ -337,7 +337,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
                         r =>
                             `عنوان: ${r.title}\n` +
                             `منبع: ${r.url}\n` +
-                            `محتوا: ${String(r.content || '').slice(0, 2800)}`
+                            `محتوا: ${String(r.content || '').slice(0, 1800)}`
                     )
                     .join('\n\n---\n\n');
 
