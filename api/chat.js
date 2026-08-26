@@ -1326,6 +1326,22 @@ const GEMINI_TOOLS = [
     }
 ];
 
+// FIX (unnecessary web_search slowing down file-edit requests): when the
+// user is editing an attached file, there is normally no reason for the
+// model to reach for web_search - it just adds an extra round-trip (and
+// extra token/quota usage) to a flow that is already the most
+// quota-sensitive one in this file. Exclude web_search specifically (not
+// the file-editing tools) whenever fileEditIntent is true, while still
+// leaving it available for normal chat.
+const GEMINI_TOOLS_NO_SEARCH = [
+    {
+        function_declarations:
+            GEMINI_TOOLS[0].function_declarations.filter(
+                fn => fn.name !== 'web_search'
+            )
+    }
+];
+
 // Human-readable Persian step labels the client shows while a tool runs.
 // Falls back to a generic label if the model didn't provide its own
 // "reason" text (only web_search asks for one).
@@ -1827,7 +1843,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         // just emptied) when a video is attached, since some
                         // Gemini versions treat an empty tools array
                         // differently from no tools key at all.
-                        ...((disableTools || scopedSearchState.used) ? {} : { tools: GEMINI_TOOLS })
+                        ...((disableTools || scopedSearchState.used) ? {} : { tools: fileEditIntent ? GEMINI_TOOLS_NO_SEARCH : GEMINI_TOOLS })
                     }),
                     signal: controller.signal
                 }
