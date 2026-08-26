@@ -4481,8 +4481,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 try { saveFileToArchive(currentChatId, fileName, content); } catch (_) {}
             }
 
-            // §6: Edited File Card — name, size, status, change count, and
-            // Copy/Download actions for the edited file.
+            // §6: Edited File Card — name, size, status, change count,
+            // Copy/Download actions, and the full patched code itself
+            // (collapsed by default) so the complete file is visible right
+            // in the chat without ever asking the model to retype it -
+            // this content comes straight from applyFileEdits, i.e. it's
+            // the real file, not anything reconstructed by the model.
             const encoded = encodeURIComponent(content);
             const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
             // Fuzzy-applied edits matched via best-effort line similarity
@@ -4491,15 +4495,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // it's the one stage that isn't a guaranteed-correct match.
             const fuzzyNote = fuzzyCount ? ` (${fuzzyCount} مورد به‌صورت تقریبی/فازی تطبیق داده شد - پیشنهاد می‌شود بررسی شود)` : '';
             const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
+            const codeCardId = `full-code-${Math.random().toString(36).slice(2)}`;
             html += `<div class="code-card edited-file-card">
                 <div class="code-card-head">
                     <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}${fuzzyNote}</span>
                     <div class="code-actions">
+                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
                         <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
                         <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
                     </div>
                 </div>
                 <div class="edited-file-meta">${sizeKb} KB &middot; آماده</div>
+                <pre id="${codeCardId}" class="full-code-view" style="display:none; max-height:480px; overflow:auto; margin:10px 0 0; padding:12px; background:var(--bg-secondary,#111); border-radius:8px; font-size:0.78rem; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(content)}</code></pre>
             </div>`;
         }
         return html;
@@ -4514,6 +4521,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         a.download = filename;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    function toggleFullCodeView(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = (el.style.display === 'none') ? 'block' : 'none';
     }
 
     function escapeAttr(value) {
