@@ -70,28 +70,62 @@ const USAGE_WINDOW_MS = 60_000;
 const USAGE_TTL_SECONDS = 180;
 
 function hasUsageKV() {
-    return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+    return Boolean((process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) || process.env.REDIS_URL);
+}
+
+let __redisClientPromise = null;
+async function getRedisClient() {
+    if (!process.env.REDIS_URL) return null;
+    if (!__redisClientPromise) {
+        __redisClientPromise = import('redis').then(async ({ createClient }) => {
+            const client = createClient({ url: process.env.REDIS_URL });
+            client.on('error', (err) => log.warn('usage.redis_error', { message: err?.message || String(err) }));
+            await client.connect();
+            return client;
+        }).catch((err) => { __redisClientPromise = null; throw err; });
+    }
+    return __redisClientPromise;
 }
 
 async function usageKvCommand(command, args = []) {
-    if (!hasUsageKV()) return null;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1800);
-    try {
-        const response = await fetch(process.env.KV_REST_API_URL, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${process.env.KV_REST_API_TOKEN}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify([command, ...args]),
-            signal: controller.signal
-        });
-        if (!response.ok) throw new Error(`KV ${command} returned ${response.status}`);
-        const data = await response.json();
-        return data?.result ?? null;
-    } finally {
-        clearTimeout(timeoutId);
+    if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1800);
+        try {
+            const response = await fetch(process.env.KV_REST_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${process.env.KV_REST_API_TOKEN}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify([command, ...args]),
+                signal: controller.signal
+            });
+            if (!response.ok) throw new Error(`KV ${command} returned ${response.status}`);
+            const data = await response.json();
+            return data?.result ?? null;
+        } finally { clearTimeout(timeoutId); }
+    }
+    const client = await getRedisClient();
+    if (!client) return null;
+    switch (command) {
+        case 'ZADD': return client.zAdd(args[0], [{ score: Number(args[1]), value: String(args[2]) }]);
+        case 'EXPIRE': return client.expire(args[0], Number(args[1]));
+        case 'HINCRBY': return client.hIncrBy(args[0], args[1], Number(args[2]));
+        case 'HSET': {
+            const values = {};
+            for (let i = 1; i < args.length; i += 2) values[args[i]] = String(args[i + 1] ?? '');
+            return client.hSet(args[0], values);
+        }
+        case 'ZREMRANGEBYSCORE': return client.zRemRangeByScore(args[0], args[1], args[2]);
+        case 'ZCOUNT': return client.zCount(args[0], args[1], args[2]);
+        case 'ZRANGE': {
+            const withScores = args[3] === 'WITHSCORES';
+            const rows = withScores ? await client.zRangeWithScores(args[0], Number(args[1]), Number(args[2])) : await client.zRange(args[0], Number(args[1]), Number(args[2]));
+            return withScores ? rows.flatMap(r => [r.value, String(r.score)]) : rows;
+        }
+        case 'HGETALL': return client.hGetAll(args[0]);
+        default: throw new Error(`Unsupported Redis command: ${command}`);
     }
 }
 
