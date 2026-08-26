@@ -832,6 +832,137 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 | immediately, the same way a person narrates what they're doing.
 */
 
+
+/*
+|--------------------------------------------------------------------------
+| File Structure Intelligence
+|--------------------------------------------------------------------------
+| This is intentionally lightweight and dependency-free. It does not try to
+| compile or execute user code; it extracts a stable structural map that the
+| model can use before producing file-edit operations. The same tool is used
+| for every text/code file type we can reasonably inspect.
+*/
+function analyzeFileStructure(content, fileName = 'file', query = '') {
+    const text = String(content || '');
+    const lowerName = String(fileName || '').toLowerCase();
+    const language = /\.(html?|htm)$/.test(lowerName) ? 'html'
+        : /\.(css|scss|less)$/.test(lowerName) ? 'css'
+        : /\.(py)$/.test(lowerName) ? 'python'
+        : /\.(json)$/.test(lowerName) ? 'json'
+        : /\.(ts|tsx)$/.test(lowerName) ? 'typescript'
+        : /\.(jsx)$/.test(lowerName) ? 'javascript-react'
+        : 'javascript';
+
+    const lines = text.split(/\r?\n/);
+    const out = {
+        file: fileName,
+        language,
+        lineCount: lines.length,
+        charCount: text.length,
+        sections: [],
+        functions: [],
+        classes: [],
+        variables: [],
+        imports: [],
+        eventHandlers: [],
+        htmlElements: [],
+        cssRules: [],
+        queryMatches: []
+    };
+
+    const add = (arr, item) => { if (item && arr.length < 120) arr.push(item); };
+    const lineOf = index => text.slice(0, index).split(/\r?\n/).length;
+
+    // Section comments are especially valuable in this project because the
+    // existing code uses named section separators extensively.
+    const sectionRe = /(?:\/\/|\/\*+|<!--)\s*={2,}\s*([^\n=*-]+?)\s*={2,}|(?:\/\/|\/\*+|<!--)\s*([^\n]+?)\s*(?:\*\/|-->)?$/gm;
+    let m;
+    while ((m = sectionRe.exec(text)) && out.sections.length < 80) {
+        const title = String(m[1] || m[2] || '').trim();
+        if (title && !/^[-=]+$/.test(title) && title.length < 120) {
+            add(out.sections, { name: title, line: lineOf(m.index) });
+        }
+    }
+
+    if (language === 'html') {
+        const tagRe = /<([a-z][\w:-]*)(?:\s+[^>]*?)?>/gi;
+        const seen = new Map();
+        while ((m = tagRe.exec(text)) && out.htmlElements.length < 120) {
+            const tag = m[1].toLowerCase();
+            const key = tag;
+            const count = (seen.get(key) || 0) + 1;
+            seen.set(key, count);
+            if (['html','head','body','script','style','main','section','header','footer','nav','form','button','input','textarea','div'].includes(tag) || count <= 2) {
+                const attrs = m[0];
+                const id = (attrs.match(/\bid\s*=\s*["']([^"']+)["']/i) || [])[1] || null;
+                const cls = (attrs.match(/\bclass\s*=\s*["']([^"']+)["']/i) || [])[1] || null;
+                add(out.htmlElements, { tag, id, className: cls, line: lineOf(m.index) });
+            }
+        }
+        const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+        while ((m = scriptRe.exec(text)) && out.sections.length < 120) {
+            add(out.sections, { name: 'script', line: lineOf(m.index) });
+        }
+    } else if (language === 'css') {
+        const cssRe = /([^{}]+)\{/g;
+        while ((m = cssRe.exec(text)) && out.cssRules.length < 120) {
+            const selector = m[1].trim().replace(/\s+/g, ' ');
+            if (selector && selector.length < 180) add(out.cssRules, { selector, line: lineOf(m.index) });
+        }
+    } else if (language === 'python') {
+        const importRe = /^\s*(?:from\s+([^\s]+)\s+)?import\s+(.+)$/gm;
+        while ((m = importRe.exec(text)) && out.imports.length < 100) add(out.imports, { name: (m[1] ? `from ${m[1]} ` : '') + m[2].trim(), line: lineOf(m.index) });
+        const fnRe = /^\s*(?:async\s+)?def\s+([A-Za-z_$][\w$]*)\s*\(/gm;
+        while ((m = fnRe.exec(text)) && out.functions.length < 120) add(out.functions, { name: m[1], line: lineOf(m.index) });
+        const clsRe = /^\s*class\s+([A-Za-z_$][\w$]*)/gm;
+        while ((m = clsRe.exec(text)) && out.classes.length < 80) add(out.classes, { name: m[1], line: lineOf(m.index) });
+    } else {
+        const importRe = /(?:^|\n)\s*(?:import\s+[^;\n]+|const\s+[^;=]+\s*=\s*require\s*\([^\n]+\)|import\s*\([^\n]+\))/g;
+        while ((m = importRe.exec(text)) && out.imports.length < 100) add(out.imports, { text: m[0].trim(), line: lineOf(m.index) });
+        const fnRe = /(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g;
+        while ((m = fnRe.exec(text)) && out.functions.length < 160) add(out.functions, { name: m[1] || m[2], line: lineOf(m.index) });
+        const clsRe = /\bclass\s+([A-Za-z_$][\w$]*)/g;
+        while ((m = clsRe.exec(text)) && out.classes.length < 80) add(out.classes, { name: m[1], line: lineOf(m.index) });
+        const varRe = /(?:^|\n)\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g;
+        while ((m = varRe.exec(text)) && out.variables.length < 160) add(out.variables, { name: m[1], line: lineOf(m.index) });
+        const eventRe = /(?:addEventListener\s*\(\s*["']([^"']+)["']|\.on(?:click|change|submit|input|load)\s*=)/g;
+        while ((m = eventRe.exec(text)) && out.eventHandlers.length < 100) add(out.eventHandlers, { event: m[1] || 'property-handler', line: lineOf(m.index) });
+    }
+
+    if (query) {
+        const q = String(query).trim();
+        if (q) {
+            const terms = q.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+            lines.forEach((line, i) => {
+                const ll = line.toLowerCase();
+                if (terms.some(t => ll.includes(t)) && out.queryMatches.length < 40) {
+                    add(out.queryMatches, { line: i + 1, text: line.trim().slice(0, 220) });
+                }
+            });
+        }
+    }
+
+    return out;
+}
+
+function formatFileStructureForModel(analysis) {
+    const pick = (arr, key = 'name') => arr.slice(0, 60).map(x => key === 'text' ? x.text : `${x[key] || ''}${x.line ? ` (خط ${x.line})` : ''}`).filter(Boolean);
+    return {
+        file: analysis.file,
+        language: analysis.language,
+        lines: analysis.lineCount,
+        sections: pick(analysis.sections),
+        functions: pick(analysis.functions),
+        classes: pick(analysis.classes),
+        variables: pick(analysis.variables),
+        imports: pick(analysis.imports, analysis.imports.some(x => x.name) ? 'name' : 'text'),
+        eventHandlers: analysis.eventHandlers.slice(0, 60),
+        htmlElements: analysis.htmlElements.slice(0, 80),
+        cssRules: pick(analysis.cssRules, 'selector'),
+        queryMatches: analysis.queryMatches.slice(0, 40)
+    };
+}
+
 const GEMINI_TOOLS = [
     {
         function_declarations: [
@@ -891,6 +1022,22 @@ const GEMINI_TOOLS = [
                 }
             },
             {
+                name: 'inspect_file',
+                description:
+                    'ساختار واقعی فایل کد/متن ضمیمه‌شده را بررسی می‌کند. قبل از هر ویرایش فایل، ' +
+                    'به‌خصوص قبل از ساختن file-edit، حتماً این ابزار را برای فایل هدف صدا بزن. ' +
+                    'از نتیجه برای پیدا کردن تابع/بخش/عنصر موجود، تشخیص کد مشابه و انتخاب محل دقیق تغییر استفاده کن. ' +
+                    'این ابزار فقط متن را تکرار نمی‌کند؛ یک نقشه ساختاری از فایل و در صورت نیاز خطوط مرتبط با درخواست را برمی‌گرداند.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        file: { type: 'string', description: 'نام دقیق فایل ضمیمه‌شده.' },
+                        query: { type: 'string', description: 'خلاصه کوتاه چیزی که قرار است در فایل پیدا یا تغییر داده شود.' }
+                    },
+                    required: ['file']
+                }
+            },
+            {
                 name: 'ask_user',
                 description:
                     'وقتی درخواست کاربر شامل یک تغییر اساسی/غیرقابل‌برگشت است (مثلاً بازنویسی کامل ' +
@@ -918,6 +1065,9 @@ const GEMINI_TOOLS = [
 function describeToolCall(name, args) {
     if (name === 'web_search') {
         return (args && args.reason) || `دارم درباره‌ی «${(args && args.query) || ''}» توی وب سرچ می‌کنم...`;
+    }
+    if (name === 'inspect_file') {
+        return `در حال بررسی ساختار فایل «${(args && args.file) || ''}»...`;
     }
     if (name === 'ask_user') {
         return 'قبل از ادامه، یه سؤال دارم...';
@@ -967,6 +1117,30 @@ async function executeToolCall(name, args, ctx) {
             ...(truncated ? {
                 note: 'این فایل خیلی بزرگ بود و فقط بخش ابتدایی آن (۴۰ هزار کاراکتر اول) بازگردانده شد. اگر بخش دیگری لازم است، به کاربر بگو که فایل کامل در دسترس نیست و باید بخش خاصی از آن را دوباره بفرستد.'
             } : {})
+        };
+    }
+
+    if (name === 'inspect_file') {
+        const fileName = String((args && args.file) || '').trim();
+        const query = String((args && args.query) || '').trim();
+        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
+        if (!found) {
+            return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+        }
+        const analysis = analyzeFileStructure(found.content || '', found.name || fileName, query);
+        log.info('agent.tool.inspect_file', {
+            name: found.name || fileName,
+            language: analysis.language,
+            lineCount: analysis.lineCount,
+            functions: analysis.functions.length,
+            classes: analysis.classes.length,
+            queryMatches: analysis.queryMatches.length
+        });
+        return {
+            type: 'file_structure',
+            instruction: 'این نتیجه از محتوای واقعی فایل ساخته شده است؛ قبل از file-edit از آن استفاده کن و چیزی را که در ساختار موجود است دوباره اضافه نکن.',
+            structure: formatFileStructureForModel(analysis)
         };
     }
 
@@ -1023,7 +1197,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent }) {
+async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent }) {
     const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
@@ -1287,7 +1461,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             scopedSearchState.used = true;
-            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, searchCache });
+            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache });
             scopedSearchState.result = result;
             searchResult = result;
             if (result.askUser) earlySearchAskUser = result.askUser;
@@ -1374,7 +1548,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 scopedSearchState.used = true;
             }
 
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, searchCache });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache });
 
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
@@ -2112,6 +2286,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - اگر باید چند جای فایل عوض شود، به‌جای یک "old" بزرگ که همه را در بر بگیرد، چند آیتم جدا در همان آرایه بساز (هر کدام "old" کوتاه و مجزا).
 - "old" باید در فایل دقیقاً یک‌بار ظاهر شود؛ اگر متنی که می‌خواهی تغییر بدهی در چند جای فایل تکرار شده، خط(های) قبل/بعدش را هم به "old" اضافه کن تا یکتا شود.
 - هرگز فاصله‌های اضافه، تب‌های متفاوت، یا خطوط خالی اضافی در "old" یا "new" وارد نکن که در فایل اصلی نیستند.
+- قبل از هر file-edit حتماً ابزار inspect_file را برای فایل هدف صدا بزن؛ فقط دیدن متن فایل کافی نیست.
+- نتیجه inspect_file را مبنای انتخاب تابع/بخش/عنصر هدف قرار بده و اگر قابلیت یا کد مشابه از قبل وجود دارد، آن را دوباره ایجاد نکن؛ همان بخش موجود را اصلاح کن.
+- اگر inspect_file نشان داد چند مورد مشابه وجود دارد، بدون تعیین هدف دقیق و یکتا file-edit نساز؛ با context کافی همان مورد درست را انتخاب کن.
 
 فرمت:
 
@@ -2312,6 +2489,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         // effect on what the user sees typed out.
                         const codeStreamGate = (() => {
                             let carry = ''; // holds a partial ``` at chunk boundary
+                            let seenTail = ''; // small rolling window to detect the ```file-edit fence across chunk boundaries
+                            let fileEditStepSent = false;
 
                             const emitText = (t) => {
                                 if (!t) return;
@@ -2332,6 +2511,23 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                     chunk = chunk.slice(0, -carry.length);
                                 }
 
+                                // FEATURE (file-edit progress narration): the
+                                // model only emits the ```file-edit fence once
+                                // it has finished "deciding" the diff and is
+                                // about to print the actual old/new JSON -
+                                // narrate that moment specifically (not any
+                                // ``` fence in general, which was already
+                                // tried and reverted above for being
+                                // misleading on non-code fences).
+                                if (!fileEditStepSent && textFiles.length > 0) {
+                                    seenTail = (seenTail + chunk).slice(-32);
+                                    if (seenTail.includes('```file-edit')) {
+                                        fileEditStepSent = true;
+                                        res.write(`data: ${JSON.stringify({ step: 'در حال اعمال تغییرات روی فایل...' })}\n\n`);
+                                        if (typeof res.flush === 'function') res.flush();
+                                    }
+                                }
+
                                 emitText(chunk);
                             };
                         })();
@@ -2344,6 +2540,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             contents,
                             tavilyKeys,
                             archivedFiles,
+                            textFiles,
                             searchCache,
                             searchState,
                             searchIntent: requestSearchIntent,
