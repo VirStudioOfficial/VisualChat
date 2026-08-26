@@ -43,6 +43,169 @@ const log = {
 */
 const __keyFailureCounts = new Map(); // key -> consecutive failure count
 
+/*
+|--------------------------------------------------------------------------
+| Google API usage telemetry (observed locally, never fabricated)
+|--------------------------------------------------------------------------
+| Google does not expose the project's live RPM/TPM/RPD quota through the
+| Gemini API key itself. We therefore expose ONLY requests this backend
+| actually sent with each configured key, plus real 429/error observations.
+| The rolling window is process-local (serverless instances can reset).
+*/
+const __googleUsage = new Map();
+
+/*
+ * Persistent usage storage (Vercel KV / Upstash Redis integration).
+ *
+ * Required environment variables on Vercel:
+ *   KV_REST_API_URL
+ *   KV_REST_API_TOKEN
+ *
+ * If they are not configured, we keep the old in-memory fallback so local
+ * development still works. The UI is told whether the data is persistent.
+ * No API key value is ever stored; only its stable 1-based index is used.
+ */
+const USAGE_KV_PREFIX = 'virtual-bot:google-usage:v2';
+const USAGE_WINDOW_MS = 60_000;
+const USAGE_TTL_SECONDS = 180;
+
+function hasUsageKV() {
+    return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+async function usageKvCommand(command, args = []) {
+    if (!hasUsageKV()) return null;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1800);
+    try {
+        const response = await fetch(process.env.KV_REST_API_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.KV_REST_API_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify([command, ...args]),
+            signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`KV ${command} returned ${response.status}`);
+        const data = await response.json();
+        return data?.result ?? null;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+function recordGoogleAttemptMemory(key, status) {
+    const now = Date.now();
+    let row = __googleUsage.get(key);
+    if (!row) {
+        row = { timestamps: [], total: 0, success: 0, errors: 0, lastStatus: null, lastAt: null };
+        __googleUsage.set(key, row);
+    }
+    row.timestamps.push(now);
+    row.total += 1;
+    row.lastStatus = Number.isFinite(status) ? status : null;
+    row.lastAt = now;
+    if (status >= 200 && status < 300) row.success += 1;
+    else row.errors += 1;
+    const cutoff = now - USAGE_WINDOW_MS;
+    row.timestamps = row.timestamps.filter(t => t >= cutoff);
+}
+
+/*
+ * Record the request in both the local fallback and persistent storage.
+ * The KV write is deliberately fire-and-forget so telemetry cannot add a
+ * network round-trip to Gemini response latency. The write happens while
+ * the current Vercel request is still active.
+ */
+function recordGoogleAttempt(key, status, keyIndex) {
+    recordGoogleAttemptMemory(key, status);
+
+    if (!hasUsageKV()) return;
+
+    const now = Date.now();
+    const id = `${now}:${Math.random().toString(36).slice(2, 10)}`;
+    const zsetKey = `${USAGE_KV_PREFIX}:key:${keyIndex}`;
+    const metaKey = `${USAGE_KV_PREFIX}:meta:${keyIndex}`;
+    const score = String(now);
+
+    Promise.all([
+        usageKvCommand('ZADD', [zsetKey, score, id]),
+        usageKvCommand('EXPIRE', [zsetKey, String(USAGE_TTL_SECONDS)]),
+        usageKvCommand('HINCRBY', [metaKey, 'totalObserved', '1']),
+        usageKvCommand('HINCRBY', [metaKey, status >= 200 && status < 300 ? 'successfulObserved' : 'errorsObserved', '1']),
+        usageKvCommand('HSET', [metaKey, 'lastStatus', String(Number.isFinite(status) ? status : ''), 'lastAt', new Date(now).toISOString()]),
+        usageKvCommand('EXPIRE', [metaKey, String(90 * 24 * 60 * 60)])
+    ]).catch(error => {
+        log.warn('usage.storage_write_failed', { message: error?.message || String(error) });
+    });
+}
+
+function pruneGoogleUsage() {
+    const cutoff = Date.now() - USAGE_WINDOW_MS;
+    for (const row of __googleUsage.values()) row.timestamps = row.timestamps.filter(t => t >= cutoff);
+}
+
+async function getPersistentGoogleUsage(index) {
+    const now = Date.now();
+    const cutoff = String(now - USAGE_WINDOW_MS);
+    const zsetKey = `${USAGE_KV_PREFIX}:key:${index}`;
+    const metaKey = `${USAGE_KV_PREFIX}:meta:${index}`;
+
+    await usageKvCommand('ZREMRANGEBYSCORE', [zsetKey, '-inf', cutoff]);
+    const [count, oldest, meta] = await Promise.all([
+        usageKvCommand('ZCOUNT', [zsetKey, cutoff, '+inf']),
+        usageKvCommand('ZRANGE', [zsetKey, '0', '0', 'WITHSCORES']),
+        usageKvCommand('HGETALL', [metaKey])
+    ]);
+
+    let oldestAt = null;
+    if (Array.isArray(oldest) && oldest.length >= 2) {
+        const score = Number(oldest[1]);
+        if (Number.isFinite(score)) oldestAt = score;
+    }
+
+    const metaObj = meta && typeof meta === 'object' ? meta : {};
+    return {
+        requestsLast60s: Number(count) || 0,
+        totalObserved: Number(metaObj.totalObserved) || 0,
+        successfulObserved: Number(metaObj.successfulObserved) || 0,
+        errorsObserved: Number(metaObj.errorsObserved) || 0,
+        lastStatus: metaObj.lastStatus === '' || metaObj.lastStatus == null ? null : Number(metaObj.lastStatus),
+        lastAt: metaObj.lastAt || null,
+        secondsUntilOldestExpires: oldestAt ? Math.max(0, Math.ceil((oldestAt + USAGE_WINDOW_MS - now) / 1000)) : 0
+    };
+}
+
+async function getGoogleUsageSnapshot(keys) {
+    if (hasUsageKV()) {
+        try {
+            const persistent = await Promise.all(keys.map((_, index) => getPersistentGoogleUsage(index + 1)));
+            return keys.map((_, index) => ({
+                label: `Key ${String(index + 1).padStart(2, '0')}`,
+                ...persistent[index]
+            }));
+        } catch (error) {
+            log.warn('usage.storage_read_failed', { message: error?.message || String(error) });
+        }
+    }
+
+    pruneGoogleUsage();
+    const now = Date.now();
+    return keys.map((key, index) => {
+        const row = __googleUsage.get(key) || { timestamps: [], total: 0, success: 0, errors: 0, lastStatus: null, lastAt: null };
+        return {
+            label: `Key ${String(index + 1).padStart(2, '0')}`,
+            requestsLast60s: row.timestamps.length,
+            totalObserved: row.total,
+            successfulObserved: row.success,
+            errorsObserved: row.errors,
+            lastStatus: row.lastStatus,
+            lastAt: row.lastAt ? new Date(row.lastAt).toISOString() : null,
+            secondsUntilOldestExpires: row.timestamps.length ? Math.max(0, Math.ceil((row.timestamps[0] + USAGE_WINDOW_MS - now) / 1000)) : 0
+        };
+    });
+}
 function rotateKeysByHealth(keys) {
     // Randomize first (keeps load spread across otherwise-equal keys),
     // then stable-sort healthier keys first.
@@ -631,6 +794,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                     signal: controller.signal
                 }
             );
+            recordGoogleAttempt(currentKey, upstream.status, geminiKeys.indexOf(currentKey) + 1);
         } finally {
             clearTimeout(timeoutId);
             if (signal) signal.removeEventListener('abort', onAbort);
@@ -939,6 +1103,20 @@ async function handler(req, res) {
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
+    }
+
+    const usageGeminiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
+        .split(',').map(k => k.trim()).filter(Boolean);
+
+    if (req.method === 'GET' && String(req.query?.mode || '') === 'usage') {
+        return res.status(200).json({
+            source: 'virtual-bot-observed-backend-requests',
+            quota: { rpm: null, tpm: null, rpd: null, note: 'Google live quota is not exposed by the Gemini API key. These are only real requests observed by this backend instance.' },
+            instanceScoped: !hasUsageKV(),
+            storage: hasUsageKV() ? 'vercel-kv' : 'memory-fallback',
+            generatedAt: new Date().toISOString(),
+            keys: await getGoogleUsageSnapshot(usageGeminiKeys)
+        });
     }
 
     if (req.method !== 'POST') {
