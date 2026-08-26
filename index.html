@@ -1706,7 +1706,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // =====================================================
     // گزارش باگ
     // =====================================================
-    const BUG_REPORT_ENDPOINT = 'https://script.google.com/macros/s/AKfycby9_zHGFJWl25s_LzW5jvpxLcW39EpgV0QqSRvxCookWMc5weujZoRpzlJAzP8TjlEGig/exec';
+    const BUG_REPORT_ENDPOINT = 'https://notify-admin-iota.vercel.app/api/bugreports';
 
     async function sendBugReport() {
         const textEl = document.getElementById('bugReportText');
@@ -1726,10 +1726,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
         try {
             const uName = (localStorage.getItem('virtual_custom_name') || '').trim() || 'ناشناس';
-            await fetch(BUG_REPORT_ENDPOINT, {
+            const res = await fetch(BUG_REPORT_ENDPOINT, {
                 method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     userName: uName,
                     message: message,
@@ -1737,6 +1736,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     userAgent: navigator.userAgent
                 })
             });
+            if (!res.ok) throw new Error('bad status');
             statusEl.style.color = '#4ade80';
             statusEl.textContent = 'ارسال شد، ممنون از گزارشت 🙏';
             textEl.value = '';
