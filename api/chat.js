@@ -1931,6 +1931,44 @@ async function handler(req, res) {
             });
         }
 
+        // FIX (root cause of "Requests ending with a model turn are not
+        // supported" / INVALID_ARGUMENT 400): Gemini rejects any request
+        // whose `contents` array does not end on a `user` turn. This can
+        // happen whenever the client's `history` already ends on a `model`
+        // turn - e.g. the current user message failed to get appended to
+        // history before being sent, or a duplicate/out-of-order request
+        // race left the last turn as the bot's previous reply. Rather than
+        // trying to special-case every way the frontend could produce that
+        // shape, guarantee it here: if the last turn isn't `user`, use the
+        // actual incoming message text (searchQueryBase) as a new trailing
+        // user turn. If there's no incoming text either, fall back to
+        // dropping trailing model turns until a user turn is exposed.
+        if (contents.length > 0 && contents[contents.length - 1].role !== 'user') {
+            if (searchQueryBase && searchQueryBase.trim()) {
+                contents.push({
+                    role: 'user',
+                    parts: [{ text: searchQueryBase.trim() }]
+                });
+            } else {
+                while (
+                    contents.length > 0 &&
+                    contents[contents.length - 1].role !== 'user'
+                ) {
+                    contents.pop();
+                }
+
+                if (contents.length === 0) {
+                    return res.status(400).json({
+                        error: {
+                            message: 'متن ورودی خالی است.',
+                            type: 'invalid_file',
+                            stage: 'request_validation'
+                        }
+                    });
+                }
+            }
+        }
+
         /*
         |--------------------------------------------------------------------------
         | Web Search
