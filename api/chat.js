@@ -2663,6 +2663,22 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             _classification: classified
                         };
 
+                        // FIX (shared 429/quota): a 429 caused by project/model
+                        // quota is NOT specific to the current API key. Retrying
+                        // the same request on every key only burns more requests
+                        // and makes the UI look as if file editing never starts.
+                        // Stop the key-rotation loop immediately; the client gets
+                        // the real quota message and can retry later. Per-key
+                        // rate limits/auth failures still continue to the next key.
+                        if (classified.category === 'quota_exhausted') {
+                            log.warn('model.shared_quota_stop', {
+                                model: currentModel,
+                                key: keyLabel(geminiKeys, currentKey),
+                                status: classified.status
+                            });
+                            break outerLoop;
+                        }
+
                         // BUGFIX (silent empty reply after a tool call): this
                         // specific error means the model itself returned an
                         // empty/blocked reply right after reading an
