@@ -1473,6 +1473,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         #connectionStatus.show { transform: translateX(-50%) translateY(0); }
         #connectionStatus.reconnected { background: var(--success); }
 </style>
+
+<style>
+.api-usage-wrap{position:relative}.api-usage-panel{display:none;position:absolute;top:calc(100% + 10px);right:0;width:min(390px,calc(100vw - 28px));z-index:100;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:14px;backdrop-filter:blur(18px)}.api-usage-panel.active{display:block;animation:fadeIn .16s ease}.api-usage-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.api-usage-title{font-weight:800;font-size:.9rem}.api-usage-sub{font-size:.7rem;color:var(--text-muted);line-height:1.45}.api-usage-summary{padding:10px;border:1px solid var(--border-soft);border-radius:12px;background:var(--bg-card);margin-bottom:10px}.api-usage-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border-soft);font-size:.75rem}.api-usage-row:last-child{border-bottom:0}.api-usage-key{font-weight:700}.api-usage-count{font-variant-numeric:tabular-nums}.api-usage-status{font-size:.66rem;color:var(--text-muted)}.api-usage-refresh{border:1px solid var(--border);background:transparent;color:var(--text-main);border-radius:8px;padding:5px 8px;cursor:pointer}.api-usage-note{margin-top:9px;font-size:.67rem;color:var(--text-muted);line-height:1.5}.api-usage-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-2);margin-left:5px}.api-usage-dot.warn{background:var(--danger)}
+</style>
 </head>
 <body>
 
@@ -1562,6 +1566,21 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                         <div class="notif-list" id="notifList">
                             <div class="notif-empty">در حال بارگذاری...</div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="api-usage-wrap">
+                    <button class="icon-btn" id="apiUsageBtn" onclick="toggleApiUsage(event)" title="مصرف API گوگل">
+                        <i class="lucide-icon" data-lucide="activity"></i>
+                    </button>
+                    <div class="api-usage-panel" id="apiUsagePanel">
+                        <div class="api-usage-head">
+                            <div><div class="api-usage-title">⚡ Google API Usage</div><div class="api-usage-sub">مصرف واقعی ثبت‌شده توسط Backend در ۶۰ ثانیه اخیر</div></div>
+                            <button class="api-usage-refresh" onclick="refreshApiUsage(event)">↻</button>
+                        </div>
+                        <div class="api-usage-summary" id="apiUsageSummary">در حال دریافت...</div>
+                        <div id="apiUsageKeys"></div>
+                        <div class="api-usage-note">⚠️ این پنل سقف RPM/TPM/RPD گوگل را حدس نمی‌زند. اعداد فقط Requestهای واقعی Virtual Bot هستند. اگر Vercel KV تنظیم شده باشد، Usage بین instanceها مشترک و پایدارتر است؛ در غیر این صورت فقط حافظه همان instance است.</div>
                     </div>
                 </div>
                 <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
@@ -4004,7 +4023,37 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const l = (lang || '').toLowerCase();
         if (/<!doctype html|<html[\s>]/i.test(code)) return code;
         if (['css'].includes(l)) {
-            return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"><style>${code}</style></head><body><p>پیش‌نمایش CSS — این متن نمونه برای دیدن استایل است.</p><div class="box">Box</div></body></html>`;
+            return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"><style>${code}</style></head><body><p>پیش‌نمایش CSS — این متن نمونه برای دیدن استایل است.</p><div class="box">Box</div>
+<script>
+(function setupApiUsagePanel(){
+    let timer=null;
+    function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+    window.refreshApiUsage=async function(e){
+        if(e) e.stopPropagation();
+        const summary=document.getElementById('apiUsageSummary'), list=document.getElementById('apiUsageKeys');
+        if(!summary||!list)return;
+        summary.textContent='در حال دریافت...'; list.innerHTML='';
+        try{
+            const r=await fetch('/api/chat?mode=usage',{cache:'no-store'});
+            const d=await r.json();
+            if(!r.ok) throw new Error(d?.error?.message||'usage failed');
+            const total=(d.keys||[]).reduce((n,k)=>n+(k.requestsLast60s||0),0);
+            const errors=(d.keys||[]).reduce((n,k)=>n+(k.lastStatus>=400?1:0),0);
+            const storageLabel=d.storage==='vercel-kv'?'🟢 Vercel KV':'🟡 حافظه موقت';
+            summary.innerHTML=`<div class="api-usage-row"><span>کل درخواست‌های واقعی / ۶۰ ثانیه</span><strong>${total}</strong></div><div class="api-usage-row"><span>کلیدهای تنظیم‌شده</span><strong>${d.keys?.length||0}</strong></div><div class="api-usage-row"><span>Storage مصرف</span><strong>${storageLabel}</strong></div><div class="api-usage-row"><span>آخرین وضعیت خطا</span><strong>${errors?'⚠️ مشاهده شد':'🟢 بدون خطای اخیر'}</strong></div>`;
+            list.innerHTML=(d.keys||[]).map(k=>{const bad=k.lastStatus>=400; const left=k.secondsUntilOldestExpires?` · ${k.secondsUntilOldestExpires}s تا خروج قدیمی‌ترین درخواست`:''; return `<div class="api-usage-row"><span><span class="api-usage-dot ${bad?'warn':''}"></span><span class="api-usage-key">${esc(k.label)}</span></span><span class="api-usage-count">${k.requestsLast60s} درخواست <span class="api-usage-status">(${k.lastStatus||'—'}${esc(left)})</span></span></div>`;}).join('')||'<div class="api-usage-sub">هیچ کلیدی در محیط فعلی پیدا نشد.</div>';
+        }catch(err){summary.textContent='دریافت Usage ناموفق بود.'; list.innerHTML=`<div class="api-usage-sub">${esc(err.message)}</div>`;}
+    };
+    window.toggleApiUsage=function(e){
+        if(e)e.stopPropagation();
+        const p=document.getElementById('apiUsagePanel'); if(!p)return;
+        p.classList.toggle('active');
+        if(p.classList.contains('active')){refreshApiUsage(); clearInterval(timer); timer=setInterval(()=>refreshApiUsage(),5000);} else {clearInterval(timer);timer=null;}
+    };
+    document.addEventListener('click',e=>{const wrap=document.querySelector('.api-usage-wrap'),p=document.getElementById('apiUsagePanel'); if(wrap&&p&&!wrap.contains(e.target)){p.classList.remove('active');clearInterval(timer);timer=null;}});
+})();
+</script>
+</body></html>`;
         }
         if (['js', 'javascript', 'jsx'].includes(l)) {
             return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"></head><body><script>${code}<\/script></body></html>`;
