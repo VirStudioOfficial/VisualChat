@@ -455,9 +455,10 @@
             display: flex;
             flex-direction: column;
             gap: 4px;
+            scrollbar-width: none !important;
+            -ms-overflow-style: none !important;
         }
-        .history-list::-webkit-scrollbar { width: 5px; }
-        .history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        .history-list::-webkit-scrollbar { display: none !important; width: 0 !important; }
 
         .history-item {
             padding: 10px 12px;
@@ -479,7 +480,7 @@
         .history-item.active i { color: var(--accent-2); }
         .history-item-menu-btn {
             width: 26px; height: 26px; flex-shrink: 0;
-            opacity: 0; transition: opacity 0.15s;
+            opacity: 0.75; transition: opacity 0.15s;
         }
         .history-item:hover .history-item-menu-btn,
         .history-item-menu-btn:focus { opacity: 1; }
@@ -672,8 +673,11 @@
             scroll-behavior: smooth;
             --chat-box-pad-top: 22px;
         }
-        .chat-box::-webkit-scrollbar { width: 6px; }
-        .chat-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        .chat-box {
+            scrollbar-width: none !important;
+            -ms-overflow-style: none !important;
+        }
+        .chat-box::-webkit-scrollbar { display: none !important; width: 0 !important; }
 
         .message-wrapper { display: flex; flex-direction: column; max-width: 85%; }
         .message-wrapper.user { align-self: flex-start; }
@@ -927,21 +931,6 @@
             text-align: center; border-radius: 999px;
             box-shadow: 0 0 0 2px var(--bg-sidebar, #111);
         }
-        .notif-badge.dot {
-            min-width: 10px; width: 10px; height: 10px; padding: 0;
-        }
-        .notif-badge.dot-progress { background: #facc15; }
-        .notif-badge.dot-fixed { background: #4ade80; }
-        .notif-item.bug-status-item { border: 1px solid transparent; }
-        .notif-item.bug-status-in_progress { border-color: rgba(250,204,21,.35); background: rgba(250,204,21,.06); }
-        .notif-item.bug-status-fixed { border-color: rgba(74,222,128,.35); background: rgba(74,222,128,.06); }
-        .notif-item-status-badge {
-            display: inline-block; font-size: 0.65rem; font-weight: 700; padding: 1px 7px;
-            border-radius: 20px; margin-inline-start: 6px; vertical-align: middle;
-        }
-        .notif-item-status-new { background: rgba(248,113,113,.15); color: #f87171; }
-        .notif-item-status-in_progress { background: rgba(250,204,21,.15); color: #facc15; }
-        .notif-item-status-fixed { background: rgba(74,222,128,.15); color: #4ade80; }
         .notif-panel {
             display: none; position: absolute; top: calc(100% + 10px); left: 0;
             width: min(340px, 88vw); max-height: 420px; overflow-y: auto;
@@ -1721,7 +1710,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // =====================================================
     // گزارش باگ
     // =====================================================
-    const BUG_REPORT_ENDPOINT = 'https://notify-admin-iota.vercel.app/api/bugreports';
+    const BUG_REPORT_ENDPOINT = 'https://script.google.com/macros/s/AKfycby9_zHGFJWl25s_LzW5jvpxLcW39EpgV0QqSRvxCookWMc5weujZoRpzlJAzP8TjlEGig/exec';
 
     async function sendBugReport() {
         const textEl = document.getElementById('bugReportText');
@@ -1741,22 +1730,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
         try {
             const uName = (localStorage.getItem('virtual_custom_name') || '').trim() || 'ناشناس';
-            const res = await fetch(BUG_REPORT_ENDPOINT, {
+            await fetch(BUG_REPORT_ENDPOINT, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
                     userName: uName,
                     message: message,
                     model: typeof currentModel !== 'undefined' ? currentModel : '',
-                    userAgent: navigator.userAgent,
-                    clientId: getBugClientId()
+                    userAgent: navigator.userAgent
                 })
             });
-            if (!res.ok) throw new Error('bad status');
             statusEl.style.color = '#4ade80';
             statusEl.textContent = 'ارسال شد، ممنون از گزارشت 🙏';
             textEl.value = '';
-            if (typeof fetchBugStatuses === 'function') fetchBugStatuses();
         } catch (err) {
             statusEl.style.color = '#f87171';
             statusEl.textContent = 'ارسال نشد، دوباره امتحان کن';
@@ -1836,40 +1823,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     // ===== Notification bell (Changelog از پنل ادمین جدا) =====
     const NOTIF_API_URL = 'https://notify-admin-iota.vercel.app/api/notifications';
-    const BUGSTATUS_API_URL = 'https://notify-admin-iota.vercel.app/api/bugreports';
     const NOTIF_SEEN_KEY = 'vc_notif_seen_ids';
-    const BUG_CLIENT_ID_KEY = 'vc_bug_client_id';
-    const BUG_STATUS_SEEN_KEY = 'vc_bug_status_seen'; // { [reportId]: lastSeenStatus }
     let notifItems = [];
-    let bugStatusItems = [];
-
-    // شناسه‌ی یکتای این مرورگر - یک‌بار ساخته می‌شود و همراه هر گزارش باگ
-    // فرستاده می‌شود، تا بعداً بشود فقط گزارش‌های همین کاربر را از سرور خواند.
-    function getBugClientId() {
-        let id = localStorage.getItem(BUG_CLIENT_ID_KEY);
-        if (!id) {
-            id = 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
-            localStorage.setItem(BUG_CLIENT_ID_KEY, id);
-        }
-        return id;
-    }
 
     function getSeenNotifIds() {
         try { return JSON.parse(localStorage.getItem(NOTIF_SEEN_KEY) || '[]'); }
         catch (e) { return []; }
     }
-    function getSeenBugStatuses() {
-        try { return JSON.parse(localStorage.getItem(BUG_STATUS_SEEN_KEY) || '{}'); }
-        catch (e) { return {}; }
-    }
     function markAllNotifsSeen() {
         const ids = notifItems.map(n => n.id);
         localStorage.setItem(NOTIF_SEEN_KEY, JSON.stringify(ids));
-        // وضعیت‌های در حال بررسی/رفع شده هم که الان دیده شدن، از حالت "جدید دیده‌نشده" خارج می‌شن
-        // تا دفعه‌ی بعد که زنگوله رو باز می‌کنه، اون نقطه‌ی رنگی دوباره نیاد.
-        const seenBug = getSeenBugStatuses();
-        bugStatusItems.forEach(b => { seenBug[b.id] = b.status; });
-        localStorage.setItem(BUG_STATUS_SEEN_KEY, JSON.stringify(seenBug));
         updateNotifBadge();
     }
     function updateNotifBadge() {
@@ -1877,56 +1840,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const unread = notifItems.filter(n => !seen.includes(n.id)).length;
         const badge = document.getElementById('notifBadge');
         if (!badge) return;
-
-        // اولویت نمایش زنگوله: اگر گزارش باگی هست که وضعیتش تغییر کرده و هنوز
-        // ندیده، یه نقطه‌ی رنگی (زرد=در حال بررسی، سبز=رفع شده) نشون بده -
-        // در غیر این صورت رفتار قبلی (عدد قرمز برای اعلان‌های عادی نخونده) ادامه پیدا کنه.
-        const seenBug = getSeenBugStatuses();
-        const unseenBugChanges = bugStatusItems.filter(b =>
-            (b.status === 'in_progress' || b.status === 'fixed') && seenBug[b.id] !== b.status
-        );
-        const hasFixed = unseenBugChanges.some(b => b.status === 'fixed');
-        const hasProgress = unseenBugChanges.some(b => b.status === 'in_progress');
-
-        badge.classList.remove('dot', 'dot-progress', 'dot-fixed');
-        if (hasFixed || hasProgress) {
-            badge.textContent = '';
-            badge.classList.add('dot', hasFixed ? 'dot-fixed' : 'dot-progress');
-            badge.style.display = 'block';
-        } else if (unread > 0) {
+        if (unread > 0) {
             badge.textContent = unread > 99 ? '99+' : unread;
             badge.style.display = 'block';
         } else {
             badge.style.display = 'none';
         }
     }
-    const BUG_STATUS_LABELS = { new: 'جدید', in_progress: 'در حال بررسی', fixed: 'رفع شده' };
     function renderNotifList() {
         const list = document.getElementById('notifList');
         if (!list) return;
-
-        // گزارش‌های خود کاربر (اگر باشند) بالای لیست، بعد اعلان‌های عمومی.
-        const bugHtml = bugStatusItems.map(b => `
-            <div class="notif-item bug-status-item bug-status-${b.status}">
-                <div class="notif-item-title">
-                    گزارش شما ثبت شد
-                    <span class="notif-item-status-badge notif-item-status-${b.status}">${BUG_STATUS_LABELS[b.status] || b.status}</span>
-                </div>
-                <div class="notif-item-body">${escapeHtmlNotif(b.message || '')}</div>
-                <div class="notif-item-date">${b.createdAt ? new Date(b.createdAt).toLocaleDateString('fa-IR') : ''}</div>
-            </div>
-        `).join('');
-
-        const notifHtml = notifItems.map(n => `
+        if (!notifItems.length) {
+            list.innerHTML = '<div class="notif-empty">فعلاً اعلانی نیست.</div>';
+            return;
+        }
+        list.innerHTML = notifItems.map(n => `
             <div class="notif-item">
                 <div class="notif-item-title">${escapeHtmlNotif(n.title || '')}</div>
                 <div class="notif-item-body">${escapeHtmlNotif(n.body || '')}</div>
                 <div class="notif-item-date">${escapeHtmlNotif(n.date || '')}</div>
             </div>
         `).join('');
-
-        const combined = bugHtml + notifHtml;
-        list.innerHTML = combined || '<div class="notif-empty">فعلاً اعلانی نیست.</div>';
     }
     function escapeHtmlNotif(str) {
         const div = document.createElement('div');
@@ -1952,19 +1886,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (list) list.innerHTML = '<div class="notif-empty">دریافت اعلان‌ها ممکن نشد.</div>';
         }
     }
-    async function fetchBugStatuses() {
-        try {
-            const clientId = getBugClientId();
-            const res = await fetch(`${BUGSTATUS_API_URL}?clientId=${encodeURIComponent(clientId)}&t=${Date.now()}`, { cache: 'no-store' });
-            if (!res.ok) throw new Error('bad response');
-            const data = await res.json();
-            bugStatusItems = Array.isArray(data.items) ? data.items : [];
-            renderNotifList();
-            updateNotifBadge();
-        } catch (e) {
-            // اگر خطا بخوره، فقط گزارش‌های باگ نمایش داده نمی‌شن؛ اعلان‌های عمومی مثل قبل کار می‌کنن.
-        }
-    }
     function toggleNotifPanel() {
         const panel = document.getElementById('notifPanel');
         if (!panel) return;
@@ -1976,8 +1897,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
     function initNotifSystem() {
         fetchNotifs();
-        fetchBugStatuses();
-        setInterval(fetchBugStatuses, 60000); // هر ۱ دقیقه چک کن وضعیت گزارش‌ها تغییر کرده یا نه
         document.addEventListener('click', (e) => {
             const wrap = document.getElementById('notifWrap');
             const panel = document.getElementById('notifPanel');
