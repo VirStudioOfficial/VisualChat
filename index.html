@@ -1475,7 +1475,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 </style>
 
 <style>
-.api-usage-wrap{position:relative}.api-usage-panel{display:none;position:absolute;top:calc(100% + 10px);right:0;width:min(390px,calc(100vw - 28px));z-index:100;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:14px;backdrop-filter:blur(18px)}.api-usage-panel.active{display:block;animation:fadeIn .16s ease}.api-usage-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.api-usage-title{font-weight:800;font-size:.9rem}.api-usage-sub{font-size:.7rem;color:var(--text-muted);line-height:1.45}.api-usage-summary{padding:10px;border:1px solid var(--border-soft);border-radius:12px;background:var(--bg-card);margin-bottom:10px}.api-usage-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border-soft);font-size:.75rem}.api-usage-row:last-child{border-bottom:0}.api-usage-key{font-weight:700}.api-usage-count{font-variant-numeric:tabular-nums}.api-usage-status{font-size:.66rem;color:var(--text-muted)}.api-usage-refresh{border:1px solid var(--border);background:transparent;color:var(--text-main);border-radius:8px;padding:5px 8px;cursor:pointer}.api-usage-note{margin-top:9px;font-size:.67rem;color:var(--text-muted);line-height:1.5}.api-usage-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-2);margin-left:5px}.api-usage-dot.warn{background:var(--danger)}
+.api-usage-wrap{position:relative}.api-usage-panel{display:none;position:absolute;top:calc(100% + 10px);left:0;right:auto;width:min(390px,calc(100vw - 28px));z-index:100;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:14px;backdrop-filter:blur(18px)}.api-usage-panel.active{display:block;animation:fadeIn .16s ease}.api-usage-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.api-usage-title{font-weight:800;font-size:.9rem}.api-usage-sub{font-size:.7rem;color:var(--text-muted);line-height:1.45}.api-usage-summary{padding:10px;border:1px solid var(--border-soft);border-radius:12px;background:var(--bg-card);margin-bottom:10px}.api-usage-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border-soft);font-size:.75rem}.api-usage-row:last-child{border-bottom:0}.api-usage-key{font-weight:700}.api-usage-count{font-variant-numeric:tabular-nums}.api-usage-status{font-size:.66rem;color:var(--text-muted)}.api-usage-refresh{border:1px solid var(--border);background:transparent;color:var(--text-main);border-radius:8px;padding:5px 8px;cursor:pointer}.api-usage-note{margin-top:9px;font-size:.67rem;color:var(--text-muted);line-height:1.5}.api-usage-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-2);margin-left:5px}.api-usage-dot.warn{background:var(--danger)}
 </style>
 </head>
 <body>
@@ -5123,7 +5123,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if(e)e.stopPropagation();
         const p=document.getElementById('apiUsagePanel'); if(!p)return;
         p.classList.toggle('active');
-        if(p.classList.contains('active')){refreshApiUsage(); clearInterval(timer); timer=setInterval(()=>refreshApiUsage(),5000);} else {clearInterval(timer);timer=null;}
+        if(p.classList.contains('active')){
+            refreshApiUsage();
+            clearInterval(timer);
+            timer=setInterval(()=>refreshApiUsage(),5000);
+            requestAnimationFrame(()=>{
+                const wrap=p.parentElement, rect=wrap?.getBoundingClientRect();
+                if(!rect)return;
+                const width=p.getBoundingClientRect().width;
+                p.style.left='0'; p.style.right='auto';
+                if(rect.left + width > window.innerWidth - 8){
+                    p.style.left='auto'; p.style.right='0';
+                }
+            });
+        } else {clearInterval(timer);timer=null;}
     };
     document.addEventListener('click',e=>{const wrap=document.querySelector('.api-usage-wrap'),p=document.getElementById('apiUsagePanel'); if(wrap&&p&&!wrap.contains(e.target)){p.classList.remove('active');clearInterval(timer);timer=null;}});
 })();
