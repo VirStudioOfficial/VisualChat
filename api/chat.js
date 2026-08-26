@@ -91,14 +91,20 @@ function classifyGeminiError(error) {
     }
 
     if (status === 429 || /resource_exhausted|quota|rate.?limit|too many requests/.test(normalized)) {
-        const quota = /resource_exhausted|quota/.test(normalized);
+        // A bare 429 is NOT automatically a broken-key signal. Google can
+        // return RESOURCE_EXHAUSTED for project/model quota or shared RPM/TPM
+        // limits, and rotating 12 keys from the same project will not fix it.
+        // Only classify it as key-specific when the provider message clearly
+        // points at that individual credential rather than a shared quota.
+        const sharedQuota =
+            /resource_exhausted|quota|project.?quota|resource.?exhausted|rpm|tpm|requests?.*minute|rate.?limit/.test(normalized);
         return {
-            category: quota ? 'quota_exhausted' : 'rate_limit',
+            category: sharedQuota ? 'quota_exhausted' : 'rate_limit',
             retryable: true,
-            keySpecific: true,
-            message: quota
-                ? 'سهمیه مصرف این کلید/پروژه برای این درخواست در دسترس نیست. کلید بعدی بررسی می‌شود.'
-                : 'سرعت درخواست به حد مجاز رسیده است. کلید بعدی بررسی می‌شود.',
+            keySpecific: !sharedQuota,
+            message: sharedQuota
+                ? 'محدودیت سهمیه یا نرخ مصرف سرویس/پروژه فعال شده است؛ این مورد لزوماً خرابی این کلید نیست.'
+                : 'این کلید به محدودیت سرعت درخواست رسیده است؛ کلید بعدی بررسی می‌شود.',
             status: status || 429,
             providerCode,
             rawMessage
@@ -1263,9 +1269,54 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             };
         }
 
-        // Echo the model's own turn (including its functionCall parts) back
-        // into the conversation, then append one functionResponse per call,
-        // exactly as Gemini's function-calling protocol expects.
+        // Search is intentionally handled differently from the other tools.
+        // After web_search we disable tools for the rest of this question.
+        // Sending Gemini's functionCall + functionResponse pair into a second
+        // request with the `tools` field removed can make some Gemini models
+        // reject the follow-up as HTTP 400. Instead, convert the successful
+        // search result into ordinary user context for round 2. This preserves
+        // the one-search rule while keeping get_archived_file/ask_user on the
+        // normal function-calling protocol.
+        const webSearchCall = functionCalls.find(call => call.name === 'web_search');
+        if (webSearchCall) {
+            let searchResult = null;
+            let earlySearchAskUser = null;
+
+            if (onStep) {
+                try { onStep(describeToolCall(webSearchCall.name, webSearchCall.args), webSearchCall.name); } catch (_) {}
+            }
+
+            scopedSearchState.used = true;
+            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, searchCache });
+            scopedSearchState.result = result;
+            searchResult = result;
+            if (result.askUser) earlySearchAskUser = result.askUser;
+
+            if (earlySearchAskUser) {
+                return {
+                    finalText: earlySearchAskUser,
+                    finishReason: 'ASK_USER',
+                    usage: lastUsage,
+                    askUser: earlySearchAskUser
+                };
+            }
+
+            const resultText = searchResult?.result || searchResult?.message || 'نتیجه‌ای از جستجو دریافت نشد.';
+            workingContents.push({
+                role: 'user',
+                parts: [{
+                    text: `[نتیجه جستجوی وب — جستجو برای این سؤال تمام شده و دیگر هیچ ابزاری استفاده نکن]:\n${resultText}`
+                }]
+            });
+
+            // If Gemini emitted parallel calls in the same streamed turn, none
+            // of the additional calls are executed. One logical search owns
+            // the question, and the next round is tools-free.
+            continue;
+        }
+
+        // For non-search tools keep the native Gemini function-calling
+        // protocol intact (this is required by get_archived_file / ask_user).
         workingContents.push({
             role: 'model',
             parts: parts
