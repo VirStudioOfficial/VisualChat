@@ -4176,74 +4176,188 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return { displayText, edits };
     }
 
-    // هر {old,new} را فقط وقتی اعمال می‌کند که old دقیقاً و فقط یک‌بار در فایل
-    // پیدا شود؛ در غیر این‌صورت آن مورد را نادیده می‌گیرد (بدون خراب کردن بقیه فایل).
-    // نرمال‌سازی خطوط: CRLF/CR را به LF یکسان می‌کند تا مقایسه‌ی متن بین
-    // فایل اصلی (که معمولاً \r\n دارد) و متنی که مدل در پاسخش تولید کرده
-    // (که معمولاً فقط \n دارد) درست کار کند.
+    // هر {old,new} را با یک زنجیره‌ی چند مرحله‌ای (از دقیق‌ترین به مسامحه‌کارترین)
+    // اعمال می‌کند، تا وقتی مدل متن old را حرف‌به‌حرف کپی نکرده (که برای فایل‌های
+    // بزرگ خیلی رایج است) هم ویرایش بی‌جهت رد نشود:
+    //   ۱) تطابق دقیق و یکتا (بدون تغییر - رفتار قبلی)
+    //   ۲) تطابق پس از نرمال‌سازی CRLF/CR (رفتار قبلی)
+    //   ۳) تطابق پس از نرمال‌سازی فاصله/تورفتگی (فاصله‌های ابتدای خط و فاصله‌های
+    //      پیاپی را برابر می‌گیرد - بیشترین علت "مطابقت نداشت" روی فایل‌های
+    //      بزرگ همین اختلاف فاصله/تب است، نه اختلاف محتوایی واقعی)
+    //   ۴) نزدیک‌ترین تطابق فازی روی خطوط (similarity-based)، فقط وقتی یک
+    //      کاندیدای برنده‌ی واضح وجود دارد (فاصله‌ی امتیاز با کاندیدای بعدی
+    //      به‌اندازه‌ی کافی زیاد است) - تا هرگز به‌جای بخش اشتباه چیزی جایگزین
+    //      نشود. اگر بیش از یک کاندیدای نزدیک به‌هم باشد، همچنان رد می‌شود.
+    // هر مرحله فقط وقتی به مرحله‌ی بعد می‌رود که مرحله‌ی قبل matchی پیدا نکرده
+    // باشد؛ به محض یک تطابق یکتا، همان اعمال و از بقیه مراحل صرف‌نظر می‌شود.
     function normalizeLineEndings(str) {
         return typeof str === 'string' ? str.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : str;
     }
 
+    // Collapses leading indentation and repeated inner whitespace to single
+    // spaces per line, keeping line breaks intact, so "  const x = 1;" and
+    // "    const x = 1;" (or "const x  =  1;") compare as equal without
+    // touching actual code tokens.
+    function normalizeWhitespace(str) {
+        return typeof str === 'string'
+            ? normalizeLineEndings(str)
+                .split('\n')
+                .map(line => line.trim().replace(/[ \t]+/g, ' '))
+                .join('\n')
+            : str;
+    }
+
+    // Simple line-based similarity: fraction of the shorter text's lines
+    // that appear (in order, allowing gaps) in the longer text, weighted by
+    // exact line equality after whitespace normalization. Cheap, dependency
+    // free, and good enough to rank candidate windows - this never needs to
+    // be a real diff algorithm since it only breaks ties between a handful
+    // of candidate windows of near-identical length.
+    function lineSimilarity(a, b) {
+        const linesA = normalizeWhitespace(a).split('\n');
+        const linesB = normalizeWhitespace(b).split('\n');
+        const setB = new Map();
+        linesB.forEach(l => setB.set(l, (setB.get(l) || 0) + 1));
+        let matched = 0;
+        for (const l of linesA) {
+            if (setB.get(l) > 0) {
+                matched++;
+                setB.set(l, setB.get(l) - 1);
+            }
+        }
+        const denom = Math.max(linesA.length, linesB.length, 1);
+        return matched / denom;
+    }
+
+    // Slides a window of edit.old's line-length over content and returns the
+    // best-scoring window(s) by lineSimilarity. Only used as a last resort,
+    // and only ever applied when there is a single clear winner.
+    function findBestFuzzyWindow(content, oldText) {
+        const contentLines = content.split('\n');
+        const oldLineCount = oldText.split('\n').length;
+        if (oldLineCount < 2 || contentLines.length < oldLineCount) return null;
+
+        // Cap scan cost on very large files: only worth trying fuzzy match
+        // for reasonably sized targets, and this is already a fallback path
+        // that only runs after exact/normalized matching failed.
+        if (contentLines.length > 20000) return null;
+
+        let best = null; // { score, startLine, endLine, text }
+        let secondBestScore = -1;
+
+        for (let start = 0; start <= contentLines.length - oldLineCount; start++) {
+            const windowLines = contentLines.slice(start, start + oldLineCount);
+            const windowText = windowLines.join('\n');
+            const score = lineSimilarity(oldText, windowText);
+            if (!best || score > best.score) {
+                secondBestScore = best ? best.score : -1;
+                best = { score, startLine: start, endLine: start + oldLineCount, text: windowText };
+            } else if (score > secondBestScore) {
+                secondBestScore = score;
+            }
+        }
+
+        // Require a strong, unambiguous winner: high absolute similarity AND
+        // a meaningful margin over the runner-up, so a fuzzy match never
+        // silently replaces the wrong section when several similar blocks
+        // exist (e.g. repeated boilerplate).
+        if (best && best.score >= 0.72 && (best.score - secondBestScore) >= 0.12) {
+            return best;
+        }
+        return null;
+    }
+
     function applyFileEdits(originalContent, edits) {
         let content = originalContent;
-        let appliedCount = 0, failedCount = 0;
+        let appliedCount = 0, failedCount = 0, fuzzyCount = 0;
         for (const edit of (edits || [])) {
             if (!edit || typeof edit.old !== 'string' || typeof edit.new !== 'string' || !edit.old) { failedCount++; continue; }
 
-            // FIX (line-ending mismatch bug): the file on disk is almost
-            // always CRLF (\r\n), but the model virtually never reproduces
-            // \r when it echoes "old" text back in its reply — so a
-            // byte-exact indexOf() against the raw CRLF content failed
-            // every single time for CRLF files, even when the model's
-            // "old" text was otherwise a perfect, intentional copy. That
-            // showed up to the user as "متن مبدأ ویرایش با محتوای فعلی
-            // فایل مطابقت نداشت" on edits that were actually correct.
-            // Now: try an exact match first (unchanged behavior for LF
-            // files); if that fails, retry against a CRLF/CR-normalized
-            // version of both sides, and if THAT single match is found,
-            // splice the edit into the ORIGINAL (un-normalized) content at
-            // the equivalent position so we never silently rewrite the
-            // file's original line endings.
+            // Stage 1: exact, unique match (unchanged from before).
             let firstIndex = content.indexOf(edit.old);
             let lastIndex = content.lastIndexOf(edit.old);
 
-            if (firstIndex === -1 || firstIndex !== lastIndex) {
+            if (firstIndex !== -1 && firstIndex === lastIndex) {
+                content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
+                appliedCount++;
+                continue;
+            }
+
+            // Stage 2: CRLF/CR-normalized match (unchanged from before - the
+            // model almost never reproduces \r when echoing "old" text).
+            {
                 const normContent = normalizeLineEndings(content);
                 const normOld = normalizeLineEndings(edit.old);
                 const normFirst = normContent.indexOf(normOld);
                 const normLast = normContent.lastIndexOf(normOld);
 
                 if (normFirst !== -1 && normFirst === normLast) {
-                    // یک match یکتا روی نسخه‌ی نرمال‌شده پیدا شد. چون
-                    // normalizeLineEndings طول رشته را تغییر می‌دهد (\r\n
-                    // به \n)، نمی‌توان همان index را مستقیم روی content
-                    // اصلی استفاده کرد؛ به‌جایش دوباره با یک الگوی regex
-                    // که \r؟ اختیاری بین خطوط را می‌پذیرد، محل واقعی در
-                    // content اصلی را پیدا می‌کنیم.
                     const pattern = edit.old
                         .split(/\r\n|\r|\n/)
                         .map(line => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
                         .join('\\r?\\n');
-                    const re = new RegExp(pattern);
                     const matches = content.match(new RegExp(pattern, 'g')) || [];
                     if (matches.length === 1) {
-                        const m = content.match(re);
-                        firstIndex = m.index;
-                        lastIndex = m.index;
-                        content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + m[0].length);
+                        const m = content.match(new RegExp(pattern));
+                        content = content.slice(0, m.index) + edit.new + content.slice(m.index + m[0].length);
                         appliedCount++;
                         continue;
                     }
                 }
-                failedCount++;
-                continue;
             }
 
-            content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
-            appliedCount++;
+            // Stage 3: whitespace-tolerant match. Builds a regex from old's
+            // lines where each line's leading/inner whitespace is treated as
+            // \s+, so indentation-only differences (very common when a model
+            // "remembers" code instead of copying it verbatim) still resolve
+            // to a single unique location.
+            {
+                const oldLines = edit.old.split(/\r\n|\r|\n/);
+                const pattern = oldLines
+                    .map(line =>
+                        line
+                            .trim()
+                            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                            .replace(/ +/g, '\\s+')
+                    )
+                    .join('\\s*\\r?\\n\\s*');
+                try {
+                    const re = new RegExp(pattern);
+                    const matches = content.match(new RegExp(pattern, 'g')) || [];
+                    if (matches.length === 1) {
+                        const m = content.match(re);
+                        content = content.slice(0, m.index) + edit.new + content.slice(m.index + m[0].length);
+                        appliedCount++;
+                        continue;
+                    }
+                } catch (_) {
+                    // Malformed pattern (e.g. old text collapses to empty
+                    // after trimming) - fall through to fuzzy stage.
+                }
+            }
+
+            // Stage 4: fuzzy line-window match, only applied when there is a
+            // single unambiguous best candidate. This is intentionally the
+            // most conservative stage - it never guesses between two
+            // similar-looking blocks.
+            {
+                const win = findBestFuzzyWindow(content, edit.old);
+                if (win) {
+                    const contentLines = content.split('\n');
+                    const before = contentLines.slice(0, win.startLine).join('\n');
+                    const after = contentLines.slice(win.endLine).join('\n');
+                    const sep1 = win.startLine > 0 ? '\n' : '';
+                    const sep2 = win.endLine < contentLines.length ? '\n' : '';
+                    content = before + sep1 + edit.new + sep2 + after;
+                    appliedCount++;
+                    fuzzyCount++;
+                    continue;
+                }
+            }
+
+            failedCount++;
         }
-        return { content, appliedCount, failedCount };
+        return { content, appliedCount, failedCount, fuzzyCount };
     }
 
     function buildFileEditResultHtml(edits) {
@@ -4320,7 +4434,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             const fileEntry = editFileCandidates.find(f => f.name === fileName);
             if (!fileEntry) continue;
 
-            const { content, appliedCount, failedCount } = applyFileEdits(fileEntry.content, editsByFile[fileName]);
+            const { content, appliedCount, failedCount, fuzzyCount } = applyFileEdits(fileEntry.content, editsByFile[fileName]);
             if (appliedCount === 0) {
                 // هیچ ادیتی اعمال نشد (متن مبدأ با محتوای فایل مطابقت نداشت) —
                 // به‌جای سکوت کامل، به کاربر بگو چرا دکمه دانلودی نمی‌بینه.
@@ -4348,10 +4462,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // Copy/Download actions for the edited file.
             const encoded = encodeURIComponent(content);
             const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
+            // Fuzzy-applied edits matched via best-effort line similarity
+            // rather than an exact/whitespace-normalized match - flag this
+            // explicitly so the user knows to double-check that spot, since
+            // it's the one stage that isn't a guaranteed-correct match.
+            const fuzzyNote = fuzzyCount ? ` (${fuzzyCount} مورد به‌صورت تقریبی/فازی تطبیق داده شد - پیشنهاد می‌شود بررسی شود)` : '';
             const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
             html += `<div class="code-card edited-file-card">
                 <div class="code-card-head">
-                    <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}</span>
+                    <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}${fuzzyNote}</span>
                     <div class="code-actions">
                         <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
                         <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
