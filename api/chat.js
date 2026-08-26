@@ -1208,8 +1208,10 @@ const GEMINI_TOOLS = [
                     'محتوای یکی از فایل‌های قبلاً ارسال‌شده در همین گفتگو را برمی‌گرداند. این ابزار را ' +
                     'فقط زمانی صدا بزن که کاربر واقعاً به محتوای یک فایل قبلی نیاز دارد یا به آن ارجاع ' +
                     'می‌دهد (مثلاً «همون فایلی که قبلاً فرستادم رو ویرایش کن» یا «توی اون فایل دنبال X ' +
-                    'بگرد») - نه صرفاً وقتی اسم فایل یک‌بار در گفتگو ذکر شده. اسم فایل‌های موجود در آرشیو ' +
-                    'این گفتگو در پرامپت سیستم به تو داده شده است.',
+                    'بگرد») - نه صرفاً وقتی اسم فایل یک‌بار در گفتگو ذکر شده. اگر درخواست کاربر ویرایش فایل ' +
+                    'باشد، سیستم در حالت ویرایش محتوای کامل فایل را در اختیار تو می‌گذارد (تا وقتی اندازه فایل ' +
+                    'در سقف امن ویرایش باشد) و همان فایل برای inspect_file/get_file_chunk/apply_patch قابل ویرایش ' +
+                    'است. اسم فایل‌های موجود در آرشیو در پرامپت سیستم به تو داده شده است.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1418,21 +1420,52 @@ async function executeToolCall(name, args, ctx) {
             return { error: `فایلی با نام «${fileName}» در آرشیو این گفتگو پیدا نشد.` };
         }
 
-        // FIX (token/quota exhaustion): a single archived file (e.g. a full
-        // index.html) can be tens of thousands of tokens. Handing back the
-        // ENTIRE file every time it's referenced - especially since it then
-        // rides along in workingContents for every subsequent tool round in
-        // the same turn - was spiking single-request token usage well above
-        // a normal message and burning through per-minute token quota fast,
-        // even across just 1-2 user messages. Cap what's returned so a huge
-        // file can still be searched/discussed without blowing the budget;
-        // the model is told the file was truncated so it doesn't silently
-        // assume it saw everything.
-        const MAX_ARCHIVED_FILE_CHARS = 70000; // raised from 40000 alongside MAX_TOOL_ROUNDS increase - edit flows need to see enough of a heavy file to build a matching patch
+        // Archive reads have two deliberate budgets:
+        //   - normal read/discussion: keep the historical 70k character cap
+        //   - file-edit request: return the complete archived file so the
+        //     editor can reason about the real structure and patch the real file.
+        // The edit budget is intentionally larger than the current project
+        // files (which are normally <500KB), while still preventing an
+        // accidental multi-megabyte archive entry from being injected into
+        // a single Gemini round.
+        const MAX_ARCHIVED_FILE_CHARS_READ = 70000;
+        const MAX_ARCHIVED_FILE_CHARS_EDIT = 600 * 1024;
+        const isArchiveEdit = Boolean(ctx && ctx.fileEditIntent);
         let content = found.content || '';
         let truncated = false;
-        if (content.length > MAX_ARCHIVED_FILE_CHARS) {
-            content = content.slice(0, MAX_ARCHIVED_FILE_CHARS);
+        const archiveLimit = isArchiveEdit
+            ? MAX_ARCHIVED_FILE_CHARS_EDIT
+            : MAX_ARCHIVED_FILE_CHARS_READ;
+
+        if (content.length > archiveLimit) {
+            // In edit mode, never silently feed a partial file to the editor.
+            // Register the full file for inspect_file/get_file_chunk/apply_patch
+            // and let the agent switch to chunk-based editing instead.
+            if (isArchiveEdit) {
+                const textFiles = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+                if (!textFiles.some(f => f && f.name === found.name)) {
+                    textFiles.push(found);
+                }
+                const analysis = analyzeFileStructure(found.content || '', found.name || fileName, '');
+                const chunks = computeLogicalChunks(found.content || '', found.name || fileName, analysis);
+                log.info('agent.tool.get_archived_file.large_edit_file', {
+                    name: fileName,
+                    contentLen: found.content.length,
+                    limit: archiveLimit,
+                    lineCount: analysis.lineCount,
+                    chunkCount: chunks.length
+                });
+                return {
+                    name: found.name,
+                    type: 'file_structure',
+                    content: '',
+                    structure: `\n\n[تحلیل ساختار فایل آرشیوشده برای ویرایش]\n${formatFileStructureForModel(analysis)}\n`,
+                    chunks: chunks.map(c => ({ startLine: c.startLine, endLine: c.endLine, preview: c.preview })),
+                    truncated: true,
+                    note: `این فایل برای خواندن کامل از سقف ${Math.round(archiveLimit / 1024)}KB بزرگ‌تر است؛ محتوای کامل در حافظه‌ی ابزار باقی مانده و برای inspect_file/get_file_chunk/apply_patch در دسترس است. برای ویرایش از chunkهای واقعی استفاده کن و هرگز فایل ناقص را مبنای patch قرار نده.`
+                };
+            }
+            content = content.slice(0, archiveLimit);
             truncated = true;
         }
 
@@ -1442,15 +1475,19 @@ async function executeToolCall(name, args, ctx) {
             truncated
         });
 
-        // FIX (retry-on-archived-file produced no real edit): fileEditIntent
-        // pre-analysis (analyzeFileStructure) previously only ran for files
-        // attached directly in the current message (textFiles), never for
-        // files pulled back from the archive. That meant an edit request
-        // that resolved to an archived file (e.g. after Retry) got no
-        // structural map at all, and the file-edit round had to build one
-        // from scratch on top of already needing to construct + verify the
-        // patch - routinely running out of round budget and silently
-        // producing nothing. Give archive reads the same structural report.
+        // Archived files used for editing must enter the exact same patch
+        // pipeline as directly attached files. Keep the original archive
+        // object as the source of truth so apply_patch mutates it in-place,
+        // while registering it in textFiles makes inspect_file/get_file_chunk/
+        // apply_patch able to resolve the target by name.
+        if (isArchiveEdit) {
+            const textFiles = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+            if (!textFiles.some(f => f && f.name === found.name)) {
+                textFiles.push(found);
+            }
+        }
+
+        // Give archive reads the same structural report used by direct files.
         let structureNote = '';
         try {
             const analysis = analyzeFileStructure(content, found.name || fileName, '');
@@ -1465,7 +1502,7 @@ async function executeToolCall(name, args, ctx) {
             name: found.name,
             content,
             ...(truncated ? {
-                note: 'این فایل خیلی بزرگ بود و فقط بخش ابتدایی آن (۷۰ هزار کاراکتر اول) بازگردانده شد. اگر بخش دیگری لازم است، به کاربر بگو که فایل کامل در دسترس نیست و باید بخش خاصی از آن را دوباره بفرستد.'
+                note: `این فایل برای خواندن معمولی بزرگ بود و فقط ${archiveLimit.toLocaleString('en-US')} کاراکتر اول بازگردانده شد. اگر درخواست ویرایش داری، باید از inspect_file/get_file_chunk برای بخش واقعی موردنظر استفاده شود و نباید فایل ناقص مبنای ویرایش قرار بگیرد.`
             } : {}),
             ...(structureNote ? { structure: structureNote } : {})
         };
@@ -2124,7 +2161,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 scopedSearchState.used = true;
             }
 
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, fileEditIntent });
 
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
@@ -2388,7 +2425,9 @@ async function handler(req, res) {
         // Guard: reject any individual text file content that is absurdly large.
         // The frontend already caps this at 300KB, but the backend must not
         // trust the client - a hand-crafted request could skip that check.
-        const MAX_TEXT_FILE_CHARS = 300 * 1024;
+        // Direct code files use the same safe envelope as archived edit reads.
+        // Normal conversations still avoid injecting files unless they are relevant.
+        const MAX_TEXT_FILE_CHARS = 600 * 1024;
 
         const textFiles =
             incomingFiles.filter(
@@ -2399,7 +2438,9 @@ async function handler(req, res) {
                     f.content.length <= MAX_TEXT_FILE_CHARS
             );
 
-        const fileEditIntent = textFiles.length > 0 && looksLikeFileEditIntent(text);
+        const fileEditIntent =
+            (textFiles.length > 0 || archivedFiles.length > 0) &&
+            looksLikeFileEditIntent(text);
 
         const oversizedTextFiles =
             incomingFiles.filter(
@@ -2872,7 +2913,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         |--------------------------------------------------------------------------
         */
 
-        if (textFiles.length > 0) {
+        if (textFiles.length > 0 || (fileEditIntent && archivedFiles.length > 0)) {
             const fileNamesList =
                 textFiles
                     .map(
@@ -2894,6 +2935,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - اگر کاربر تغییر کد خواست، واقعاً تغییر را روی فایل اعمال کن.
 - ساختارهای موجود را بررسی کن و چیزهای بی‌دلیل اختراع نکن.
 - به جای بازنویسی کل فایل، فقط قسمت لازم را تغییر بده.
+
+درخواست ویرایش فایل آرشیوشده:
+- اگر کاربر می‌خواهد فایل آرشیوشده را ویرایش کنی، get_archived_file را صدا بزن. در حالت ویرایش، اگر فایل در سقف امن باشد، محتوای کامل فایل را دریافت می‌کنی و همان فایل به inspect_file/get_file_chunk/apply_patch متصل می‌شود.
+- برای فایل‌های بزرگ‌تر از سقف امن، get_archived_file فایل ناقص را برای patch به تو نمی‌دهد؛ در عوض ساختار و chunk map را می‌دهد و فایل کامل پشت ابزارهای inspect_file/get_file_chunk/apply_patch باقی می‌ماند. در این حالت فقط chunk واقعی موردنیاز را بخوان و با apply_patch خط‌محور تغییر بده.
+- فایل آرشیوی را مثل فایل مستقیم ویرایش کن: قبل از patch ساختار را بررسی کن، محدوده‌ی واقعی را از ابزار بخوان، patch را اعمال و نتیجه را validate کن و فقط بعد از موفقیت واقعی file-edit نهایی را تولید کن.
 
 دو حالت ویرایش داری - انتخاب درست بین این دو حالت مهم‌ترین قدم است:
 
@@ -3156,7 +3202,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                 // ``` fence in general, which was already
                                 // tried and reverted above for being
                                 // misleading on non-code fences).
-                                if (!fileEditStepSent && textFiles.length > 0) {
+                                if (!fileEditStepSent && (textFiles.length > 0 || fileEditIntent)) {
                                     seenTail = (seenTail + chunk).slice(-32);
                                     if (seenTail.includes('```file-edit')) {
                                         fileEditStepSent = true;
