@@ -1389,7 +1389,17 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
             for (const part of parts) {
                 if (typeof part.text === 'string') {
-                    accumulatedParts.push({ text: part.text });
+                    // FIX (root cause of "Function call is missing a
+                    // thought_signature"): in the generateContent API,
+                    // Gemini can attach `thoughtSignature` metadata to ANY
+                    // part - not only functionCall parts, a text part right
+                    // before a functionCall can carry it too. This must be
+                    // preserved and resent unmodified on every later turn
+                    // (stateless multi-turn requirement per Google's docs),
+                    // so it is copied through here rather than dropped.
+                    const textPart = { text: part.text };
+                    if (part.thoughtSignature) textPart.thoughtSignature = part.thoughtSignature;
+                    accumulatedParts.push(textPart);
                     // If this event also contains the tool call, its text is
                     // not a valid user-facing preamble. Otherwise use the
                     // selective guard above: normal turns stream immediately,
@@ -1398,7 +1408,20 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         handleStreamText(part.text);
                     }
                 } else if (part.functionCall) {
-                    accumulatedParts.push({ functionCall: part.functionCall });
+                    // FIX (root cause of "Function call is missing a
+                    // thought_signature in functionCall parts"): previously
+                    // only `{ functionCall: part.functionCall }` was kept,
+                    // silently dropping any `thoughtSignature` Gemini
+                    // attached to this same part. That stripped part was
+                    // then resent as the model's turn on the NEXT round
+                    // (e.g. right after get_archived_file), and Gemini
+                    // rejects a functionCall that is missing its required
+                    // signature with a 400 INVALID_ARGUMENT. Now the
+                    // signature is copied through untouched, exactly as
+                    // received, so the resent turn is byte-for-byte valid.
+                    const fcPart = { functionCall: part.functionCall };
+                    if (part.thoughtSignature) fcPart.thoughtSignature = part.thoughtSignature;
+                    accumulatedParts.push(fcPart);
                 }
             }
         };
