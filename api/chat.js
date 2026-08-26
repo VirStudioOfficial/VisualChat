@@ -1768,11 +1768,24 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 }
             }
 
+            // Surface Gemini's own reason (status + message), not just our
+            // generic Persian fallback, so it's possible to tell apart a
+            // real daily quota exhaustion (RESOURCE_EXHAUSTED) from a
+            // per-minute rate limit (429 without RESOURCE_EXHAUSTED, often
+            // hit faster when web_search is on since each turn costs 2+
+            // Gemini calls instead of 1) from anything else (auth,
+            // permission, model-not-found, etc). Both live only in the
+            // "detail" field the client already renders behind "جزئیات
+            // بیشتر", so no UI changes are needed to see them.
+            const geminiStatusCode = lastError?.status || lastError?.error?.code || null;
+            const geminiReasonMessage = (lastError && (lastError.message || lastError.error?.message)) || 'unknown';
+
             log.error('request.all_models_failed', {
                 mode: 'stream',
                 attemptsTried,
                 totalPossible: modelsToTry.length * geminiKeys.length,
-                lastError: (lastError && (lastError.message || lastError.error?.message)) || 'unknown'
+                geminiStatusCode,
+                lastError: geminiReasonMessage
             });
 
             res.write(
@@ -1785,7 +1798,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         type: (lastError && lastError.type) || 'model_error',
                         stage: 'stream_generation',
                         detail:
-                            ((lastError && (lastError.message || lastError.error?.message)) || 'all models/keys failed') +
+                            `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}: ${geminiReasonMessage}` +
                             ` (attempts: ${attemptsTried}/${modelsToTry.length * geminiKeys.length})`
                     }
                 })}\n\n`
