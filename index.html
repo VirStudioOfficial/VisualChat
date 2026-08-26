@@ -2764,7 +2764,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
             'gif': 'image/gif', 'webp': 'image/webp', 'pdf': 'application/pdf',
             'txt': 'text/plain', 'doc': 'application/msword',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'zip': 'application/zip'
         };
         return mimeMap[ext] || 'application/octet-stream';
     }
@@ -2891,6 +2891,88 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let filesProcessingCount = 0;
     const cancelledPreviewIds = new Set();
 
+    // ===== ZIP text/code extraction =====
+    // .zip is a container, not a model-readable text file. Extract supported
+    // text/code entries locally and feed them into the normal multi-file memory.
+    async function readZipEntries(file) {
+        const buffer = await file.arrayBuffer();
+        const view = new DataView(buffer);
+        const bytes = new Uint8Array(buffer);
+        const utf8 = new TextDecoder('utf-8', { fatal: false });
+        const u16 = o => view.getUint16(o, true);
+        const u32 = o => view.getUint32(o, true);
+
+        let eocd = -1;
+        const start = Math.max(0, bytes.length - 65557);
+        for (let i = bytes.length - 22; i >= start; i--) {
+            if (u32(i) === 0x06054b50) { eocd = i; break; }
+        }
+        if (eocd < 0) throw new Error('ZIP_EOCD_NOT_FOUND');
+
+        const totalEntries = u16(eocd + 10);
+        const centralSize = u32(eocd + 12);
+        const centralOffset = u32(eocd + 16);
+        if (totalEntries === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
+            throw new Error('ZIP64_UNSUPPORTED');
+        }
+
+        const entries = [];
+        let p = centralOffset;
+        const MAX_ZIP_ENTRIES = 100;
+        const MAX_TOTAL_TEXT_BYTES = 2 * 1024 * 1024;
+
+        for (let i = 0; i < totalEntries && i < MAX_ZIP_ENTRIES; i++) {
+            if (p + 46 > bytes.length || u32(p) !== 0x02014b50) throw new Error('ZIP_CENTRAL_INVALID');
+
+            const flags = u16(p + 8);
+            const method = u16(p + 10);
+            const compressedSize = u32(p + 20);
+            const uncompressedSize = u32(p + 24);
+            const nameLen = u16(p + 28);
+            const extraLen = u16(p + 30);
+            const commentLen = u16(p + 32);
+            const localOffset = u32(p + 42);
+            const nameBytes = bytes.slice(p + 46, p + 46 + nameLen);
+            const name = (flags & 0x0800)
+                ? utf8.decode(nameBytes)
+                : new TextDecoder('windows-1252').decode(nameBytes);
+            p += 46 + nameLen + extraLen + commentLen;
+
+            if (!name || name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
+            if (flags & 0x0001) continue;
+            if (compressedSize > 8 * 1024 * 1024 || uncompressedSize > 2 * 1024 * 1024) continue;
+            if (localOffset + 30 > bytes.length || u32(localOffset) !== 0x04034b50) continue;
+
+            const localNameLen = u16(localOffset + 26);
+            const localExtraLen = u16(localOffset + 28);
+            const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+            const dataEnd = dataStart + compressedSize;
+            if (dataEnd > bytes.length) continue;
+            if (!isCodeOrTextFile({ name, type: '' })) continue;
+
+            let raw;
+            if (method === 0) {
+                raw = bytes.slice(dataStart, dataEnd);
+            } else if (method === 8) {
+                if (typeof DecompressionStream !== 'function') throw new Error('ZIP_DEFLATE_UNSUPPORTED');
+                const ds = new DecompressionStream('deflate-raw');
+                const stream = new Blob([bytes.slice(dataStart, dataEnd)]).stream().pipeThrough(ds);
+                raw = new Uint8Array(await new Response(stream).arrayBuffer());
+            } else {
+                continue;
+            }
+
+            if (raw.length > 2 * 1024 * 1024) continue;
+            entries.push({ name, content: utf8.decode(raw), size: raw.length });
+        }
+
+        if (!entries.length) throw new Error('ZIP_NO_TEXT_FILES');
+        if (entries.reduce((n, e) => n + e.size, 0) > MAX_TOTAL_TEXT_BYTES) {
+            throw new Error('ZIP_TEXT_TOO_LARGE');
+        }
+        return entries;
+    }
+
     async function processIncomingFile(file) {
         if (isGenerating || !file) return;
 
@@ -2916,10 +2998,38 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // (certain clipboard/drag sources), which previously threw on
             // .startsWith(). Coerce to a string first.
             const mimeType = file.type || '';
+            const isZip = mimeType === 'application/zip' || /\.zip$/i.test(file.name || '');
             const isVideo = mimeType.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name || '');
             const isImage = mimeType.startsWith('image/');
 
-            if (isImage) {
+            if (isZip) {
+                updateFilePreviewItem(previewId, { status: 'در حال باز کردن ZIP...', statusClass: 'loading' });
+                try {
+                    const entries = await readZipEntries(file);
+                    if (cancelledPreviewIds.has(previewId)) return;
+                    for (const entry of entries) {
+                        const idx = codeFilesMemory.findIndex(f => f.name === entry.name);
+                        const item = { name: entry.name, content: entry.content, mode: 'text', sourceArchive: file.name };
+                        if (idx >= 0) codeFilesMemory[idx] = item;
+                        else codeFilesMemory.push(item);
+                    }
+                    renderCodeFilesBar();
+                    removeFileItem(previewId);
+                    showToast(`${entries.length} فایل متنی/کدی از «${file.name}» استخراج و آماده شد.`, 'success');
+                } catch (zipErr) {
+                    const messages = {
+                        ZIP_EOCD_NOT_FOUND: 'ZIP معتبر یا کامل نیست.',
+                        ZIP64_UNSUPPORTED: 'ZIP64 پشتیبانی نمی‌شود؛ یک ZIP معمولی امتحان کن.',
+                        ZIP_CENTRAL_INVALID: 'ساختار ZIP قابل خواندن نیست.',
+                        ZIP_DEFLATE_UNSUPPORTED: 'مرورگر فعلی فشرده‌سازی ZIP را پشتیبانی نمی‌کند.',
+                        ZIP_NO_TEXT_FILES: 'داخل ZIP فایل متنی/کدی قابل ویرایش پیدا نشد.',
+                        ZIP_TEXT_TOO_LARGE: 'حجم مجموع فایل‌های متنی داخل ZIP زیاد است.'
+                    };
+                    const msg = messages[zipErr?.message] || 'خواندن فایل ZIP با خطا مواجه شد.';
+                    updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                    showToast(msg, 'error');
+                }
+            } else if (isImage) {
                 const compressedBase64 = await compressImage(file, 1024, 0.7);
                 // FIX (zombie-file bug): user may have clicked the ✕ while
                 // this compression was still running — check before pushing.
@@ -3494,6 +3604,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
         const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
         const request = { textPrompt, payloadFiles, wrapper: wrapperDiv, loadingDiv };
+        wrapperDiv.__virtualRequestFiles = [
+            ...payloadFiles.map(f => ({ ...f })),
+            ...codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text' }))
+        ];
         activeLoadingDiv = loadingDiv;
 
         // FIX (multi-file bug): previously only a single text-mode
@@ -3530,6 +3644,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             loadingDiv.className = "message bot";
             wrapperDiv.appendChild(loadingDiv);
             chatBox.appendChild(wrapperDiv);
+            try { addMessageActions(wrapperDiv, 'bot'); } catch (_) {}
         }
 
         loadingDiv.innerHTML = `<span class="loader-dots"><span></span><span></span><span></span></span>`;
@@ -4073,18 +4188,44 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function buildFileEditResultHtml(edits) {
         if (!edits || !edits.length || !lastCodeFilesForEdit.length) return '';
 
-        // اگر مدل کلید "file" رو نذاشته باشه و فقط یک فایل ضمیمه بوده، همون یکی رو هدف بگیر.
-        const singleFileName = lastCodeFilesForEdit.length === 1 ? lastCodeFilesForEdit[0].name : null;
+        // Resolve the file explicitly when possible. If an older model output
+        // omits "file", infer the target from the unique file containing "old"
+        // instead of silently dropping the edit.
+        const resolveEditTarget = (edit) => {
+            const explicit = String(edit?.file || '').trim();
+            if (explicit) {
+                const exact = lastCodeFilesForEdit.find(f => f.name === explicit);
+                if (exact) return exact.name;
+                const base = explicit.split('/').pop().split('\\').pop();
+                const byBase = lastCodeFilesForEdit.filter(f => f.name.split('/').pop().split('\\').pop() === base);
+                if (byBase.length === 1) return byBase[0].name;
+            }
+            const oldText = normalizeLineEndings(String(edit?.old || ''));
+            if (!oldText) return null;
+            const candidates = lastCodeFilesForEdit.filter(f =>
+                normalizeLineEndings(f.content || '').indexOf(oldText) !== -1
+            );
+            if (candidates.length === 1) return candidates[0].name;
+            if (lastCodeFilesForEdit.length === 1) return lastCodeFilesForEdit[0].name;
+            return null;
+        };
 
         const editsByFile = {};
+        let unresolvedEdits = 0;
         for (const edit of edits) {
-            const targetName = (edit && edit.file) ? edit.file : singleFileName;
-            if (!targetName) continue;
+            const targetName = resolveEditTarget(edit);
+            if (!targetName) {
+                unresolvedEdits++;
+                continue;
+            }
             if (!editsByFile[targetName]) editsByFile[targetName] = [];
             editsByFile[targetName].push(edit);
         }
 
         let html = '';
+        if (unresolvedEdits > 0) {
+            html += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> ${unresolvedEdits} ویرایش نیاز به تعیین فایل داشت</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">برای بخشی از ویرایش‌ها نام فایل مشخص نبود یا متن تغییر در چند فایل تکراری بود؛ ویرایش‌های قابل تشخیص همچنان اعمال شدند.</div></div>`;
+        }
         for (const fileName of Object.keys(editsByFile)) {
             const fileEntry = lastCodeFilesForEdit.find(f => f.name === fileName);
             if (!fileEntry) continue;
@@ -4623,20 +4764,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function regenerateMessage(wrapper) {
-        if(isGenerating) return;
-        const botWrappers=[...document.querySelectorAll('#chatBox .message-wrapper.bot')];
-        const index=botWrappers.indexOf(wrapper);
-        if(index<0) return;
-        const users=[...document.querySelectorAll('#chatBox .message-wrapper.user')];
-        let prompt='';
-        for(let i=users.length-1;i>=0;i--){
-            if(users[i].compareDocumentPosition(wrapper)&Node.DOCUMENT_POSITION_FOLLOWING){ prompt=users[i].querySelector('.message')?.innerText||''; break; }
+        if (isGenerating || !wrapper?.isConnected) return;
+
+        let userWrapper = wrapper.previousElementSibling;
+        while (userWrapper && !userWrapper.classList.contains('user')) {
+            userWrapper = userWrapper.previousElementSibling;
         }
-        if(!prompt) return;
-        wrapper.remove();
-        const hist=chatHistoryData[currentChatId]||[];
-        for(let i=hist.length-1;i>=0;i--){if(hist[i].role==='model'){hist.splice(i,1);break;}}
-        sendToGemini(prompt,null);
+        const prompt = userWrapper?.querySelector('.message')?.innerText?.trim() || '';
+        if (!prompt) {
+            showToast('پیام اصلی برای تولید دوباره پیدا نشد.', 'warning');
+            return;
+        }
+
+        const snapshot = Array.isArray(wrapper.__virtualRequestFiles)
+            ? wrapper.__virtualRequestFiles.map(f => ({ ...f }))
+            : [];
+
+        const loadingDiv = wrapper.querySelector('.message');
+        if (!loadingDiv) return;
+        // Reuse the existing bot wrapper as a retry. sendToGemini's retry path
+        // intentionally does not push a duplicate user turn into history.
+        sendToGemini(prompt, snapshot, { retry: true, wrapper, loadingDiv });
     }
 
     function editUserMessage(wrapper){
