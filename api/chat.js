@@ -252,9 +252,26 @@ ${String(botText || '').slice(0, 500)}
 |--------------------------------------------------------------------------
 */
 
-async function fetchTavilyResults(query, tavilyKeys) {
+async function fetchTavilyResults(query, tavilyKeys, searchCache) {
     if (!tavilyKeys || tavilyKeys.length === 0) {
         return null;
+    }
+
+    // FIX (root cause of "many different searches for one message"): the
+    // outer handler retries the whole runAgentLoop from scratch on the next
+    // Gemini key/model whenever an attempt fails AFTER it already did a
+    // web_search but BEFORE it produced a final answer (timeout, upstream
+    // error, empty response, etc). Each retry used to re-run
+    // fetchTavilyResults from zero, burning a fresh Tavily search per retry
+    // even though it's the same user question. searchCache is a small
+    // Map created once per incoming HTTP request (see main handler) and
+    // passed all the way down here, so a retry that searches the same
+    // (normalized) query reuses the first attempt's result instead of
+    // hitting Tavily again.
+    const cacheKey = query.trim().toLowerCase();
+    if (searchCache && searchCache.has(cacheKey)) {
+        log.info('search.cache_hit', { queryPreview: query.slice(0, 100) });
+        return searchCache.get(cacheKey);
     }
 
     for (let i = 0; i < tavilyKeys.length; i++) {
@@ -303,7 +320,7 @@ async function fetchTavilyResults(query, tavilyKeys) {
             ) {
                 log.info('search.succeeded', { keyIndex: i + 1, resultCount: data.results.length });
 
-                return data.results
+                const formatted = data.results
                     .map(
                         r =>
                             `عنوان: ${r.title}\n` +
@@ -311,6 +328,9 @@ async function fetchTavilyResults(query, tavilyKeys) {
                             `محتوا: ${r.content}`
                     )
                     .join('\n\n---\n\n');
+
+                if (searchCache) searchCache.set(cacheKey, formatted);
+                return formatted;
             }
 
         } catch (error) {
@@ -487,7 +507,7 @@ async function executeToolCall(name, args, ctx) {
 
         log.info('agent.tool.web_search', { queryPreview: query.slice(0, 100) });
 
-        const results = await fetchTavilyResults(query, ctx.tavilyKeys);
+        const results = await fetchTavilyResults(query, ctx.tavilyKeys, ctx.searchCache);
 
         if (!results) {
             return { result: 'نتیجه‌ای برای این جستجو پیدا نشد.' };
@@ -517,7 +537,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment }) {
+async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache }) {
     const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     let lastUsage = null;
@@ -744,7 +764,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                 try { onStep(label, call.name); } catch (_) {}
             }
 
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, searchCache });
 
             // Marks the NEXT round as needing the longer timeout budget -
             // see roundNeedsMoreTime comment above.
@@ -926,6 +946,11 @@ async function handler(req, res) {
                 .map(k => k.trim())
                 .filter(Boolean)
         );
+
+        // FIX: shared across every key/model retry attempt for THIS one
+        // incoming request only (never persisted, never shared across
+        // requests) - see fetchTavilyResults comment for why this exists.
+        const searchCache = new Map();
 
         /*
         |--------------------------------------------------------------------------
@@ -1692,6 +1717,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             contents,
                             tavilyKeys,
                             archivedFiles,
+                            searchCache,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
@@ -1905,6 +1931,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         contents,
                         tavilyKeys,
                         archivedFiles,
+                        searchCache,
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
                         hasVideoAttachment,
