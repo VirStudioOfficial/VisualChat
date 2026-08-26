@@ -96,15 +96,25 @@ function classifyGeminiError(error) {
         // limits, and rotating 12 keys from the same project will not fix it.
         // Only classify it as key-specific when the provider message clearly
         // points at that individual credential rather than a shared quota.
+        const dailyOrPlanQuota =
+            /generate_content_.*requests|free.?tier|daily.?quota|quota.?exceeded|limit:?\s*\d+.*model:|exceeded your current quota/.test(normalized);
         const sharedQuota =
-            /resource_exhausted|quota|project.?quota|resource.?exhausted|rpm|tpm|requests?.*minute|rate.?limit/.test(normalized);
+            /resource_exhausted|quota|project.?quota|resource.?exhausted|\brpm\b|\btpm\b|requests?.*minute|rate.?limit/.test(normalized);
+
+        // A daily/free-tier quota is not recoverable by rotating API keys
+        // from the same project. Do not retry it, otherwise one user action
+        // can burn through every configured key and model immediately.
+        const quotaExhausted = dailyOrPlanQuota || sharedQuota;
+
         return {
-            category: sharedQuota ? 'quota_exhausted' : 'rate_limit',
-            retryable: true,
-            keySpecific: !sharedQuota,
-            message: sharedQuota
-                ? 'محدودیت سهمیه یا نرخ مصرف سرویس/پروژه فعال شده است؛ این مورد لزوماً خرابی این کلید نیست.'
-                : 'این کلید به محدودیت سرعت درخواست رسیده است؛ کلید بعدی بررسی می‌شود.',
+            category: quotaExhausted ? 'quota_exhausted' : 'rate_limit',
+            retryable: dailyOrPlanQuota ? false : !sharedQuota,
+            keySpecific: false,
+            message: dailyOrPlanQuota
+                ? 'سهمیه مصرف این مدل/پلن تمام یا محدود شده است؛ تعویض کلید کمکی نمی‌کند. لطفاً بعد از آزاد شدن سهمیه دوباره تلاش کن.'
+                : sharedQuota
+                    ? 'محدودیت سهمیه یا نرخ مصرف سرویس/پروژه فعال شده است؛ این مورد لزوماً خرابی این کلید نیست.'
+                    : 'این کلید به محدودیت سرعت درخواست رسیده است؛ کلید بعدی بررسی می‌شود.',
             status: status || 429,
             providerCode,
             rawMessage
@@ -2663,19 +2673,10 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             _classification: classified
                         };
 
-                        // FIX (shared 429/quota): a 429 caused by project/model
-                        // quota is NOT specific to the current API key. Retrying
-                        // the same request on every key only burns more requests
-                        // and makes the UI look as if file editing never starts.
-                        // Stop the key-rotation loop immediately; the client gets
-                        // the real quota message and can retry later. Per-key
-                        // rate limits/auth failures still continue to the next key.
-                        if (classified.category === 'quota_exhausted') {
-                            log.warn('model.shared_quota_stop', {
-                                model: currentModel,
-                                key: keyLabel(geminiKeys, currentKey),
-                                status: classified.status
-                            });
+                        // Daily/free-tier/project quota exhaustion is a shared
+                        // limit. Rotating keys or models cannot fix it, so stop
+                        // the retry loop immediately and surface the real reason.
+                        if (classified.category === 'quota_exhausted' && !classified.retryable) {
                             break outerLoop;
                         }
 
@@ -2854,6 +2855,12 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         ...(error?.body && typeof error.body === 'object' ? error.body : {}),
                         _classification: classified
                     };
+
+                    // Same rule as streaming: a shared/daily quota cannot be
+                    // repaired by trying another configured API key.
+                    if (classified.category === 'quota_exhausted' && !classified.retryable) {
+                        break outerLoopNonStream;
+                    }
 
                     // See identical comment in the streaming path above.
                     if (error?.body?.type === 'empty_after_tool_call') {
