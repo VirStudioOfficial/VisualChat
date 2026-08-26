@@ -4418,6 +4418,22 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // Resolve the file explicitly when possible. If an older model output
         // omits "file", infer the target from the unique file containing "old"
         // instead of silently dropping the edit.
+        //
+        // FIX (archived + line-anchored edit silently dropped): apply_patch
+        // on the backend returns editedName/suggestedOutputName with an
+        // "_edited"/"_edited2"/... suffix (nextEditedFileName), and the
+        // system prompt tells the model to put THAT name in "file" - but
+        // editFileCandidates only ever holds ORIGINAL names (from the
+        // archive/current attachment/memory), never the edited variant, so
+        // the exact/base-name match always failed for it. On top of that,
+        // line-anchored edits have no "old" text at all, so the old-text
+        // fallback also always returned null - the two failures combined
+        // meant this class of edit was silently dropped with no card and
+        // no error. Strip a trailing _edited\d* before comparing names, and
+        // fall back to the single-candidate file when there's only one
+        // file in play (very common: user is editing "the" archived file)
+        // even for edits with no "old" text.
+        const stripEditedSuffix = (name) => String(name || '').replace(/_edited\d*(?=\.[^.]*$|$)/i, '');
         const resolveEditTarget = (edit) => {
             const explicit = String(edit?.file || '').trim();
             if (explicit) {
@@ -4426,6 +4442,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const base = explicit.split('/').pop().split('\\').pop();
                 const byBase = editFileCandidates.filter(f => f.name.split('/').pop().split('\\').pop() === base);
                 if (byBase.length === 1) return byBase[0].name;
+                // Try again after stripping an "_edited"/"_edited2"/... suffix
+                // the backend adds to distinguish the patched name from the
+                // original - this is the common case for any archived-file
+                // edit, line-anchored or not.
+                const strippedBase = stripEditedSuffix(base);
+                const byStrippedBase = editFileCandidates.filter(f => stripEditedSuffix(f.name.split('/').pop().split('\\').pop()) === strippedBase);
+                if (byStrippedBase.length === 1) return byStrippedBase[0].name;
+            }
+            // Line-anchored edits carry no "old" text to match against - if
+            // there's exactly one candidate file in play, it's almost
+            // certainly the target (this mirrors the existing single-file
+            // fallback below, just reached before requiring "old").
+            if (Number.isFinite(edit?.startLine) && Number.isFinite(edit?.endLine) && editFileCandidates.length === 1) {
+                return editFileCandidates[0].name;
             }
             const oldText = normalizeLineEndings(String(edit?.old || ''));
             if (!oldText) return null;
