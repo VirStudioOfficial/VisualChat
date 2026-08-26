@@ -510,12 +510,9 @@ async function executeToolCall(name, args, ctx) {
         const results = await fetchTavilyResults(query, ctx.tavilyKeys, ctx.searchCache);
 
         if (!results) {
-            return { result: 'نتیجه‌ای برای این جستجو پیدا نشد. بر اساس اطلاعات موجود پاسخ بده.' };
+            return { result: 'نتیجه‌ای برای این جستجو پیدا نشد.' };
         }
-        return {
-            result: results,
-            instruction: 'جستجو با موفقیت انجام شد. اکنون مستقیماً و بدون صدا زدن مجدد هیچ ابزاری، پاسخ نهایی کاربر را بر اساس همین نتایج بنویس.'
-        };
+        return { result: results };
     }
 
     if (name === 'ask_user') {
@@ -541,11 +538,12 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache }) {
-    const MAX_TOOL_ROUNDS = 3;
+    const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     let lastUsage = null;
-    let totalWebSearches = 0;
-    const MAX_TOTAL_WEB_SEARCHES = 1;
+    // Question-scoped search lock: after one web_search, no tool is exposed
+    // for the remainder of this question.
+    let webSearchUsedForQuestion = false;
 
     // FIX (root cause of "video reads extremely slowly / times out"):
     // Gemini has to ingest and effectively transcode/sample the whole video
@@ -605,7 +603,7 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
                         // just emptied) when a video is attached, since some
                         // Gemini versions treat an empty tools array
                         // differently from no tools key at all.
-                        ...(disableTools ? {} : { tools: GEMINI_TOOLS })
+                        ...((disableTools || webSearchUsedForQuestion) ? {} : { tools: GEMINI_TOOLS })
                     }),
                     signal: controller.signal
                 }
@@ -624,10 +622,10 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             throw err;
         }
 
-        // Read the upstream SSE stream chunk-by-chunk, forwarding text parts
-        // to the client the moment each one arrives, while also accumulating
-        // everything (text + functionCall parts + finishReason/usage) so we
-        // still know at the end whether a tool needs to run.
+        // Read the upstream SSE stream chunk-by-chunk. In a tool-enabled
+        // round, buffer text until we know no functionCall occurred; this
+        // prevents temporary prose from appearing before a tool call. Once
+        // tools are disabled, final-answer text streams normally.
         const reader = upstream.body.getReader();
         const decoder = new TextDecoder();
         let sseBuffer = '';
@@ -646,13 +644,10 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
             for (const part of parts) {
                 if (typeof part.text === 'string') {
                     accumulatedParts.push({ text: part.text });
-                    // Forward this text chunk to the client the instant it
-                    // arrives from Google - this is the actual fix for
-                    // "everything shows up at once with a delay": previously
-                    // nothing was sent to onChunk/onStep until the *entire*
-                    // model turn had finished.
-                    if (onChunk) {
-                        try { onChunk(part.text); } catch (_) {}
+                    if (disableTools || webSearchUsedForQuestion) {
+                        if (onChunk) {
+                            try { onChunk(part.text); } catch (_) {}
+                        }
                     }
                 } else if (part.functionCall) {
                     accumulatedParts.push({ functionCall: part.functionCall });
@@ -689,10 +684,11 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
         if (functionCalls.length === 0) {
-            // Final answer - no more tools requested. Text has already been
-            // streamed to the client chunk-by-chunk via onChunk above; we
-            // still return the joined text too, so non-stream callers (and
-            // history-saving) keep working unchanged.
+            // Final answer. If this round had tools enabled, flush the
+            // buffered text only now; no pre-tool prose can leak.
+            if (!(disableTools || webSearchUsedForQuestion) && onChunk && textParts.length) {
+                try { onChunk(textParts.join('')); } catch (_) {}
+            }
             //
             // BUGFIX (silent empty reply after a tool call): if Gemini's
             // very next turn after a functionResponse (e.g. get_archived_file
@@ -741,25 +737,35 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         // a single model turn (parallel calling) - e.g. 3-4 different
         // web_search calls with slightly reworded queries, all at once. That
         // happened entirely within ONE round, so MAX_TOOL_ROUNDS never even
-        // saw it as more than one step and did nothing to stop it. Cap how
-        // many web_search calls are actually executed per round: the first
-        // one runs, any additional ones in the same batch are short-circuited
-        // with a message telling the model to use the first result instead of
-        // firing off more searches.
+        // saw it as more than one step. The runtime therefore enforces both
+        // one search per round and, more importantly, one search per question.
+        let webSearchesThisRound = 0;
+        const MAX_WEB_SEARCHES_PER_ROUND = 1;
+        let searchTriggeredThisRound = false;
+
         for (const call of functionCalls) {
             const label = describeToolCall(call.name, call.args);
 
             if (call.name === 'web_search') {
-                totalWebSearches++;
-                if (totalWebSearches > MAX_TOTAL_WEB_SEARCHES) {
+                webSearchesThisRound++;
+                if (webSearchesThisRound > MAX_WEB_SEARCHES_PER_ROUND || webSearchUsedForQuestion) {
                     responseParts.push({
                         functionResponse: {
                             name: call.name,
-                            response: { error: 'سقف ۱ بار جستجو تکمیل شده است. بلافاصله و بدون فراخوانی مجدد ابزار، پاسخ نهایی را بر اساس اطلاعات موجود بنویس.' }
+                            response: { error: 'جستجو برای این سؤال قبلاً انجام شده؛ با همان نتیجه پاسخ بده و جستجوی دیگری انجام نده.' }
                         }
                     });
                     continue;
                 }
+                searchTriggeredThisRound = true;
+            } else if (searchTriggeredThisRound || webSearchUsedForQuestion) {
+                responseParts.push({
+                    functionResponse: {
+                        name: call.name,
+                        response: { error: 'بعد از web_search ابزارها برای این سؤال غیرفعال شده‌اند؛ با نتیجهٔ جستجو پاسخ بده.' }
+                    }
+                });
+                continue;
             }
 
             if (onStep) {
@@ -768,17 +774,10 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
 
             const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, searchCache });
 
-            // Marks the NEXT round as needing the longer timeout budget -
-            // see roundNeedsMoreTime comment above.
-            if (call.name === 'get_archived_file') {
-                lastToolCallWasArchiveRead = true;
-            }
+            if (call.name === 'web_search') webSearchUsedForQuestion = true;
+            if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
 
-            if (result.askUser) {
-                // Don't bother calling any further tools this round - surface
-                // the question to the user right away.
-                earlyAskUser = result.askUser;
-            }
+            if (result.askUser) earlyAskUser = result.askUser;
 
             responseParts.push({
                 functionResponse: {
@@ -1435,8 +1434,7 @@ async function handler(req, res) {
         systemText += `
 ابزارها:
 - ابزار web_search را هر وقت واقعاً به اطلاعات به‌روز/زنده نیاز داری صدا بزن (قیمت، اخبار، رویدادها، چیزی که ممکن است بعد از آموزشت تغییر کرده باشد). برای سؤالات عمومی/ثابت (تعریف، مفهوم، تاریخ گذشته) نیازی به سرچ نیست.
-- برای سؤالات کلی مثل «قیمت گوشی»، فقط یک‌بار یک عبارت کلی سرچ کن (مثلاً "قیمت روز گوشی‌های موبایل پرفروش"). هرگز برای برندهای مختلف سرچ‌های جداگانه انجام نده.
-- قانون قطعی: در هر پیام فقط و فقط مجاز به ۱ بار استفاده از web_search هستی. پس از دریافت اولین نتیجه، بلافاصله پاسخ متنی را بنویس.
+- برای یک سؤال ساده، فقط یک‌بار سرچ کن و با همان نتایج جواب بده. دوباره سرچ کردن (با کوئری متفاوت یا حتی مشابه) فقط وقتی مجاز است که نتیجه‌ی سرچ اول واقعاً ناکافی/نامرتبط بود یا سؤال چند بخش جدا از هم دارد که هرکدام نیاز به سرچ مجزا دارند. سرچ‌های تکراری روی همان موضوع را انجام نده.
 - ابزار ask_user را فقط برای تغییرات اساسی/غیرقابل‌برگشت یا تصمیم‌هایی با چند راه‌حل متفاوت صدا بزن (مثلاً بازنویسی کامل یک فایل، حذف بخش بزرگ کد). برای کارهای کوچک یا واضح، مستقیم انجام بده و از این ابزار استفاده نکن.
 `;
 
@@ -1483,6 +1481,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - ساختارهای موجود را بررسی کن و چیزهای بی‌دلیل اختراع نکن.
 - به جای بازنویسی کل فایل، فقط قسمت لازم را تغییر بده.
 - در پایان پاسخ دقیقاً یک بلاک file-edit تولید کن.
+- وقتی بیش از یک فایل ضمیمه است، فیلد "file" برای هر آیتم اجباری است؛ نام فایل را دقیقاً از فهرست فایل‌های ضمیمه کپی کن.
+- اگر تغییر مربوط به چند فایل است، برای هر فایل آیتم جداگانه با "file" بساز.
 
 قوانین حیاتی برای فیلد "old" (در غیر این‌صورت ویرایش رد می‌شود):
 - "old" باید کاراکتر به کاراکتر (شامل فاصله‌ها، تورفتگی/indentation، و شکست خط) دقیقاً همان‌طور که در فایل اصلی آمده کپی شود؛ آن را از حافظه بازنویسی نکن.
