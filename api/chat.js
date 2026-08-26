@@ -864,6 +864,93 @@ function looksLikeFileEditIntent(text) {
     return /(?:ویرایش|ادیت|تغییر بده|تغییرش بده|اضافه کن|اضافه‌|حذف کن|پاک کن|اصلاح کن|درست کن|پیاده کن|پیاده‌|بروزرسانی کن|آپدیت کن|به‌روز کن|جایگزین کن|بازنویسی کن|اضافه کردن|حذف کردن|تغییر دادن|اصلاح کردن|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor)/i.test(t);
 }
 
+/*
+|--------------------------------------------------------------------------
+| Versioned output filename
+|--------------------------------------------------------------------------
+| اگه اسم فایل به عدد ختم بشه (index58 -> index59) عدد یکی زیاد می‌شه.
+| اگه نه، برچسب _edited اضافه می‌شه (chat.js -> chat_edited.js)، و اگه از
+| قبل _edited داشت شماره‌دار می‌شه (_edited -> _edited2 -> _edited3 ...).
+| این جلوی اون مشکل "اسم خروجی با اسم ورودی یکیه و معلوم نیست کدوم ویرایش‌شده"
+| رو می‌گیره.
+*/
+function nextEditedFileName(originalName) {
+    const name = String(originalName || '').trim();
+    if (!name) return 'edited_file';
+
+    const dotIndex = name.lastIndexOf('.');
+    const hasExt = dotIndex > 0 && dotIndex < name.length - 1;
+    const base = hasExt ? name.slice(0, dotIndex) : name;
+    const ext = hasExt ? name.slice(dotIndex) : '';
+
+    const trailingNumberMatch = base.match(/^(.*?)(\d+)$/);
+    if (trailingNumberMatch) {
+        const prefix = trailingNumberMatch[1];
+        const num = trailingNumberMatch[2];
+        const nextNum = String(Number(num) + 1).padStart(num.length, '0');
+        return `${prefix}${nextNum}${ext}`;
+    }
+
+    const editedMatch = base.match(/^(.*)_edited(\d*)$/);
+    if (editedMatch) {
+        const prefix = editedMatch[1];
+        const currentNum = editedMatch[2] ? Number(editedMatch[2]) : 1;
+        return `${prefix}_edited${currentNum + 1}${ext}`;
+    }
+
+    return `${base}_edited${ext}`;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Transactional patch engine
+|--------------------------------------------------------------------------
+| apply_patch tool اینو صدا می‌زنه. هر patch باید دقیقاً یک‌بار در فایل
+| پیدا بشه؛ اگه نشد یا مبهم بود، یه گزارش دقیق (نزدیک‌ترین context) برمی‌گرده
+| که مدل با اون old رو اصلاح کنه و دوباره صدا بزنه - هیچ حدس/fuzzy-match ی
+| در کار نیست.
+*/
+function tryApplyPatch(content, oldStr, newStr) {
+    const firstIndex = content.indexOf(oldStr);
+    const lastIndex = content.lastIndexOf(oldStr);
+
+    if (firstIndex === -1) {
+        return { success: false, reason: 'not_found' };
+    }
+    if (firstIndex !== lastIndex) {
+        return { success: false, reason: 'ambiguous' };
+    }
+    return {
+        success: true,
+        content: content.slice(0, firstIndex) + newStr + content.slice(firstIndex + oldStr.length)
+    };
+}
+
+function buildPatchFailureReport(content, oldStr, reasonText) {
+    const oldLines = String(oldStr || '').split('\n');
+    const firstLine = oldLines[0].trim();
+    const contentLines = content.split('\n');
+
+    const candidates = [];
+    contentLines.forEach((line, idx) => {
+        if (firstLine && line.includes(firstLine.slice(0, Math.min(20, firstLine.length)))) {
+            const start = Math.max(0, idx - 2);
+            const end = Math.min(contentLines.length, idx + 3);
+            candidates.push({
+                lineNumber: idx + 1,
+                context: contentLines.slice(start, end).join('\n')
+            });
+        }
+    });
+
+    return {
+        reason: reasonText,
+        candidatesFound: candidates.length,
+        candidates: candidates.slice(0, 3),
+        hint: 'old را دقیقاً از یکی از این context ها کپی کن (کاراکتر به کاراکتر، شامل فاصله‌گذاری) تا یکتا شود، سپس دوباره apply_patch را صدا بزن.'
+    };
+}
+
 function analyzeFileStructure(content, fileName = 'file', query = '') {
     const text = String(content || '');
     const lowerName = String(fileName || '').toLowerCase();
@@ -1060,6 +1147,44 @@ const GEMINI_TOOLS = [
                     },
                     required: ['question']
                 }
+            },
+            {
+                // FEATURE (transactional file patching): replaces the old
+                // "print one ```file-edit block at the end of the reply"
+                // flow. The model now calls this tool per-patch, gets an
+                // immediate success/failure result (with the nearest
+                // matching context on failure), and can retry with a
+                // corrected `old` string in the same turn - instead of
+                // silently producing a JSON block that the frontend applies
+                // with no feedback loop at all. Always call inspect_file
+                // first so `old` is copied from real content, not recalled
+                // from memory.
+                name: 'apply_patch',
+                description:
+                    'یک تغییر دقیق را روی فایل هدف اعمال می‌کند. old باید دقیقاً (کاراکتر به کاراکتر) از ' +
+                    'محتوای واقعی فایل کپی شده باشد - نه از حافظه بازسازی شود - و باید در کل فایل دقیقاً ' +
+                    'یک‌بار ظاهر شود؛ اگر متن تکراری/مبهم است، خطوط بیشتری از context اطراف را به old اضافه ' +
+                    'کن تا یکتا شود. همیشه قبل از این ابزار، inspect_file را برای همان فایل صدا بزن. اگر ' +
+                    'این ابزار خطای «پیدا نشد» یا «مبهم» برگرداند، با توجه به context/کاندیدهای برگشتی، ' +
+                    'old را اصلاح کن و دوباره صدا بزن - هرگز حدس نزن.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        file: {
+                            type: 'string',
+                            description: 'نام دقیق فایل هدف (همانی که در inspect_file استفاده شد).'
+                        },
+                        old: {
+                            type: 'string',
+                            description: 'متن دقیق و یکتا که باید جایگزین شود - کپی حرف‌به‌حرف از فایل واقعی.'
+                        },
+                        new: {
+                            type: 'string',
+                            description: 'متنی که باید جایگزین old شود.'
+                        }
+                    },
+                    required: ['file', 'old', 'new']
+                }
             }
         ]
     }
@@ -1147,6 +1272,59 @@ async function executeToolCall(name, args, ctx) {
             type: 'file_structure',
             instruction: 'این نتیجه از محتوای واقعی فایل ساخته شده است؛ قبل از file-edit از آن استفاده کن و چیزی را که در ساختار موجود است دوباره اضافه نکن.',
             structure: formatFileStructureForModel(analysis)
+        };
+    }
+
+    if (name === 'apply_patch') {
+        const fileName = String((args && args.file) || '').trim();
+        const oldStr = (args && args.old) || '';
+        const newStr = (args && args.new) || '';
+
+        if (!oldStr) {
+            return { success: false, error: 'فیلد old خالی است. یک متن دقیق برای جایگزینی لازم است.' };
+        }
+
+        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
+        if (!found) {
+            return { success: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+        }
+
+        const result = tryApplyPatch(found.content || '', oldStr, newStr);
+
+        if (!result.success) {
+            const reasonText = result.reason === 'ambiguous'
+                ? 'متن old بیش از یک‌بار در فایل تکرار شده - باید یکتا باشد'
+                : 'متن old دقیقاً در فایل پیدا نشد (احتمالاً از حافظه بازسازی شده، نه کپی واقعی)';
+            const report = buildPatchFailureReport(found.content || '', oldStr, reasonText);
+            log.warn('agent.tool.apply_patch.failed', {
+                name: found.name || fileName,
+                reason: result.reason,
+                candidatesFound: report.candidatesFound
+            });
+            return { success: false, ...report };
+        }
+
+        // FIX (in-place update so subsequent tool calls in the same turn see
+        // the patched content): mutate the found entry directly rather than
+        // just returning the new content, since inspect_file/apply_patch
+        // later in this same agent loop read ctx.textFiles again.
+        found.content = result.content;
+        found._patched = true;
+        found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
+
+        log.info('agent.tool.apply_patch.success', {
+            name: found.name || fileName,
+            editedName: found._editedName,
+            oldLen: oldStr.length,
+            newLen: newStr.length
+        });
+
+        return {
+            success: true,
+            file: found.name || fileName,
+            suggestedOutputName: found._editedName,
+            note: 'patch با موفقیت اعمال شد. اسم فایل خروجی نهایی باید ' + found._editedName + ' باشد، نه اسم فایل اصلی.'
         };
     }
 
@@ -2373,27 +2551,29 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - اگر کاربر تغییر کد خواست، واقعاً تغییر را روی فایل اعمال کن.
 - ساختارهای موجود را بررسی کن و چیزهای بی‌دلیل اختراع نکن.
 - به جای بازنویسی کل فایل، فقط قسمت لازم را تغییر بده.
-- در پایان پاسخ دقیقاً یک بلاک file-edit تولید کن.
-- وقتی بیش از یک فایل ضمیمه است، فیلد "file" برای هر آیتم اجباری است؛ نام فایل را دقیقاً از فهرست فایل‌های ضمیمه کپی کن.
-- اگر تغییر مربوط به چند فایل است، برای هر فایل آیتم جداگانه با "file" بساز.
-
 قوانین حیاتی برای فیلد "old" (در غیر این‌صورت ویرایش رد می‌شود):
 - "old" باید کاراکتر به کاراکتر (شامل فاصله‌ها، تورفتگی/indentation، و شکست خط) دقیقاً همان‌طور که در فایل اصلی آمده کپی شود؛ آن را از حافظه بازنویسی نکن.
 - "old" را تا حد امکان کوتاه نگه دار: فقط چند خط اطراف تغییر، نه یک بلوک بزرگ. برای یک تغییر کوچک، "old" فقط همان خط(های) مربوطه است، نه کل تابع/بلوک.
 - اگر باید چند جای فایل عوض شود، به‌جای یک "old" بزرگ که همه را در بر بگیرد، چند آیتم جدا در همان آرایه بساز (هر کدام "old" کوتاه و مجزا).
 - "old" باید در فایل دقیقاً یک‌بار ظاهر شود؛ اگر متنی که می‌خواهی تغییر بدهی در چند جای فایل تکرار شده، خط(های) قبل/بعدش را هم به "old" اضافه کن تا یکتا شود.
 - هرگز فاصله‌های اضافه، تب‌های متفاوت، یا خطوط خالی اضافی در "old" یا "new" وارد نکن که در فایل اصلی نیستند.
-- قبل از هر file-edit حتماً ابزار inspect_file را برای فایل هدف صدا بزن؛ فقط دیدن متن فایل کافی نیست.
-- نتیجه inspect_file را مبنای انتخاب تابع/بخش/عنصر هدف قرار بده و اگر قابلیت یا کد مشابه از قبل وجود دارد، آن را دوباره ایجاد نکن؛ همان بخش موجود را اصلاح کن.
-- اگر inspect_file نشان داد چند مورد مشابه وجود دارد، بدون تعیین هدف دقیق و یکتا file-edit نساز؛ با context کافی همان مورد درست را انتخاب کن.
 
-فرمت:
+روند اجباری ویرایش (هر مرحله قبل از بعدی):
+۱. ابزار inspect_file را برای فایل هدف صدا بزن؛ فقط دیدن متن فایل کافی نیست.
+۲. نتیجه inspect_file را مبنای انتخاب تابع/بخش/عنصر هدف قرار بده و اگر قابلیت یا کد مشابه از قبل وجود دارد، آن را دوباره ایجاد نکن؛ همان بخش موجود را اصلاح کن. اگر چند مورد مشابه وجود دارد، با context کافی همان مورد درست را انتخاب کن.
+۳. برای هر تغییر، اول ابزار apply_patch را با {file, old, new} صدا بزن. این ابزار patch را واقعاً روی فایل امتحان می‌کند و نتیجه دقیق برمی‌گرداند:
+   - اگر success:true برگشت، patch تأیید شده است.
+   - اگر success:false برگشت (پیدا نشد یا مبهم بود)، با استفاده از candidates/context برگشتی، "old" را اصلاح کن و apply_patch را دوباره برای همان تغییر صدا بزن. هرگز حدس نزن یا از fuzzy-match استفاده نکن.
+۴. فقط بعد از اینکه همه‌ی apply_patch های لازم با success:true تمام شدند، دقیقاً یک بلاک file-edit در پایان پاسخ تولید کن که شامل همان patch های تأییدشده باشد.
+۵. در فیلد "file" هر آیتم بلاک file-edit، به‌جای اسم فایل اصلی، از مقدار suggestedOutputName که apply_patch برگرداند استفاده کن (نه اسم فایلی که کاربر فرستاده) - این اسم نسخه‌ی ویرایش‌شده را از نسخه‌ی اصلی متمایز می‌کند.
+
+فرمت نهایی (بعد از تأیید همه‌ی patch ها با apply_patch):
 
 \`\`\`file-edit
 [
   {
-    "file": "نام فایل",
-    "old": "متن دقیق قدیمی (کوتاه و یکتا)",
+    "file": "suggestedOutputName که apply_patch برگرداند",
+    "old": "متن دقیق قدیمی (همانی که apply_patch تأیید کرد)",
     "new": "متن دقیق جدید"
   }
 ]
