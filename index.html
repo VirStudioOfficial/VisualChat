@@ -15,7 +15,6 @@
                     : mode;
                 document.documentElement.setAttribute('data-theme', resolved);
 
-                // انتخاب رنگ حذف شده؛ مشکی (charcoal) همیشه پالت ثابت است.
                 var c1 = '#6b7078';
                 var c2 = '#b6bac1';
                 var isCharcoal = true;
@@ -1845,13 +1844,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let currentUser = null;
     let chats = {};
     let chatHistoryData = {};
-    // FEATURE (persistent file memory): chatFileArchive[chatId] = [{name, content, savedAt}]
-    // - permanent, IndexedDB-backed copy of every text/code file ever sent in
-    // that chat. Unlike codeFilesMemory/lastCodeFilesForEdit (in-memory only,
-    // wiped after every send), this survives across messages, page reloads,
-    // and browser restarts, so a much later message can still ask about an
-    // old file. Loaded in loadChatsFromIndexedDB(), written in
-    // saveFileToArchive().
+    let chatFileArchive = {};
     let chatFileArchive = {};
     // FIX (multi-file upload bug): این قبلاً یک آبجکت تکی بود، پس وقتی چند
     // عکس/ویدیو/PDF با هم انتخاب می‌شدند هر کدوم که آخر پردازش می‌شد بقیه
@@ -2188,19 +2181,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // IndexedDB storage for conversations: each chat is a separate record,
     // so adding one message never rewrites the entire history in localStorage.
     const CHAT_DB_NAME = 'VirtualChatDB';
-    // FEATURE (persistent file memory): bumped from 1 -> 2 to add FILES_STORE
-    // below. IndexedDB only runs onupgradeneeded when the version number
-    // increases, so this bump is what actually creates the new object store
-    // for existing users who already have a v1 database on disk.
     const CHAT_DB_VERSION = 2;
     const CHAT_STORE = 'chats';
     const HISTORY_STORE = 'histories';
-    // FEATURE (persistent file memory): every text/code file the user ever
-    // sends in a chat gets a permanent copy here, keyed by chatId - separate
-    // from codeFilesMemory (which is only for the CURRENT message and gets
-    // wiped after every send). This is what lets the model find a file's
-    // content again several messages later, instead of only ever seeing its
-    // name in the chat HTML.
     const FILES_STORE = 'chatFiles';
     let chatDbPromise = null;
     let chatSaveQueue = Promise.resolve();
@@ -2307,11 +2290,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         fileRecords.forEach(r => { chatFileArchive[r.chatId] = Array.isArray(r.files) ? r.files : []; });
     }
 
-    // FEATURE (persistent file memory): saves/updates one file inside a
-    // chat's permanent archive. De-duplicated by name - re-sending a file
-    // with the same name overwrites its stored content (the user almost
-    // always means "here's the updated version"), it doesn't pile up
-    // duplicate entries.
     async function saveFileToArchive(chatId, name, content) {
         if (!chatId || !name || typeof content !== 'string') return;
         const owner = getChatOwnerKey();
@@ -2333,12 +2311,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         try { await idbDelete(FILES_STORE, `${owner}:${chatId}`); } catch (_) {}
     }
 
-    // FEATURE (persistent file memory - recency cap): everything ever sent
-    // stays in chatFileArchive/IndexedDB forever (nothing is deleted here),
-    // but only the N most recently SENT files (by savedAt) are handed to the
-    // model each turn - as names in the prompt and as what get_archived_file
-    // is allowed to return. This bounds how much a long chat's file history
-    // can cost per-request, no matter how many files accumulate over time.
     const MAX_MODEL_VISIBLE_ARCHIVED_FILES = 3;
     function recentArchivedFiles(chatId) {
         const list = chatFileArchive[chatId] || [];
@@ -2433,8 +2405,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     const defaultSettings = { theme: 'auto', c1: '#6b7078', c2: '#b6bac1', fontSize: 'normal', uiPalette: 'charcoal' };
 
-    // انتخاب رنگ حذف شده و مشکی (charcoal) همیشه پالت ثابت است، صرف‌نظر از هر
-    // چیزی که قبلاً در localStorage ذخیره شده باشد.
     function getSettings() {
         try {
             const stored = { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') };
