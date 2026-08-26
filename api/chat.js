@@ -1753,7 +1753,7 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
-    const MAX_TOOL_ROUNDS = 7; // search (if needed) + inspect_file + one or more get_file_chunk calls + apply_patch + final answer; chunk-based large-file edits legitimately need more rounds than the old whole-file flow did
+    const MAX_TOOL_ROUNDS = 5; // search (if needed) + inspect_file + one or more get_file_chunk calls + apply_patch + final answer; chunk-based large-file edits legitimately need more rounds than the old whole-file flow did
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
     // keep the first search result available to the replacement model without
