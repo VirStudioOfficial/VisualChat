@@ -3632,7 +3632,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
 
         const encodedMessage = encodeURIComponent(message);
-        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button><button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
+        const canRetry = !(errorDetail && typeof errorDetail === 'object' && errorDetail.retryable === false);
+        const retryButtonHtml = canRetry
+            ? `<button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button>`
+            : `<span class="retry-disabled-note">این خطا قابل تکرار خودکار نیست.</span>`;
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
         if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
