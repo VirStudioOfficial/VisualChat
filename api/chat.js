@@ -2015,23 +2015,72 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // exactly the "پیام یه لحظه میاد بعد غیب میشه" symptom. Detect
             // that specific case and surface a real, explained error instead
             // of a silent empty success.
+            // BUGFIX (silent empty reply after a tool call, "پاسخی دریافت
+            // نشد"): the check below used to require finishReason to be
+            // something abnormal (MAX_TOKENS, SAFETY, ...) before treating
+            // an empty reply as an error. But Gemini can also finish with a
+            // perfectly normal STOP right after a tool call (e.g. right
+            // after apply_patch succeeds) while producing zero text - no
+            // final answer, no file-edit block, nothing. That used to be
+            // returned as a "successful" empty finalText, which the client
+            // then shows as a blank bubble and falls back to its own
+            // generic "پاسخی دریافت نشد" message with no real error to
+            // retry against. Treat ANY empty reply after at least one tool
+            // round (round > 0) as the same real, explained error,
+            // regardless of finishReason, so the outer key/model retry
+            // loop actually kicks in instead of silently succeeding with
+            // nothing.
             const normalStop = !finishReason || finishReason === 'STOP';
-            if (!normalStop && textParts.length === 0 && round > 0) {
-                log.warn('agent.empty_after_tool_call', { finishReason, round });
+            if (textParts.length === 0 && round > 0) {
+                log.warn('agent.empty_after_tool_call', { finishReason, round, normalStop });
                 const err = new Error('agent_empty_after_tool_call');
                 err.status = 502;
+                // FEATURE (Continue button): if apply_patch already
+                // succeeded one or more times before the model went silent,
+                // found.content on the matching textFiles entry was mutated
+                // in-place to the partially-edited version (see
+                // apply_patch's "found.content = ..." above). Surface that
+                // partial progress here so the client can offer a "Continue"
+                // action that resumes editing from the already-patched
+                // content instead of starting the whole edit over from the
+                // original file.
+                const partialFiles = (Array.isArray(textFiles) ? textFiles : [])
+                    .filter(f => f && f._patched)
+                    .map(f => ({
+                        name: f.name,
+                        editedName: f._editedName || f.name,
+                        content: f.content || ''
+                    }));
                 err.body = {
-                    message: 'مدل بعد از خوندن فایل آرشیوشده جواب خالی برگردوند. لطفاً دوباره امتحان کن.',
+                    message: 'مدل بعد از استفاده از ابزار جواب خالی برگردوند. لطفاً دوباره امتحان کن.',
                     type: 'empty_after_tool_call',
-                    finishReason
+                    finishReason,
+                    ...(partialFiles.length ? { partialFiles, canContinue: true } : {})
                 };
                 throw err;
             }
+            // FEATURE (Continue button, MAX_TOKENS case): same idea as the
+            // empty_after_tool_call case above, but here the model DID
+            // produce text and finished with MAX_TOKENS (cut off by its own
+            // output limit) instead of going silent. Any apply_patch calls
+            // that already succeeded before the cutoff are still reflected
+            // in-place on the matching textFiles entry, so surface them the
+            // same way.
+            const partialFilesOnCutoff = finishReason === 'MAX_TOKENS'
+                ? (Array.isArray(textFiles) ? textFiles : [])
+                    .filter(f => f && f._patched)
+                    .map(f => ({
+                        name: f.name,
+                        editedName: f._editedName || f.name,
+                        content: f.content || ''
+                    }))
+                : [];
             return {
                 finalText: textParts.join(''),
                 finishReason: finishReason,
                 usage: lastUsage,
-                askUser: null
+                askUser: null,
+                ...(partialFilesOnCutoff.length ? { partialFiles: partialFilesOnCutoff } : {})
             };
         }
 
@@ -3281,7 +3330,10 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                 done: true,
                                 finishReason: agentResult.finishReason,
                                 truncated,
-                                askUser: !!agentResult.askUser
+                                askUser: !!agentResult.askUser,
+                                ...(truncated && agentResult.partialFiles?.length
+                                    ? { partialFiles: agentResult.partialFiles, canContinue: true }
+                                    : {})
                             })}\n\n`
                         );
 
@@ -3391,7 +3443,10 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         stage: 'stream_generation',
                         detail:
                             `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${geminiReasonMessage}` +
-                            ` (actual attempts: ${attemptsTried})`
+                            ` (actual attempts: ${attemptsTried})`,
+                        ...(Array.isArray(lastError?.partialFiles) && lastError.partialFiles.length
+                            ? { partialFiles: lastError.partialFiles, canContinue: true }
+                            : {})
                     }
                 })}\n\n`
             );
