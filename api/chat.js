@@ -336,27 +336,35 @@ function recordGoogleAttemptMemory(key, status) {
  * network round-trip to Gemini response latency. The write happens while
  * the current Vercel request is still active.
  */
-function recordGoogleAttempt(key, status, keyIndex) {
+async function recordGoogleAttempt(key, status, keyIndex) {
+    // Always update the in-process counter synchronously. This is the source
+    // used immediately if persistent telemetry is unavailable.
     recordGoogleAttemptMemory(key, status);
 
     if (!hasUsageKV()) return;
 
+    // IMPORTANT: do NOT fire-and-forget the persistent write. On Vercel/serverless
+    // the function can finish or be suspended before an un-awaited Promise has
+    // flushed, which made the dashboard show `0 requests` even though Gemini had
+    // already returned a real 429. The request must be counted before we move on.
     const now = Date.now();
     const id = `${now}:${Math.random().toString(36).slice(2, 10)}`;
     const zsetKey = `${USAGE_KV_PREFIX}:key:${keyIndex}`;
     const metaKey = `${USAGE_KV_PREFIX}:meta:${keyIndex}`;
     const score = String(now);
 
-    Promise.all([
-        usageKvCommand('ZADD', [zsetKey, score, id]),
-        usageKvCommand('EXPIRE', [zsetKey, String(USAGE_TTL_SECONDS)]),
-        usageKvCommand('HINCRBY', [metaKey, 'totalObserved', '1']),
-        usageKvCommand('HINCRBY', [metaKey, status >= 200 && status < 300 ? 'successfulObserved' : 'errorsObserved', '1']),
-        usageKvCommand('HSET', [metaKey, 'lastStatus', String(Number.isFinite(status) ? status : ''), 'lastAt', new Date(now).toISOString()]),
-        usageKvCommand('EXPIRE', [metaKey, String(90 * 24 * 60 * 60)])
-    ]).catch(error => {
+    try {
+        await Promise.all([
+            usageKvCommand('ZADD', [zsetKey, score, id]),
+            usageKvCommand('EXPIRE', [zsetKey, String(USAGE_TTL_SECONDS)]),
+            usageKvCommand('HINCRBY', [metaKey, 'totalObserved', '1']),
+            usageKvCommand('HINCRBY', [metaKey, status >= 200 && status < 300 ? 'successfulObserved' : 'errorsObserved', '1']),
+            usageKvCommand('HSET', [metaKey, 'lastStatus', String(Number.isFinite(status) ? status : ''), 'lastAt', new Date(now).toISOString()]),
+            usageKvCommand('EXPIRE', [metaKey, String(90 * 24 * 60 * 60)])
+        ]);
+    } catch (error) {
         log.warn('usage.storage_write_failed', { message: error?.message || String(error) });
-    });
+    }
 }
 
 function pruneGoogleUsage() {
@@ -1307,7 +1315,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     signal: controller.signal
                 }
             );
-            recordGoogleAttempt(currentKey, upstream.status, keyIndex);
+            await recordGoogleAttempt(currentKey, upstream.status, keyIndex);
         } finally {
             clearTimeout(timeoutId);
             if (signal) signal.removeEventListener('abort', onAbort);
