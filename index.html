@@ -4024,35 +4024,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (/<!doctype html|<html[\s>]/i.test(code)) return code;
         if (['css'].includes(l)) {
             return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"><style>${code}</style></head><body><p>پیش‌نمایش CSS — این متن نمونه برای دیدن استایل است.</p><div class="box">Box</div>
-<script>
-(function setupApiUsagePanel(){
-    let timer=null;
-    function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-    window.refreshApiUsage=async function(e){
-        if(e) e.stopPropagation();
-        const summary=document.getElementById('apiUsageSummary'), list=document.getElementById('apiUsageKeys');
-        if(!summary||!list)return;
-        summary.textContent='در حال دریافت...'; list.innerHTML='';
-        try{
-            const r=await fetch('/api/chat?mode=usage',{cache:'no-store'});
-            const d=await r.json();
-            if(!r.ok) throw new Error(d?.error?.message||'usage failed');
-            const total=(d.keys||[]).reduce((n,k)=>n+(k.requestsLast60s||0),0);
-            const errors=(d.keys||[]).reduce((n,k)=>n+(k.lastStatus>=400?1:0),0);
-            const storageLabel=d.storage==='vercel-kv'?'🟢 Vercel KV':'🟡 حافظه موقت';
-            summary.innerHTML=`<div class="api-usage-row"><span>کل درخواست‌های واقعی / ۶۰ ثانیه</span><strong>${total}</strong></div><div class="api-usage-row"><span>کلیدهای تنظیم‌شده</span><strong>${d.keys?.length||0}</strong></div><div class="api-usage-row"><span>Storage مصرف</span><strong>${storageLabel}</strong></div><div class="api-usage-row"><span>آخرین وضعیت خطا</span><strong>${errors?'⚠️ مشاهده شد':'🟢 بدون خطای اخیر'}</strong></div>`;
-            list.innerHTML=(d.keys||[]).map(k=>{const bad=k.lastStatus>=400; const left=k.secondsUntilOldestExpires?` · ${k.secondsUntilOldestExpires}s تا خروج قدیمی‌ترین درخواست`:''; return `<div class="api-usage-row"><span><span class="api-usage-dot ${bad?'warn':''}"></span><span class="api-usage-key">${esc(k.label)}</span></span><span class="api-usage-count">${k.requestsLast60s} درخواست <span class="api-usage-status">(${k.lastStatus||'—'}${esc(left)})</span></span></div>`;}).join('')||'<div class="api-usage-sub">هیچ کلیدی در محیط فعلی پیدا نشد.</div>';
-        }catch(err){summary.textContent='دریافت Usage ناموفق بود.'; list.innerHTML=`<div class="api-usage-sub">${esc(err.message)}</div>`;}
-    };
-    window.toggleApiUsage=function(e){
-        if(e)e.stopPropagation();
-        const p=document.getElementById('apiUsagePanel'); if(!p)return;
-        p.classList.toggle('active');
-        if(p.classList.contains('active')){refreshApiUsage(); clearInterval(timer); timer=setInterval(()=>refreshApiUsage(),5000);} else {clearInterval(timer);timer=null;}
-    };
-    document.addEventListener('click',e=>{const wrap=document.querySelector('.api-usage-wrap'),p=document.getElementById('apiUsagePanel'); if(wrap&&p&&!wrap.contains(e.target)){p.classList.remove('active');clearInterval(timer);timer=null;}});
-})();
-</script>
 </body></html>`;
         }
         if (['js', 'javascript', 'jsx'].includes(l)) {
@@ -5128,6 +5099,34 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (!navigator.onLine) updateStatus();
     })();
 
+
+(function setupApiUsagePanel(){
+    let timer=null;
+    function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+    window.refreshApiUsage=async function(e){
+        if(e) e.stopPropagation();
+        const summary=document.getElementById('apiUsageSummary'), list=document.getElementById('apiUsageKeys');
+        if(!summary||!list)return;
+        summary.textContent='در حال دریافت...'; list.innerHTML='';
+        try{
+            const r=await fetch('/api/chat?mode=usage',{cache:'no-store'});
+            const d=await r.json();
+            if(!r.ok) throw new Error(d?.error?.message||'usage failed');
+            const total=(d.keys||[]).reduce((n,k)=>n+(k.requestsLast60s||0),0);
+            const errors=(d.keys||[]).reduce((n,k)=>n+(k.lastStatus>=400?1:0),0);
+            const storageLabel=d.storage==='vercel-kv'?'🟢 Vercel KV':'🟡 حافظه موقت';
+            summary.innerHTML=`<div class="api-usage-row"><span>کل درخواست‌های واقعی / ۶۰ ثانیه</span><strong>${total}</strong></div><div class="api-usage-row"><span>کلیدهای تنظیم‌شده</span><strong>${d.keys?.length||0}</strong></div><div class="api-usage-row"><span>Storage مصرف</span><strong>${storageLabel}</strong></div><div class="api-usage-row"><span>آخرین وضعیت خطا</span><strong>${errors?'⚠️ مشاهده شد':'🟢 بدون خطای اخیر'}</strong></div>`;
+            list.innerHTML=(d.keys||[]).map(k=>{const bad=k.lastStatus>=400; const left=k.secondsUntilOldestExpires?` · ${k.secondsUntilOldestExpires}s تا خروج قدیمی‌ترین درخواست`:''; return `<div class="api-usage-row"><span><span class="api-usage-dot ${bad?'warn':''}"></span><span class="api-usage-key">${esc(k.label)}</span></span><span class="api-usage-count">${k.requestsLast60s} درخواست <span class="api-usage-status">(${k.lastStatus||'—'}${esc(left)})</span></span></div>`;}).join('')||'<div class="api-usage-sub">هیچ کلیدی در محیط فعلی پیدا نشد.</div>';
+        }catch(err){summary.textContent='دریافت Usage ناموفق بود.'; list.innerHTML=`<div class="api-usage-sub">${esc(err.message)}</div>`;}
+    };
+    window.toggleApiUsage=function(e){
+        if(e)e.stopPropagation();
+        const p=document.getElementById('apiUsagePanel'); if(!p)return;
+        p.classList.toggle('active');
+        if(p.classList.contains('active')){refreshApiUsage(); clearInterval(timer); timer=setInterval(()=>refreshApiUsage(),5000);} else {clearInterval(timer);timer=null;}
+    };
+    document.addEventListener('click',e=>{const wrap=document.querySelector('.api-usage-wrap'),p=document.getElementById('apiUsagePanel'); if(wrap&&p&&!wrap.contains(e.target)){p.classList.remove('active');clearInterval(timer);timer=null;}});
+})();
 </script>
 </body>
 </html>
