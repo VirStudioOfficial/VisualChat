@@ -3490,12 +3490,33 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         let detailsHtml = '';
         if (errorDetail && typeof errorDetail === 'object') {
             const detailId = 'errdetail-' + Math.random().toString(36).slice(2, 9);
+            const errorLabels = {
+                rate_limit: 'محدودیت سرعت درخواست',
+                quota_exhausted: 'سهمیه مصرف تمام/محدود شده',
+                invalid_api_key: 'کلید API نامعتبر',
+                permission_denied: 'دسترسی رد شد',
+                model_not_found: 'مدل پیدا نشد',
+                invalid_request: 'درخواست نامعتبر',
+                request_too_large: 'حجم درخواست بیش از حد مجاز',
+                timeout: 'پایان زمان انتظار',
+                provider_unavailable: 'سرویس هوش مصنوعی موقتاً در دسترس نیست',
+                network_error: 'خطای ارتباط شبکه',
+                empty_response: 'پاسخ خالی از مدل',
+                configuration_error: 'خطای پیکربندی',
+                internal_error: 'خطای داخلی Virtual Bot',
+                missing_api_keys: 'کلید Gemini تنظیم نشده',
+                unknown_error: 'خطای ناشناخته'
+            };
+            const category = errorDetail.category || errorDetail.type || '';
+            const categoryLabel = errorLabels[category] || category || 'نامشخص';
             const rows = [];
-            if (errorDetail.type) rows.push(`<div><span class="err-detail-label">نوع خطا:</span> ${escapeHtml(String(errorDetail.type))}</div>`);
+            if (categoryLabel) rows.push(`<div><span class="err-detail-label">نوع خطا:</span> ${escapeHtml(String(categoryLabel))}</div>`);
+            if (errorDetail.type && errorDetail.type !== category) rows.push(`<div><span class="err-detail-label">کد:</span> ${escapeHtml(String(errorDetail.type))}</div>`);
             if (errorDetail.stage) rows.push(`<div><span class="err-detail-label">مرحله:</span> ${escapeHtml(String(errorDetail.stage))}</div>`);
             if (errorDetail.detail) rows.push(`<div><span class="err-detail-label">جزئیات فنی:</span> ${escapeHtml(String(errorDetail.detail))}</div>`);
             const detailText = [
-                errorDetail.type ? `نوع: ${errorDetail.type}` : '',
+                categoryLabel ? `نوع: ${categoryLabel}` : '',
+                errorDetail.type && errorDetail.type !== category ? `کد: ${errorDetail.type}` : '',
                 errorDetail.stage ? `مرحله: ${errorDetail.stage}` : '',
                 errorDetail.detail ? `جزئیات: ${errorDetail.detail}` : ''
             ].filter(Boolean).join('\n');
