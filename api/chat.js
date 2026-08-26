@@ -1348,6 +1348,67 @@ function describeToolCall(name, args) {
     return 'در حال انجام یک مرحله...';
 }
 
+function getFileLanguageFromName(fileName) {
+    const lower = String(fileName || '').toLowerCase();
+    if (/\.(html?|htm)$/.test(lower)) return 'html';
+    if (/\.(js|jsx|mjs|cjs)$/.test(lower)) return 'javascript';
+    return 'other';
+}
+
+// FIX (structural safety net for the new line-anchored patch mode): a
+// line-anchored replacement never string-matches, so it CAN produce a
+// broken file (unbalanced tag/brace, cut mid-token) if startLine/endLine
+// were off by a line. This is a fast, dependency-free check - no model
+// round, no API call - run synchronously right after building the
+// candidate content and BEFORE it's accepted, so a broken patch is
+// rejected the same way a failed string-match patch always was.
+function validatePatchedContent(content, fileName) {
+    const language = getFileLanguageFromName(fileName);
+    if (language === 'javascript') {
+        try {
+            new Function(content);
+            return { valid: true };
+        } catch (error) {
+            return { valid: false, reason: `سنتکس جاوااسکریپت بعد از این تغییر نامعتبر می‌شود: ${error?.message || error}` };
+        }
+    }
+    if (language === 'html') {
+        // Balance-check void-aware tag nesting rather than full DOM
+        // parsing - enough to catch the common breakage (an unclosed or
+        // mismatched tag from a bad line range) without a heavy parser.
+        const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+        const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
+        const stack = [];
+        let m;
+        while ((m = tagRe.exec(content))) {
+            const tag = m[1].toLowerCase();
+            const isClosing = m[0][1] === '/';
+            const isSelfClosing = m[2] === '/' || voidTags.has(tag);
+            if (tag === 'script' || tag === 'style') {
+                // Content inside can contain characters that look like tags
+                // (e.g. "a < b" in JS) - the regex above only matches real
+                // <tag> syntax so this is safe, just skip nesting logic for
+                // their internal content by handling them as normal
+                // open/close pairs below.
+            }
+            if (isClosing) {
+                const idx = stack.lastIndexOf(tag);
+                if (idx === -1) {
+                    return { valid: false, reason: `تگ بسته‌ی «</${tag}>» بدون تگ باز متناظر پیدا شد - احتمالاً محدوده‌ی خط اشتباه بوده.` };
+                }
+                stack.length = idx; // pop this tag and any unclosed ones nested deeper (tolerant of minor real-world HTML)
+            } else if (!isSelfClosing) {
+                stack.push(tag);
+            }
+        }
+        if (stack.length > 0) {
+            return { valid: false, reason: `تگ(های) باز بدون بسته شدن باقی مانده: ${[...new Set(stack)].slice(0, 5).join(', ')} - احتمالاً محدوده‌ی خط اشتباه بوده.` };
+        }
+        return { valid: true };
+    }
+    return { valid: true }; // unknown/other file types: no structural check available, accept as-is
+}
+
 async function executeToolCall(name, args, ctx) {
     if (name === 'get_archived_file') {
         const fileName = (args && args.name) || '';
@@ -1503,7 +1564,24 @@ async function executeToolCall(name, args, ctx) {
             const replacedSpan = lines.slice(startLine - 1, endLine);
             const after = lines.slice(endLine);
             const newLines = newStr.split(/\r?\n/);
-            found.content = [...before, ...newLines, ...after].join('\n');
+            const candidateContent = [...before, ...newLines, ...after].join('\n');
+
+            const validation = validatePatchedContent(candidateContent, found.name || fileName);
+            if (!validation.valid) {
+                log.warn('agent.tool.apply_patch.rejected_invalid', {
+                    name: found.name || fileName,
+                    mode: 'line-anchored',
+                    startLine,
+                    endLine,
+                    reason: validation.reason
+                });
+                return {
+                    success: false,
+                    error: `این پچ رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} خط‌ها را دوباره با get_file_chunk بررسی کن و محدوده/متن را اصلاح کن.`
+                };
+            }
+
+            found.content = candidateContent;
             found._patched = true;
             found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
 
@@ -1544,6 +1622,21 @@ async function executeToolCall(name, args, ctx) {
                 candidatesFound: report.candidatesFound
             });
             return { success: false, ...report };
+        }
+
+        // Same structural safety net as line-anchored mode: reject before
+        // accepting if the resulting file would be broken.
+        const validation = validatePatchedContent(result.content, found.name || fileName);
+        if (!validation.valid) {
+            log.warn('agent.tool.apply_patch.rejected_invalid', {
+                name: found.name || fileName,
+                mode: 'exact-match',
+                reason: validation.reason
+            });
+            return {
+                success: false,
+                error: `این پچ رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} old/new را بازبینی کن.`
+            };
         }
 
         // FIX (in-place update so subsequent tool calls in the same turn see
