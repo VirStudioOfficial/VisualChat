@@ -111,7 +111,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css">
     <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="manifest" href="/manifest.json">
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" defer></script>
 
     <style>
         .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.1; }
@@ -1872,7 +1872,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     // ===== Notification bell =====
     const NOTIF_API_URL = 'https://notify-admin-iota.vercel.app/api/notifications';
-    var BUG_REPORT_ENDPOINT = 'https://notify-admin-iota.vercel.app/api/bugreports';
     const NOTIF_SEEN_KEY = 'vc_notif_seen_ids';
     const BUG_STATUS_SEEN_KEY = 'vc_bug_status_seen';
 
