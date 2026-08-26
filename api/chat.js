@@ -1623,7 +1623,7 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
-    const MAX_TOOL_ROUNDS = 4; // one round to search (if needed) + up to 3 rounds to answer/self-correct file-edit patches using the results; this is a hard cap, not a target
+    const MAX_TOOL_ROUNDS = 7; // search (if needed) + inspect_file + one or more get_file_chunk calls + apply_patch + final answer; chunk-based large-file edits legitimately need more rounds than the old whole-file flow did
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
     // keep the first search result available to the replacement model without
@@ -1694,14 +1694,21 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // them on what was never actually a quota problem, and only then
     // surfacing the generic "quota exhausted" message. Rounds that follow a
     // get_archived_file call now get the same longer budget as video.
+    // FIX (large-file chunk-edit flow): a round right after get_file_chunk
+    // can carry a 300+ line code chunk plus the model's own reasoning about
+    // where exactly to patch it - same "genuinely more to read/reason
+    // about than normal" situation as an archive read, so it gets the same
+    // extended budget instead of racing the standard 60s.
     const roundNeedsMoreTime = (round) =>
         hasVideoAttachment ||
-        (round > 0 && lastToolCallWasArchiveRead);
+        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasChunkRead));
     let lastToolCallWasArchiveRead = false;
+    let lastToolCallWasChunkRead = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
+        lastToolCallWasChunkRead = false; // consumed for this round; re-armed below only if this round's own tool call is a chunk read
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), ROUND_TIMEOUT_MS);
         // Also abort this round if the caller's own signal (client disconnect
@@ -2028,6 +2035,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
+            if (call.name === 'get_file_chunk') lastToolCallWasChunkRead = true;
 
             if (result.askUser) earlyAskUser = result.askUser;
 
@@ -2800,6 +2808,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - به‌جای خواندن/کپی کردن متن، فقط شماره خط شروع/پایان بخش هدف را از chunk map یا get_file_chunk بگیر.
 - apply_patch را با {file, startLine, endLine, new} صدا بزن - بدون "old". این حالت نیازی به تطبیق رشته‌ای ندارد و خطای "پیدا نشد/مبهم" در آن پیش نمی‌آید.
 - برای تشخیص خط دقیق، همیشه اول get_file_chunk را روی محدوده‌ی مشکوک بخوان تا شماره خط‌ها را از محتوای واقعی (نه حدس) تأیید کنی.
+- تعداد دفعات صدا زدن get_file_chunk را کم نگه دار: از روی نقشه‌ی chunk (structure/chunks در inspect_file) محدوده‌ی درست را حدس نزن، اما هم نباید بیش از ۲-۳ بار برای یک تغییر ساده chunk بخوانی؛ اگر ندانستی کدام chunk درست است، از عنوان/preview هر chunk کمک بگیر نه از خواندن همه‌ی آن‌ها یکی‌یکی.
 
 حالت B) متن دقیق (فقط برای فایل‌های کوچک یا تغییرات یک‌خطی ساده):
 قوانین حیاتی برای فیلد "old" (در غیر این‌صورت ویرایش رد می‌شود):
