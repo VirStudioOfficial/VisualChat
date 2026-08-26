@@ -455,10 +455,9 @@
             display: flex;
             flex-direction: column;
             gap: 4px;
-            scrollbar-width: none !important;
-            -ms-overflow-style: none !important;
         }
-        .history-list::-webkit-scrollbar { display: none !important; width: 0 !important; }
+        .history-list::-webkit-scrollbar { width: 5px; }
+        .history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
         .history-item {
             padding: 10px 12px;
@@ -480,7 +479,7 @@
         .history-item.active i { color: var(--accent-2); }
         .history-item-menu-btn {
             width: 26px; height: 26px; flex-shrink: 0;
-            opacity: 0.75; transition: opacity 0.15s;
+            opacity: 0; transition: opacity 0.15s;
         }
         .history-item:hover .history-item-menu-btn,
         .history-item-menu-btn:focus { opacity: 1; }
@@ -673,11 +672,8 @@
             scroll-behavior: smooth;
             --chat-box-pad-top: 22px;
         }
-        .chat-box {
-            scrollbar-width: none !important;
-            -ms-overflow-style: none !important;
-        }
-        .chat-box::-webkit-scrollbar { display: none !important; width: 0 !important; }
+        .chat-box::-webkit-scrollbar { width: 6px; }
+        .chat-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
         .message-wrapper { display: flex; flex-direction: column; max-width: 85%; }
         .message-wrapper.user { align-self: flex-start; }
@@ -3383,7 +3379,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 </div>`;
         }
 
-        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button></div>`;
+        const encodedMessage = encodeURIComponent(message);
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row"><button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button><button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
+        if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
     }
