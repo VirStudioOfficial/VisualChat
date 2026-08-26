@@ -510,9 +510,12 @@ async function executeToolCall(name, args, ctx) {
         const results = await fetchTavilyResults(query, ctx.tavilyKeys, ctx.searchCache);
 
         if (!results) {
-            return { result: 'نتیجه‌ای برای این جستجو پیدا نشد.' };
+            return { result: 'نتیجه‌ای برای این جستجو پیدا نشد. بر اساس اطلاعات موجود به کاربر پاسخ بده.' };
         }
-        return { result: results };
+        return {
+            result: results,
+            instruction: 'جستجو با موفقیت انجام شد. اکنون مستقیماً و بدون فراخوانی مجدد ابزار، پاسخ نهایی کاربر را بر اساس همین اطلاعات بنویس.'
+        };
     }
 
     if (name === 'ask_user') {
@@ -538,9 +541,11 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache }) {
-    const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
+    const MAX_TOOL_ROUNDS = 3;
     let workingContents = [...contents];
     let lastUsage = null;
+    let totalWebSearches = 0;
+    const MAX_TOTAL_WEB_SEARCHES = 1;
 
     // FIX (root cause of "video reads extremely slowly / times out"):
     // Gemini has to ingest and effectively transcode/sample the whole video
@@ -741,19 +746,16 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         // one runs, any additional ones in the same batch are short-circuited
         // with a message telling the model to use the first result instead of
         // firing off more searches.
-        let webSearchesThisRound = 0;
-        const MAX_WEB_SEARCHES_PER_ROUND = 1;
-
         for (const call of functionCalls) {
             const label = describeToolCall(call.name, call.args);
 
             if (call.name === 'web_search') {
-                webSearchesThisRound++;
-                if (webSearchesThisRound > MAX_WEB_SEARCHES_PER_ROUND) {
+                totalWebSearches++;
+                if (totalWebSearches > MAX_TOTAL_WEB_SEARCHES) {
                     responseParts.push({
                         functionResponse: {
                             name: call.name,
-                            response: { error: 'به همین یک جستجو اکتفا کن و با همون نتیجه جواب بده - جستجوی بیشتر لازم نیست.' }
+                            response: { error: 'سقف ۱ بار جستجو برای این درخواست تکمیل شده است. بلافاصله و فقط بر اساس نتایج قبلی پاسخ نهایی کاربر را بنویس و ابزار دیگری صدا نزن.' }
                         }
                     });
                     continue;
