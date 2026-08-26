@@ -518,7 +518,7 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, systemText, contents, tavilyKeys, archivedFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment }) {
-    const MAX_TOOL_ROUNDS = 2; // hard safety cap so a confused model can't loop forever / burn search quota on one message
+    const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     let lastUsage = null;
 
@@ -711,8 +711,35 @@ async function runAgentLoop({ currentModel, currentKey, systemText, contents, ta
         const responseParts = [];
         let earlyAskUser = null;
 
+        // FIX (root cause of "searches many sites for one simple question"):
+        // Gemini's function-calling can return SEVERAL functionCall parts in
+        // a single model turn (parallel calling) - e.g. 3-4 different
+        // web_search calls with slightly reworded queries, all at once. That
+        // happened entirely within ONE round, so MAX_TOOL_ROUNDS never even
+        // saw it as more than one step and did nothing to stop it. Cap how
+        // many web_search calls are actually executed per round: the first
+        // one runs, any additional ones in the same batch are short-circuited
+        // with a message telling the model to use the first result instead of
+        // firing off more searches.
+        let webSearchesThisRound = 0;
+        const MAX_WEB_SEARCHES_PER_ROUND = 1;
+
         for (const call of functionCalls) {
             const label = describeToolCall(call.name, call.args);
+
+            if (call.name === 'web_search') {
+                webSearchesThisRound++;
+                if (webSearchesThisRound > MAX_WEB_SEARCHES_PER_ROUND) {
+                    responseParts.push({
+                        functionResponse: {
+                            name: call.name,
+                            response: { error: 'به همین یک جستجو اکتفا کن و با همون نتیجه جواب بده - جستجوی بیشتر لازم نیست.' }
+                        }
+                    });
+                    continue;
+                }
+            }
+
             if (onStep) {
                 try { onStep(label, call.name); } catch (_) {}
             }
