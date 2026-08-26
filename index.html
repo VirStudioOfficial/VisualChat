@@ -734,29 +734,9 @@
         .err-detail-label { color: var(--text-main); font-weight: 600; }
         .error-details .code-action { margin-top: 6px; }
 
-        /* ===== Edited File Card + File Preview modal (§6) ===== */
+        /* ===== Edited File Card ===== */
         .edited-file-meta { padding: 0 14px 12px; font-size: 0.78rem; color: var(--text-muted); }
-        .file-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 20px; }
-        .file-preview-overlay.active { display: flex; }
-        .file-preview-modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; width: min(92vw, 900px); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px var(--shadow-b); }
-        .file-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-        .file-preview-head span { font-weight: 600; font-size: 0.9rem; color: var(--text-main); word-break: break-all; }
-        .file-preview-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .file-preview-body { overflow: auto; padding: 0; direction: ltr; text-align: left; background: var(--code-bg); }
-        .file-preview-body pre { margin: 0; padding: 10px 0; }
-        .file-preview-body code { font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.82rem; color: var(--code-text); }
 
-        .code-preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); display: none; align-items: center; justify-content: center; z-index: 3100; padding: 20px; }
-        .code-preview-overlay.active { display: flex; }
-        .code-preview-modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; width: min(94vw, 1100px); height: min(88vh, 800px); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px var(--shadow-b); }
-        .code-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-        .code-preview-head span { font-weight: 600; font-size: 0.9rem; color: var(--text-main); }
-        .code-preview-head-actions { display: flex; align-items: center; gap: 8px; }
-        .code-preview-body { flex: 1; background: #fff; }
-        .code-preview-body iframe { width: 100%; height: 100%; border: 0; display: block; }
-        .fp-line { display: block; padding: 0 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
-        .fp-line:hover { background: rgba(255,255,255,0.04); }
-        .fp-lineno { display: inline-block; min-width: 2.6em; margin-inline-end: 12px; color: var(--text-muted); opacity: 0.55; user-select: none; text-align: right; }
         .retry-row { display:flex; align-items:center; gap:9px; margin-top:10px; color:var(--text-muted); font-size:0.84rem; }
         .retry-btn { border:1px solid rgba(248,113,113,.35); background:rgba(248,113,113,.08); color:#fca5a5; border-radius:9px; padding:7px 11px; cursor:pointer; font-family:inherit; }
         .retry-btn:hover { background:rgba(248,113,113,.14); }
@@ -4147,92 +4127,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const old=btn.textContent; btn.textContent='کپی شد'; setTimeout(()=>btn.textContent=old,1200);
     }
 
-    // تشخیص اینکه آیا این بلاک کد قابل اجرا/پیش‌نمایش هست یا نه.
-    // علاوه بر HTML کامل، کدهای فقط-JS یا فقط-CSS هم قابل پیش‌نمایش هستن
-    // (داخل یک قالب HTML خالی بسته‌بندی می‌شن تا اجرا بشن).
-    function isRunnableCode(lang, code) {
-        const l = (lang || '').toLowerCase();
-        if (['html', 'htm', 'xhtml'].includes(l)) return true;
-        if (/<!doctype html|<html[\s>]|<body[\s>]/i.test(code)) return true;
-        if (['js', 'javascript', 'jsx'].includes(l)) return true;
-        if (['css'].includes(l)) return true;
-        // بدون زبان مشخص ولی شامل تگ/اسکریپت HTML
-        if (!l && /<div|<script|<style|<section|<canvas/i.test(code)) return true;
-        return false;
-    }
-
-    // کد را در صورت نیاز داخل یک قالب HTML می‌پیچد تا مستقل قابل اجرا باشد.
-    function wrapCodeForPreview(lang, code) {
-        const l = (lang || '').toLowerCase();
-        if (/<!doctype html|<html[\s>]/i.test(code)) return code;
-        if (['css'].includes(l)) {
-            return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"><style>${code}</style></head><body><p>پیش‌نمایش CSS — این متن نمونه برای دیدن استایل است.</p><div class="box">Box</div>
-</body></html>`;
-        }
-        if (['js', 'javascript', 'jsx'].includes(l)) {
-            return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"></head><body><script>${code}<\/script></body></html>`;
-        }
-        // fallback: fragment HTML بدون تگ‌های اصلی
-        return `<!DOCTYPE html><html dir="ltr"><head><meta charset="utf-8"></head><body>${code}</body></html>`;
-    }
-
-    // پیش‌نمایش کاملاً داخل خود ربات (مودال + iframe) — بدون باز شدن تب جدید.
-    function runHtmlCode(btn, lang) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        const finalHtml = wrapCodeForPreview(lang, code);
-        openCodePreviewModal(finalHtml);
-    }
-
-    function openCodePreviewModal(html) {
-        let overlay = document.getElementById('codePreviewOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'codePreviewOverlay';
-            overlay.className = 'code-preview-overlay';
-            overlay.innerHTML = `
-                <div class="code-preview-modal" role="dialog" aria-modal="true">
-                    <div class="code-preview-head">
-                        <span>پیش‌نمایش</span>
-                        <div class="code-preview-head-actions">
-                            <button class="code-action" onclick="reloadCodePreview()"><i class="lucide-icon" data-lucide="rotate-cw"></i></button>
-                            <button class="code-action" onclick="closeCodePreviewModal()"><i class="lucide-icon" data-lucide="x"></i></button>
-                        </div>
-                    </div>
-                    <div class="code-preview-body">
-                        <iframe id="codePreviewFrame" sandbox="allow-scripts allow-forms allow-modals allow-popups" referrerpolicy="no-referrer"></iframe>
-                    </div>
-                </div>`;
-            document.body.appendChild(overlay);
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCodePreviewModal(); });
-        }
-        overlay.dataset.html = html;
-        const frame = document.getElementById('codePreviewFrame');
-        frame.srcdoc = html;
-        overlay.classList.add('active');
-        document.body.style.overflow = 'hidden';
-    }
-
-    function reloadCodePreview() {
-        const overlay = document.getElementById('codePreviewOverlay');
-        const frame = document.getElementById('codePreviewFrame');
-        if (overlay && frame) frame.srcdoc = overlay.dataset.html || '';
-    }
-
-    function closeCodePreviewModal() {
-        const overlay = document.getElementById('codePreviewOverlay');
-        if (!overlay) return;
-        overlay.classList.remove('active');
-        document.body.style.overflow = '';
-        const frame = document.getElementById('codePreviewFrame');
-        if (frame) frame.srcdoc = 'about:blank';
-    }
-
-    function downloadHtmlCode(btn) {
-        const code = decodeURIComponent(btn.dataset.code || '');
-        const blob = new Blob([code], {type:'text/html;charset=utf-8'});
-        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='virtual-bot-code.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-    }
-
     // FIX (requested): previously only HTML/"runnable" code blocks had a
     // download button - any other language (Python, plain JS/CSS files,
     // JSON, etc.) only ever rendered as inline <pre><code> text, which is
@@ -4349,7 +4243,36 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     }
 
     function buildFileEditResultHtml(edits) {
-        if (!edits || !edits.length || !lastCodeFilesForEdit.length) return '';
+        if (!edits || !edits.length) return '';
+
+        // FIX (archived-file edit result missing): an edit can target a file
+        // that the model found through get_archived_file rather than a file
+        // attached in the current turn. Previously this function only looked
+        // at lastCodeFilesForEdit, so the model could successfully say
+        // "تغییرات اعمال شد" while the UI showed NO edited-file card because
+        // the archived file was not present in lastCodeFilesForEdit.
+        // Build one canonical client-side candidate list from the current
+        // turn, live code-file memory, and the full local archive. The archive
+        // is already the source of truth for files saved in this chat, so this
+        // does not require another API request or another Gemini round.
+        const editFileCandidates = [];
+        const addCandidate = (file) => {
+            if (!file || !file.name || typeof file.content !== 'string') return;
+            const existing = editFileCandidates.find(f => f.name === file.name);
+            if (existing) {
+                // Prefer the newest/current copy when the same file exists in
+                // multiple stores (e.g. current attachment + archive).
+                existing.content = file.content;
+                return;
+            }
+            editFileCandidates.push({ name: file.name, content: file.content });
+        };
+
+        (lastCodeFilesForEdit || []).forEach(addCandidate);
+        (codeFilesMemory || []).forEach(addCandidate);
+        ((chatFileArchive && chatFileArchive[currentChatId]) || []).forEach(addCandidate);
+
+        if (!editFileCandidates.length) return '';
 
         // Resolve the file explicitly when possible. If an older model output
         // omits "file", infer the target from the unique file containing "old"
@@ -4357,19 +4280,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const resolveEditTarget = (edit) => {
             const explicit = String(edit?.file || '').trim();
             if (explicit) {
-                const exact = lastCodeFilesForEdit.find(f => f.name === explicit);
+                const exact = editFileCandidates.find(f => f.name === explicit);
                 if (exact) return exact.name;
                 const base = explicit.split('/').pop().split('\\').pop();
-                const byBase = lastCodeFilesForEdit.filter(f => f.name.split('/').pop().split('\\').pop() === base);
+                const byBase = editFileCandidates.filter(f => f.name.split('/').pop().split('\\').pop() === base);
                 if (byBase.length === 1) return byBase[0].name;
             }
             const oldText = normalizeLineEndings(String(edit?.old || ''));
             if (!oldText) return null;
-            const candidates = lastCodeFilesForEdit.filter(f =>
+            const candidates = editFileCandidates.filter(f =>
                 normalizeLineEndings(f.content || '').indexOf(oldText) !== -1
             );
             if (candidates.length === 1) return candidates[0].name;
-            if (lastCodeFilesForEdit.length === 1) return lastCodeFilesForEdit[0].name;
+            if (editFileCandidates.length === 1) return editFileCandidates[0].name;
             return null;
         };
 
@@ -4390,7 +4313,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             html += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> ${unresolvedEdits} ویرایش نیاز به تعیین فایل داشت</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">برای بخشی از ویرایش‌ها نام فایل مشخص نبود یا متن تغییر در چند فایل تکراری بود؛ ویرایش‌های قابل تشخیص همچنان اعمال شدند.</div></div>`;
         }
         for (const fileName of Object.keys(editsByFile)) {
-            const fileEntry = lastCodeFilesForEdit.find(f => f.name === fileName);
+            const fileEntry = editFileCandidates.find(f => f.name === fileName);
             if (!fileEntry) continue;
 
             const { content, appliedCount, failedCount } = applyFileEdits(fileEntry.content, editsByFile[fileName]);
@@ -4406,10 +4329,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             const memoryEntry = codeFilesMemory.find(f => f.name === fileName);
             if (memoryEntry) memoryEntry.content = content;
 
+            // Keep the persistent chat archive synchronized too. This is
+            // especially important when the edited file came from an older
+            // message/archive rather than the current attachment.
+            const archiveList = (chatFileArchive && chatFileArchive[currentChatId]) || [];
+            const archiveEntry = archiveList.find(f => f.name === fileName);
+            if (archiveEntry) {
+                archiveEntry.content = content;
+                archiveEntry.savedAt = Date.now();
+                try { saveFileToArchive(currentChatId, fileName, content); } catch (_) {}
+            }
+
             // §6: Edited File Card — name, size, status, change count, and
-            // Preview/Copy/Download actions (previously only a bare
-            // "دانلود فایل ویرایش‌شده" link with no way to actually look at
-            // or copy the result without downloading it first).
+            // Copy/Download actions for the edited file.
             const encoded = encodeURIComponent(content);
             const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
             const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
@@ -4417,7 +4349,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <div class="code-card-head">
                     <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}</span>
                     <div class="code-actions">
-                        <button class="code-action" onclick="openFilePreview('${encoded}','${escapeAttr(fileName)}')"><i class="lucide-icon" data-lucide="eye"></i> پیش‌نمایش</button>
                         <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
                         <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
                     </div>
@@ -4439,61 +4370,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
-    // ===== File Preview modal for edited files (§6) =====
-    // Full-content, line-numbered, scrollable preview + copy for edited
-    // text/code files, opened from the "پیش‌نمایش" button on an edited-file
-    // card. Built as an injected overlay (same technique as the confirm
-    // modal / image lightbox) so no static markup has to change.
     function escapeAttr(value) {
         return String(value ?? '').replace(/"/g, '&quot;');
-    }
-
-    function openFilePreview(encodedContent, filename) {
-        const content = decodeURIComponent(encodedContent);
-        let overlay = document.getElementById('filePreviewOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'filePreviewOverlay';
-            overlay.className = 'file-preview-overlay';
-            overlay.innerHTML = `
-                <div class="file-preview-modal" role="dialog" aria-modal="true" aria-labelledby="filePreviewTitle">
-                    <div class="file-preview-head">
-                        <span id="filePreviewTitle"></span>
-                        <div class="file-preview-head-actions">
-                            <button class="code-action" type="button" id="filePreviewCopyBtn"><i class="lucide-icon" data-lucide="copy"></i> کپی همه</button>
-                            <button class="image-lightbox-close" type="button" aria-label="بستن" onclick="closeFilePreview()"><i class="lucide-icon" data-lucide="x"></i></button>
-                        </div>
-                    </div>
-                    <div class="file-preview-body"><pre><code id="filePreviewCode"></code></pre></div>
-                </div>`;
-            document.body.appendChild(overlay);
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFilePreview(); });
-        }
-        document.getElementById('filePreviewTitle').textContent = filename || 'پیش‌نمایش فایل';
-        const codeEl = document.getElementById('filePreviewCode');
-        // Numbered, escaped lines — never render raw file content as HTML.
-        const lines = content.split('\n');
-        codeEl.innerHTML = lines.map((ln, i) => `<span class="fp-line"><span class="fp-lineno">${i + 1}</span>${escapeHtml(ln)}</span>`).join('\n');
-        const copyBtn = document.getElementById('filePreviewCopyBtn');
-        copyBtn.onclick = async () => {
-            try { await navigator.clipboard.writeText(content); }
-            catch { const ta = document.createElement('textarea'); ta.value = content; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-            const old = copyBtn.innerHTML; copyBtn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد';
-            setTimeout(() => copyBtn.innerHTML = old, 1200);
-            if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
-        };
-        overlay.classList.add('active');
-        document.addEventListener('keydown', __filePreviewEscHandler);
-    }
-
-    function __filePreviewEscHandler(e) {
-        if (e.key === 'Escape') closeFilePreview();
-    }
-
-    function closeFilePreview() {
-        const overlay = document.getElementById('filePreviewOverlay');
-        if (overlay) overlay.classList.remove('active');
-        document.removeEventListener('keydown', __filePreviewEscHandler);
     }
 
     async function copyEditedFile(btn) {
@@ -5059,11 +4937,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const rawParts=String(text ?? '').split(/```/);
         const rendered=rawParts.map((rawPart,index)=>{
             if(index%2===1){
-                // نسخه‌ی خام کد (بدون escape) برای کپی/دانلود/پیش‌نمایش نگه
+                // نسخه‌ی خام کد (بدون escape) برای کپی/دانلود نگه
                 // داشته می‌شود، اما دیگر به‌صورت متن داخل چت نمایش داده
-                // نمی‌شود - طبق درخواست، فقط یک کارت فایل (اسم/تعداد خط)
-                // نشان داده می‌شود و خودِ کد فقط از طریق دکمه‌ها قابل دسترسی
-                // است (کپی، دانلود فایل، پیش‌نمایش).
+                // نمی‌شود؛ فقط کارت فایل با امکان کپی و دانلود نمایش داده می‌شود.
                 const raw=rawPart.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
                 const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
                 const rawCode=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim();
