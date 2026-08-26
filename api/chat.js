@@ -842,6 +842,12 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 | model can use before producing file-edit operations. The same tool is used
 | for every text/code file type we can reasonably inspect.
 */
+function looksLikeFileEditIntent(text) {
+    const t = String(text || '').trim().toLowerCase();
+    if (!t) return false;
+    return /(?:ویرایش|ادیت|تغییر بده|تغییرش بده|اضافه کن|اضافه‌|حذف کن|پاک کن|اصلاح کن|درست کن|پیاده کن|پیاده‌|بروزرسانی کن|آپدیت کن|به‌روز کن|جایگزین کن|بازنویسی کن|اضافه کردن|حذف کردن|تغییر دادن|اصلاح کردن|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor)/i.test(t);
+}
+
 function analyzeFileStructure(content, fileName = 'file', query = '') {
     const text = String(content || '');
     const lowerName = String(fileName || '').toLowerCase();
@@ -1022,22 +1028,6 @@ const GEMINI_TOOLS = [
                 }
             },
             {
-                name: 'inspect_file',
-                description:
-                    'ساختار واقعی فایل کد/متن ضمیمه‌شده را بررسی می‌کند. قبل از هر ویرایش فایل، ' +
-                    'به‌خصوص قبل از ساختن file-edit، حتماً این ابزار را برای فایل هدف صدا بزن. ' +
-                    'از نتیجه برای پیدا کردن تابع/بخش/عنصر موجود، تشخیص کد مشابه و انتخاب محل دقیق تغییر استفاده کن. ' +
-                    'این ابزار فقط متن را تکرار نمی‌کند؛ یک نقشه ساختاری از فایل و در صورت نیاز خطوط مرتبط با درخواست را برمی‌گرداند.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        file: { type: 'string', description: 'نام دقیق فایل ضمیمه‌شده.' },
-                        query: { type: 'string', description: 'خلاصه کوتاه چیزی که قرار است در فایل پیدا یا تغییر داده شود.' }
-                    },
-                    required: ['file']
-                }
-            },
-            {
                 name: 'ask_user',
                 description:
                     'وقتی درخواست کاربر شامل یک تغییر اساسی/غیرقابل‌برگشت است (مثلاً بازنویسی کامل ' +
@@ -1197,7 +1187,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent }) {
+async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
     const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
@@ -1214,6 +1204,34 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // retries, so a retry can NEVER start a second logical web_search for the
     // same incoming user question.
     const scopedSearchState = searchState || { used: false, result: null };
+
+    // File Structure Intelligence is local and synchronous: do it BEFORE the
+    // first Gemini request for an edit. This keeps the UI step truthful while
+    // avoiding an extra Gemini function-call round that could consume RPM/TPM
+    // quota and trigger a misleading "quota exhausted" error.
+    if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
+        try {
+            if (onStep) onStep('در حال بررسی ساختار فایل...', 'inspect_file');
+            const structuralReports = textFiles.map((f) => {
+                const analysis = analyzeFileStructure(f.content || '', f.name || 'file', '');
+                return {
+                    file: f.name || 'file',
+                    structure: formatFileStructureForModel(analysis)
+                };
+            });
+            systemText += `\n\n[تحلیل واقعی ساختار فایل - قبل از شروع ویرایش]\n${JSON.stringify(structuralReports, null, 2)}\n\nاین ساختار مستقیماً از محتوای فعلی فایل ساخته شده است. قبل از تولید file-edit از آن استفاده کن؛ کد یا قابلیت موجود را دوباره اضافه نکن و هدف تغییر را بر اساس همین ساختار انتخاب کن.\n`;
+            log.info('file.structure.preanalyzed', {
+                files: structuralReports.length,
+                names: structuralReports.map(x => x.file)
+            });
+        } catch (error) {
+            log.warn('file.structure.preanalysis_failed', {
+                message: error?.message || String(error)
+            });
+            // Do not fail the whole chat because a best-effort structural map
+            // could not be produced. The model still has the original file.
+        }
+    }
 
 
     // FIX (root cause of "video reads extremely slowly / times out"):
@@ -1821,6 +1839,8 @@ async function handler(req, res) {
                     typeof f.content === 'string' &&
                     f.content.length <= MAX_TEXT_FILE_CHARS
             );
+
+        const fileEditIntent = textFiles.length > 0 && looksLikeFileEditIntent(text);
 
         const oversizedTextFiles =
             incomingFiles.filter(
@@ -2544,6 +2564,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             searchCache,
                             searchState,
                             searchIntent: requestSearchIntent,
+                            fileEditIntent,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
@@ -2769,6 +2790,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         archivedFiles,
                         searchCache,
                         searchState,
+                        fileEditIntent,
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
                         hasVideoAttachment,
