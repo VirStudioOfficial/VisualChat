@@ -1072,6 +1072,97 @@ function formatFileStructureForModel(analysis) {
     };
 }
 
+/*
+|--------------------------------------------------------------------------
+| Logical chunking (structural, not fixed-size)
+|--------------------------------------------------------------------------
+| Turns the same structural markers analyzeFileStructure already finds
+| (functions, classes, sections, top-level html tags) into a sorted list
+| of line-range chunks, so the model can fetch "just the login function"
+| or "just the header markup" by line range instead of ingesting the
+| whole file. A hard MAX_CHUNK_LINES cap splits any span that's still too
+| big (e.g. one giant function) into sequential sub-chunks so no single
+| get_file_chunk call can blow the context budget.
+*/
+const MAX_CHUNK_LINES = 250; // upper bound per chunk regardless of structure
+const MIN_CHUNK_LINES = 15;  // avoid a flood of tiny 1-2 line chunks; small adjacent markers get merged
+
+function computeLogicalChunks(content, fileName, analysis) {
+    const lines = String(content || '').split(/\r?\n/);
+    const totalLines = lines.length;
+    const structure = analysis || analyzeFileStructure(content, fileName, '');
+
+    // Collect every marker line we have (function/class/section starts, and
+    // for HTML the top-level structural tags), dedupe, sort ascending.
+    const markerLines = new Set([1]);
+    const addMarkers = (arr) => arr.forEach(x => { if (x && x.line) markerLines.add(x.line); });
+    addMarkers(structure.sections);
+    addMarkers(structure.functions);
+    addMarkers(structure.classes);
+    if (structure.language === 'html') {
+        // Only the "big" recurring structural tags make good boundaries;
+        // formatFileStructureForModel already limits this list in size.
+        structure.htmlElements.forEach(el => {
+            if (el && el.line && ['html','head','body','script','style','header','footer','nav','main','section','form'].includes(el.tag)) {
+                markerLines.add(el.line);
+            }
+        });
+    }
+    if (structure.language === 'css') addMarkers(structure.cssRules);
+
+    let boundaries = Array.from(markerLines).sort((a, b) => a - b);
+
+    // Merge boundaries that are closer together than MIN_CHUNK_LINES, so we
+    // don't end up with dozens of near-empty chunks in dense code.
+    const merged = [];
+    for (const b of boundaries) {
+        if (merged.length === 0 || b - merged[merged.length - 1] >= MIN_CHUNK_LINES) {
+            merged.push(b);
+        }
+    }
+    boundaries = merged.length > 0 ? merged : [1];
+
+    // Build raw spans between consecutive boundaries.
+    const rawChunks = [];
+    for (let i = 0; i < boundaries.length; i++) {
+        const start = boundaries[i];
+        const end = (i + 1 < boundaries.length) ? boundaries[i + 1] - 1 : totalLines;
+        if (start <= end) rawChunks.push({ start, end });
+    }
+
+    // Split any chunk still bigger than MAX_CHUNK_LINES into sequential
+    // sub-chunks so one call can never return an unbounded amount of text.
+    const chunks = [];
+    for (const c of rawChunks) {
+        let s = c.start;
+        while (s <= c.end) {
+            const e = Math.min(c.end, s + MAX_CHUNK_LINES - 1);
+            chunks.push({ start: s, end: e });
+            s = e + 1;
+        }
+    }
+
+    // Attach a short label per chunk (first non-empty line, trimmed) so the
+    // model's chunk map is readable without needing the full content.
+    return chunks.map((c, idx) => {
+        const firstContentLine = lines.slice(c.start - 1, c.end).find(l => l.trim().length > 0) || '';
+        return {
+            index: idx + 1,
+            startLine: c.start,
+            endLine: c.end,
+            preview: firstContentLine.trim().slice(0, 100)
+        };
+    });
+}
+
+function getChunkContent(content, startLine, endLine) {
+    const lines = String(content || '').split(/\r?\n/);
+    const s = Math.max(1, startLine);
+    const e = Math.min(lines.length, endLine);
+    if (s > e) return null;
+    return lines.slice(s - 1, e).join('\n');
+}
+
 const GEMINI_TOOLS = [
     {
         function_declarations: [
@@ -1149,6 +1240,41 @@ const GEMINI_TOOLS = [
                 }
             },
             {
+                // FEATURE (structural chunking): for large files, the model
+                // is given a chunk MAP (see inspect_file's "chunks" field)
+                // instead of the whole content. Each chunk is a logical
+                // span (a function, a section, an HTML block) with real
+                // line numbers, computed by computeLogicalChunks. This tool
+                // fetches just the lines of ONE chunk (or a custom range),
+                // so a multi-thousand-line file never has to be ingested
+                // whole just to edit one part of it.
+                name: 'get_file_chunk',
+                description:
+                    'محتوای واقعی یک محدوده‌ی خط مشخص از فایل را برمی‌گرداند (نه کل فایل). ابتدا با ' +
+                    'inspect_file نقشه‌ی chunk های فایل (هرکدام با شماره خط شروع/پایان و یک پیش‌نمایش) را ' +
+                    'بگیر، سپس فقط chunk یا محدوده‌ای که واقعاً برای پاسخ/ویرایش لازم داری را با این ابزار ' +
+                    'بخوان. برای فایل‌های چند هزار خطی، هرگز سعی نکن کل فایل را یک‌جا بخواهی - فقط محدوده‌ی ' +
+                    'مرتبط را بگیر.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        file: {
+                            type: 'string',
+                            description: 'نام دقیق فایل هدف (همانی که در inspect_file استفاده شد).'
+                        },
+                        startLine: {
+                            type: 'number',
+                            description: 'شماره خط شروع (بر اساس نقشه‌ی chunk یا شماره خط دلخواه).'
+                        },
+                        endLine: {
+                            type: 'number',
+                            description: 'شماره خط پایان (شامل). اگر محدوده خیلی بزرگ باشد (بیش از ۳۰۰ خط)، به بخش‌های کوچک‌تر تقسیم و جداگانه بخواه.'
+                        }
+                    },
+                    required: ['file', 'startLine', 'endLine']
+                }
+            },
+            {
                 // FEATURE (transactional file patching): replaces the old
                 // "print one ```file-edit block at the end of the reply"
                 // flow. The model now calls this tool per-patch, gets an
@@ -1161,12 +1287,14 @@ const GEMINI_TOOLS = [
                 // from memory.
                 name: 'apply_patch',
                 description:
-                    'یک تغییر دقیق را روی فایل هدف اعمال می‌کند. old باید دقیقاً (کاراکتر به کاراکتر) از ' +
-                    'محتوای واقعی فایل کپی شده باشد - نه از حافظه بازسازی شود - و باید در کل فایل دقیقاً ' +
-                    'یک‌بار ظاهر شود؛ اگر متن تکراری/مبهم است، خطوط بیشتری از context اطراف را به old اضافه ' +
-                    'کن تا یکتا شود. همیشه قبل از این ابزار، inspect_file را برای همان فایل صدا بزن. اگر ' +
-                    'این ابزار خطای «پیدا نشد» یا «مبهم» برگرداند، با توجه به context/کاندیدهای برگشتی، ' +
-                    'old را اصلاح کن و دوباره صدا بزن - هرگز حدس نزن.',
+                    'یک تغییر دقیق را روی فایل هدف اعمال می‌کند. دو حالت پشتیبانی می‌شود: ' +
+                    '(۱) حالت خط‌محور (ترجیحی برای فایل‌های بزرگ): startLine و endLine را از chunkی که با ' +
+                    'get_file_chunk خوانده‌ای بده - این محدوده دقیقاً با همان محتوای واقعی آن خطوط جایگزین ' +
+                    'می‌شود، بدون نیاز به تطبیق رشته‌ای. ' +
+                    '(۲) حالت متن دقیق (برای فایل‌های کوچک یا وقتی startLine/endLine مشخص نیست): old باید ' +
+                    'دقیقاً (کاراکتر به کاراکتر) از محتوای واقعی فایل کپی شده باشد و باید در کل فایل دقیقاً ' +
+                    'یک‌بار ظاهر شود. اگر این ابزار خطای «پیدا نشد» یا «مبهم» برگرداند، بر اساس context/' +
+                    'کاندیدهای برگشتی اصلاح کن و دوباره صدا بزن - هرگز حدس نزن.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1174,16 +1302,24 @@ const GEMINI_TOOLS = [
                             type: 'string',
                             description: 'نام دقیق فایل هدف (همانی که در inspect_file استفاده شد).'
                         },
+                        startLine: {
+                            type: 'number',
+                            description: 'حالت خط‌محور: شماره خط شروع محدوده‌ای که باید جایگزین شود.'
+                        },
+                        endLine: {
+                            type: 'number',
+                            description: 'حالت خط‌محور: شماره خط پایان محدوده‌ای که باید جایگزین شود (شامل).'
+                        },
                         old: {
                             type: 'string',
-                            description: 'متن دقیق و یکتا که باید جایگزین شود - کپی حرف‌به‌حرف از فایل واقعی.'
+                            description: 'حالت متن دقیق: متن دقیق و یکتا که باید جایگزین شود - کپی حرف‌به‌حرف از فایل واقعی.'
                         },
                         new: {
                             type: 'string',
-                            description: 'متنی که باید جایگزین old شود.'
+                            description: 'متنی که باید جایگزین محدوده‌ی خط یا old شود.'
                         }
                     },
-                    required: ['file', 'old', 'new']
+                    required: ['file', 'new']
                 }
             }
         ]
@@ -1202,6 +1338,9 @@ function describeToolCall(name, args) {
     }
     if (name === 'ask_user') {
         return 'قبل از ادامه، یه سؤال دارم...';
+    }
+    if (name === 'get_file_chunk') {
+        return `در حال خواندن بخشی از فایل «${(args && args.file) || ''}» (خط ${(args && args.startLine) || '?'} تا ${(args && args.endLine) || '?'})...`;
     }
     if (name === 'get_archived_file') {
         return `دارم فایل «${(args && args.name) || ''}» رو از آرشیو این گفتگو می‌خونم...`;
@@ -1228,7 +1367,7 @@ async function executeToolCall(name, args, ctx) {
         // file can still be searched/discussed without blowing the budget;
         // the model is told the file was truncated so it doesn't silently
         // assume it saw everything.
-        const MAX_ARCHIVED_FILE_CHARS = 40000; // ~ safely under one round's comfortable budget
+        const MAX_ARCHIVED_FILE_CHARS = 70000; // raised from 40000 alongside MAX_TOOL_ROUNDS increase - edit flows need to see enough of a heavy file to build a matching patch
         let content = found.content || '';
         let truncated = false;
         if (content.length > MAX_ARCHIVED_FILE_CHARS) {
@@ -1242,12 +1381,32 @@ async function executeToolCall(name, args, ctx) {
             truncated
         });
 
+        // FIX (retry-on-archived-file produced no real edit): fileEditIntent
+        // pre-analysis (analyzeFileStructure) previously only ran for files
+        // attached directly in the current message (textFiles), never for
+        // files pulled back from the archive. That meant an edit request
+        // that resolved to an archived file (e.g. after Retry) got no
+        // structural map at all, and the file-edit round had to build one
+        // from scratch on top of already needing to construct + verify the
+        // patch - routinely running out of round budget and silently
+        // producing nothing. Give archive reads the same structural report.
+        let structureNote = '';
+        try {
+            const analysis = analyzeFileStructure(content, found.name || fileName, '');
+            structureNote = `\n\n[تحلیل ساختار این فایل آرشیوشده - قبل از تولید file-edit از آن استفاده کن]\n${formatFileStructureForModel(analysis)}\n`;
+        } catch (error) {
+            log.warn('file.structure.archived_preanalysis_failed', {
+                message: error?.message || String(error)
+            });
+        }
+
         return {
             name: found.name,
             content,
             ...(truncated ? {
-                note: 'این فایل خیلی بزرگ بود و فقط بخش ابتدایی آن (۴۰ هزار کاراکتر اول) بازگردانده شد. اگر بخش دیگری لازم است، به کاربر بگو که فایل کامل در دسترس نیست و باید بخش خاصی از آن را دوباره بفرستد.'
-            } : {})
+                note: 'این فایل خیلی بزرگ بود و فقط بخش ابتدایی آن (۷۰ هزار کاراکتر اول) بازگردانده شد. اگر بخش دیگری لازم است، به کاربر بگو که فایل کامل در دسترس نیست و باید بخش خاصی از آن را دوباره بفرستد.'
+            } : {}),
+            ...(structureNote ? { structure: structureNote } : {})
         };
     }
 
@@ -1260,34 +1419,116 @@ async function executeToolCall(name, args, ctx) {
             return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
         }
         const analysis = analyzeFileStructure(found.content || '', found.name || fileName, query);
+        const chunks = computeLogicalChunks(found.content || '', found.name || fileName, analysis);
         log.info('agent.tool.inspect_file', {
             name: found.name || fileName,
             language: analysis.language,
             lineCount: analysis.lineCount,
             functions: analysis.functions.length,
             classes: analysis.classes.length,
-            queryMatches: analysis.queryMatches.length
+            queryMatches: analysis.queryMatches.length,
+            chunkCount: chunks.length
         });
         return {
             type: 'file_structure',
-            instruction: 'این نتیجه از محتوای واقعی فایل ساخته شده است؛ قبل از file-edit از آن استفاده کن و چیزی را که در ساختار موجود است دوباره اضافه نکن.',
-            structure: formatFileStructureForModel(analysis)
+            instruction: analysis.lineCount > 400
+                ? 'این فایل بزرگ است. کل محتوا اینجا داده نشده - از فهرست "chunks" استفاده کن و فقط محدوده‌ی خطی مرتبط را با get_file_chunk بخوان، نه کل فایل را. قبل از file-edit حتماً chunk مربوطه را بخوان.'
+                : 'این نتیجه از محتوای واقعی فایل ساخته شده است؛ قبل از file-edit از آن استفاده کن و چیزی را که در ساختار موجود است دوباره اضافه نکن.',
+            structure: formatFileStructureForModel(analysis),
+            chunks: chunks.map(c => ({ startLine: c.startLine, endLine: c.endLine, preview: c.preview }))
+        };
+    }
+
+    if (name === 'get_file_chunk') {
+        const fileName = String((args && args.file) || '').trim();
+        const startLine = Number(args && args.startLine);
+        const endLine = Number(args && args.endLine);
+        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
+        if (!found) {
+            return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+        }
+        if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
+            return { error: 'محدوده‌ی خط نامعتبر است. startLine و endLine باید عدد صحیح معتبر و startLine <= endLine باشند.' };
+        }
+        const MAX_CHUNK_REQUEST_LINES = 320;
+        const clampedEnd = Math.min(endLine, startLine + MAX_CHUNK_REQUEST_LINES - 1);
+        const chunkContent = getChunkContent(found.content || '', startLine, clampedEnd);
+        if (chunkContent === null) {
+            return { error: 'این محدوده‌ی خط در فایل وجود ندارد.' };
+        }
+        log.info('agent.tool.get_file_chunk', {
+            name: found.name || fileName,
+            startLine,
+            endLine: clampedEnd,
+            truncatedFromEndLine: clampedEnd < endLine ? endLine : null
+        });
+        return {
+            file: found.name || fileName,
+            startLine,
+            endLine: clampedEnd,
+            content: chunkContent,
+            ...(clampedEnd < endLine ? { note: `محدوده درخواستی بزرگ‌تر از حد مجاز بود؛ فقط تا خط ${clampedEnd} برگردانده شد. برای ادامه، get_file_chunk را با startLine جدید دوباره صدا بزن.` } : {})
         };
     }
 
     if (name === 'apply_patch') {
         const fileName = String((args && args.file) || '').trim();
-        const oldStr = (args && args.old) || '';
         const newStr = (args && args.new) || '';
-
-        if (!oldStr) {
-            return { success: false, error: 'فیلد old خالی است. یک متن دقیق برای جایگزینی لازم است.' };
-        }
+        const startLine = (args && args.startLine != null) ? Number(args.startLine) : null;
+        const endLine = (args && args.endLine != null) ? Number(args.endLine) : null;
+        const oldStr = (args && args.old) || '';
 
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
             return { success: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+        }
+
+        // Line-anchored mode: replace an exact line range, no string
+        // matching needed at all - this is what avoids the "old didn't
+        // match, probably reconstructed from memory" failure mode on large
+        // files, since the model only had to get line numbers right (which
+        // it read directly from get_file_chunk/inspect_file), not
+        // character-for-character content.
+        if (startLine != null && endLine != null) {
+            if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
+                return { success: false, error: 'محدوده‌ی خط نامعتبر است.' };
+            }
+            const lines = String(found.content || '').split(/\r?\n/);
+            if (endLine > lines.length) {
+                return { success: false, error: `فایل فقط ${lines.length} خط دارد؛ endLine (${endLine}) خارج از محدوده است.` };
+            }
+            const before = lines.slice(0, startLine - 1);
+            const replacedSpan = lines.slice(startLine - 1, endLine);
+            const after = lines.slice(endLine);
+            const newLines = newStr.split(/\r?\n/);
+            found.content = [...before, ...newLines, ...after].join('\n');
+            found._patched = true;
+            found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
+
+            log.info('agent.tool.apply_patch.success', {
+                name: found.name || fileName,
+                editedName: found._editedName,
+                mode: 'line-anchored',
+                startLine,
+                endLine,
+                replacedLineCount: replacedSpan.length
+            });
+
+            return {
+                success: true,
+                mode: 'line-anchored',
+                editedName: found._editedName,
+                replacedLineCount: replacedSpan.length,
+                newLineCount: newLines.length,
+                suggestedOutputName: found._editedName,
+                note: 'patch با موفقیت اعمال شد (حالت خط‌محور). اسم فایل خروجی نهایی باید ' + found._editedName + ' باشد، نه اسم فایل اصلی.'
+            };
+        }
+
+        if (!oldStr) {
+            return { success: false, error: 'فیلد old خالی است، یا برای حالت خط‌محور startLine/endLine بده.' };
         }
 
         const result = tryApplyPatch(found.content || '', oldStr, newStr);
@@ -1382,7 +1623,7 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
-    const MAX_TOOL_ROUNDS = 5; // one round to search (if needed) + up to 3 rounds to answer/self-correct file-edit patches using the results; this is a hard cap, not a target
+    const MAX_TOOL_ROUNDS = 4; // one round to search (if needed) + up to 3 rounds to answer/self-correct file-edit patches using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
     // keep the first search result available to the replacement model without
@@ -2520,6 +2761,7 @@ async function handler(req, res) {
 ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
 فقط وقتی کاربر واقعاً به محتوای یکی از این فایل‌ها نیاز دارد یا ارجاع می‌دهد (نه صرفاً وقتی اسمش را می‌بینی)، ابزار get_archived_file را با نام دقیق فایل صدا بزن.
+مهم: اگر کاربر در همین پیام یک فایل را مستقیماً ضمیمه کرده (چه پیام اول باشد چه Retry)، همیشه از همان نسخه‌ی ضمیمه‌شده (که در بخش فایل‌های فعلی در دسترس توست) استفاده کن، حتی اگر فایلی هم‌نام در آرشیو موجود باشد. get_archived_file را در این حالت صدا نزن؛ این ابزار فقط برای فایل‌هایی است که کاربر به آن‌ها ارجاع می‌دهد بدون این‌که دوباره ضمیمه کرده باشد.
 `;
         }
 
@@ -2551,29 +2793,45 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - اگر کاربر تغییر کد خواست، واقعاً تغییر را روی فایل اعمال کن.
 - ساختارهای موجود را بررسی کن و چیزهای بی‌دلیل اختراع نکن.
 - به جای بازنویسی کل فایل، فقط قسمت لازم را تغییر بده.
+
+دو حالت ویرایش داری - انتخاب درست بین این دو حالت مهم‌ترین قدم است:
+
+حالت A) خط‌محور (برای فایل‌های بزرگ یا وقتی inspect_file می‌گوید فایل بزرگ است - ترجیحی و پیش‌فرض):
+- به‌جای خواندن/کپی کردن متن، فقط شماره خط شروع/پایان بخش هدف را از chunk map یا get_file_chunk بگیر.
+- apply_patch را با {file, startLine, endLine, new} صدا بزن - بدون "old". این حالت نیازی به تطبیق رشته‌ای ندارد و خطای "پیدا نشد/مبهم" در آن پیش نمی‌آید.
+- برای تشخیص خط دقیق، همیشه اول get_file_chunk را روی محدوده‌ی مشکوک بخوان تا شماره خط‌ها را از محتوای واقعی (نه حدس) تأیید کنی.
+
+حالت B) متن دقیق (فقط برای فایل‌های کوچک یا تغییرات یک‌خطی ساده):
 قوانین حیاتی برای فیلد "old" (در غیر این‌صورت ویرایش رد می‌شود):
 - "old" باید کاراکتر به کاراکتر (شامل فاصله‌ها، تورفتگی/indentation، و شکست خط) دقیقاً همان‌طور که در فایل اصلی آمده کپی شود؛ آن را از حافظه بازنویسی نکن.
-- "old" را تا حد امکان کوتاه نگه دار: فقط چند خط اطراف تغییر، نه یک بلوک بزرگ. برای یک تغییر کوچک، "old" فقط همان خط(های) مربوطه است، نه کل تابع/بلوک.
-- اگر باید چند جای فایل عوض شود، به‌جای یک "old" بزرگ که همه را در بر بگیرد، چند آیتم جدا در همان آرایه بساز (هر کدام "old" کوتاه و مجزا).
+- "old" را تا حد امکان کوتاه نگه دار: فقط چند خط اطراف تغییر، نه یک بلوک بزرگ.
 - "old" باید در فایل دقیقاً یک‌بار ظاهر شود؛ اگر متنی که می‌خواهی تغییر بدهی در چند جای فایل تکرار شده، خط(های) قبل/بعدش را هم به "old" اضافه کن تا یکتا شود.
 - هرگز فاصله‌های اضافه، تب‌های متفاوت، یا خطوط خالی اضافی در "old" یا "new" وارد نکن که در فایل اصلی نیستند.
 
 روند اجباری ویرایش (هر مرحله قبل از بعدی):
-۱. ابزار inspect_file را برای فایل هدف صدا بزن؛ فقط دیدن متن فایل کافی نیست.
-۲. نتیجه inspect_file را مبنای انتخاب تابع/بخش/عنصر هدف قرار بده و اگر قابلیت یا کد مشابه از قبل وجود دارد، آن را دوباره ایجاد نکن؛ همان بخش موجود را اصلاح کن. اگر چند مورد مشابه وجود دارد، با context کافی همان مورد درست را انتخاب کن.
-۳. برای هر تغییر، اول ابزار apply_patch را با {file, old, new} صدا بزن. این ابزار patch را واقعاً روی فایل امتحان می‌کند و نتیجه دقیق برمی‌گرداند:
+۱. ابزار inspect_file را برای فایل هدف صدا بزن. اگر lineCount زیاد بود (نتیجه صراحتاً می‌گوید فایل بزرگ است)، کل فایل به تو داده نمی‌شود - فقط نقشه‌ی ساختار و chunk map داده می‌شود.
+۲. نتیجه inspect_file (و در صورت نیاز get_file_chunk) را مبنای انتخاب تابع/بخش/عنصر هدف قرار بده و اگر قابلیت یا کد مشابه از قبل وجود دارد، آن را دوباره ایجاد نکن؛ همان بخش موجود را اصلاح کن.
+۳. برای فایل بزرگ: حالت A (خط‌محور) را انتخاب کن - get_file_chunk را برای محدوده‌ی هدف بخوان تا شماره خط دقیق را تأیید کنی، سپس apply_patch را با {file, startLine, endLine, new} صدا بزن.
+   برای فایل کوچک یا تغییر یک‌خطی: حالت B (متن دقیق) را انتخاب کن - apply_patch را با {file, old, new} صدا بزن.
    - اگر success:true برگشت، patch تأیید شده است.
-   - اگر success:false برگشت (پیدا نشد یا مبهم بود)، با استفاده از candidates/context برگشتی، "old" را اصلاح کن و apply_patch را دوباره برای همان تغییر صدا بزن. هرگز حدس نزن یا از fuzzy-match استفاده نکن.
-۴. فقط بعد از اینکه همه‌ی apply_patch های لازم با success:true تمام شدند، دقیقاً یک بلاک file-edit در پایان پاسخ تولید کن که شامل همان patch های تأییدشده باشد.
-۵. در فیلد "file" هر آیتم بلاک file-edit، به‌جای اسم فایل اصلی، از مقدار suggestedOutputName که apply_patch برگرداند استفاده کن (نه اسم فایلی که کاربر فرستاده) - این اسم نسخه‌ی ویرایش‌شده را از نسخه‌ی اصلی متمایز می‌کند.
+   - اگر success:false برگشت، بر اساس خطای برگشتی (candidates برای حالت B، یا پیام خطای محدوده برای حالت A) اصلاح کن و دوباره صدا بزن. هرگز حدس نزن یا از fuzzy-match استفاده نکن.
+۴. اگر چند تغییر در فایل‌های بزرگ لازم است و همه خط‌محور هستند، آن‌ها را به ترتیب نزولی شماره خط (از پایین فایل به بالا) روی هم اعمال کن تا شماره خط‌های تغییرات قبلی به‌هم نریزد.
+۵. فقط بعد از اینکه همه‌ی apply_patch های لازم با success:true تمام شدند، دقیقاً یک بلاک file-edit در پایان پاسخ تولید کن که شامل همان patch های تأییدشده باشد (هر آیتم دقیقاً همان فیلدهایی را دارد که apply_patch با آن‌ها success:true گرفت - یا {startLine, endLine, new} یا {old, new}).
+۶. در فیلد "file" هر آیتم بلاک file-edit، به‌جای اسم فایل اصلی، از مقدار suggestedOutputName/editedName که apply_patch برگرداند استفاده کن (نه اسم فایلی که کاربر فرستاده).
 
 فرمت نهایی (بعد از تأیید همه‌ی patch ها با apply_patch):
 
 \`\`\`file-edit
 [
   {
-    "file": "suggestedOutputName که apply_patch برگرداند",
-    "old": "متن دقیق قدیمی (همانی که apply_patch تأیید کرد)",
+    "file": "editedName که apply_patch برگرداند",
+    "startLine": 855,
+    "endLine": 860,
+    "new": "متن دقیق جدید"
+  },
+  {
+    "file": "editedName که apply_patch برگرداند",
+    "old": "متن دقیق قدیمی (فقط برای حالت B)",
     "new": "متن دقیق جدید"
   }
 ]
