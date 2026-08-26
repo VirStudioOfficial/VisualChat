@@ -927,6 +927,24 @@
             text-align: center; border-radius: 999px;
             box-shadow: 0 0 0 2px var(--bg-sidebar, #111);
         }
+        .notif-status-dot {
+            position: absolute; top: 3px; left: 3px;
+            width: 10px; height: 10px; border-radius: 50%;
+            border: 2px solid var(--bg-sidebar, #111);
+            box-shadow: 0 0 6px rgba(0,0,0,0.4);
+            z-index: 2;
+        }
+        .notif-status-dot.yellow { background-color: #fbbf24; }
+        .notif-status-dot.green { background-color: #22c55e; }
+        .notif-status-badge {
+            font-size: 0.7rem; font-weight: 700; padding: 2px 8px;
+            border-radius: 12px; display: inline-block; white-space: nowrap; flex-shrink: 0;
+        }
+        .notif-status-badge.status-green { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+        .notif-status-badge.status-yellow { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+        .notif-status-badge.status-gray { background: rgba(148,163,184,0.15); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); }
+        .notif-section-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); padding: 8px 10px 4px; border-bottom: 1px solid var(--border-soft); margin-bottom: 4px; }
+        .notif-item-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
         .notif-panel {
             display: none; position: absolute; top: calc(100% + 10px); left: 0;
             width: min(340px, 88vw); max-height: 420px; overflow-y: auto;
@@ -1560,6 +1578,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     <button class="icon-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="اعلان‌ها">
                         <i class="lucide-icon" data-lucide="bell"></i>
                         <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+                        <span class="notif-status-dot" id="notifStatusDot" style="display:none;"></span>
                     </button>
                     <div class="notif-panel" id="notifPanel">
                         <div class="notif-panel-header">تغییرات و اعلان‌ها</div>
@@ -1773,6 +1792,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             statusEl.style.color = '#4ade80';
             statusEl.textContent = 'ارسال شد، ممنون از گزارشت 🙏';
             textEl.value = '';
+            fetchNotifs();
         } catch (err) {
             statusEl.style.color = '#f87171';
             statusEl.textContent = 'ارسال نشد، دوباره امتحان کن';
@@ -1850,20 +1870,88 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let activeLoadingDiv = null;
 
 
-    // ===== Notification bell (Changelog از پنل ادمین جدا) =====
+    // ===== Notification bell =====
     const NOTIF_API_URL = 'https://notify-admin-iota.vercel.app/api/notifications';
+    const BUG_REPORT_ENDPOINT = 'https://notify-admin-iota.vercel.app/api/bugreports';
     const NOTIF_SEEN_KEY = 'vc_notif_seen_ids';
+    const BUG_STATUS_SEEN_KEY = 'vc_bug_status_seen';
+
     let notifItems = [];
+    let myBugReports = [];
+    let activeStatusDot = null;
 
     function getSeenNotifIds() {
         try { return JSON.parse(localStorage.getItem(NOTIF_SEEN_KEY) || '[]'); }
         catch (e) { return []; }
     }
+
+    function getStatusInfo(statusStr) {
+        const s = String(statusStr || '').toLowerCase().trim();
+        if (s.includes('رفع') || s.includes('حل') || s.includes('resolve') || s.includes('fix') || s.includes('done')) {
+            return { label: 'رفع شده', badgeClass: 'status-green', dotColor: 'green' };
+        }
+        if (s.includes('بررسی') || s.includes('progress') || s.includes('investigat') || s.includes('review')) {
+            return { label: 'درحال بررسی', badgeClass: 'status-yellow', dotColor: 'yellow' };
+        }
+        return { label: 'در انتظار بررسی', badgeClass: 'status-gray', dotColor: null };
+    }
+
+    function checkBugStatusChanges() {
+        let seenMap = {};
+        try { seenMap = JSON.parse(localStorage.getItem(BUG_STATUS_SEEN_KEY) || '{}'); } catch(e){}
+
+        let hasUnseenYellow = false;
+        let hasUnseenGreen = false;
+
+        for (const report of myBugReports) {
+            const reportId = String(report.id || report._id || report.createdAt || report.message);
+            const currentStatus = String(report.status || 'pending');
+            const lastSeenStatus = seenMap[reportId];
+
+            if (currentStatus !== lastSeenStatus) {
+                const info = getStatusInfo(currentStatus);
+                if (info.dotColor === 'green') hasUnseenGreen = true;
+                if (info.dotColor === 'yellow') hasUnseenYellow = true;
+            }
+        }
+
+        if (hasUnseenGreen) activeStatusDot = 'green';
+        else if (hasUnseenYellow) activeStatusDot = 'yellow';
+        else activeStatusDot = null;
+
+        updateStatusDotUI();
+    }
+
+    function updateStatusDotUI() {
+        const dot = document.getElementById('notifStatusDot');
+        if (!dot) return;
+        if (activeStatusDot) {
+            dot.className = 'notif-status-dot ' + activeStatusDot;
+            dot.style.display = 'block';
+        } else {
+            dot.style.display = 'none';
+        }
+    }
+
     function markAllNotifsSeen() {
         const ids = notifItems.map(n => n.id);
         localStorage.setItem(NOTIF_SEEN_KEY, JSON.stringify(ids));
+
+        let seenMap = {};
+        try { seenMap = JSON.parse(localStorage.getItem(BUG_STATUS_SEEN_KEY) || '{}'); } catch(e){}
+        for (const report of myBugReports) {
+            const reportId = String(report.id || report._id || report.createdAt || report.message);
+            if (reportId) {
+                seenMap[reportId] = String(report.status || 'pending');
+            }
+        }
+        localStorage.setItem(BUG_STATUS_SEEN_KEY, JSON.stringify(seenMap));
+
+        activeStatusDot = null;
+        updateStatusDotUI();
         updateNotifBadge();
     }
+
     function updateNotifBadge() {
         const seen = getSeenNotifIds();
         const unread = notifItems.filter(n => !seen.includes(n.id)).length;
@@ -1876,54 +1964,106 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             badge.style.display = 'none';
         }
     }
+
     function renderNotifList() {
         const list = document.getElementById('notifList');
         if (!list) return;
-        if (!notifItems.length) {
+
+        if (!notifItems.length && !myBugReports.length) {
             list.innerHTML = '<div class="notif-empty">فعلاً اعلانی نیست.</div>';
             return;
         }
-        list.innerHTML = notifItems.map(n => `
-            <div class="notif-item">
-                <div class="notif-item-title">${escapeHtmlNotif(n.title || '')}</div>
-                <div class="notif-item-body">${escapeHtmlNotif(n.body || '')}</div>
-                <div class="notif-item-date">${escapeHtmlNotif(n.date || '')}</div>
-            </div>
-        `).join('');
+
+        let html = '';
+
+        if (myBugReports.length > 0) {
+            html += '<div class="notif-section-title">گزارش‌های شما</div>';
+            html += myBugReports.map(b => {
+                const info = getStatusInfo(b.status);
+                const dateStr = b.date || (b.createdAt ? new Date(b.createdAt).toLocaleDateString('fa-IR') : '');
+                return `
+                    <div class="notif-item">
+                        <div class="notif-item-header">
+                            <div class="notif-item-title" style="margin-bottom:0;">📋 ${escapeHtmlNotif(b.message || '')}</div>
+                            <span class="notif-status-badge ${info.badgeClass}">${escapeHtmlNotif(info.label)}</span>
+                        </div>
+                        ${dateStr ? `<div class="notif-item-date">${escapeHtmlNotif(dateStr)}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        if (notifItems.length > 0) {
+            if (myBugReports.length > 0) {
+                html += '<div class="notif-section-title">اعلان‌های سیستم</div>';
+            }
+            html += notifItems.map(n => `
+                <div class="notif-item">
+                    <div class="notif-item-title">${escapeHtmlNotif(n.title || '')}</div>
+                    <div class="notif-item-body">${escapeHtmlNotif(n.body || '')}</div>
+                    <div class="notif-item-date">${escapeHtmlNotif(n.date || '')}</div>
+                </div>
+            `).join('');
+        }
+
+        list.innerHTML = html;
     }
+
     function escapeHtmlNotif(str) {
         const div = document.createElement('div');
-        div.textContent = String(str);
+        div.textContent = String(str || '');
         return div.innerHTML;
     }
+
     async function fetchNotifs() {
         try {
-            const res = await fetch(NOTIF_API_URL + '?t=' + Date.now(), { cache: 'no-store' });
-            if (!res.ok) throw new Error('bad response');
-            const data = await res.json();
-            notifItems = Array.isArray(data) ? data : (data.items || data.notifications || []);
-            notifItems = notifItems.slice(0, 20).map(n => ({
-                id: n.id,
-                title: n.title,
-                body: n.body,
-                date: n.date || (n.createdAt ? new Date(n.createdAt).toLocaleDateString('fa-IR') : '')
-            }));
+            const [notifRes, bugRes] = await Promise.allSettled([
+                fetch(NOTIF_API_URL + '?t=' + Date.now(), { cache: 'no-store' }),
+                fetch(BUG_REPORT_ENDPOINT + '?t=' + Date.now(), { cache: 'no-store' })
+            ]);
+
+            if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
+                const data = await notifRes.value.json();
+                const raw = Array.isArray(data) ? data : (data.items || data.notifications || []);
+                notifItems = raw.slice(0, 20).map(n => ({
+                    id: n.id,
+                    title: n.title,
+                    body: n.body,
+                    date: n.date || (n.createdAt ? new Date(n.createdAt).toLocaleDateString('fa-IR') : '')
+                }));
+            }
+
+            if (bugRes.status === 'fulfilled' && bugRes.value.ok) {
+                const bugData = await bugRes.value.json();
+                const allBugs = Array.isArray(bugData) ? bugData : [];
+                const myClientId = typeof getBugClientId === 'function' ? getBugClientId() : null;
+                const currentUName = (localStorage.getItem('virtual_custom_name') || '').trim();
+
+                myBugReports = allBugs.filter(b => 
+                    (myClientId && b.clientId === myClientId) ||
+                    (!b.clientId && currentUName && b.userName === currentUName)
+                );
+            }
+
+            checkBugStatusChanges();
             renderNotifList();
             updateNotifBadge();
         } catch (e) {
-            const list = document.getElementById('notifList');
-            if (list) list.innerHTML = '<div class="notif-empty">دریافت اعلان‌ها ممکن نشد.</div>';
+            console.error('fetchNotifs failed:', e);
+            renderNotifList();
         }
     }
+
     function toggleNotifPanel() {
         const panel = document.getElementById('notifPanel');
         if (!panel) return;
         const willOpen = !panel.classList.contains('active');
         panel.classList.toggle('active', willOpen);
         if (willOpen) {
-            setTimeout(markAllNotifsSeen, 1200);
+            markAllNotifsSeen();
         }
     }
+
     function initNotifSystem() {
         fetchNotifs();
         document.addEventListener('click', (e) => {
