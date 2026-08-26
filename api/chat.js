@@ -631,96 +631,182 @@ ${String(botText || '').slice(0, 500)}
 
 async function fetchTavilyResults(query, tavilyKeys, searchCache) {
     if (!tavilyKeys || tavilyKeys.length === 0) {
-        return null;
+        return {
+            ok: false,
+            code: 'search_not_configured',
+            message: 'سرویس جستجو پیکربندی نشده است.'
+        };
     }
 
-    // FIX (root cause of "many different searches for one message"): the
-    // outer handler retries the whole runAgentLoop from scratch on the next
-    // Gemini key/model whenever an attempt fails AFTER it already did a
-    // web_search but BEFORE it produced a final answer (timeout, upstream
-    // error, empty response, etc). Each retry used to re-run
-    // fetchTavilyResults from zero, burning a fresh Tavily search per retry
-    // even though it's the same user question. searchCache is a small
-    // Map created once per incoming HTTP request (see main handler) and
-    // passed all the way down here, so a retry that searches the same
-    // (normalized) query reuses the first attempt's result instead of
-    // hitting Tavily again.
-    const cacheKey = query.trim().toLowerCase();
+    // One logical web_search = at most ONE Tavily HTTP request.
+    // The previous implementation looped over every Tavily key after a
+    // failure. That looked like one search in the UI, but could actually
+    // generate many provider requests for the same user question.
+    const cacheKey = String(query).trim().toLowerCase();
+
     if (searchCache && searchCache.has(cacheKey)) {
-        log.info('search.cache_hit', { queryPreview: query.slice(0, 100) });
+        log.info('search.cache_hit', { queryPreview: String(query).slice(0, 100) });
         return searchCache.get(cacheKey);
     }
 
-    for (let i = 0; i < tavilyKeys.length; i++) {
-        const currentKey = tavilyKeys[i];
+    // Spread requests across healthy keys, but never retry another key inside
+    // this logical search. A different incoming request can select another
+    // key, so a fleet of keys is still useful without violating the one-search
+    // limit.
+    const orderedTavilyKeys = rotateKeysByHealth(tavilyKeys);
+    const currentKey = orderedTavilyKeys[0];
+    const keyIndex = tavilyKeys.indexOf(currentKey) + 1;
 
+    const fail = (code, message, status = null, retryable = false) => {
+        const failure = {
+            ok: false,
+            code,
+            status,
+            retryable,
+            message
+        };
+        if (searchCache) searchCache.set(cacheKey, failure);
+        return failure;
+    };
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        let response;
         try {
-            const controller = new AbortController();
-
-            const timeoutId = setTimeout(
-                () => controller.abort(),
-                4500
+            response = await fetch(
+                'https://api.tavily.com/search',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        api_key: currentKey,
+                        query,
+                        search_depth: 'basic',
+                        max_results: 2
+                    }),
+                    signal: controller.signal
+                }
             );
-
-            let response;
-
-            try {
-                response = await fetch(
-                    'https://api.tavily.com/search',
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            api_key: currentKey,
-                            query,
-                            search_depth: 'basic',
-                            max_results: 2
-                        }),
-                        signal: controller.signal
-                    }
-                );
-            } finally {
-                clearTimeout(timeoutId);
-            }
-
-            if (!response.ok) {
-                continue;
-            }
-
-            const data = await response.json();
-
-            if (
-                data.results &&
-                data.results.length > 0
-            ) {
-                log.info('search.succeeded', { keyIndex: i + 1, resultCount: data.results.length });
-
-                const formatted = data.results
-                    .map(
-                        r =>
-                            `عنوان: ${r.title}\n` +
-                            `منبع: ${r.url}\n` +
-                            `محتوا: ${String(r.content || '').slice(0, 1800)}`
-                    )
-                    .join('\n\n---\n\n');
-
-                if (searchCache) searchCache.set(cacheKey, formatted);
-                return formatted;
-            }
-
-        } catch (error) {
-            log.error('search.key_failed', {
-                keyIndex: i + 1,
-                message: error?.message || String(error)
-            });
+        } finally {
+            clearTimeout(timeoutId);
         }
+
+        if (!response.ok) {
+            let body = null;
+            try { body = await response.json(); } catch (_) {}
+
+            const status = response.status;
+            const providerMessage =
+                body?.detail ||
+                body?.message ||
+                body?.error ||
+                `HTTP ${status}`;
+
+            markKeyResult(currentKey, false);
+
+            if (status === 401 || status === 403) {
+                return fail(
+                    'search_invalid_key',
+                    'کلید سرویس جستجو معتبر نیست یا دسترسی آن رد شده است.',
+                    status,
+                    false
+                );
+            }
+
+            if (status === 429) {
+                return fail(
+                    'search_rate_limit',
+                    'سرویس جستجو به محدودیت درخواست رسیده است. این جستجو فقط یک‌بار تلاش شد تا درخواست‌های اضافی ایجاد نشود.',
+                    status,
+                    true
+                );
+            }
+
+            if (status >= 500) {
+                return fail(
+                    'search_provider_error',
+                    'خود سرویس جستجو موقتاً با خطای سرور مواجه شد.',
+                    status,
+                    true
+                );
+            }
+
+            return fail(
+                'search_http_error',
+                `سرویس جستجو درخواست را رد کرد (${status}).`,
+                status,
+                false
+            );
+        }
+
+        const data = await response.json();
+
+        if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
+            markKeyResult(currentKey, true);
+            return fail(
+                'search_no_results',
+                'جستجو انجام شد اما نتیجه‌ای برای این عبارت پیدا نشد.',
+                200,
+                false
+            );
+        }
+
+        markKeyResult(currentKey, true);
+
+        const formatted = data.results
+            .map(
+                r =>
+                    `عنوان: ${r.title || 'بدون عنوان'}\n` +
+                    `منبع: ${r.url || 'نامشخص'}\n` +
+                    `محتوا: ${String(r.content || '').slice(0, 1800)}`
+            )
+            .join('\n\n---\n\n');
+
+        const success = {
+            ok: true,
+            code: 'search_success',
+            status: 200,
+            result: formatted
+        };
+
+        if (searchCache) searchCache.set(cacheKey, success);
+
+        log.info('search.succeeded', {
+            keyIndex,
+            resultCount: data.results.length
+        });
+
+        return success;
+
+    } catch (error) {
+        markKeyResult(currentKey, false);
+
+        if (error?.name === 'AbortError') {
+            return fail(
+                'search_timeout',
+                'جستجوی وب در زمان تعیین‌شده پاسخ نداد.',
+                408,
+                true
+            );
+        }
+
+        log.error('search.request_failed', {
+            keyIndex,
+            message: error?.message || String(error)
+        });
+
+        return fail(
+            'search_network_error',
+            'ارتباط با سرویس جستجوی وب برقرار نشد.',
+            null,
+            true
+        );
     }
-
-    return null;
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -884,12 +970,29 @@ async function executeToolCall(name, args, ctx) {
 
         log.info('agent.tool.web_search', { queryPreview: query.slice(0, 100) });
 
-        const results = await fetchTavilyResults(query, ctx.tavilyKeys, ctx.searchCache);
+        const search = await fetchTavilyResults(
+            query,
+            ctx.tavilyKeys,
+            ctx.searchCache
+        );
 
-        if (!results) {
-            return { result: 'نتیجه‌ای برای این جستجو پیدا نشد.' };
+        if (!search?.ok) {
+            return {
+                result:
+                    `[جستجوی وب ناموفق بود | ${search?.code || 'search_error'}] ` +
+                    `${search?.message || 'سرویس جستجو نتوانست نتیجه‌ای برگرداند.'}`,
+                searchError: {
+                    code: search?.code || 'search_error',
+                    status: search?.status ?? null,
+                    retryable: !!search?.retryable
+                }
+            };
         }
-        return { result: results };
+
+        return {
+            result: search.result,
+            searchError: null
+        };
     }
 
     if (name === 'ask_user') {
