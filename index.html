@@ -2010,7 +2010,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         try {
             const [notifRes, bugRes] = await Promise.allSettled([
                 fetch(NOTIF_API_URL + '?t=' + Date.now(), { cache: 'no-store' }),
-                fetch(BUG_REPORT_ENDPOINT + '?t=' + Date.now(), { cache: 'no-store' })
+                fetch(BUG_REPORT_ENDPOINT + '?clientId=' + encodeURIComponent(getBugClientId()) + '&t=' + Date.now(), { cache: 'no-store' })
             ]);
 
             if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
@@ -2026,7 +2026,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
             if (bugRes.status === 'fulfilled' && bugRes.value.ok) {
                 const bugData = await bugRes.value.json();
-                const allBugs = Array.isArray(bugData) ? bugData : [];
+                const allBugs = Array.isArray(bugData) ? bugData : (Array.isArray(bugData.items) ? bugData.items : []);
                 const myClientId = typeof getBugClientId === 'function' ? getBugClientId() : null;
                 const currentUName = (localStorage.getItem('virtual_custom_name') || '').trim();
 
