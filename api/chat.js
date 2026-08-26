@@ -934,8 +934,8 @@ function buildPatchFailureReport(content, oldStr, reasonText) {
     const candidates = [];
     contentLines.forEach((line, idx) => {
         if (firstLine && line.includes(firstLine.slice(0, Math.min(20, firstLine.length)))) {
-            const start = Math.max(0, idx - 2);
-            const end = Math.min(contentLines.length, idx + 3);
+            const start = Math.max(0, idx - 3);
+            const end = Math.min(contentLines.length, idx + 4);
             candidates.push({
                 lineNumber: idx + 1,
                 context: contentLines.slice(start, end).join('\n')
@@ -946,7 +946,7 @@ function buildPatchFailureReport(content, oldStr, reasonText) {
     return {
         reason: reasonText,
         candidatesFound: candidates.length,
-        candidates: candidates.slice(0, 3),
+        candidates: candidates.slice(0, 5),
         hint: 'old را دقیقاً از یکی از این context ها کپی کن (کاراکتر به کاراکتر، شامل فاصله‌گذاری) تا یکتا شود، سپس دوباره apply_patch را صدا بزن.'
     };
 }
@@ -1382,7 +1382,7 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
-    const MAX_TOOL_ROUNDS = 2; // one round to search (if needed) + one round to answer using the results; this is a hard cap, not a target
+    const MAX_TOOL_ROUNDS = 5; // one round to search (if needed) + up to 3 rounds to answer/self-correct file-edit patches using the results; this is a hard cap, not a target
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
     // keep the first search result available to the replacement model without
