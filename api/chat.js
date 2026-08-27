@@ -2454,10 +2454,22 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
             if (result.askUser) earlyAskUser = result.askUser;
 
-            responseParts.push({
+            // FINAL AGENT CONTINUATION GUARD:
+// After reading a file chunk, explicitly tell the model that context is
+// already loaded. This prevents restarting inspect_file from zero.
+let responseForModel = result;
+if (call.name === 'get_file_chunk' && result && !result.error) {
+    responseForModel = {
+        ...result,
+        agentInstruction:
+            'File chunk loaded successfully. Continue from this context. Do not restart file inspection or request inspect_file again unless absolutely required.'
+    };
+}
+
+responseParts.push({
                 functionResponse: {
                     name: call.name,
-                    response: result
+                    response: responseForModel
                 }
             });
         }
