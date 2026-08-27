@@ -2304,6 +2304,32 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 const requestedEnd = Number(call.args && call.args.endLine);
                 const priorReads = chunkReadsPerFile.get(chunkFileKey) || [];
 
+                // FIX: prevent stale/backward chunk jumps.
+                // If the agent already scanned a newer region of the same file,
+                // a later request for an older range usually means the model
+                // lost track of the current edit context. Do not restart the
+                // file walk; return the latest known context instead.
+                const latestRead = priorReads.reduce((latest, item) => {
+                    if (!latest || item.endLine > latest.endLine) return item;
+                    return latest;
+                }, null);
+
+                if (latestRead && Number.isFinite(requestedStart) && Number.isFinite(requestedEnd) && requestedEnd < latestRead.startLine) {
+                    responseParts.push({
+                        functionResponse: {
+                            name: call.name,
+                            response: {
+                                file: (call.args && call.args.file) || '',
+                                startLine: latestRead.startLine,
+                                endLine: latestRead.endLine,
+                                content: latestRead.content,
+                                error: `این فایل قبلاً تا خط ${latestRead.endLine} بررسی شده است. برگشت به محدوده قدیمی ${requestedStart}-${requestedEnd} متوقف شد؛ از context خوانده‌شده فعلی ادامه بده.`
+                            }
+                        }
+                    });
+                    continue;
+                }
+
                 const exactOrSubsetMatch = Number.isFinite(requestedStart) && Number.isFinite(requestedEnd)
                     ? priorReads.find(r => requestedStart >= r.startLine && requestedEnd <= r.endLine)
                     : null;
