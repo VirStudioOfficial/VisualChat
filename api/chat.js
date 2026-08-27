@@ -2216,6 +2216,20 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         const responseParts = [];
         let earlyAskUser = null;
 
+        // FIX (root cause of "بررسی ساختار فایل" چندبار تکرار می‌شود و
+        // Rate limit همه‌ی کلیدها را می‌ترکاند): با هر بار inspect_file،
+        // computeLogicalChunks کل نقشه‌ی chunk را از صفر و با مرزهای
+        // متفاوت می‌سازد (چون هیچ حالتی بین صداها نگه داشته نمی‌شود).
+        // هیچ‌جای system prompt هم مدل را از صدا زدن دوباره‌ی inspect_file
+        // منع نمی‌کرد، پس وقتی مدل روی یک فایل بزرگ گیج می‌شد، راه‌حلش
+        // "از اول نگاه کن" بود - دقیقاً همان رفتار "می‌ره ۲۰۰، بعد ۱۰۰۰،
+        // بعد برمی‌گرده ۱۰۰" که باعث شد هر ۱۲ کلید با 429 تمام شوند.
+        // این حالت را به‌ازای هر فایل، در طول کل درخواست (نه فقط یک
+        // round)، یک‌بار محدود می‌کنیم؛ صداهای بعدی بدون تماس با Gemini
+        // رد می‌شوند و مدل به get_file_chunk (که فقط می‌خواند، چیزی را
+        // دوباره نمی‌سازد) هدایت می‌شود.
+        const inspectedFilesThisRequest = new Set();
+
         // FIX (root cause of "searches many sites for one simple question"):
         // Gemini's function-calling can return SEVERAL functionCall parts in
         // a single model turn (parallel calling) - e.g. 3-4 different
@@ -2229,6 +2243,22 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
         for (const call of functionCalls) {
             const label = describeToolCall(call.name, call.args);
+
+            if (call.name === 'inspect_file') {
+                const targetFileKey = String((call.args && call.args.file) || '').trim().toLowerCase();
+                if (inspectedFilesThisRequest.has(targetFileKey)) {
+                    responseParts.push({
+                        functionResponse: {
+                            name: call.name,
+                            response: {
+                                error: 'inspect_file قبلاً برای این فایل صدا زده شده و نقشه‌ی ساختار/chunk آن را قبلاً داری. دوباره صدایش نزن - آن نقشه یا نتیجه‌ی قبلی get_file_chunk را مبنا قرار بده و مستقیماً با get_file_chunk محدوده‌ی مدنظر را بخوان یا apply_patch را بزن.'
+                            }
+                        }
+                    });
+                    continue;
+                }
+                inspectedFilesThisRequest.add(targetFileKey);
+            }
 
             if (call.name === 'web_search') {
                 webSearchesThisRound++;
@@ -3161,7 +3191,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - هرگز فاصله‌های اضافه، تب‌های متفاوت، یا خطوط خالی اضافی در "old" یا "new" وارد نکن که در فایل اصلی نیستند.
 
 روند اجباری ویرایش (هر مرحله قبل از بعدی):
-۱. ابزار inspect_file را برای فایل هدف صدا بزن. اگر lineCount زیاد بود (نتیجه صراحتاً می‌گوید فایل بزرگ است)، کل فایل به تو داده نمی‌شود - فقط نقشه‌ی ساختار و chunk map داده می‌شود.
+۱. ابزار inspect_file را برای فایل هدف، فقط یک‌بار در کل این مکالمه صدا بزن. اگر lineCount زیاد بود (نتیجه صراحتاً می‌گوید فایل بزرگ است)، کل فایل به تو داده نمی‌شود - فقط نقشه‌ی ساختار و chunk map داده می‌شود. این نقشه را نگه دار و از آن استفاده کن؛ صدا زدن دوباره‌ی inspect_file برای همان فایل رد می‌شود (چون نقشه از قبل داری) و فقط وقت و سهمیه را هدر می‌دهد.
 ۲. نتیجه inspect_file (و در صورت نیاز get_file_chunk) را مبنای انتخاب تابع/بخش/عنصر هدف قرار بده و اگر قابلیت یا کد مشابه از قبل وجود دارد، آن را دوباره ایجاد نکن؛ همان بخش موجود را اصلاح کن.
 ۳. برای فایل بزرگ: حالت A (خط‌محور) را انتخاب کن - get_file_chunk را برای محدوده‌ی هدف بخوان تا شماره خط دقیق را تأیید کنی، سپس apply_patch را با {file, startLine, endLine, new} صدا بزن.
    برای فایل کوچک یا تغییر یک‌خطی: حالت B (متن دقیق) را انتخاب کن - apply_patch را با {file, old, new} صدا بزن.
