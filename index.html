@@ -3773,34 +3773,57 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
     }
 
+    // ARCHITECTURE (multi-request file editing): sendToGemini is the public
+    // entry point every existing call site already uses (unchanged
+    // signature/behavior for callers). It now just kicks off
+    // runOneEditTurn, which may call ITSELF again one or more times (see
+    // the continueEditState branch below) before the visible turn is truly
+    // done - that looping is entirely internal and invisible to callers.
     async function sendToGemini(textPrompt, payloadFiles = [], retryContext = null) {
+        await runOneEditTurn(textPrompt, payloadFiles, retryContext);
+    }
+
+    async function runOneEditTurn(textPrompt, payloadFiles = [], retryContext = null) {
         // Backward-compat: earlier code paths might still call this with a
         // single file object instead of an array.
         if (payloadFiles && !Array.isArray(payloadFiles)) payloadFiles = [payloadFiles];
         if (!payloadFiles) payloadFiles = [];
-        const requestId = ++activeRequestId;
-        setGeneratingState(true);
+        // ARCHITECTURE (multi-request file editing): a continuation call
+        // (see the continueEdit handling further down) re-invokes this same
+        // function with retryContext.agentState set. That's the ONLY signal
+        // this function needs to behave as "still the same visible turn,
+        // just another /api/chat call under the hood" - it reuses
+        // retryContext's existing isRetry machinery (same wrapperDiv,
+        // loadingDiv, no duplicate history push) since a continuation call
+        // has exactly the same DOM/history requirements a retry already
+        // has: don't create a new bubble, don't push the user's turn again.
+        const isContinuation = !!(retryContext && retryContext.agentState);
+        const requestId = isContinuation ? activeRequestId : ++activeRequestId;
+        if (!isContinuation) setGeneratingState(true);
 
         // ===== FIX: safety-net watchdog. Some rare network failures (e.g. the
         // server process restarting mid-stream during a deploy) don't surface as a
         // clean fetch rejection or AbortError — the promise can simply never
         // settle. Without this, isGenerating stays stuck true forever and the
         // composer (#userInput / send button) stays disabled in that chat until
-        // the page is reloaded. This timer force-resets the UI after 210s no matter
-        // what went wrong upstream, so the user is never permanently locked out.
+        // the page is reloaded. This timer force-resets the UI after 75s no
+        // matter what went wrong upstream, so the user is never permanently
+        // locked out.
         //
-        // BUGFIX (mismatched timeout - "took too long" fires while the server
-        // is still legitimately working): this used to be 90000 (90s), but the
-        // backend's own overall deadline is 180s, and a reply that needs the
-        // get_archived_file tool (e.g. re-reading a large saved file) genuinely
-        // takes two full Gemini rounds - each with up to a 60s budget - plus
-        // the tool call itself. 90s could (and did) fire WHILE the server was
-        // still mid-request, killing the client-side UI first; the user would
-        // then see "took too long", but the original request kept running
-        // server-side and its (unretrieved) result, or the key-rotation state
-        // it touched, could surface confusingly on the next manual retry. Set
-        // this comfortably above the server's real 180s ceiling so the server
-        // always gets to finish (and return its OWN specific error) first. =====
+        // BUGFIX (mismatched timeout - watchdog fires while the server is
+        // still legitimately working, or fires too late to ever help): this
+        // used to be a single 210000ms (210s) timer covering the ENTIRE
+        // reply, based on the old single-call backend that could itself run
+        // up to ~180s in one HTTP request. The backend no longer works that
+        // way - every single /api/chat call (including each file-edit
+        // continuation call) is now bounded to a few rounds specifically so
+        // it finishes well inside Vercel's own ~60s hard function timeout.
+        // So the watchdog is now PER-CALL (reset on every continuation, see
+        // runOneEditTurn's caller below) with a budget just above that real
+        // per-call ceiling - it fires only if THIS ONE call's connection
+        // truly went dead (e.g. mid-deploy restart), not because a
+        // multi-round edit is still legitimately working across several
+        // calls. =====
         const watchdogId = setTimeout(() => {
             if (requestId === activeRequestId && isGenerating) {
                 console.warn('[watchdog] Request took too long — resetting UI so input is usable again.');
@@ -3818,10 +3841,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 activeLoadingDiv = null;
                 saveCurrentChat();
             }
-        }, 210000);
+        }, 75000);
 
         const chatBox = document.getElementById("chatBox");
-        const isRetry = !!retryContext?.retry;
+        const isRetry = !!retryContext?.retry || isContinuation;
         const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
         const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
         const request = { textPrompt, payloadFiles, wrapper: wrapperDiv, loadingDiv };
@@ -3883,24 +3906,38 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // instead of the new message. Track exactly which index this turn
         // lives at, so it can be cleanly removed if the request doesn't
         // finish with a real reply (stopped, errored, or empty).
-        let pushedHistoryIndex = -1;
+        //
+        // ARCHITECTURE (multi-request file editing): a continuation call
+        // must NOT push a second user turn (isRetry already prevents that,
+        // same as a normal retry) - but unlike a normal retry, there was no
+        // earlier failed attempt that already cleaned up the ORIGINAL push
+        // from the very first call in this chain. If a later continuation
+        // call fails, that first-call push still needs to be removable.
+        // So the tracking state lives in one shared mutable object created
+        // by the FIRST call and threaded through retryContext to every
+        // continuation call in the chain - every call reads/clears the
+        // SAME underlying index instead of each getting its own useless -1
+        // that can never reach the real pushed turn.
+        const historyPushState = isContinuation
+            ? retryContext.historyPushState
+            : { index: -1 };
         if (!isRetry) {
             ensureVirtualPersona();
             chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
-            pushedHistoryIndex = chatHistoryData[currentChatId].length - 1;
+            historyPushState.index = chatHistoryData[currentChatId].length - 1;
         }
         const removePushedUserTurnIfUnanswered = () => {
-            if (pushedHistoryIndex === -1) return;
+            if (historyPushState.index === -1) return;
             const hist = chatHistoryData[currentChatId];
-            const entry = hist && hist[pushedHistoryIndex];
+            const entry = hist && hist[historyPushState.index];
             // Only remove if it's still exactly the turn we pushed (still a
             // 'user' turn at that index, nothing else appended after it that
             // would shift things) - keeps this safe even if something else
             // touched history in the meantime.
-            if (entry && entry.role === 'user' && hist.length === pushedHistoryIndex + 1) {
-                hist.splice(pushedHistoryIndex, 1);
+            if (entry && entry.role === 'user' && hist.length === historyPushState.index + 1) {
+                hist.splice(historyPushState.index, 1);
             }
-            pushedHistoryIndex = -1;
+            historyPushState.index = -1;
         };
         currentAbortController = new AbortController();
 
@@ -3967,7 +4004,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
                     styleHint: virtualPersona,
-                    stream: true
+                    stream: true,
+                    // ARCHITECTURE (multi-request file editing): on a
+                    // continuation call, hand back EXACTLY the agentState
+                    // object the previous /api/chat call sent us in its
+                    // continueEdit event. The backend uses this instead of
+                    // rebuilding contents from history/files, so it resumes
+                    // the in-progress edit rather than starting over.
+                    // Omitted (undefined -> not sent) on every normal
+                    // request, which is how the backend tells first-time
+                    // requests apart from continuations.
+                    ...(isContinuation ? { agentState: retryContext.agentState } : {})
                 }),
                 signal: currentAbortController.signal
             });
@@ -3999,6 +4046,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let gotAnyText = false;
             let liveRenderTimer = null;
             let streamEnded = false;
+            let continueEditState = null;
 
             const flushLiveRender = () => {
                 liveRenderTimer = null;
@@ -4077,6 +4125,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamError = parsed.error.message || 'خطای نامشخص';
                             streamErrorDetail = parsed.error;
                         }
+                    } else if (parsed.continueEdit) {
+                        // ARCHITECTURE (multi-request file editing): the
+                        // backend ran out of its per-call round budget
+                        // while still legitimately mid-edit (large file,
+                        // several get_file_chunk/apply_patch rounds) and is
+                        // asking for a fresh /api/chat call to keep going.
+                        // Not an error and not a real end-of-turn - handled
+                        // once the stream closes, below.
+                        continueEditState = parsed.agentState || null;
                     }
                 }
             }
@@ -4094,14 +4151,36 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamError = parsed.error.message || 'خطای نامشخص';
                             streamErrorDetail = parsed.error;
                         }
+                    } else if (parsed.continueEdit) {
+                        continueEditState = parsed.agentState || null;
                     }
                 } catch (_) {}
             }
 
             streamEnded = true;
-            queueLiveRender(true);
 
             if (requestId !== activeRequestId) return;
+
+            // ARCHITECTURE (multi-request file editing): resume immediately
+            // and silently - from the user's point of view this is still
+            // one continuous reply. Loading dots / step label stay visible
+            // (loadingDiv is untouched) instead of being replaced by a
+            // finished-reply render, and the request/history bookkeeping
+            // below (which only runs on a real end-of-turn) is skipped
+            // entirely for this call.
+            if (continueEditState) {
+                clearTimeout(watchdogId);
+                await runOneEditTurn(textPrompt, payloadFiles, {
+                    retry: true,
+                    wrapper: wrapperDiv,
+                    loadingDiv,
+                    agentState: continueEditState,
+                    historyPushState
+                });
+                return;
+            }
+
+            queueLiveRender(true);
 
             const reply = sanitizeVirtualIdentity(fullReply);
             if (gotAnyText && reply) {
@@ -4113,7 +4192,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
                 // Reply arrived and was saved right after the user turn -
                 // nothing left to clean up.
-                pushedHistoryIndex = -1;
+                historyPushState.index = -1;
                 lastFailedRequest = null;
 
                 const { displayText, edits } = stripFileEditBlock(reply);
