@@ -1,5 +1,23 @@
 // pages/api/chat.js
 
+// FIX (ریشه‌ی واقعیِ "گیر کردن وسط خواندن فایل بزرگ، بدون هیچ لاگ خطا"):
+// این تابع بدون maxDuration صریح روی سقف پیش‌فرض Vercel اجرا می‌شد. روی پلن
+// Hobby این سقف حداکثر ۶۰ ثانیه است (و بسته به runtime حتی می‌تواند کمتر
+// باشد)، در حالی‌که یک فایل ۲۰۰۰+ خطی با fileEditIntent فعال، به‌راحتی به
+// چند round خواندن chunk نیاز دارد که هرکدام تا ۱۷۰ ثانیه مهلت دارند
+// (roundNeedsMoreTime در runAgentLoop) - یعنی کل درخواست می‌توانست چند
+// دقیقه طول بکشد. وقتی زمان اجرا از سقف Vercel رد می‌شد، خودِ پلتفرم
+// پروسه را وسط کار Kill می‌کرد: نه catch سرور فرصت اجرا پیدا می‌کرد، نه
+// لاگی نوشته می‌شد (پروسه ناگهان از بین می‌رفت)، و کلاینت فقط می‌دید که
+// اتصال SSE دیگر هیچ event تازه‌ای نمی‌فرستد تا بالاخره خودش timeout بزند.
+// این دقیقاً همان رفتاری بود که مشاهده شد: توقف بی‌صدا درست وسط
+// "در حال خواندن بخشی از فایل"، بدون هیچ ردی در لاگ سرور.
+// عدد زیر باید با سقف واقعی پلن Vercel هماهنگ باشد (Hobby معمولاً حداکثر
+// ۶۰، Pro تا ۸۰۰) - این فقط یک "مقدار امن دلخواه" نیست، سقف واقعی پلن است.
+export const config = {
+    maxDuration: 60
+};
+
 /*
 |--------------------------------------------------------------------------
 | Logger - structured, no secrets ever printed
@@ -1763,7 +1781,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
+async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, maxRoundsThisCall, roundsAlreadySpent }) {
     // FIX (فایل‌های ۵۰۰۰+ خطی): با MAX_CHUNK_REQUEST_LINES=900، یک فایل
     // ۵۰۰۰ خطی حداقل به ۶-۷ بار get_file_chunk نیاز دارد اگر مدل مجبور
     // شود همه‌ی فایل را پیمایش کند، به‌علاوه‌ی inspect_file و apply_patch و
@@ -1771,6 +1789,37 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // get_file_chunk می‌رسید تمام می‌شد. بالا بردنش برای این پروفایل کاری
     // ضروری است - نه یک "مقدار امن دلخواه"، بلکه حداقل فضای واقعی لازم.
     const MAX_TOOL_ROUNDS = 16;
+    // ARCHITECTURE (multi-request file editing, Vercel Hobby's ~60s hard
+    // function-timeout): a single HTTP function invocation can only safely
+    // do a handful of rounds before Vercel kills the whole process mid-work
+    // — silently, with no throw, no log line, nothing the client can react
+    // to (it just sees the SSE connection go dead and eventually times out
+    // client-side). MAX_TOOL_ROUNDS above is the ABSOLUTE ceiling across the
+    // whole multi-step edit; maxRoundsThisCall is how many of those rounds
+    // THIS ONE function invocation is allowed to spend before it must return
+    // control to the caller instead of continuing to loop. When the caller
+    // (the fileEditIntent path only - see call site) passes a small number
+    // here, runAgentLoop stops itself early with needsContinuation instead
+    // of throwing a "too many steps" error, and hands back everything the
+    // NEXT invocation needs to resume mid-edit. Every other call site
+    // (plain chat, web search, non-stream) omits this and behaves exactly
+    // as before, running the full MAX_TOOL_ROUNDS in one call.
+    // How many rounds earlier invocations of this SAME logical edit already
+    // used up, across all prior continuation calls. Needed so the overall
+    // MAX_TOOL_ROUNDS ceiling is enforced across the whole multi-request
+    // chain, not reset back to full every time a new invocation starts -
+    // otherwise a genuinely stuck edit could loop through continuation
+    // calls forever instead of ever hitting the real "give up" case.
+    const spentSoFar = Number.isFinite(roundsAlreadySpent) ? Math.max(0, roundsAlreadySpent) : 0;
+    const roundBudgetForThisCall = Number.isFinite(maxRoundsThisCall)
+        ? Math.max(1, Math.min(maxRoundsThisCall, MAX_TOOL_ROUNDS - spentSoFar))
+        : MAX_TOOL_ROUNDS;
+    // Whether this invocation is even allowed to report "still going, call
+    // me again" - false once the cumulative round count across the whole
+    // chain has actually reached the absolute ceiling, so a stuck edit
+    // still terminates with the real TOOL_LOOP_LIMIT message instead of
+    // looping continuation calls forever.
+    const continuationAllowed = Number.isFinite(maxRoundsThisCall) && (spentSoFar + roundBudgetForThisCall) < MAX_TOOL_ROUNDS;
     // FIX (روند/tool call های چندمرحله‌ای که وسط کار throw می‌کردند از صفر
     // شروع می‌شدند): قبلاً اینجا `[...contents]` یک کپی محلی می‌ساخت. تمام
     // push های بعدی (نتیجه جستجو، نتیجه tool call، پاسخ مدل) فقط روی همین
@@ -1897,7 +1946,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const chunkReadsPerFile = new Map(); // fileKey -> [{startLine, endLine, content}]
     const MAX_CHUNK_READS_PER_FILE = 10; // با MAX_CHUNK_REQUEST_LINES=900 یعنی پوشش کامل فایل‌های ۵۰۰۰+ خطی + چند بار چک مجدد، نه پرسه‌زنی بی‌پایان
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round < roundBudgetForThisCall; round++) {
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         lastToolCallWasChunkRead = false; // consumed for this round; re-armed below only if this round's own tool call is a chunk read
@@ -2523,7 +2572,46 @@ responseParts.push({
         // loop continues: send the tool result(s) back to the model for round 2+
     }
 
-    // Safety net: too many tool rounds without a final answer.
+    // ARCHITECTURE (multi-request file editing): if this call was given a
+    // smaller round budget than the absolute MAX_TOOL_ROUNDS ceiling, this
+    // is NOT the "genuinely stuck" case below — it's this one function
+    // invocation simply running out of its Vercel-timeout-safe allowance
+    // while the edit was still legitimately in progress. Hand back
+    // everything the next invocation needs (the accumulated conversation
+    // AND any partially-patched file content) instead of giving up.
+    if (continuationAllowed) {
+        const partialFiles = (Array.isArray(textFiles) ? textFiles : [])
+            .filter(f => f && f._patched)
+            .map(f => ({
+                name: f.name,
+                editedName: f._editedName || f.name,
+                content: f.content || ''
+            }));
+        log.info('agent.round_budget_exhausted_continuing', {
+            roundBudgetForThisCall,
+            spentSoFar,
+            toolCallTally,
+            patchedFileCount: partialFiles.length
+        });
+        return {
+            needsContinuation: true,
+            finishReason: 'ROUND_BUDGET',
+            usage: lastUsage,
+            askUser: null,
+            partialFiles,
+            roundsSpentThisCall: roundBudgetForThisCall,
+            // Handed straight back into the next runAgentLoop call's
+            // `contents` param unchanged - workingContents already IS
+            // that accumulated array (see the mutate-in-place fix above),
+            // so no extra copying/reconstruction is needed here.
+            resumedContents: workingContents
+        };
+    }
+
+    // Safety net: too many tool rounds without a final answer, and this
+    // was already running with the full MAX_TOOL_ROUNDS budget - i.e. even
+    // across every continuation call, the edit never converged. This is
+    // the genuine "stuck" case, not a budget-ran-out-early case.
     // DIAGNOSTICS: این یکی از دو حالتی است که قبلاً هیچ اطلاعی از "چرا"
     // به کاربر نمی‌رسید - فقط همین پیام ثابت. حالا diagnostics هم برمی‌گردد
     // تا در "جزئیات بیشتر" معلوم باشد کدام ابزار چندبار تکرار شده بود.
@@ -2708,8 +2796,26 @@ async function handler(req, res) {
             // request at all, which is what actually bounds per-request
             // token cost as a chat's file history grows over time.
             archivedFileNames: rawArchivedFileNames,
-            archivedFiles: rawArchivedFiles
+            archivedFiles: rawArchivedFiles,
+            // ARCHITECTURE (multi-request file editing): when the client is
+            // resuming a file edit that a PREVIOUS /api/chat call already
+            // made partial progress on (see the fileEditIntent path below),
+            // it sends back exactly the agentState this same server handed
+            // it at the end of that previous call. Absent on every normal
+            // first-time request - this is only ever non-null on a
+            // continuation call.
+            agentState: rawAgentState
         } = req.body || {};
+
+        // Only trust the shape we actually produced; anything else is
+        // treated as "no state", which just makes this behave like a
+        // normal first request (worst case: starts the edit over, never
+        // crashes on a malformed/tampered client payload).
+        const agentState = (rawAgentState && typeof rawAgentState === 'object' &&
+            Array.isArray(rawAgentState.workingContents) &&
+            Number.isFinite(rawAgentState.roundsSpent))
+            ? rawAgentState
+            : null;
 
         const archivedFileNames = Array.isArray(rawArchivedFileNames) ? rawArchivedFileNames.filter(n => typeof n === 'string') : [];
         const archivedFiles = Array.isArray(rawArchivedFiles)
@@ -2826,7 +2932,29 @@ async function handler(req, res) {
                     f.content.length <= MAX_TEXT_FILE_CHARS
             );
 
-        const fileEditIntent = textFiles.length > 0 && looksLikeFileEditIntent(text);
+        // ARCHITECTURE (multi-request file editing): apply_patch mutates a
+        // textFiles entry in place (content/_patched/_editedName). On a
+        // continuation call, incomingFiles is whatever the client happened
+        // to resend - restore the patched state from the PREVIOUS
+        // invocation's agentState so apply_patch's in-place edits from
+        // earlier rounds aren't lost, and so a repeat apply_patch on the
+        // same file continues from the already-patched content instead of
+        // the original.
+        if (agentState && Array.isArray(agentState.patchedFiles)) {
+            for (const patched of agentState.patchedFiles) {
+                if (!patched || typeof patched.name !== 'string') continue;
+                const match = textFiles.find(f => f && f.name === patched.name);
+                if (match) {
+                    match.content = patched.content || '';
+                    match._patched = true;
+                    match._editedName = patched.editedName || match._editedName;
+                }
+            }
+        }
+
+        const fileEditIntent = agentState
+            ? !!agentState.fileEditIntent
+            : (textFiles.length > 0 && looksLikeFileEditIntent(text));
 
         const oversizedTextFiles =
             incomingFiles.filter(
@@ -2858,7 +2986,19 @@ async function handler(req, res) {
 
         let contents = [];
 
-        if (
+        // ARCHITECTURE (multi-request file editing): a continuation call
+        // already has its full accumulated conversation - original
+        // history, the user's message, the injected file content, AND
+        // every tool round from earlier invocations - sitting in
+        // agentState.workingContents exactly as the previous call left it.
+        // Rebuilding contents from `history` here would silently DROP all
+        // of that accumulated tool-call progress and restart the edit from
+        // scratch, defeating the entire point of this mechanism. So on a
+        // continuation call, skip history/file-block reconstruction
+        // entirely and use the carried-over array verbatim.
+        if (agentState) {
+            contents = agentState.workingContents;
+        } else if (
             history &&
             Array.isArray(history) &&
             history.length > 0
@@ -2913,7 +3053,7 @@ async function handler(req, res) {
         // actual incoming message text (searchQueryBase) as a new trailing
         // user turn. If there's no incoming text either, fall back to
         // dropping trailing model turns until a user turn is exposed.
-        if (contents.length > 0 && contents[contents.length - 1].role !== 'user') {
+        if (!agentState && contents.length > 0 && contents[contents.length - 1].role !== 'user') {
             if (searchQueryBase && searchQueryBase.trim()) {
                 contents.push({
                     role: 'user',
@@ -2961,6 +3101,7 @@ async function handler(req, res) {
         */
 
         if (
+            !agentState &&
             textFiles.length > 0 &&
             contents.length > 0
         ) {
@@ -3624,6 +3765,17 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             };
                         })();
 
+                        // ARCHITECTURE (multi-request file editing): only the
+                        // fileEditIntent path gets a small per-call round
+                        // budget - this is the profile that actually risks
+                        // running past Vercel's ~60s function timeout on a
+                        // large file (several get_file_chunk/apply_patch
+                        // rounds). Plain chat and search stay on the old
+                        // single-call behavior (maxRoundsThisCall omitted =
+                        // full MAX_TOOL_ROUNDS in one call), since neither
+                        // realistically needs enough rounds to approach that
+                        // ceiling.
+                        const FILE_EDIT_ROUNDS_PER_CALL = 3;
                         const agentResult = await runAgentLoop({
                             currentModel,
                             currentKey,
@@ -3640,6 +3792,10 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
+                            ...(fileEditIntent ? {
+                                maxRoundsThisCall: FILE_EDIT_ROUNDS_PER_CALL,
+                                roundsAlreadySpent: agentState ? (agentState.roundsSpent || 0) : 0
+                            } : {}),
                             onStep: (label, toolName) => {
                                 if (toolName === 'web_search') searchWasPerformed = true;
                                 res.write(
@@ -3651,6 +3807,31 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                 codeStreamGate(textChunk);
                             }
                         });
+
+                        // ARCHITECTURE (multi-request file editing): the
+                        // agent ran out of ITS round budget while genuinely
+                        // still mid-edit (not stuck, not erroring) - hand
+                        // the client everything needed to resume with a
+                        // fresh /api/chat call instead of this same
+                        // long-lived function continuing to loop past
+                        // Vercel's hard timeout. This ends the SSE response
+                        // normally (not an error), so existing error-path
+                        // UI/retry logic is untouched.
+                        if (agentResult.needsContinuation) {
+                            res.write(`data: ${JSON.stringify({
+                                continueEdit: true,
+                                agentState: {
+                                    workingContents: agentResult.resumedContents,
+                                    patchedFiles: agentResult.partialFiles || [],
+                                    fileEditIntent: true,
+                                    roundsSpent: (agentState ? (agentState.roundsSpent || 0) : 0) + (agentResult.roundsSpentThisCall || 0)
+                                }
+                            })}\n\n`);
+                            if (typeof res.flush === 'function') res.flush();
+                            markKeyResult(currentKey, true);
+                            res.end();
+                            return;
+                        }
 
                         markKeyResult(currentKey, true);
                         log.info('model.connected', {
