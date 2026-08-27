@@ -1814,10 +1814,30 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     let lastToolCallWasArchiveRead = false;
     let lastToolCallWasChunkRead = false;
 
+    // DIAGNOSTICS (ردِ کامل اجرای عامل): برای هر round، یک رکورد ساختاریافته
+    // نگه می‌داریم - نه فقط یک پیام خطای کلی در انتها. این آرایه همیشه (چه
+    // در موفقیت چه در خطا) برگردانده می‌شود تا بشود دقیقاً دید هر round
+    // چقدر طول کشید، کدام ابزار با چه آرگومانی صدا زده شد، هر ابزار چند بار
+    // تکرار شد، چند apply_patch موفق شد، و در نهایت با چه finishReason و
+    // چند کاراکتر متن متوقف شد.
+    const roundTrace = [];
+    const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
+    const agentLoopStartedAt = Date.now();
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         lastToolCallWasChunkRead = false; // consumed for this round; re-armed below only if this round's own tool call is a chunk read
+        const roundStartedAt = Date.now();
+        const roundEntry = {
+            round: round + 1,
+            toolCalls: [],       // [{ name, argsSummary, resultSummary }]
+            finishReason: null,
+            textChars: 0,
+            durationMs: null,
+            timedOut: false
+        };
+        roundTrace.push(roundEntry);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), ROUND_TIMEOUT_MS);
         // Also abort this round if the caller's own signal (client disconnect
@@ -1979,15 +1999,38 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 handleEventPayload(sseBuffer.trim().slice(5).trim());
             }
         } catch (streamErr) {
-            if (streamErr?.name === 'AbortError') throw streamErr;
+            roundEntry.durationMs = Date.now() - roundStartedAt;
+            if (streamErr?.name === 'AbortError') {
+                roundEntry.timedOut = true;
+                roundEntry.finishReason = 'CLIENT_TIMEOUT';
+                const err = new Error('agent_stream_read_failed');
+                err.body = { message: 'timeout', roundTrace };
+                err.roundTrace = roundTrace;
+                streamErr.roundTrace = roundTrace;
+                throw streamErr;
+            }
+            roundEntry.finishReason = 'STREAM_READ_ERROR';
             const err = new Error('agent_stream_read_failed');
-            err.body = { message: streamErr?.message || String(streamErr) };
+            err.body = { message: streamErr?.message || String(streamErr), roundTrace };
+            err.roundTrace = roundTrace;
             throw err;
         }
 
         const parts = accumulatedParts;
         const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
+
+        // DIAGNOSTICS: ثبت وضعیت پایانی این round، صرف‌نظر از این‌که در
+        // نهایت پاسخ نهایی باشد یا برود سراغ round بعدی برای اجرای ابزار.
+        roundEntry.durationMs = Date.now() - roundStartedAt;
+        roundEntry.finishReason = finishReason || 'NONE';
+        roundEntry.textChars = textParts.reduce((sum, t) => sum + (t ? t.length : 0), 0);
+        roundEntry.functionCallCount = functionCalls.length;
+        roundEntry.usage = lastUsage ? {
+            promptTokens: lastUsage.promptTokenCount ?? null,
+            candidateTokens: lastUsage.candidatesTokenCount ?? null,
+            totalTokens: lastUsage.totalTokenCount ?? null
+        } : null;
 
         if (functionCalls.length === 0) {
             // No tool call arrived after all. Release any selectively held
@@ -2032,7 +2075,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // nothing.
             const normalStop = !finishReason || finishReason === 'STOP';
             if (textParts.length === 0 && round > 0) {
-                log.warn('agent.empty_after_tool_call', { finishReason, round, normalStop });
+                log.warn('agent.empty_after_tool_call', {
+                    finishReason,
+                    round,
+                    normalStop,
+                    toolCallTally,
+                    roundTrace
+                });
                 const err = new Error('agent_empty_after_tool_call');
                 err.status = 502;
                 // FEATURE (Continue button): if apply_patch already
@@ -2051,10 +2100,18 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         editedName: f._editedName || f.name,
                         content: f.content || ''
                     }));
+                // DIAGNOSTICS: خلاصه‌ی قابل‌فهم برای انسان (فارسی) که مستقیم
+                // در "جزئیات بیشتر" کاربر نشان داده می‌شود - نه فقط دیتای خام
+                // برای لاگ سرور. summarizeAgentTrace هر دو را می‌سازد.
+                const traceSummary = summarizeAgentTrace(roundTrace, toolCallTally, {
+                    stoppedReason: 'silent_after_tool',
+                    round
+                });
                 err.body = {
                     message: 'مدل بعد از استفاده از ابزار جواب خالی برگردوند. لطفاً دوباره امتحان کن.',
                     type: 'empty_after_tool_call',
                     finishReason,
+                    diagnostics: traceSummary,
                     ...(partialFiles.length ? { partialFiles, canContinue: true } : {})
                 };
                 throw err;
@@ -2189,11 +2246,32 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 scopedSearchState.used = true;
             }
 
+            const toolCallStartedAt = Date.now();
             const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache });
+            const toolCallDurationMs = Date.now() - toolCallStartedAt;
 
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
             if (call.name === 'get_file_chunk') lastToolCallWasChunkRead = true;
+
+            // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
+            // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
+            // خطا خودش حجیم نشود) و خلاصه‌ای از نتیجه ثبت می‌کنیم. تعداد کل
+            // هر ابزار در toolCallTally جمع می‌شود تا تکرار غیرعادی (مثلاً
+            // inspect_file چندبار پشت‌سرهم) فوراً قابل مشاهده باشد.
+            toolCallTally[call.name] = (toolCallTally[call.name] || 0) + 1;
+            roundEntry.toolCalls.push({
+                name: call.name,
+                file: (call.args && (call.args.file || call.args.name)) || null,
+                lineRange: (call.args && call.args.startLine != null)
+                    ? `${call.args.startLine}-${call.args.endLine ?? '?'}`
+                    : null,
+                durationMs: toolCallDurationMs,
+                ok: !(result && result.error),
+                error: (result && result.error) || null,
+                patched: !!(result && result.success && (call.name === 'apply_patch')),
+                callIndexForThisTool: toolCallTally[call.name]
+            });
 
             if (result.askUser) earlyAskUser = result.askUser;
 
@@ -2222,11 +2300,71 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     }
 
     // Safety net: too many tool rounds without a final answer.
+    // DIAGNOSTICS: این یکی از دو حالتی است که قبلاً هیچ اطلاعی از "چرا"
+    // به کاربر نمی‌رسید - فقط همین پیام ثابت. حالا diagnostics هم برمی‌گردد
+    // تا در "جزئیات بیشتر" معلوم باشد کدام ابزار چندبار تکرار شده بود.
+    const loopLimitTrace = summarizeAgentTrace(roundTrace, toolCallTally, {
+        stoppedReason: 'round_limit',
+        round: MAX_TOOL_ROUNDS
+    });
+    log.warn('agent.tool_loop_limit_hit', { toolCallTally, roundTrace });
     return {
         finalText: 'متأسفم، در پردازش این درخواست به مشکل خوردم (تعداد مراحل زیاد شد). می‌تونی دوباره یا واضح‌تر بپرسی؟',
         finishReason: 'TOOL_LOOP_LIMIT',
         usage: lastUsage,
-        askUser: null
+        askUser: null,
+        diagnostics: loopLimitTrace
+    };
+}
+
+// DIAGNOSTICS: از یک roundTrace خام یک خلاصه‌ی دوبخشی می‌سازد:
+//  - humanSummary: چند خط فارسی ساده، همان چیزی که کاربر توی "جزئیات
+//    بیشتر" می‌بیند (بدون اصطلاح فنی زیاد)
+//  - raw: خودِ roundTrace + toolCallTally، برای لاگ سرور و دیباگ عمیق‌تر
+// این تابع هیچ تصمیمی نمی‌گیرد و چیزی را silent نمی‌کند؛ فقط چیزی که در
+// طول اجرا واقعاً اتفاق افتاده را به فارسیِ قابل‌خواندن ترجمه می‌کند.
+function summarizeAgentTrace(roundTrace, toolCallTally, meta) {
+    const totalRounds = roundTrace.length;
+    const totalDurationMs = roundTrace.reduce((sum, r) => sum + (r.durationMs || 0), 0);
+    const repeatedTools = Object.entries(toolCallTally || {}).filter(([, count]) => count > 1);
+    const patchedFiles = [];
+    for (const r of roundTrace) {
+        for (const tc of r.toolCalls) {
+            if (tc.patched && tc.file && !patchedFiles.includes(tc.file)) patchedFiles.push(tc.file);
+        }
+    }
+    const lastRound = roundTrace[roundTrace.length - 1] || null;
+
+    const lines = [];
+    lines.push(`تعداد مراحل طی‌شده: ${totalRounds} از سقف مجاز`);
+    lines.push(`زمان کل صرف‌شده: ${(totalDurationMs / 1000).toFixed(1)} ثانیه`);
+    if (repeatedTools.length) {
+        lines.push('ابزارهایی که بیش از یک‌بار صدا زده شدند: ' +
+            repeatedTools.map(([name, count]) => `${name} (${count} بار)`).join('، '));
+    }
+    if (patchedFiles.length) {
+        lines.push(`قبل از توقف، این فایل‌ها با موفقیت پچ خورده بودند: ${patchedFiles.join('، ')}`);
+    } else {
+        lines.push('قبل از توقف، هیچ apply_patch موفقی ثبت نشده بود.');
+    }
+    if (lastRound) {
+        lines.push(`آخرین مرحله (round ${lastRound.round}): finishReason=${lastRound.finishReason || 'نامشخص'}, متن تولیدشده=${lastRound.textChars} کاراکتر`);
+    }
+    if (meta?.stoppedReason === 'round_limit') {
+        lines.push('نتیجه: به سقف تعداد مراحل رسید بدون رسیدن به پاسخ نهایی یا اعمال کامل تغییرات.');
+    } else if (meta?.stoppedReason === 'silent_after_tool') {
+        lines.push('نتیجه: بعد از صدا زدن یک ابزار، مدل هیچ متنی برنگرداند (سکوت).');
+    }
+
+    return {
+        humanSummary: lines.join('\n'),
+        raw: {
+            totalRounds,
+            totalDurationMs,
+            toolCallTally,
+            patchedFiles,
+            rounds: roundTrace
+        }
     };
 }
 
@@ -3325,12 +3463,29 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         const truncated =
                             agentResult.finishReason === 'MAX_TOKENS';
 
+                        // DIAGNOSTICS: وقتی حلقه به سقف MAX_TOOL_ROUNDS
+                        // می‌رسد (finishReason === 'TOOL_LOOP_LIMIT')، این
+                        // مسیر throw نمی‌کند - یک finalText عمومی برمی‌گرداند
+                        // و به همین شکل به کاربر می‌رسد، بدون توضیح واقعی.
+                        // agentResult.diagnostics را همینجا هم به لاگ سرور و
+                        // هم (تحت "جزئیات بیشتر" مشابه مسیر خطا) به کلاینت
+                        // می‌فرستیم تا این حالت هم دیگر کورکورانه نباشد.
+                        if (agentResult.diagnostics) {
+                            log.warn('agent.tool_loop_limit_surfaced', {
+                                model: currentModel,
+                                summary: agentResult.diagnostics.humanSummary
+                            });
+                        }
+
                         res.write(
                             `data: ${JSON.stringify({
                                 done: true,
                                 finishReason: agentResult.finishReason,
                                 truncated,
                                 askUser: !!agentResult.askUser,
+                                ...(agentResult.finishReason === 'TOOL_LOOP_LIMIT' && agentResult.diagnostics
+                                    ? { diagnostics: agentResult.diagnostics }
+                                    : {}),
                                 ...(truncated && agentResult.partialFiles?.length
                                     ? { partialFiles: agentResult.partialFiles, canContinue: true }
                                     : {})
@@ -3432,6 +3587,17 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     ? `همهٔ ${geminiKeys.length} کلید تنظیم‌شده در سهمیه/محدودیت نرخ گیر کردند؛ لطفاً کمی بعد دوباره تلاش کن.`
                     : classification.message;
 
+            // DIAGNOSTICS: اگر خطا از نوع "سکوت بعد از ابزار" یا "سقف
+            // مراحل" بود، lastError.diagnostics.humanSummary را داریم (چون
+            // runAgentLoop آن را در err.body گذاشته و لاین بالا کل err.body
+            // را روی lastError پخش می‌کند). آن را به detail اضافه می‌کنیم
+            // تا بدون هیچ تغییر فرانت‌اندی، زیر "جزئیات بیشتر" دیده شود.
+            const diagnosticsSummary = lastError?.diagnostics?.humanSummary || null;
+            const detailText =
+                `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${geminiReasonMessage}` +
+                ` (actual attempts: ${attemptsTried})` +
+                (diagnosticsSummary ? `\n\n--- ردِ اجرای مدل ---\n${diagnosticsSummary}` : '');
+
             res.write(
                 `data: ${JSON.stringify({
                     error: {
@@ -3441,9 +3607,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         retryable: classification.retryable,
                         retryAfterSeconds: classification.retryAfterSeconds ?? null,
                         stage: 'stream_generation',
-                        detail:
-                            `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${geminiReasonMessage}` +
-                            ` (actual attempts: ${attemptsTried})`,
+                        detail: detailText,
+                        ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {}),
                         ...(Array.isArray(lastError?.partialFiles) && lastError.partialFiles.length
                             ? { partialFiles: lastError.partialFiles, canContinue: true }
                             : {})
@@ -3552,7 +3717,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                 finishReason: agentResult.finishReason || 'STOP'
                             }
                         ],
-                        usageMetadata: agentResult.usage || undefined
+                        usageMetadata: agentResult.usage || undefined,
+                        // DIAGNOSTICS: فقط وقتی finishReason غیرعادی است
+                        // (سقف مراحل و مشابه آن) پر می‌شود؛ روی پاسخ‌های
+                        // معمولی چیزی اضافه نمی‌کند.
+                        ...(agentResult.diagnostics ? { diagnostics: agentResult.diagnostics } : {})
                     });
 
                 } catch (error) {
@@ -3605,6 +3774,15 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 ? `همهٔ ${geminiKeys.length} کلید تنظیم‌شده در سهمیه/محدودیت نرخ گیر کردند؛ لطفاً کمی بعد دوباره تلاش کن.`
                 : classification.message;
 
+        // DIAGNOSTICS: همان الگوی مسیر streaming - اگر runAgentLoop یک
+        // diagnostics روی err.body گذاشته بود (empty_after_tool_call یا
+        // tool_loop_limit)، اینجا هم به detail و هم به فیلد جدا اضافه‌اش کن.
+        const diagnosticsSummaryNonStream = lastError?.diagnostics?.humanSummary || null;
+        const detailTextNonStream =
+            `Gemini${classification.status ? ' [' + classification.status + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${classification.rawMessage || 'unknown'}` +
+            ` (actual attempts: ${attemptsTried})` +
+            (diagnosticsSummaryNonStream ? `\n\n--- ردِ اجرای مدل ---\n${diagnosticsSummaryNonStream}` : '');
+
         return res.status(classification.category === 'empty_response' ? 502 : (classification.status && classification.status >= 400 && classification.status < 600 ? classification.status : 500)).json({
             error: {
                 message: allKeysExhaustedMessageNonStream,
@@ -3613,9 +3791,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 retryable: classification.retryable,
                 retryAfterSeconds: classification.retryAfterSeconds ?? null,
                 stage: 'non_stream_generation',
-                detail:
-                    `Gemini${classification.status ? ' [' + classification.status + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${classification.rawMessage || 'unknown'}` +
-                    ` (actual attempts: ${attemptsTried})`
+                detail: detailTextNonStream,
+                ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {})
             }
         });
 
