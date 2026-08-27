@@ -1843,6 +1843,23 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
     const agentLoopStartedAt = Date.now();
 
+    // FIX (باگ در تلاش قبلی): این Set باید در طول کل درخواست (بیرون حلقه‌ی
+    // round) زنده بماند تا "inspect_file فقط یک‌بار" واقعاً اجرا شود. اگر
+    // داخل حلقه تعریف شود، هر round دوباره خالی می‌شود و محدودیت هیچ‌وقت
+    // واقعاً اعمال نمی‌شود.
+    const inspectedFilesThisRequest = new Set();
+
+    // FIX (root cause واقعیِ "میره ۱۰۰-۲۰۰، بعد ۱۰۰۰، بعد دوباره
+    // ۱۰۰-۲۰۰"): برخلاف inspect_file، هیچ‌جای کد قبلی تعداد یا الگوی صدا
+    // زدن get_file_chunk را enforce نمی‌کرد - فقط توصیه‌ای در system
+    // prompt بود که مدل مجبور به رعایتش نبود. حالا برای هر فایل، محدوده‌های
+    // خوانده‌شده را نگه می‌داریم تا: (۱) اگر مدل دقیقاً همان محدوده (یا
+    // زیرمجموعه‌ی آن) را دوباره بخواهد، بدون تماس با Gemini با همان محتوای
+    // قبلی پاسخ داده شود (۲) اگر تعداد کل صداها از سقف منطقی گذشت، مدل
+    // مجبور شود به‌جای خواندن بیشتر، با آنچه دارد پچ بزند.
+    const chunkReadsPerFile = new Map(); // fileKey -> [{startLine, endLine, content}]
+    const MAX_CHUNK_READS_PER_FILE = 10; // با MAX_CHUNK_REQUEST_LINES=900 یعنی پوشش کامل فایل‌های ۵۰۰۰+ خطی + چند بار چک مجدد، نه پرسه‌زنی بی‌پایان
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
@@ -2228,7 +2245,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         // round)، یک‌بار محدود می‌کنیم؛ صداهای بعدی بدون تماس با Gemini
         // رد می‌شوند و مدل به get_file_chunk (که فقط می‌خواند، چیزی را
         // دوباره نمی‌سازد) هدایت می‌شود.
-        const inspectedFilesThisRequest = new Set();
+        // (inspectedFilesThisRequest و chunkReadsPerFile بیرون حلقه‌ی round
+        // تعریف شده‌اند تا بین round ها پاک نشوند.)
 
         // FIX (root cause of "searches many sites for one simple question"):
         // Gemini's function-calling can return SEVERAL functionCall parts in
@@ -2258,6 +2276,56 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     continue;
                 }
                 inspectedFilesThisRequest.add(targetFileKey);
+            }
+
+            // FIX (root cause واقعیِ "میره ۱۰۰-۲۰۰، بعد ۱۰۰۰، بعد دوباره
+            // ۱۰۰-۲۰۰"): قبلاً هیچ enforcement واقعی‌ای روی get_file_chunk
+            // نبود - مدل می‌توانست هر تعداد بار و با هر ترتیبی صدایش بزند.
+            // این‌جا دو کار می‌کنیم: (۱) اگر محدوده‌ی درخواستی دقیقاً قبلاً
+            // برای همین فایل خوانده شده، به‌جای صدا زدن واقعی Gemini/فایل،
+            // همان محتوای قبلی را برمی‌گردانیم - این یعنی برگشتن به یک
+            // محدوده‌ی قبلی هیچ هزینه‌ی سهمیه‌ای اضافه نمی‌کند و مدل هم
+            // متوجه می‌شود که این کار بی‌فایده است. (۲) اگر تعداد کل صداها
+            // برای یک فایل از سقف گذشت، دیگر اجازه‌ی خواندن بیشتر نمی‌دهیم
+            // و صریحاً می‌گوییم با محتوای موجود پچ بزند - یک "پرسه‌زنی
+            // بی‌پایان" هرگز از این نقطه به بعد نمی‌تواند ادامه پیدا کند.
+            if (call.name === 'get_file_chunk') {
+                const chunkFileKey = String((call.args && call.args.file) || '').trim().toLowerCase();
+                const requestedStart = Number(call.args && call.args.startLine);
+                const requestedEnd = Number(call.args && call.args.endLine);
+                const priorReads = chunkReadsPerFile.get(chunkFileKey) || [];
+
+                const exactOrSubsetMatch = Number.isFinite(requestedStart) && Number.isFinite(requestedEnd)
+                    ? priorReads.find(r => requestedStart >= r.startLine && requestedEnd <= r.endLine)
+                    : null;
+
+                if (exactOrSubsetMatch) {
+                    responseParts.push({
+                        functionResponse: {
+                            name: call.name,
+                            response: {
+                                file: (call.args && call.args.file) || '',
+                                startLine: exactOrSubsetMatch.startLine,
+                                endLine: exactOrSubsetMatch.endLine,
+                                content: exactOrSubsetMatch.content,
+                                note: 'این محدوده قبلاً خوانده شده بود؛ همان محتوای قبلی دوباره برگردانده شد. اگر هنوز مطمئن نیستی کجا باید پچ بزنی، به‌جای خواندن مجدد، از روی همین محتوا یا از chunk map اولیه تصمیم بگیر.'
+                            }
+                        }
+                    });
+                    continue;
+                }
+
+                if (priorReads.length >= MAX_CHUNK_READS_PER_FILE) {
+                    responseParts.push({
+                        functionResponse: {
+                            name: call.name,
+                            response: {
+                                error: `به سقف ${MAX_CHUNK_READS_PER_FILE} بار خواندن chunk برای این فایل رسیدی. دیگر get_file_chunk صدا نزن - با محتوایی که تا الان از این فایل داری (chunk map اولیه + بخش‌های خوانده‌شده)، apply_patch را برای تغییر مدنظر بزن. اگر واقعاً بخش لازم را ندیده‌ای، دقیق‌ترین حدس بر پایه‌ی chunk map را انتخاب کن، نه خواندن بیشتر.`
+                            }
+                        }
+                    });
+                    continue;
+                }
             }
 
             if (call.name === 'web_search') {
@@ -2302,6 +2370,18 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
             if (call.name === 'get_file_chunk') lastToolCallWasChunkRead = true;
+
+            // ثبت محدوده‌ی واقعاً خوانده‌شده (پس از clamp احتمالی داخل
+            // executeToolCall) تا چک تکرار/سقف بالا برای صداهای بعدی درست
+            // کار کند - startLine/endLine واقعی از خودِ result می‌آید، نه
+            // از args خام (که ممکن است endLine بزرگ‌تر از حد مجاز خواسته
+            // باشد و در نتیجه clamp شده باشد).
+            if (call.name === 'get_file_chunk' && result && !result.error && Number.isFinite(result.startLine) && Number.isFinite(result.endLine)) {
+                const chunkFileKeyForStore = String((call.args && call.args.file) || '').trim().toLowerCase();
+                const list = chunkReadsPerFile.get(chunkFileKeyForStore) || [];
+                list.push({ startLine: result.startLine, endLine: result.endLine, content: result.content });
+                chunkReadsPerFile.set(chunkFileKeyForStore, list);
+            }
 
             // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
             // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
