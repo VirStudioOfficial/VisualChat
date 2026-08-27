@@ -2329,7 +2329,27 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     return latest;
                 }, null);
 
-                if (latestRead && Number.isFinite(requestedStart) && Number.isFinite(requestedEnd) && requestedEnd < latestRead.startLine) {
+                // FIX 2 (هنوز رخ می‌داد با overlap جزئی): شرط قبلی فقط زمانی
+                // فعال می‌شد که محدوده‌ی جدید کاملاً و بدون هیچ همپوشانی قبل
+                // از آخرین محدوده باشد (requestedEnd < latestRead.startLine).
+                // اما پرش‌هایی مثل «۱۱۵-۱۴۷۳ سپس ۱۳۵۰-۱۹۰۰» یک overlap جزئیِ
+                // رو‌به‌عقب هستند: start از جلوترین نقطه‌ی خوانده‌شده عقب‌تر
+                // است ولی end جلوتر می‌رود، پس هیچ‌کدام از دو محافظ (این شرط
+                // و exactOrSubsetMatch) فعال نمی‌شدند و chunk به‌عنوان جدید
+                // پردازش می‌شد - همان حلقه‌ی رفت‌وبرگشت مشاهده‌شده. حالا هر
+                // درخواستی که startLine آن به‌طور معنادار (بیش از نصف
+                // MIN_CHUNK_LINES) عقب‌تر از جلوترین نقطه‌ی خوانده‌شده باشد،
+                // به‌عنوان بازگشت به عقب شمرده می‌شود - even با overlap.
+                // BACKWARD_JUMP_TOLERANCE_LINES: چقدر می‌توان قبل‌تر از جلوترین
+                // نقطه‌ی خوانده‌شده رفت بدون این‌که "بازگشت به عقب" حساب شود.
+                // این باید بزرگ‌تر از نوسانِ طبیعیِ overlap بین chunkهای
+                // منطقی مجاور باشد (مثلاً وقتی مدل برای دیدنِ context اطراف
+                // یک تابع، چند خط قبل از مرز chunk قبلی را هم می‌خواهد) اما
+                // آن‌قدر کوچک بماند که پرش واقعی به عقب (صدها خط، مثل نمونه‌ی
+                // ۱۴۷۳ -> ۱۳۵۰) را همچنان بگیرد.
+                const BACKWARD_JUMP_TOLERANCE_LINES = 100;
+                const furthestReadEnd = priorReads.reduce((max, item) => Math.max(max, item.endLine), 0);
+                if (latestRead && Number.isFinite(requestedStart) && Number.isFinite(requestedEnd) && requestedStart < furthestReadEnd - BACKWARD_JUMP_TOLERANCE_LINES) {
                     responseParts.push({
                         functionResponse: {
                             name: call.name,
