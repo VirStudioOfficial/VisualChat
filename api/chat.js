@@ -1771,7 +1771,20 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // get_file_chunk می‌رسید تمام می‌شد. بالا بردنش برای این پروفایل کاری
     // ضروری است - نه یک "مقدار امن دلخواه"، بلکه حداقل فضای واقعی لازم.
     const MAX_TOOL_ROUNDS = 16;
-    let workingContents = [...contents];
+    // FIX (روند/tool call های چندمرحله‌ای که وسط کار throw می‌کردند از صفر
+    // شروع می‌شدند): قبلاً اینجا `[...contents]` یک کپی محلی می‌ساخت. تمام
+    // push های بعدی (نتیجه جستجو، نتیجه tool call، پاسخ مدل) فقط روی همین
+    // کپی اعمال می‌شدند. اگر throw وسط یکی از round ها اتفاق می‌افتاد (مثلاً
+    // خطای موقتی شبکه در round 5 از 10)، caller با catch شدن throw، همان
+    // `contents` اصلی و دست‌نخورده را برای attempt بعدی دوباره می‌فرستاد -
+    // یعنی همه‌ی پیشرفت آن ۵ round دور ریخته می‌شد.
+    // با mutate کردن مستقیم روی خودِ آرایه‌ی `contents` (که در جاوااسکریپت
+    // by-reference پاس داده می‌شود)، هر push روی همان آرایه‌ای اعمال می‌شود
+    // که caller (خط‌های runAgentLoop call site) نگه داشته. پس با throw شدن،
+    // caller همان contents را - حالا شامل تمام round های موفقِ قبل از خطا -
+    // به عنوان ورودی attempt بعدی پاس می‌دهد و ادامه از همان‌جا شروع می‌شود،
+    // نه از صفر.
+    let workingContents = contents;
     // If the outer handler is retrying Gemini after a search already happened,
     // keep the first search result available to the replacement model without
     // exposing web_search (or any other tool) again. This preserves key/model
