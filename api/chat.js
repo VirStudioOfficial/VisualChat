@@ -1528,7 +1528,15 @@ async function executeToolCall(name, args, ctx) {
         if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
             return { error: 'محدوده‌ی خط نامعتبر است. startLine و endLine باید عدد صحیح معتبر و startLine <= endLine باشند.' };
         }
-        const MAX_CHUNK_REQUEST_LINES = 320;
+        // FIX (فایل‌های ۵۰۰۰+ خطی): سقف قبلی ۳۲۰ خط بود که برای فایل‌های
+        // چند هزار خطی یعنی مدل باید ده‌ها بار get_file_chunk را پشت سر هم
+        // صدا بزند تا کل فایل را ببیند - هر صدا زدن یک نقطه‌ی شکست جدید
+        // است (دقیقاً همانی که کاربر با رنج ۱۱۰۰-۱۸۹۰ دید). بالا بردن این
+        // سقف به ۹۰۰ خط، اکثر توابع/بخش‌های منطقی را در یک یا دو
+        // درخواست پوشش می‌دهد و چرخه‌ی "بخوان، دوباره بخوان، گم شو" را
+        // به‌شدت کوتاه می‌کند. عدد را زیادتر از این نبردیم چون حجم پاسخ به
+        // مدل هم باید در توکن‌بودجه‌ی معقول بماند.
+        const MAX_CHUNK_REQUEST_LINES = 900;
         const clampedEnd = Math.min(endLine, startLine + MAX_CHUNK_REQUEST_LINES - 1);
         const chunkContent = getChunkContent(found.content || '', startLine, clampedEnd);
         if (chunkContent === null) {
@@ -1732,7 +1740,13 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
-    const MAX_TOOL_ROUNDS = 7; // search (if needed) + inspect_file + one or more get_file_chunk calls + apply_patch + final answer; chunk-based large-file edits legitimately need more rounds than the old whole-file flow did
+    // FIX (فایل‌های ۵۰۰۰+ خطی): با MAX_CHUNK_REQUEST_LINES=900، یک فایل
+    // ۵۰۰۰ خطی حداقل به ۶-۷ بار get_file_chunk نیاز دارد اگر مدل مجبور
+    // شود همه‌ی فایل را پیمایش کند، به‌علاوه‌ی inspect_file و apply_patch و
+    // پاسخ نهایی. سقف قبلی (۷) عملاً همان لحظه که مدل به دومین/سومین
+    // get_file_chunk می‌رسید تمام می‌شد. بالا بردنش برای این پروفایل کاری
+    // ضروری است - نه یک "مقدار امن دلخواه"، بلکه حداقل فضای واقعی لازم.
+    const MAX_TOOL_ROUNDS = 16;
     let workingContents = [...contents];
     // If the outer handler is retrying Gemini after a search already happened,
     // keep the first search result available to the replacement model without
@@ -1803,13 +1817,18 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // them on what was never actually a quota problem, and only then
     // surfacing the generic "quota exhausted" message. Rounds that follow a
     // get_archived_file call now get the same longer budget as video.
-    // FIX (large-file chunk-edit flow): a round right after get_file_chunk
-    // can carry a 300+ line code chunk plus the model's own reasoning about
-    // where exactly to patch it - same "genuinely more to read/reason
-    // about than normal" situation as an archive read, so it gets the same
-    // extended budget instead of racing the standard 60s.
+    // FIX (large-file chunk-edit flow, رفع واقعی برای فایل‌های ۵۰۰۰+ خط):
+    // منطق قبلی فقط به روندِ "بعد از" یک get_file_chunk/get_archived_file
+    // مهلت بیشتر می‌داد - یعنی خودِ روندی که برای اولین بار یک chunk بزرگ
+    // را می‌خواند و پردازش می‌کند (یا روند inspect_file روی یک فایل چند
+    // هزار خطی) همچنان با مهلت استاندارد ۶۰ ثانیه اجرا می‌شد و دقیقاً
+    // همین‌جا (خط ۱۱۰۰ تا ۱۸۹۰ که کاربر تست کرد) timeout می‌خورد. برای
+    // فایل‌های بزرگ، تقریباً هر round این جریان به همان اندازه سنگین است -
+    // پس به‌جای حدس زدن "کدام round سنگین‌تره"، وقتی fileEditIntent فعال
+    // است، همه‌ی round ها مهلت بلند می‌گیرند.
     const roundNeedsMoreTime = (round) =>
         hasVideoAttachment ||
+        fileEditIntent ||
         (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasChunkRead));
     let lastToolCallWasArchiveRead = false;
     let lastToolCallWasChunkRead = false;
