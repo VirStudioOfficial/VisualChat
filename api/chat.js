@@ -1830,7 +1830,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 '۲. برای تغییر، write_block را با شماره‌ی بلوک و کل محتوای جدید آن بلوک صدا بزن (خطوطی که تغییر نکرده‌اند را هم دوباره در newContent بنویس).\n' +
                 '۳. بعد از یک یا چند write_block موفق، قبل از پاسخ نهایی حتماً verify_file را صدا بزن و مطمئن شو valid:true برگردانده - در غیر این صورت اجازه‌ی پاسخ نهایی را نداری.\n' +
                 '۴. بعد از هر write_block موفق، شماره‌ی بلوک‌های فایل ممکن است تغییر کند (چون طول بلوک عوض شده) - همیشه از "newTotalBlocks" در نتیجه‌ی write_block یا نقشه‌ی جدید استفاده کن، نه شماره‌های قدیمی.\n' +
-                '۵. اگر بخشی از فایل که نیاز به تغییر ندارد، نیازی به read_block/write_block هم ندارد - فقط بلوک(های) مرتبط با درخواست کاربر را دست بزن.\n';
+                '۵. اگر بخشی از فایل که نیاز به تغییر ندارد، نیازی به read_block/write_block هم ندارد - فقط بلوک(های) مرتبط با درخواست کاربر را دست بزن.\n' +
+                '۶. اگر "alreadyRead" یک بلوک true است، یعنی محتوای آن را قبلاً در همین درخواست خوانده‌ای (حتی اگر این یک retry باشد) - آن را دوباره با read_block نخوان؛ از محتوایی که قبلاً دیدی استفاده کن. فقط بلوکی را دوباره بخوان که بعد از خواندنش با write_block تغییر کرده باشد (چون شماره‌بندی ممکن است عوض شده باشد).\n';
             log.info('file.blocks.mapped', {
                 files: blockMaps.length,
                 names: blockMaps.map(x => x.file),
@@ -2238,12 +2239,34 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         content: f.content || ''
                     }))
                 : [];
+            // FIX (verified edit never reached the client): write_block
+            // mirrors its patched content onto the matching textFiles entry
+            // (found.content/_patched/_editedName - see write_block above),
+            // and partialFilesOnCutoff already reads exactly that on the
+            // MAX_TOKENS path. But on a CLEAN success (normal STOP, the
+            // common case after verify_file passes), no equivalent existed -
+            // the block-editing system prompt tells the model not to print
+            // a file-edit JSON block itself, so there was no other path left
+            // for the real patched content to ever reach the client on a
+            // normal, fully-verified success. The edit was correct and
+            // verified server-side but the user could never see or download
+            // it. Send it here under editedFiles whenever any file was
+            // patched, regardless of finishReason.
+            const editedFiles = (Array.isArray(textFiles) ? textFiles : [])
+                .filter(f => f && f._patched)
+                .map(f => ({
+                    name: f.name,
+                    editedName: f._editedName || f.name,
+                    content: f.content || ''
+                }));
+
             return {
                 finalText: textParts.join(''),
                 finishReason: finishReason,
                 usage: lastUsage,
                 askUser: null,
-                ...(partialFilesOnCutoff.length ? { partialFiles: partialFilesOnCutoff } : {})
+                ...(partialFilesOnCutoff.length ? { partialFiles: partialFilesOnCutoff } : {}),
+                ...(editedFiles.length ? { editedFiles } : {})
             };
         }
 
@@ -2744,7 +2767,21 @@ async function handler(req, res) {
                     f.content.length <= MAX_TEXT_FILE_CHARS
             );
 
-        const fileEditIntent = textFiles.length > 0 && looksLikeFileEditIntent(text);
+        // FIX (block-editing system silently never activated): fileEditIntent
+        // was gated on looksLikeFileEditIntent(text), a fixed Persian/English
+        // keyword regex. Any phrasing outside that list (or a message that
+        // just references "the file I gave you" without a listed verb) made
+        // this silently false even with a real attachment - the whole
+        // block-map/read_block/write_block/verify_file system then never
+        // activated, the "don't call get_archived_file when a file is
+        // attached" instruction never got injected either, and the request
+        // fell through to old, unreliable prose/archive behavior with no
+        // warning to the user or the model. A file being attached at all is
+        // a sufficient and much more robust signal: building the block map
+        // costs nothing when the user isn't actually asking for an edit
+        // (the model just never calls read_block/write_block), so there's no
+        // downside to always doing it whenever textFiles is non-empty.
+        const fileEditIntent = textFiles.length > 0;
 
         const oversizedTextFiles =
             incomingFiles.filter(
@@ -3609,6 +3646,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                     : {}),
                                 ...(truncated && agentResult.partialFiles?.length
                                     ? { partialFiles: agentResult.partialFiles, canContinue: true }
+                                    : {}),
+                                ...(agentResult.editedFiles?.length
+                                    ? { editedFiles: agentResult.editedFiles }
                                     : {})
                             })}\n\n`
                         );
