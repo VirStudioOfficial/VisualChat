@@ -2,6 +2,55 @@
 
 /*
 |--------------------------------------------------------------------------
+| ARCHITECTURE OVERVIEW
+|--------------------------------------------------------------------------
+| This file implements a layered agent architecture:
+|
+| ┌──────────────────┐
+| │      CLIENT      │
+| │ Chat / Files/UI  │
+| └────────┬─────────┘
+|          │
+|          ▼
+| ┌─────────────────────────┐
+| │      API GATEWAY        │
+| │ auth / rate / request ID│
+| └────────────┬────────────┘
+|              │
+|              ▼
+| ┌──────────────────────────────┐
+| │       AGENT SESSION          │
+| │                              │
+| │ sessionId                    │
+| │ conversationId               │
+| │ currentStep                  │
+| │ messages                     │
+| │ toolState                    │
+| │ fileState                    │
+| │ retryState                   │
+| │ checkpoint                   │
+| └──────────────┬───────────────┘
+|                │
+|                ▼
+| ┌──────────────────────────────┐
+| │      AGENT ORCHESTRATOR      │
+| │                              │
+| │ PLAN → ACT → OBSERVE → LOOP │
+| └──────┬────────┬────────┬─────┘
+|        │        │        │
+| ┌──────▼─┐ ┌────▼────┐ ┌─▼──────────┐
+| │ MODEL     │ │  TOOLS  │ │ FILE       │
+| │ ADAPTER   │ │ ROUTER  │ │ ENGINE     │
+| └─────┬─────┘ └────┬────┘ └────┬───────┘
+|       │             │           │
+|       ▼             ▼           ▼
+|    Gemini        Search      read/chunk
+|    adapter       Tavily      patch/diff
+|                              validate
+*/
+
+/*
+|--------------------------------------------------------------------------
 | Logger - structured, no secrets ever printed
 |--------------------------------------------------------------------------
 | Every log line is one JSON object so it's easy to grep/parse in Vercel
@@ -32,6 +81,14 @@ const log = {
     error(event, meta) { this._base('error', event, meta); }
 };
 
+
+/*
+|==========================================================================
+| LAYER 1: API GATEWAY
+|==========================================================================
+| Handles authentication, rate limiting, and request ID generation.
+| All incoming requests pass through this layer first.
+*/
 
 /*
 |--------------------------------------------------------------------------
@@ -225,6 +282,14 @@ function classifyGeminiError(error) {
         rawMessage
     };
 }
+
+/*
+|==========================================================================
+| LAYER 2: AGENT SESSION
+|==========================================================================
+| Manages session state including sessionId, conversationId, currentStep,
+| messages, toolState, fileState, retryState, and checkpoint.
+*/
 
 /*
 |--------------------------------------------------------------------------
@@ -951,6 +1016,16 @@ function buildPatchFailureReport(content, oldStr, reasonText) {
     };
 }
 
+/*
+|==========================================================================
+| LAYER 3: AGENT ORCHESTRATOR & COMPONENTS
+|==========================================================================
+| Implements the PLAN → ACT → OBSERVE → LOOP cycle with three main components:
+| - MODEL ADAPTER: Gemini adapter for model interactions
+| - TOOLS ROUTER: Search Tavily and tool routing
+| - FILE ENGINE: read/chunk, patch/diff, validate operations
+*/
+
 function analyzeFileStructure(content, fileName = 'file', query = '') {
     const text = String(content || '');
     const lowerName = String(fileName || '').toLowerCase();
@@ -1389,6 +1464,13 @@ function getFileLanguageFromName(fileName) {
 // round, no API call - run synchronously right after building the
 // candidate content and BEFORE it's accepted, so a broken patch is
 // rejected the same way a failed string-match patch always was.
+
+/*
+|--------------------------------------------------------------------------
+| FILE ENGINE: validate
+|--------------------------------------------------------------------------
+| Validates patched content for structural integrity before accepting changes.
+*/
 function validatePatchedContent(content, fileName) {
     const language = getFileLanguageFromName(fileName);
     if (language === 'javascript') {
@@ -1440,6 +1522,13 @@ function validatePatchedContent(content, fileName) {
 // Prevents repeated inspect_file calls from rebuilding the same analysis.
 const fileStructureCache = new Map();
 
+/*
+|--------------------------------------------------------------------------
+| TOOLS ROUTER
+|--------------------------------------------------------------------------
+| Routes tool calls to appropriate handlers including search (Tavily),
+| file operations (get_archived_file, get_file_chunk, apply_patch), etc.
+*/
 async function executeToolCall(name, args, ctx) {
     if (name === 'get_archived_file') {
         const fileName = (args && args.name) || '';
@@ -1763,6 +1852,14 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
+
+/*
+|--------------------------------------------------------------------------
+| AGENT ORCHESTRATOR: PLAN → ACT → OBSERVE → LOOP
+|--------------------------------------------------------------------------
+| Main orchestration loop that coordinates model calls, tool routing, and
+| file engine operations in a continuous cycle until completion.
+*/
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent }) {
     // FIX (فایل‌های ۵۰۰۰+ خطی): با MAX_CHUNK_REQUEST_LINES=900، یک فایل
     // ۵۰۰۰ خطی حداقل به ۶-۷ بار get_file_chunk نیاز دارد اگر مدل مجبور
