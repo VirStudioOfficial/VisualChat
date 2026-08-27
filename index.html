@@ -3616,11 +3616,25 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (errorDetail.type && errorDetail.type !== category) rows.push(`<div><span class="err-detail-label">کد:</span> ${escapeHtml(String(errorDetail.type))}</div>`);
             if (errorDetail.stage) rows.push(`<div><span class="err-detail-label">مرحله:</span> ${escapeHtml(String(errorDetail.stage))}</div>`);
             if (errorDetail.detail) rows.push(`<div><span class="err-detail-label">جزئیات فنی:</span> ${escapeHtml(String(errorDetail.detail))}</div>`);
+            // FEATURE (ردِ اجرای مدل / diagnostics): وقتی بک‌اند مشکل را در
+            // حین اجرای عامل (سکوت بعد از ابزار، یا رسیدن به سقف مراحل)
+            // تشخیص داده، errorDetail.diagnostics.humanSummary یک خلاصه‌ی
+            // چندخطیِ فارسی از دقیقاً چه اتفاقی افتاده دارد (چند round،
+            // کدام ابزار چندبار تکرار شد، چه فایلی پچ خورد، آخرین
+            // finishReason). آن را به‌صورت یک ردیف جدا و خواناتر (با
+            // شکستن خط) نشان بده، نه فقط داخل یک خط "جزئیات فنی".
+            if (errorDetail.diagnostics && errorDetail.diagnostics.humanSummary) {
+                rows.push(
+                    `<div><span class="err-detail-label">ردِ اجرای مدل:</span>` +
+                    `<pre style="white-space:pre-wrap;margin:4px 0 0;font-size:0.85em;">${escapeHtml(String(errorDetail.diagnostics.humanSummary))}</pre></div>`
+                );
+            }
             const detailText = [
                 categoryLabel ? `نوع: ${categoryLabel}` : '',
                 errorDetail.type && errorDetail.type !== category ? `کد: ${errorDetail.type}` : '',
                 errorDetail.stage ? `مرحله: ${errorDetail.stage}` : '',
-                errorDetail.detail ? `جزئیات: ${errorDetail.detail}` : ''
+                errorDetail.detail ? `جزئیات: ${errorDetail.detail}` : '',
+                errorDetail.diagnostics?.humanSummary ? `ردِ اجرای مدل:\n${errorDetail.diagnostics.humanSummary}` : ''
             ].filter(Boolean).join('\n');
             const encodedDetail = encodeURIComponent(detailText);
             detailsHtml = `
