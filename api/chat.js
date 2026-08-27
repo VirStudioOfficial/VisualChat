@@ -1436,6 +1436,10 @@ function validatePatchedContent(content, fileName) {
     return { valid: true }; // unknown/other file types: no structural check available, accept as-is
 }
 
+// Persistent cache for file structure/chunk maps during the server lifetime.
+// Prevents repeated inspect_file calls from rebuilding the same analysis.
+const fileStructureCache = new Map();
+
 async function executeToolCall(name, args, ctx) {
     if (name === 'get_archived_file') {
         const fileName = (args && args.name) || '';
@@ -1506,8 +1510,19 @@ async function executeToolCall(name, args, ctx) {
         if (!found) {
             return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
         }
-        const analysis = analyzeFileStructure(found.content || '', found.name || fileName, query);
-        const chunks = computeLogicalChunks(found.content || '', found.name || fileName, analysis);
+        const cacheKey = `${found.name || fileName}:${(found.content || '').length}:${query}`;
+        let analysis;
+        let chunks;
+
+        const cached = fileStructureCache.get(cacheKey);
+        if (cached && (Date.now() - cached.createdAt) < 10 * 60 * 1000) {
+            analysis = cached.analysis;
+            chunks = cached.chunks;
+        } else {
+            analysis = analyzeFileStructure(found.content || '', found.name || fileName, query);
+            chunks = computeLogicalChunks(found.content || '', found.name || fileName, analysis);
+            fileStructureCache.set(cacheKey, { analysis, chunks, createdAt: Date.now() });
+        }
         log.info('agent.tool.inspect_file', {
             name: found.name || fileName,
             language: analysis.language,
