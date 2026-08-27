@@ -1084,7 +1084,18 @@ function formatFileStructureForModel(analysis) {
 | big (e.g. one giant function) into sequential sub-chunks so no single
 | get_file_chunk call can blow the context budget.
 */
-const MAX_CHUNK_LINES = 250; // upper bound per chunk regardless of structure
+// FIX (ریشه‌ی واقعی مشکل "میره ۱۰۰-۲۰۰، ۲۰۸۰-۲۱۵۰، دوباره ۲۱۲۶-۲۱۶۵..."):
+// این مقدار تعیین می‌کند خودِ نقشه‌ی chunk (chunk map) که به مدل نشان داده
+// می‌شود از چه تیکه‌هایی تشکیل شده. حتی وقتی MAX_CHUNK_REQUEST_LINES (سقف
+// get_file_chunk) را به ۹۰۰ رساندیم، تا وقتی خودِ نقشه از تیکه‌های ۲۵۰
+// خطی ساخته می‌شد، مدل - که طبق system prompt باید "از روی chunk map
+// محدوده را بگیرد، نه حدس بزند" - همان بازه‌های کوچک ۲۵۰ خطی (یا کمتر،
+// بسته به فاصله‌ی مرزهای تابع/تگ) را عیناً به get_file_chunk پاس می‌داد.
+// برای فایل ۵۰۰۰+ خطی، یعنی ده‌ها chunk کوچک پشت‌سرهم، دقیقاً همان رفت‌
+// و‌برگشت و اتمام سهمیه‌ای که مشاهده شد. این عدد را هماهنگ با
+// MAX_CHUNK_REQUEST_LINES (۹۰۰) بالا می‌بریم تا نقشه از همان ابتدا
+// تیکه‌های بزرگ‌تر و واقع‌بینانه پیشنهاد بدهد.
+const MAX_CHUNK_LINES = 900; // upper bound per chunk regardless of structure - kept in sync with MAX_CHUNK_REQUEST_LINES in get_file_chunk
 const MIN_CHUNK_LINES = 15;  // avoid a flood of tiny 1-2 line chunks; small adjacent markers get merged
 
 function computeLogicalChunks(content, fileName, analysis) {
@@ -1528,15 +1539,13 @@ async function executeToolCall(name, args, ctx) {
         if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
             return { error: 'محدوده‌ی خط نامعتبر است. startLine و endLine باید عدد صحیح معتبر و startLine <= endLine باشند.' };
         }
-        // FIX (فایل‌های ۵۰۰۰+ خطی): سقف قبلی ۳۲۰ خط بود که برای فایل‌های
-        // چند هزار خطی یعنی مدل باید ده‌ها بار get_file_chunk را پشت سر هم
-        // صدا بزند تا کل فایل را ببیند - هر صدا زدن یک نقطه‌ی شکست جدید
-        // است (دقیقاً همانی که کاربر با رنج ۱۱۰۰-۱۸۹۰ دید). بالا بردن این
-        // سقف به ۹۰۰ خط، اکثر توابع/بخش‌های منطقی را در یک یا دو
-        // درخواست پوشش می‌دهد و چرخه‌ی "بخوان، دوباره بخوان، گم شو" را
-        // به‌شدت کوتاه می‌کند. عدد را زیادتر از این نبردیم چون حجم پاسخ به
-        // مدل هم باید در توکن‌بودجه‌ی معقول بماند.
-        const MAX_CHUNK_REQUEST_LINES = 900;
+        // FIX (هماهنگ با MAX_CHUNK_LINES بالای فایل - همان عدد، نه یک
+        // مقدار مستقل، دقیقاً برای جلوگیری از تکرار همین باگ: قبلاً این
+        // عدد و MAX_CHUNK_LINES هر دو باید ۹۰۰ می‌بودند اما جدا از هم
+        // تغییر داده شدند و یکی عقب ماند - همان چیزی که باعث شد
+        // "بالابردن سقف" هیچ اثری روی اندازه‌ی واقعی chunk map نداشته
+        // باشد.):
+        const MAX_CHUNK_REQUEST_LINES = MAX_CHUNK_LINES;
         const clampedEnd = Math.min(endLine, startLine + MAX_CHUNK_REQUEST_LINES - 1);
         const chunkContent = getChunkContent(found.content || '', startLine, clampedEnd);
         if (chunkContent === null) {
