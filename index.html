@@ -3616,25 +3616,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (errorDetail.type && errorDetail.type !== category) rows.push(`<div><span class="err-detail-label">کد:</span> ${escapeHtml(String(errorDetail.type))}</div>`);
             if (errorDetail.stage) rows.push(`<div><span class="err-detail-label">مرحله:</span> ${escapeHtml(String(errorDetail.stage))}</div>`);
             if (errorDetail.detail) rows.push(`<div><span class="err-detail-label">جزئیات فنی:</span> ${escapeHtml(String(errorDetail.detail))}</div>`);
-            // FEATURE (ردِ اجرای مدل / diagnostics): وقتی بک‌اند مشکل را در
-            // حین اجرای عامل (سکوت بعد از ابزار، یا رسیدن به سقف مراحل)
-            // تشخیص داده، errorDetail.diagnostics.humanSummary یک خلاصه‌ی
-            // چندخطیِ فارسی از دقیقاً چه اتفاقی افتاده دارد (چند round،
-            // کدام ابزار چندبار تکرار شد، چه فایلی پچ خورد، آخرین
-            // finishReason). آن را به‌صورت یک ردیف جدا و خواناتر (با
-            // شکستن خط) نشان بده، نه فقط داخل یک خط "جزئیات فنی".
-            if (errorDetail.diagnostics && errorDetail.diagnostics.humanSummary) {
-                rows.push(
-                    `<div><span class="err-detail-label">ردِ اجرای مدل:</span>` +
-                    `<pre style="white-space:pre-wrap;margin:4px 0 0;font-size:0.85em;">${escapeHtml(String(errorDetail.diagnostics.humanSummary))}</pre></div>`
-                );
-            }
             const detailText = [
                 categoryLabel ? `نوع: ${categoryLabel}` : '',
                 errorDetail.type && errorDetail.type !== category ? `کد: ${errorDetail.type}` : '',
                 errorDetail.stage ? `مرحله: ${errorDetail.stage}` : '',
-                errorDetail.detail ? `جزئیات: ${errorDetail.detail}` : '',
-                errorDetail.diagnostics?.humanSummary ? `ردِ اجرای مدل:\n${errorDetail.diagnostics.humanSummary}` : ''
+                errorDetail.detail ? `جزئیات: ${errorDetail.detail}` : ''
             ].filter(Boolean).join('\n');
             const encodedDetail = encodeURIComponent(detailText);
             detailsHtml = `
@@ -3650,27 +3636,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const retryButtonHtml = canRetry
             ? `<button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button>`
             : `<span class="retry-disabled-note">این خطا قابل تکرار خودکار نیست.</span>`;
-
-        // FEATURE (Continue button): when the backend already applied one or
-        // more patches before it went silent / got cut off, it sends those
-        // back as errorDetail.partialFiles so editing can resume from there
-        // instead of starting over on the original file. Store this on the
-        // saved retry payload (not just in memory) so the button still
-        // works even after a page reload, same as the normal retry button.
-        let continueButtonHtml = '';
-        if (errorDetail && typeof errorDetail === 'object' && errorDetail.canContinue && Array.isArray(errorDetail.partialFiles) && errorDetail.partialFiles.length) {
-            const continuePayload = {
-                textPrompt: request?.textPrompt || '',
-                originalPayloadFiles: request?.payloadFiles || [],
-                partialFiles: errorDetail.partialFiles,
-                webSearch: isSearchEnabled,
-                model: currentModel
-            };
-            const continueData = encodeURIComponent(JSON.stringify(continuePayload));
-            continueButtonHtml = `<button class="retry-btn" type="button" data-continue="${continueData}" onclick="continueFromButton(this)">ادامه بده</button>`;
-        }
-
-        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${continueButtonHtml}${retryButtonHtml}<button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
         if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
@@ -3703,47 +3669,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         await retryRequest(request);
     }
 
-    // FEATURE (Continue button): resumes a file edit that stopped partway
-    // through (empty reply after a tool call, or MAX_TOKENS cutoff) by
-    // swapping the original file(s) for the already-patched version the
-    // backend returned in errorDetail.partialFiles, and asking the model to
-    // finish the rest of the edit instead of starting over. Reads from the
-    // button's data-continue attribute (survives a page reload) rather than
-    // relying on in-memory state, mirroring how retryFromButton works.
-    async function continueFromButton(btn) {
-        if (isGenerating) return;
-        let saved;
-        try {
-            saved = JSON.parse(decodeURIComponent(btn.dataset.continue || ''));
-        } catch (_) {
-            return;
-        }
-        if (!saved) return;
-
-        const originalFiles = Array.isArray(saved.originalPayloadFiles) ? saved.originalPayloadFiles : [];
-        const partialFiles = Array.isArray(saved.partialFiles) ? saved.partialFiles : [];
-        if (!partialFiles.length) return;
-
-        // Replace each original file with its partially-edited version by
-        // name; keep any original file untouched if it has no matching
-        // partial (e.g. the model never got to patching it).
-        const mergedFiles = originalFiles.map(f => {
-            const match = partialFiles.find(p => p && p.name === f.name);
-            return match ? { name: f.name, content: match.content, mode: 'text' } : f;
-        });
-        // In case a partial file somehow has no matching original entry,
-        // still include it so its progress isn't silently dropped.
-        partialFiles.forEach(p => {
-            if (!mergedFiles.some(f => f.name === p.name)) {
-                mergedFiles.push({ name: p.name, content: p.content, mode: 'text' });
-            }
-        });
-
-        const continuePrompt = 'ادامه‌ی همون ویرایش قبلی رو تموم کن. بخشی از تغییرات قبلاً روی همین فایل اعمال شده - از inspect_file برای دیدن وضعیت فعلی فایل استفاده کن و فقط قسمت باقی‌مانده را کامل کن.';
-
-        await sendToGemini(continuePrompt, mergedFiles);
-    }
-
     async function retryRequest(request = lastFailedRequest) {
         if (!request || isGenerating) return;
         // FIX (retry button broken): the object handed to retryRequest can
@@ -3773,57 +3698,34 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
     }
 
-    // ARCHITECTURE (multi-request file editing): sendToGemini is the public
-    // entry point every existing call site already uses (unchanged
-    // signature/behavior for callers). It now just kicks off
-    // runOneEditTurn, which may call ITSELF again one or more times (see
-    // the continueEditState branch below) before the visible turn is truly
-    // done - that looping is entirely internal and invisible to callers.
     async function sendToGemini(textPrompt, payloadFiles = [], retryContext = null) {
-        await runOneEditTurn(textPrompt, payloadFiles, retryContext);
-    }
-
-    async function runOneEditTurn(textPrompt, payloadFiles = [], retryContext = null) {
         // Backward-compat: earlier code paths might still call this with a
         // single file object instead of an array.
         if (payloadFiles && !Array.isArray(payloadFiles)) payloadFiles = [payloadFiles];
         if (!payloadFiles) payloadFiles = [];
-        // ARCHITECTURE (multi-request file editing): a continuation call
-        // (see the continueEdit handling further down) re-invokes this same
-        // function with retryContext.agentState set. That's the ONLY signal
-        // this function needs to behave as "still the same visible turn,
-        // just another /api/chat call under the hood" - it reuses
-        // retryContext's existing isRetry machinery (same wrapperDiv,
-        // loadingDiv, no duplicate history push) since a continuation call
-        // has exactly the same DOM/history requirements a retry already
-        // has: don't create a new bubble, don't push the user's turn again.
-        const isContinuation = !!(retryContext && retryContext.agentState);
-        const requestId = isContinuation ? activeRequestId : ++activeRequestId;
-        if (!isContinuation) setGeneratingState(true);
+        const requestId = ++activeRequestId;
+        setGeneratingState(true);
 
         // ===== FIX: safety-net watchdog. Some rare network failures (e.g. the
         // server process restarting mid-stream during a deploy) don't surface as a
         // clean fetch rejection or AbortError — the promise can simply never
         // settle. Without this, isGenerating stays stuck true forever and the
         // composer (#userInput / send button) stays disabled in that chat until
-        // the page is reloaded. This timer force-resets the UI after 75s no
-        // matter what went wrong upstream, so the user is never permanently
-        // locked out.
+        // the page is reloaded. This timer force-resets the UI after 210s no matter
+        // what went wrong upstream, so the user is never permanently locked out.
         //
-        // BUGFIX (mismatched timeout - watchdog fires while the server is
-        // still legitimately working, or fires too late to ever help): this
-        // used to be a single 210000ms (210s) timer covering the ENTIRE
-        // reply, based on the old single-call backend that could itself run
-        // up to ~180s in one HTTP request. The backend no longer works that
-        // way - every single /api/chat call (including each file-edit
-        // continuation call) is now bounded to a few rounds specifically so
-        // it finishes well inside Vercel's own ~60s hard function timeout.
-        // So the watchdog is now PER-CALL (reset on every continuation, see
-        // runOneEditTurn's caller below) with a budget just above that real
-        // per-call ceiling - it fires only if THIS ONE call's connection
-        // truly went dead (e.g. mid-deploy restart), not because a
-        // multi-round edit is still legitimately working across several
-        // calls. =====
+        // BUGFIX (mismatched timeout - "took too long" fires while the server
+        // is still legitimately working): this used to be 90000 (90s), but the
+        // backend's own overall deadline is 180s, and a reply that needs the
+        // get_archived_file tool (e.g. re-reading a large saved file) genuinely
+        // takes two full Gemini rounds - each with up to a 60s budget - plus
+        // the tool call itself. 90s could (and did) fire WHILE the server was
+        // still mid-request, killing the client-side UI first; the user would
+        // then see "took too long", but the original request kept running
+        // server-side and its (unretrieved) result, or the key-rotation state
+        // it touched, could surface confusingly on the next manual retry. Set
+        // this comfortably above the server's real 180s ceiling so the server
+        // always gets to finish (and return its OWN specific error) first. =====
         const watchdogId = setTimeout(() => {
             if (requestId === activeRequestId && isGenerating) {
                 console.warn('[watchdog] Request took too long — resetting UI so input is usable again.');
@@ -3841,10 +3743,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 activeLoadingDiv = null;
                 saveCurrentChat();
             }
-        }, 75000);
+        }, 210000);
 
         const chatBox = document.getElementById("chatBox");
-        const isRetry = !!retryContext?.retry || isContinuation;
+        const isRetry = !!retryContext?.retry;
         const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
         const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
         const request = { textPrompt, payloadFiles, wrapper: wrapperDiv, loadingDiv };
@@ -3906,38 +3808,24 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // instead of the new message. Track exactly which index this turn
         // lives at, so it can be cleanly removed if the request doesn't
         // finish with a real reply (stopped, errored, or empty).
-        //
-        // ARCHITECTURE (multi-request file editing): a continuation call
-        // must NOT push a second user turn (isRetry already prevents that,
-        // same as a normal retry) - but unlike a normal retry, there was no
-        // earlier failed attempt that already cleaned up the ORIGINAL push
-        // from the very first call in this chain. If a later continuation
-        // call fails, that first-call push still needs to be removable.
-        // So the tracking state lives in one shared mutable object created
-        // by the FIRST call and threaded through retryContext to every
-        // continuation call in the chain - every call reads/clears the
-        // SAME underlying index instead of each getting its own useless -1
-        // that can never reach the real pushed turn.
-        const historyPushState = isContinuation
-            ? retryContext.historyPushState
-            : { index: -1 };
+        let pushedHistoryIndex = -1;
         if (!isRetry) {
             ensureVirtualPersona();
             chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
-            historyPushState.index = chatHistoryData[currentChatId].length - 1;
+            pushedHistoryIndex = chatHistoryData[currentChatId].length - 1;
         }
         const removePushedUserTurnIfUnanswered = () => {
-            if (historyPushState.index === -1) return;
+            if (pushedHistoryIndex === -1) return;
             const hist = chatHistoryData[currentChatId];
-            const entry = hist && hist[historyPushState.index];
+            const entry = hist && hist[pushedHistoryIndex];
             // Only remove if it's still exactly the turn we pushed (still a
             // 'user' turn at that index, nothing else appended after it that
             // would shift things) - keeps this safe even if something else
             // touched history in the meantime.
-            if (entry && entry.role === 'user' && hist.length === historyPushState.index + 1) {
-                hist.splice(historyPushState.index, 1);
+            if (entry && entry.role === 'user' && hist.length === pushedHistoryIndex + 1) {
+                hist.splice(pushedHistoryIndex, 1);
             }
-            historyPushState.index = -1;
+            pushedHistoryIndex = -1;
         };
         currentAbortController = new AbortController();
 
@@ -4004,17 +3892,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
                     styleHint: virtualPersona,
-                    stream: true,
-                    // ARCHITECTURE (multi-request file editing): on a
-                    // continuation call, hand back EXACTLY the agentState
-                    // object the previous /api/chat call sent us in its
-                    // continueEdit event. The backend uses this instead of
-                    // rebuilding contents from history/files, so it resumes
-                    // the in-progress edit rather than starting over.
-                    // Omitted (undefined -> not sent) on every normal
-                    // request, which is how the backend tells first-time
-                    // requests apart from continuations.
-                    ...(isContinuation ? { agentState: retryContext.agentState } : {})
+                    stream: true
                 }),
                 signal: currentAbortController.signal
             });
@@ -4044,9 +3922,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let streamError = null;
             let streamErrorDetail = null;
             let gotAnyText = false;
+            // FIX (block-rewrite delivery gap): the backend's block-based
+            // edit flow no longer emits a ```file-edit``` JSON block in the
+            // reply text (see server-side comment on the new write_block/
+            // verify_file tools) - the patched file content now arrives
+            // instead as `editedFiles` on the final `done: true` SSE event.
+            // Capture it here so the success handler below can render the
+            // same edited-file card the old file-edit-block path used to.
+            let streamEditedFiles = null;
             let liveRenderTimer = null;
             let streamEnded = false;
-            let continueEditState = null;
 
             const flushLiveRender = () => {
                 liveRenderTimer = null;
@@ -4125,15 +4010,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamError = parsed.error.message || 'خطای نامشخص';
                             streamErrorDetail = parsed.error;
                         }
-                    } else if (parsed.continueEdit) {
-                        // ARCHITECTURE (multi-request file editing): the
-                        // backend ran out of its per-call round budget
-                        // while still legitimately mid-edit (large file,
-                        // several get_file_chunk/apply_patch rounds) and is
-                        // asking for a fresh /api/chat call to keep going.
-                        // Not an error and not a real end-of-turn - handled
-                        // once the stream closes, below.
-                        continueEditState = parsed.agentState || null;
+                    }
+                    if (parsed.done && Array.isArray(parsed.editedFiles) && parsed.editedFiles.length) {
+                        streamEditedFiles = parsed.editedFiles;
                     }
                 }
             }
@@ -4151,36 +4030,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamError = parsed.error.message || 'خطای نامشخص';
                             streamErrorDetail = parsed.error;
                         }
-                    } else if (parsed.continueEdit) {
-                        continueEditState = parsed.agentState || null;
                     }
                 } catch (_) {}
             }
 
             streamEnded = true;
+            queueLiveRender(true);
 
             if (requestId !== activeRequestId) return;
-
-            // ARCHITECTURE (multi-request file editing): resume immediately
-            // and silently - from the user's point of view this is still
-            // one continuous reply. Loading dots / step label stay visible
-            // (loadingDiv is untouched) instead of being replaced by a
-            // finished-reply render, and the request/history bookkeeping
-            // below (which only runs on a real end-of-turn) is skipped
-            // entirely for this call.
-            if (continueEditState) {
-                clearTimeout(watchdogId);
-                await runOneEditTurn(textPrompt, payloadFiles, {
-                    retry: true,
-                    wrapper: wrapperDiv,
-                    loadingDiv,
-                    agentState: continueEditState,
-                    historyPushState
-                });
-                return;
-            }
-
-            queueLiveRender(true);
 
             const reply = sanitizeVirtualIdentity(fullReply);
             if (gotAnyText && reply) {
@@ -4192,13 +4049,30 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
                 // Reply arrived and was saved right after the user turn -
                 // nothing left to clean up.
-                historyPushState.index = -1;
+                pushedHistoryIndex = -1;
                 lastFailedRequest = null;
 
                 const { displayText, edits } = stripFileEditBlock(reply);
                 let finalHtml = displayText ? formatReply(displayText) : '';
                 finalHtml += buildFileEditResultHtml(edits);
+                finalHtml += buildEditedFilesHtml(streamEditedFiles);
                 if (!finalHtml) finalHtml = formatReply('');
+
+                // FIX (false "saved successfully" claim with no real edit):
+                // the model can hallucinate success language in prose (e.g.
+                // "با موفقیت ذخیره شد") while never actually calling
+                // write_block/verify_file - it just prints the whole file in
+                // a ```html fence instead (which formatReply then renders as
+                // a generic, non-downloadable code-card that looks similar
+                // but isn't the real edited-file card). This check used to
+                // look at `edits` (the legacy file-edit JSON block), which
+                // the block-based write_block/verify_file system never
+                // produces - so it never fired for this exact failure mode.
+                // Check the real block-based delivery channel instead.
+                const claimsSuccess = /با موفقیت (ذخیره|ویرایش|اعمال)|تغییرات? (اعمال|ذخیره) شد|فایل .* (ذخیره|ویرایش) شد/.test(displayText || '');
+                if (claimsSuccess && (!edits || !edits.length) && (!streamEditedFiles || !streamEditedFiles.length)) {
+                    finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">احتمالاً مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده.</div></div>`;
+                }
 
                 loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
@@ -4535,6 +4409,39 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             failedCount++;
         }
         return { content, appliedCount, failedCount, fuzzyCount };
+    }
+
+    // Renders the card for the NEW block-based edit flow's payload: the
+    // server sends already-final, already-verified file content directly
+    // (see streamEditedFiles capture above) instead of a diff to apply
+    // client-side. Simpler than buildFileEditResultHtml below (which still
+    // handles the OLD old/new diff-block format for any code path that
+    // still produces it) since there's no matching/applying to do - the
+    // content is final as-is.
+    function buildEditedFilesHtml(editedFiles) {
+        if (!editedFiles || !editedFiles.length) return '';
+        let html = '';
+        for (const f of editedFiles) {
+            const content = f.content || '';
+            const fileName = f.editedName || f.name || 'edited-file.txt';
+            const encoded = encodeURIComponent(content);
+            const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
+            const lineCount = content ? content.split(/\r?\n/).length : 0;
+            const codeCardId = `full-code-${Math.random().toString(36).slice(2)}`;
+            html += `<div class="code-card edited-file-card">
+                <div class="code-card-head">
+                    <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد</span>
+                    <div class="code-actions">
+                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
+                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
+                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
+                    </div>
+                </div>
+                <div class="edited-file-meta">${sizeKb} KB &middot; ${lineCount} خط &middot; آماده</div>
+                <pre id="${codeCardId}" class="full-code-view" style="display:none; max-height:480px; overflow:auto; margin:10px 0 0; padding:12px; background:var(--bg-secondary,#111); border-radius:8px; font-size:0.78rem; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(content)}</code></pre>
+            </div>`;
+        }
+        return html;
     }
 
     function buildFileEditResultHtml(edits) {
