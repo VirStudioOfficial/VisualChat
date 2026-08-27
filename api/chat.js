@@ -1,23 +1,5 @@
 // pages/api/chat.js
 
-// FIX (ریشه‌ی واقعیِ "گیر کردن وسط خواندن فایل بزرگ، بدون هیچ لاگ خطا"):
-// این تابع بدون maxDuration صریح روی سقف پیش‌فرض Vercel اجرا می‌شد. روی پلن
-// Hobby این سقف حداکثر ۶۰ ثانیه است (و بسته به runtime حتی می‌تواند کمتر
-// باشد)، در حالی‌که یک فایل ۲۰۰۰+ خطی با fileEditIntent فعال، به‌راحتی به
-// چند round خواندن chunk نیاز دارد که هرکدام تا ۱۷۰ ثانیه مهلت دارند
-// (roundNeedsMoreTime در runAgentLoop) - یعنی کل درخواست می‌توانست چند
-// دقیقه طول بکشد. وقتی زمان اجرا از سقف Vercel رد می‌شد، خودِ پلتفرم
-// پروسه را وسط کار Kill می‌کرد: نه catch سرور فرصت اجرا پیدا می‌کرد، نه
-// لاگی نوشته می‌شد (پروسه ناگهان از بین می‌رفت)، و کلاینت فقط می‌دید که
-// اتصال SSE دیگر هیچ event تازه‌ای نمی‌فرستد تا بالاخره خودش timeout بزند.
-// این دقیقاً همان رفتاری بود که مشاهده شد: توقف بی‌صدا درست وسط
-// "در حال خواندن بخشی از فایل"، بدون هیچ ردی در لاگ سرور.
-// عدد زیر باید با سقف واقعی پلن Vercel هماهنگ باشد (Hobby معمولاً حداکثر
-// ۶۰، Pro تا ۸۰۰) - این فقط یک "مقدار امن دلخواه" نیست، سقف واقعی پلن است.
-export const config = {
-    maxDuration: 60
-};
-
 /*
 |--------------------------------------------------------------------------
 | Logger - structured, no secrets ever printed
@@ -928,6 +910,154 @@ function nextEditedFileName(originalName) {
 | که مدل با اون old رو اصلاح کنه و دوباره صدا بزنه - هیچ حدس/fuzzy-match ی
 | در کار نیست.
 */
+/*
+|==========================================================================
+| BLOCK-BASED FILE EDITING (rewrite - replaces inspect_file/get_file_chunk/
+| apply_patch entirely for text files)
+|==========================================================================
+|
+| چرا این بازنویسی لازم بود:
+| معماری قبلی (inspect_file + get_file_chunk با startLine/endLine دلخواه +
+| apply_patch با old/new متنی یا خط‌محور) سه دسته باگ جدا تولید می‌کرد که هر
+| بار یکی رفع می‌شد و بعدی سر بر می‌آورد:
+|   ۱) overlap جزئی بین دو خواندن (نه subset دقیق، نه کاملاً قبل از قبلی)
+|      هیچ‌جا تشخیص داده نمی‌شد -> مدل بخشی را دوباره می‌خواند.
+|   ۲) state پیشرفت (کدام خط‌ها خوانده/ویرایش شده) داخل runAgentLoop تعریف
+|      می‌شد -> با هر retry (کلید/مدل بعدی روی همان درخواست HTTP) از صفر
+|      ساخته می‌شد و مدل کاملاً فراموش می‌کرد کجا بوده.
+|   ۳) apply_patch با تطبیق متنی (old/new) در فایل‌های بزرگ شکننده بود: اگر
+|      مدل حتی یک کاراکتر (فاصله/کوتیشن) را از حافظه بازسازی می‌کرد، کل
+|      patch رد می‌شد.
+|
+| راه‌حل: به‌جای محدوده‌ی خط دلخواه، فایل به بلوک‌های شماره‌دار و
+| ثابت (توسط کد، نه مدل) تقسیم می‌شود. مدل فقط با شماره‌ی بلوک کار می‌کند -
+| نه محاسبه‌ی خط، نه تطبیق متنی. state پیشرفت (کدام بلوک خوانده/ویرایش شده،
+| آیا verify نهایی بعد از آخرین ویرایش انجام و پاس شده) در یک آبجکت واحد
+| (BlockFileState) نگه داشته می‌شود که خودِ caller (سطح HTTP request، نه
+| runAgentLoop) می‌سازد و بین همه‌ی retryهای همان درخواست مشترک است - دقیقاً
+| مثل sharedRequestState برای inspect/chunk قبلی، اما این بار state واحد و
+| کامل شامل خودِ محتوای فایل هم هست، نه پخش در چند Set/Map جدا.
+|
+| قوانین کلیدی:
+|   - بلوک‌بندی قطعی و تکرارپذیر است: همان فایل همیشه همان بلوک‌ها را می‌دهد.
+|   - write_block کل یک بلوک را با محتوای جدید جایگزین می‌کند (نه diff) -
+|     مقاوم در برابر خطای کوچک متنی، چون کل بلوک بازنویسی می‌شود نه بخشی از آن.
+|   - بعد از هر write_block، پرچم "verified" ریست می‌شود؛ مدل تا verify_file
+|     را دوباره صدا نزند و پاس نشود، اجازه‌ی جواب نهایی (بدون ابزار) را
+|     نمی‌گیرد - این را runAgentLoop در پایان هر round اجرا می‌کند، نه یک
+|     قانون صرفاً در system prompt که قابل نادیده گرفتن باشد.
+|
+|==========================================================================
+*/
+
+const FILE_BLOCK_TARGET_LINES = 250; // اندازه‌ی هدف هر بلوک - نه سقف سخت، نزدیک‌ترین مرز منطقی (خط خالی/section) به این عدد انتخاب می‌شود
+
+// یک فایل را به بلوک‌های ثابت تقسیم می‌کند. مرز هر بلوک تا حد امکان روی یک
+// خط خالی یا مرز section (از analyzeFileStructure) قرار می‌گیرد تا وسط یک
+// تابع/تگ قطع نشود؛ اما این فقط برای خوانایی preview است - چون write_block
+// همیشه کل بلوک را عوض می‌کند نه یک semantic unit را، قطع شدن وسط تابع هیچ
+// مشکل صحتی ایجاد نمی‌کند.
+function computeFileBlocks(content, fileName) {
+    const lines = String(content || '').split(/\r?\n/);
+    const totalLines = lines.length;
+    const blocks = [];
+
+    if (totalLines === 0) {
+        return [{ number: 1, startLine: 1, endLine: 0, preview: '(فایل خالی است)' }];
+    }
+
+    let analysis = null;
+    try {
+        analysis = analyzeFileStructure(content, fileName, '');
+    } catch (_) {
+        analysis = null;
+    }
+    const preferredBoundaries = new Set();
+    if (analysis) {
+        [...(analysis.sections || []), ...(analysis.functions || []), ...(analysis.classes || [])]
+            .forEach(item => { if (item && Number.isFinite(item.line)) preferredBoundaries.add(item.line); });
+    }
+
+    let cursor = 1;
+    let blockNumber = 1;
+    while (cursor <= totalLines) {
+        const idealEnd = Math.min(totalLines, cursor + FILE_BLOCK_TARGET_LINES - 1);
+        let end = idealEnd;
+
+        if (idealEnd < totalLines) {
+            const searchWindow = 40;
+            let bestEnd = null;
+            for (let candidate = idealEnd; candidate > Math.max(cursor, idealEnd - searchWindow); candidate--) {
+                const lineText = lines[candidate - 1];
+                const nextLineIsBoundary = preferredBoundaries.has(candidate + 1);
+                const thisLineBlank = lineText !== undefined && lineText.trim() === '';
+                if (nextLineIsBoundary || thisLineBlank) {
+                    bestEnd = candidate;
+                    break;
+                }
+            }
+            end = bestEnd || idealEnd;
+        }
+
+        const previewLines = lines.slice(cursor - 1, Math.min(end, cursor - 1 + 3));
+        blocks.push({
+            number: blockNumber,
+            startLine: cursor,
+            endLine: end,
+            preview: previewLines.join('\n').slice(0, 200)
+        });
+        blockNumber++;
+        cursor = end + 1;
+    }
+
+    return blocks;
+}
+
+// یک BlockFileState برای یک فایل می‌سازد. باید توسط caller (سطح HTTP
+// request) ساخته شود و بین همه‌ی retryهای همان درخواست به runAgentLoop
+// پاس داده شود - دقیقاً مثل sharedRequestState.
+function createBlockFileState(file) {
+    const lines = String(file.content || '').split(/\r?\n/);
+    return {
+        name: file.name,
+        lines,
+        blocks: computeFileBlocks(file.content || '', file.name),
+        readBlocks: new Set(),
+        editedBlocks: new Set(),
+        verified: false,
+        editedName: null
+    };
+}
+
+// بلوک‌بندی را بعد از تغییر طول فایل دوباره محاسبه می‌کند. چون write_block
+// می‌تواند طول بلوک نوشته‌شده را عوض کند، شماره‌ی بلوک‌های بعدی باید با
+// خطوط جدید همخوانی داشته باشد. بازسازی از صفر ارزان و بدون edge-case است.
+function recomputeBlocksAfterEdit(state) {
+    const content = state.lines.join('\n');
+    state.blocks = computeFileBlocks(content, state.name);
+}
+
+function formatBlockMapForModel(state) {
+    const totalLines = state.lines.length;
+    return {
+        file: state.name,
+        totalLines,
+        totalBlocks: state.blocks.length,
+        readBlocks: [...state.readBlocks].sort((a, b) => a - b),
+        editedBlocks: [...state.editedBlocks].sort((a, b) => a - b),
+        verified: state.verified,
+        blocks: state.blocks.map(b => ({
+            number: b.number,
+            startLine: b.startLine,
+            endLine: b.endLine,
+            lineCount: b.endLine - b.startLine + 1,
+            preview: b.preview,
+            alreadyRead: state.readBlocks.has(b.number),
+            alreadyEdited: state.editedBlocks.has(b.number)
+        }))
+    };
+}
+
 function tryApplyPatch(content, oldStr, newStr) {
     const firstIndex = content.indexOf(oldStr);
     const lastIndex = content.lastIndexOf(oldStr);
@@ -1090,107 +1220,6 @@ function formatFileStructureForModel(analysis) {
     };
 }
 
-/*
-|--------------------------------------------------------------------------
-| Logical chunking (structural, not fixed-size)
-|--------------------------------------------------------------------------
-| Turns the same structural markers analyzeFileStructure already finds
-| (functions, classes, sections, top-level html tags) into a sorted list
-| of line-range chunks, so the model can fetch "just the login function"
-| or "just the header markup" by line range instead of ingesting the
-| whole file. A hard MAX_CHUNK_LINES cap splits any span that's still too
-| big (e.g. one giant function) into sequential sub-chunks so no single
-| get_file_chunk call can blow the context budget.
-*/
-// FIX (ریشه‌ی واقعی مشکل "میره ۱۰۰-۲۰۰، ۲۰۸۰-۲۱۵۰، دوباره ۲۱۲۶-۲۱۶۵..."):
-// این مقدار تعیین می‌کند خودِ نقشه‌ی chunk (chunk map) که به مدل نشان داده
-// می‌شود از چه تیکه‌هایی تشکیل شده. حتی وقتی MAX_CHUNK_REQUEST_LINES (سقف
-// get_file_chunk) را به ۹۰۰ رساندیم، تا وقتی خودِ نقشه از تیکه‌های ۲۵۰
-// خطی ساخته می‌شد، مدل - که طبق system prompt باید "از روی chunk map
-// محدوده را بگیرد، نه حدس بزند" - همان بازه‌های کوچک ۲۵۰ خطی (یا کمتر،
-// بسته به فاصله‌ی مرزهای تابع/تگ) را عیناً به get_file_chunk پاس می‌داد.
-// برای فایل ۵۰۰۰+ خطی، یعنی ده‌ها chunk کوچک پشت‌سرهم، دقیقاً همان رفت‌
-// و‌برگشت و اتمام سهمیه‌ای که مشاهده شد. این عدد را هماهنگ با
-// MAX_CHUNK_REQUEST_LINES (۹۰۰) بالا می‌بریم تا نقشه از همان ابتدا
-// تیکه‌های بزرگ‌تر و واقع‌بینانه پیشنهاد بدهد.
-const MAX_CHUNK_LINES = 900; // upper bound per chunk regardless of structure - kept in sync with MAX_CHUNK_REQUEST_LINES in get_file_chunk
-const MIN_CHUNK_LINES = 15;  // avoid a flood of tiny 1-2 line chunks; small adjacent markers get merged
-
-function computeLogicalChunks(content, fileName, analysis) {
-    const lines = String(content || '').split(/\r?\n/);
-    const totalLines = lines.length;
-    const structure = analysis || analyzeFileStructure(content, fileName, '');
-
-    // Collect every marker line we have (function/class/section starts, and
-    // for HTML the top-level structural tags), dedupe, sort ascending.
-    const markerLines = new Set([1]);
-    const addMarkers = (arr) => arr.forEach(x => { if (x && x.line) markerLines.add(x.line); });
-    addMarkers(structure.sections);
-    addMarkers(structure.functions);
-    addMarkers(structure.classes);
-    if (structure.language === 'html') {
-        // Only the "big" recurring structural tags make good boundaries;
-        // formatFileStructureForModel already limits this list in size.
-        structure.htmlElements.forEach(el => {
-            if (el && el.line && ['html','head','body','script','style','header','footer','nav','main','section','form'].includes(el.tag)) {
-                markerLines.add(el.line);
-            }
-        });
-    }
-    if (structure.language === 'css') addMarkers(structure.cssRules);
-
-    let boundaries = Array.from(markerLines).sort((a, b) => a - b);
-
-    // Merge boundaries that are closer together than MIN_CHUNK_LINES, so we
-    // don't end up with dozens of near-empty chunks in dense code.
-    const merged = [];
-    for (const b of boundaries) {
-        if (merged.length === 0 || b - merged[merged.length - 1] >= MIN_CHUNK_LINES) {
-            merged.push(b);
-        }
-    }
-    boundaries = merged.length > 0 ? merged : [1];
-
-    // Build raw spans between consecutive boundaries.
-    const rawChunks = [];
-    for (let i = 0; i < boundaries.length; i++) {
-        const start = boundaries[i];
-        const end = (i + 1 < boundaries.length) ? boundaries[i + 1] - 1 : totalLines;
-        if (start <= end) rawChunks.push({ start, end });
-    }
-
-    // Split any chunk still bigger than MAX_CHUNK_LINES into sequential
-    // sub-chunks so one call can never return an unbounded amount of text.
-    const chunks = [];
-    for (const c of rawChunks) {
-        let s = c.start;
-        while (s <= c.end) {
-            const e = Math.min(c.end, s + MAX_CHUNK_LINES - 1);
-            chunks.push({ start: s, end: e });
-            s = e + 1;
-        }
-    }
-
-    // Attach a short label per chunk (first non-empty line, trimmed) so the
-    // model's chunk map is readable without needing the full content.
-    return chunks.map((c, idx) => {
-        const firstContentLine = lines.slice(c.start - 1, c.end).find(l => l.trim().length > 0) || '';
-        return {
-            index: idx + 1,
-            startLine: c.start,
-            endLine: c.end,
-            preview: firstContentLine.trim().slice(0, 100)
-        };
-    });
-}
-
-function getChunkContent(content, startLine, endLine) {
-    const lines = String(content || '').split(/\r?\n/);
-    const s = Math.max(1, startLine);
-    const e = Math.min(lines.length, endLine);
-    if (s > e) return null;
-    return lines.slice(s - 1, e).join('\n');
-}
 
 const GEMINI_TOOLS = [
     {
@@ -1269,86 +1298,85 @@ const GEMINI_TOOLS = [
                 }
             },
             {
-                // FEATURE (structural chunking): for large files, the model
-                // is given a chunk MAP (see inspect_file's "chunks" field)
-                // instead of the whole content. Each chunk is a logical
-                // span (a function, a section, an HTML block) with real
-                // line numbers, computed by computeLogicalChunks. This tool
-                // fetches just the lines of ONE chunk (or a custom range),
-                // so a multi-thousand-line file never has to be ingested
-                // whole just to edit one part of it.
-                name: 'get_file_chunk',
+                // نقشه‌ی بلوک‌های فایل (شماره، محدوده‌ی خط، پیش‌نمایش، وضعیت
+                // خوانده/ویرایش‌شده) همیشه در system prompt به مدل داده
+                // می‌شود - نیازی به یک ابزار جدا برای "دیدن ساختار" نیست.
+                // این ابزار فقط محتوای واقعی یک بلوک مشخص را برمی‌گرداند.
+                name: 'read_block',
                 description:
-                    'محتوای واقعی یک محدوده‌ی خط مشخص از فایل را برمی‌گرداند (نه کل فایل). ابتدا با ' +
-                    'inspect_file نقشه‌ی chunk های فایل (هرکدام با شماره خط شروع/پایان و یک پیش‌نمایش) را ' +
-                    'بگیر، سپس فقط chunk یا محدوده‌ای که واقعاً برای پاسخ/ویرایش لازم داری را با این ابزار ' +
-                    'بخوان. برای فایل‌های چند هزار خطی، هرگز سعی نکن کل فایل را یک‌جا بخواهی - فقط محدوده‌ی ' +
-                    'مرتبط را بگیر.',
+                    'محتوای واقعی یک بلوک مشخص از فایل را برمی‌گرداند (نه کل فایل). نقشه‌ی بلوک‌ها ' +
+                    '(شماره هر بلوک، محدوده‌ی خط، پیش‌نمایش) از قبل در system prompt به تو داده شده - ' +
+                    'فقط شماره‌ی بلوکی که واقعاً برای پاسخ/ویرایش لازم داری را اینجا بده. حدس زدن ' +
+                    'محدوده‌ی خط لازم نیست و اصلاً پشتیبانی نمی‌شود - فقط شماره‌ی بلوک.',
                 parameters: {
                     type: 'object',
                     properties: {
                         file: {
                             type: 'string',
-                            description: 'نام دقیق فایل هدف (همانی که در inspect_file استفاده شد).'
+                            description: 'نام دقیق فایل هدف (همانی که در نقشه‌ی بلوک‌ها آمده).'
                         },
-                        startLine: {
+                        block: {
                             type: 'number',
-                            description: 'شماره خط شروع (بر اساس نقشه‌ی chunk یا شماره خط دلخواه).'
-                        },
-                        endLine: {
-                            type: 'number',
-                            description: 'شماره خط پایان (شامل). اگر محدوده خیلی بزرگ باشد (بیش از ۳۰۰ خط)، به بخش‌های کوچک‌تر تقسیم و جداگانه بخواه.'
+                            description: 'شماره‌ی بلوکی که می‌خواهی محتوایش را ببینی (از نقشه‌ی بلوک‌ها).'
                         }
                     },
-                    required: ['file', 'startLine', 'endLine']
+                    required: ['file', 'block']
                 }
             },
             {
-                // FEATURE (transactional file patching): replaces the old
-                // "print one ```file-edit block at the end of the reply"
-                // flow. The model now calls this tool per-patch, gets an
-                // immediate success/failure result (with the nearest
-                // matching context on failure), and can retry with a
-                // corrected `old` string in the same turn - instead of
-                // silently producing a JSON block that the frontend applies
-                // with no feedback loop at all. Always call inspect_file
-                // first so `old` is copied from real content, not recalled
-                // from memory.
-                name: 'apply_patch',
+                // جایگزین apply_patch: به‌جای تطبیق متنی شکننده (old/new) یا
+                // محدوده‌ی خط دلخواه، کل یک بلوک با شماره‌ی مشخص با محتوای
+                // جدید جایگزین می‌شود. قبل از پذیرفتن، فایل کامل (با این
+                // بلوک جایگزین‌شده) از validatePatchedContent رد می‌شود تا
+                // یک بلوک بد کل فایل را خراب نکند.
+                name: 'write_block',
                 description:
-                    'یک تغییر دقیق را روی فایل هدف اعمال می‌کند. دو حالت پشتیبانی می‌شود: ' +
-                    '(۱) حالت خط‌محور (ترجیحی برای فایل‌های بزرگ): startLine و endLine را از chunkی که با ' +
-                    'get_file_chunk خوانده‌ای بده - این محدوده دقیقاً با همان محتوای واقعی آن خطوط جایگزین ' +
-                    'می‌شود، بدون نیاز به تطبیق رشته‌ای. ' +
-                    '(۲) حالت متن دقیق (برای فایل‌های کوچک یا وقتی startLine/endLine مشخص نیست): old باید ' +
-                    'دقیقاً (کاراکتر به کاراکتر) از محتوای واقعی فایل کپی شده باشد و باید در کل فایل دقیقاً ' +
-                    'یک‌بار ظاهر شود. اگر این ابزار خطای «پیدا نشد» یا «مبهم» برگرداند، بر اساس context/' +
-                    'کاندیدهای برگشتی اصلاح کن و دوباره صدا بزن - هرگز حدس نزن.',
+                    'محتوای یک بلوک مشخص را کامل با متن جدید جایگزین می‌کند. قبل از این ابزار حتماً ' +
+                    'همان بلوک را یک‌بار با read_block خوانده باش تا محتوای واقعی اطراف تغییر را بدانی. ' +
+                    'کل بلوک (نه فقط خط تغییریافته) را با newContent بده - هر خطی از بلوک قدیم که باید ' +
+                    'بماند را هم دوباره در newContent بنویس، چون کل بلوک عوض می‌شود. بعد از این ابزار، ' +
+                    'قبل از پاسخ نهایی حتماً verify_file را صدا بزن.',
                 parameters: {
                     type: 'object',
                     properties: {
                         file: {
                             type: 'string',
-                            description: 'نام دقیق فایل هدف (همانی که در inspect_file استفاده شد).'
+                            description: 'نام دقیق فایل هدف.'
                         },
-                        startLine: {
+                        block: {
                             type: 'number',
-                            description: 'حالت خط‌محور: شماره خط شروع محدوده‌ای که باید جایگزین شود.'
+                            description: 'شماره‌ی بلوکی که باید کامل جایگزین شود.'
                         },
-                        endLine: {
-                            type: 'number',
-                            description: 'حالت خط‌محور: شماره خط پایان محدوده‌ای که باید جایگزین شود (شامل).'
-                        },
-                        old: {
+                        newContent: {
                             type: 'string',
-                            description: 'حالت متن دقیق: متن دقیق و یکتا که باید جایگزین شود - کپی حرف‌به‌حرف از فایل واقعی.'
-                        },
-                        new: {
-                            type: 'string',
-                            description: 'متنی که باید جایگزین محدوده‌ی خط یا old شود.'
+                            description: 'محتوای کامل جدید این بلوک (شامل خطوطی که تغییر نکرده‌اند اما باید بمانند).'
                         }
                     },
-                    required: ['file', 'new']
+                    required: ['file', 'block', 'newContent']
+                }
+            },
+            {
+                // بررسی نهایی اجباری: فایل کامل (با تمام بلوک‌های ویرایش‌شده)
+                // را دوباره می‌سازد و از همان چک ساختاری validatePatchedContent
+                // (بالانس تگ/براکت، سنتکس JS) رد می‌کند. runAgentLoop مدل را
+                // مجبور می‌کند این را بعد از آخرین write_block صدا بزند و
+                // پاس کند، قبل از این‌که جواب نهایی (بدون tool call) پذیرفته
+                // شود.
+                name: 'verify_file',
+                description:
+                    'فایل کامل را (با تمام ویرایش‌های اعمال‌شده تا این لحظه) از نظر ساختاری/سنتکسی ' +
+                    'بررسی می‌کند. باید حتماً بعد از آخرین write_block و قبل از تحویل نهایی صدا زده ' +
+                    'شود. اگر مشکل پیدا کند، بلوک(های) مشکل‌دار را با read_block دوباره بخوان و با ' +
+                    'write_block اصلاح کن، سپس دوباره verify_file را صدا بزن.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        file: {
+                            type: 'string',
+                            description: 'نام دقیق فایلی که باید نهایی‌سازی و بررسی شود.'
+                        }
+                    },
+                    required: ['file']
                 }
             }
         ]
@@ -1378,14 +1406,17 @@ function describeToolCall(name, args) {
     if (name === 'web_search') {
         return (args && args.reason) || `دارم درباره‌ی «${(args && args.query) || ''}» توی وب سرچ می‌کنم...`;
     }
-    if (name === 'inspect_file') {
-        return `در حال بررسی ساختار فایل «${(args && args.file) || ''}»...`;
-    }
     if (name === 'ask_user') {
         return 'قبل از ادامه، یه سؤال دارم...';
     }
-    if (name === 'get_file_chunk') {
-        return `در حال خواندن بخشی از فایل «${(args && args.file) || ''}» (خط ${(args && args.startLine) || '?'} تا ${(args && args.endLine) || '?'})...`;
+    if (name === 'read_block') {
+        return `در حال خواندن بخش ${(args && args.block) || '?'} از فایل «${(args && args.file) || ''}»...`;
+    }
+    if (name === 'write_block') {
+        return `در حال اعمال تغییرات روی بخش ${(args && args.block) || '?'} از فایل «${(args && args.file) || ''}»...`;
+    }
+    if (name === 'verify_file') {
+        return `در حال بررسی نهایی فایل «${(args && args.file) || ''}»...`;
     }
     if (name === 'get_archived_file') {
         return `دارم فایل «${(args && args.name) || ''}» رو از آرشیو این گفتگو می‌خونم...`;
@@ -1422,6 +1453,21 @@ function validatePatchedContent(content, fileName) {
         // parsing - enough to catch the common breakage (an unclosed or
         // mismatched tag from a bad line range) without a heavy parser.
         const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+        // FIX (validator too tolerant to actually catch broken HTML):
+        // the previous version popped ANY unclosed tags nested deeper
+        // than the matching one on every closing tag - e.g.
+        // "<div><span></div>" was accepted as valid because the </div>
+        // popped both "span" and "div" off the stack, treating the
+        // missing </span> as if it had implicitly closed. That defeats
+        // the whole point of this check for the block-based editor,
+        // which has no other safety net once apply_patch's string-match
+        // mode is gone. Real HTML DOES have a small set of elements that
+        // are genuinely allowed to auto-close when a sibling/parent
+        // starts or closes (li, td, tr, option, p, ...) - only THOSE are
+        // still popped implicitly. Anything else left on the stack when
+        // its ancestor closes is now a real error, matching what a real
+        // browser's parser would actually do.
+        const implicitlyClosableTags = new Set(['li','td','th','tr','option','p','dt','dd']);
         const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
         const stack = [];
         let m;
@@ -1429,34 +1475,31 @@ function validatePatchedContent(content, fileName) {
             const tag = m[1].toLowerCase();
             const isClosing = m[0][1] === '/';
             const isSelfClosing = m[2] === '/' || voidTags.has(tag);
-            if (tag === 'script' || tag === 'style') {
-                // Content inside can contain characters that look like tags
-                // (e.g. "a < b" in JS) - the regex above only matches real
-                // <tag> syntax so this is safe, just skip nesting logic for
-                // their internal content by handling them as normal
-                // open/close pairs below.
-            }
             if (isClosing) {
                 const idx = stack.lastIndexOf(tag);
                 if (idx === -1) {
                     return { valid: false, reason: `تگ بسته‌ی «</${tag}>» بدون تگ باز متناظر پیدا شد - احتمالاً محدوده‌ی خط اشتباه بوده.` };
                 }
-                stack.length = idx; // pop this tag and any unclosed ones nested deeper (tolerant of minor real-world HTML)
+                // Anything between idx and the top of the stack must be
+                // implicitly-closable, or this is a real unclosed tag.
+                const skipped = stack.slice(idx + 1);
+                const realGap = skipped.find(t => !implicitlyClosableTags.has(t));
+                if (realGap) {
+                    return { valid: false, reason: `تگ «<${realGap}>» قبل از «</${tag}>» بسته نشده - احتمالاً محدوده‌ی خط اشتباه بوده.` };
+                }
+                stack.length = idx;
             } else if (!isSelfClosing) {
                 stack.push(tag);
             }
         }
-        if (stack.length > 0) {
-            return { valid: false, reason: `تگ(های) باز بدون بسته شدن باقی مانده: ${[...new Set(stack)].slice(0, 5).join(', ')} - احتمالاً محدوده‌ی خط اشتباه بوده.` };
+        const remaining = stack.filter(t => !implicitlyClosableTags.has(t));
+        if (remaining.length > 0) {
+            return { valid: false, reason: `تگ(های) باز بدون بسته شدن باقی مانده: ${[...new Set(remaining)].slice(0, 5).join(', ')} - احتمالاً محدوده‌ی خط اشتباه بوده.` };
         }
         return { valid: true };
     }
     return { valid: true }; // unknown/other file types: no structural check available, accept as-is
 }
-
-// Persistent cache for file structure/chunk maps during the server lifetime.
-// Prevents repeated inspect_file calls from rebuilding the same analysis.
-const fileStructureCache = new Map();
 
 async function executeToolCall(name, args, ctx) {
     if (name === 'get_archived_file') {
@@ -1520,213 +1563,155 @@ async function executeToolCall(name, args, ctx) {
         };
     }
 
-    if (name === 'inspect_file') {
+    if (name === 'read_block') {
         const fileName = String((args && args.file) || '').trim();
-        const query = String((args && args.query) || '').trim();
+        const blockNumber = Number(args && args.block);
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
             return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
         }
-        const cacheKey = `${found.name || fileName}:${(found.content || '').length}:${query}`;
-        let analysis;
-        let chunks;
-
-        const cached = fileStructureCache.get(cacheKey);
-        if (cached && (Date.now() - cached.createdAt) < 10 * 60 * 1000) {
-            analysis = cached.analysis;
-            chunks = cached.chunks;
-        } else {
-            analysis = analyzeFileStructure(found.content || '', found.name || fileName, query);
-            chunks = computeLogicalChunks(found.content || '', found.name || fileName, analysis);
-            fileStructureCache.set(cacheKey, { analysis, chunks, createdAt: Date.now() });
+        const state = ctx && ctx.blockStates && ctx.blockStates.get(found.name || fileName);
+        if (!state) {
+            return { error: `وضعیت بلوک‌بندی برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
         }
-        log.info('agent.tool.inspect_file', {
-            name: found.name || fileName,
-            language: analysis.language,
-            lineCount: analysis.lineCount,
-            functions: analysis.functions.length,
-            classes: analysis.classes.length,
-            queryMatches: analysis.queryMatches.length,
-            chunkCount: chunks.length
+        if (!Number.isFinite(blockNumber)) {
+            return { error: 'شماره‌ی بلوک نامعتبر است.' };
+        }
+        const block = state.blocks.find(b => b.number === blockNumber);
+        if (!block) {
+            return { error: `بلوک شماره ${blockNumber} وجود ندارد. فایل ${state.blocks.length} بلوک دارد (۱ تا ${state.blocks.length}).` };
+        }
+        const content = state.lines.slice(block.startLine - 1, block.endLine).join('\n');
+        state.readBlocks.add(blockNumber);
+        log.info('agent.tool.read_block', {
+            name: state.name,
+            block: blockNumber,
+            startLine: block.startLine,
+            endLine: block.endLine
         });
         return {
-            type: 'file_structure',
-            instruction: analysis.lineCount > 400
-                ? 'این فایل بزرگ است. کل محتوا اینجا داده نشده - از فهرست "chunks" استفاده کن و فقط محدوده‌ی خطی مرتبط را با get_file_chunk بخوان، نه کل فایل را. قبل از file-edit حتماً chunk مربوطه را بخوان.'
-                : 'این نتیجه از محتوای واقعی فایل ساخته شده است؛ قبل از file-edit از آن استفاده کن و چیزی را که در ساختار موجود است دوباره اضافه نکن.',
-            structure: formatFileStructureForModel(analysis),
-            chunks: chunks.map(c => ({ startLine: c.startLine, endLine: c.endLine, preview: c.preview }))
+            file: state.name,
+            block: blockNumber,
+            startLine: block.startLine,
+            endLine: block.endLine,
+            content
         };
     }
 
-    if (name === 'get_file_chunk') {
+    if (name === 'write_block') {
         const fileName = String((args && args.file) || '').trim();
-        const startLine = Number(args && args.startLine);
-        const endLine = Number(args && args.endLine);
-        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
-        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
-        if (!found) {
-            return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
-        }
-        if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
-            return { error: 'محدوده‌ی خط نامعتبر است. startLine و endLine باید عدد صحیح معتبر و startLine <= endLine باشند.' };
-        }
-        // FIX (هماهنگ با MAX_CHUNK_LINES بالای فایل - همان عدد، نه یک
-        // مقدار مستقل، دقیقاً برای جلوگیری از تکرار همین باگ: قبلاً این
-        // عدد و MAX_CHUNK_LINES هر دو باید ۹۰۰ می‌بودند اما جدا از هم
-        // تغییر داده شدند و یکی عقب ماند - همان چیزی که باعث شد
-        // "بالابردن سقف" هیچ اثری روی اندازه‌ی واقعی chunk map نداشته
-        // باشد.):
-        const MAX_CHUNK_REQUEST_LINES = MAX_CHUNK_LINES;
-        const clampedEnd = Math.min(endLine, startLine + MAX_CHUNK_REQUEST_LINES - 1);
-        const chunkContent = getChunkContent(found.content || '', startLine, clampedEnd);
-        if (chunkContent === null) {
-            return { error: 'این محدوده‌ی خط در فایل وجود ندارد.' };
-        }
-        log.info('agent.tool.get_file_chunk', {
-            name: found.name || fileName,
-            startLine,
-            endLine: clampedEnd,
-            truncatedFromEndLine: clampedEnd < endLine ? endLine : null
-        });
-        return {
-            file: found.name || fileName,
-            startLine,
-            endLine: clampedEnd,
-            content: chunkContent,
-            ...(clampedEnd < endLine ? { note: `محدوده درخواستی بزرگ‌تر از حد مجاز بود؛ فقط تا خط ${clampedEnd} برگردانده شد. برای ادامه، get_file_chunk را با startLine جدید دوباره صدا بزن.` } : {})
-        };
-    }
-
-    if (name === 'apply_patch') {
-        const fileName = String((args && args.file) || '').trim();
-        const newStr = (args && args.new) || '';
-        const startLine = (args && args.startLine != null) ? Number(args.startLine) : null;
-        const endLine = (args && args.endLine != null) ? Number(args.endLine) : null;
-        const oldStr = (args && args.old) || '';
-
+        const blockNumber = Number(args && args.block);
+        const newContent = String((args && args.newContent) ?? '');
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
             return { success: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
         }
-
-        // Line-anchored mode: replace an exact line range, no string
-        // matching needed at all - this is what avoids the "old didn't
-        // match, probably reconstructed from memory" failure mode on large
-        // files, since the model only had to get line numbers right (which
-        // it read directly from get_file_chunk/inspect_file), not
-        // character-for-character content.
-        if (startLine != null && endLine != null) {
-            if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
-                return { success: false, error: 'محدوده‌ی خط نامعتبر است.' };
-            }
-            const lines = String(found.content || '').split(/\r?\n/);
-            if (endLine > lines.length) {
-                return { success: false, error: `فایل فقط ${lines.length} خط دارد؛ endLine (${endLine}) خارج از محدوده است.` };
-            }
-            const before = lines.slice(0, startLine - 1);
-            const replacedSpan = lines.slice(startLine - 1, endLine);
-            const after = lines.slice(endLine);
-            const newLines = newStr.split(/\r?\n/);
-            const candidateContent = [...before, ...newLines, ...after].join('\n');
-
-            const validation = validatePatchedContent(candidateContent, found.name || fileName);
-            if (!validation.valid) {
-                log.warn('agent.tool.apply_patch.rejected_invalid', {
-                    name: found.name || fileName,
-                    mode: 'line-anchored',
-                    startLine,
-                    endLine,
-                    reason: validation.reason
-                });
-                return {
-                    success: false,
-                    error: `این پچ رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} خط‌ها را دوباره با get_file_chunk بررسی کن و محدوده/متن را اصلاح کن.`
-                };
-            }
-
-            found.content = candidateContent;
-            found._patched = true;
-            found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
-
-            log.info('agent.tool.apply_patch.success', {
-                name: found.name || fileName,
-                editedName: found._editedName,
-                mode: 'line-anchored',
-                startLine,
-                endLine,
-                replacedLineCount: replacedSpan.length
-            });
-
-            return {
-                success: true,
-                mode: 'line-anchored',
-                editedName: found._editedName,
-                replacedLineCount: replacedSpan.length,
-                newLineCount: newLines.length,
-                suggestedOutputName: found._editedName,
-                note: 'patch با موفقیت اعمال شد (حالت خط‌محور). اسم فایل خروجی نهایی باید ' + found._editedName + ' باشد، نه اسم فایل اصلی.'
-            };
+        const state = ctx && ctx.blockStates && ctx.blockStates.get(found.name || fileName);
+        if (!state) {
+            return { success: false, error: `وضعیت بلوک‌بندی برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
+        }
+        if (!Number.isFinite(blockNumber)) {
+            return { success: false, error: 'شماره‌ی بلوک نامعتبر است.' };
+        }
+        const block = state.blocks.find(b => b.number === blockNumber);
+        if (!block) {
+            return { success: false, error: `بلوک شماره ${blockNumber} وجود ندارد. فایل ${state.blocks.length} بلوک دارد (۱ تا ${state.blocks.length}). اگر نقشه‌ی بلوک‌ها عوض شده (بعد از یک ویرایش قبلی)، از نقشه‌ی جدید در system prompt استفاده کن.` };
         }
 
-        if (!oldStr) {
-            return { success: false, error: 'فیلد old خالی است، یا برای حالت خط‌محور startLine/endLine بده.' };
-        }
+        // Build the candidate full-file content with this block's lines
+        // replaced, WITHOUT mutating state yet - validate first.
+        const newBlockLines = newContent.split(/\r?\n/);
+        const candidateLines = [
+            ...state.lines.slice(0, block.startLine - 1),
+            ...newBlockLines,
+            ...state.lines.slice(block.endLine)
+        ];
+        const candidateContent = candidateLines.join('\n');
 
-        const result = tryApplyPatch(found.content || '', oldStr, newStr);
-
-        if (!result.success) {
-            const reasonText = result.reason === 'ambiguous'
-                ? 'متن old بیش از یک‌بار در فایل تکرار شده - باید یکتا باشد'
-                : 'متن old دقیقاً در فایل پیدا نشد (احتمالاً از حافظه بازسازی شده، نه کپی واقعی)';
-            const report = buildPatchFailureReport(found.content || '', oldStr, reasonText);
-            log.warn('agent.tool.apply_patch.failed', {
-                name: found.name || fileName,
-                reason: result.reason,
-                candidatesFound: report.candidatesFound
-            });
-            return { success: false, ...report };
-        }
-
-        // Same structural safety net as line-anchored mode: reject before
-        // accepting if the resulting file would be broken.
-        const validation = validatePatchedContent(result.content, found.name || fileName);
+        const validation = validatePatchedContent(candidateContent, state.name);
         if (!validation.valid) {
-            log.warn('agent.tool.apply_patch.rejected_invalid', {
-                name: found.name || fileName,
-                mode: 'exact-match',
+            log.warn('agent.tool.write_block.rejected_invalid', {
+                name: state.name,
+                block: blockNumber,
                 reason: validation.reason
             });
             return {
                 success: false,
-                error: `این پچ رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} old/new را بازبینی کن.`
+                error: `این تغییر رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} بلوک را دوباره با read_block بررسی کن و newContent را اصلاح کن.`
             };
         }
 
-        // FIX (in-place update so subsequent tool calls in the same turn see
-        // the patched content): mutate the found entry directly rather than
-        // just returning the new content, since inspect_file/apply_patch
-        // later in this same agent loop read ctx.textFiles again.
-        found.content = result.content;
+        // Accept: commit the new lines, recompute the block map (line
+        // numbers shift if the new block has a different length than the
+        // old one), and mark this file as needing verify_file again before
+        // it can be handed back as final.
+        state.lines = candidateLines;
+        state.editedBlocks.add(blockNumber);
+        state.verified = false;
+        recomputeBlocksAfterEdit(state);
+
+        found.content = state.lines.join('\n');
         found._patched = true;
         found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
+        state.editedName = found._editedName;
 
-        log.info('agent.tool.apply_patch.success', {
-            name: found.name || fileName,
+        log.info('agent.tool.write_block.success', {
+            name: state.name,
             editedName: found._editedName,
-            oldLen: oldStr.length,
-            newLen: newStr.length
+            block: blockNumber,
+            newBlockCount: state.blocks.length
         });
 
         return {
             success: true,
-            file: found.name || fileName,
-            suggestedOutputName: found._editedName,
-            note: 'patch با موفقیت اعمال شد. اسم فایل خروجی نهایی باید ' + found._editedName + ' باشد، نه اسم فایل اصلی.'
+            file: state.name,
+            block: blockNumber,
+            editedName: found._editedName,
+            newTotalBlocks: state.blocks.length,
+            note: 'بلوک با موفقیت بازنویسی شد. شماره‌ی بلوک‌های بعدی ممکن است عوض شده باشد - نقشه‌ی بلوک‌های به‌روز در پیام بعدی داده می‌شود. قبل از پاسخ نهایی حتماً verify_file را صدا بزن.'
         };
     }
+
+    if (name === 'verify_file') {
+        const fileName = String((args && args.file) || '').trim();
+        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
+        if (!found) {
+            return { valid: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+        }
+        const state = ctx && ctx.blockStates && ctx.blockStates.get(found.name || fileName);
+        if (!state) {
+            return { valid: false, error: `وضعیت بلوک‌بندی برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
+        }
+
+        const finalContent = state.lines.join('\n');
+        const validation = validatePatchedContent(finalContent, state.name);
+        state.verified = validation.valid;
+
+        log.info('agent.tool.verify_file', {
+            name: state.name,
+            valid: validation.valid,
+            reason: validation.valid ? null : validation.reason,
+            editedBlockCount: state.editedBlocks.size
+        });
+
+        if (!validation.valid) {
+            return {
+                valid: false,
+                error: `فایل نهایی مشکل ساختاری دارد: ${validation.reason} بلوک(های) مربوطه را با read_block بررسی و با write_block اصلاح کن، سپس دوباره verify_file را صدا بزن. تا این verify پاس نشود، نمی‌توانی پاسخ نهایی بدهی.`
+            };
+        }
+        return {
+            valid: true,
+            file: state.name,
+            editedName: found._editedName || state.name,
+            editedBlockCount: state.editedBlocks.size,
+            note: 'فایل بررسی شد و مشکل ساختاری ندارد. حالا می‌توانی پاسخ نهایی بدهی.'
+        };
+    }
+
 
     if (name === 'web_search') {
         const query = (args && args.query) || '';
@@ -1781,7 +1766,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, maxRoundsThisCall, roundsAlreadySpent }) {
+async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, sharedRequestState }) {
     // FIX (فایل‌های ۵۰۰۰+ خطی): با MAX_CHUNK_REQUEST_LINES=900، یک فایل
     // ۵۰۰۰ خطی حداقل به ۶-۷ بار get_file_chunk نیاز دارد اگر مدل مجبور
     // شود همه‌ی فایل را پیمایش کند، به‌علاوه‌ی inspect_file و apply_patch و
@@ -1789,37 +1774,6 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // get_file_chunk می‌رسید تمام می‌شد. بالا بردنش برای این پروفایل کاری
     // ضروری است - نه یک "مقدار امن دلخواه"، بلکه حداقل فضای واقعی لازم.
     const MAX_TOOL_ROUNDS = 16;
-    // ARCHITECTURE (multi-request file editing, Vercel Hobby's ~60s hard
-    // function-timeout): a single HTTP function invocation can only safely
-    // do a handful of rounds before Vercel kills the whole process mid-work
-    // — silently, with no throw, no log line, nothing the client can react
-    // to (it just sees the SSE connection go dead and eventually times out
-    // client-side). MAX_TOOL_ROUNDS above is the ABSOLUTE ceiling across the
-    // whole multi-step edit; maxRoundsThisCall is how many of those rounds
-    // THIS ONE function invocation is allowed to spend before it must return
-    // control to the caller instead of continuing to loop. When the caller
-    // (the fileEditIntent path only - see call site) passes a small number
-    // here, runAgentLoop stops itself early with needsContinuation instead
-    // of throwing a "too many steps" error, and hands back everything the
-    // NEXT invocation needs to resume mid-edit. Every other call site
-    // (plain chat, web search, non-stream) omits this and behaves exactly
-    // as before, running the full MAX_TOOL_ROUNDS in one call.
-    // How many rounds earlier invocations of this SAME logical edit already
-    // used up, across all prior continuation calls. Needed so the overall
-    // MAX_TOOL_ROUNDS ceiling is enforced across the whole multi-request
-    // chain, not reset back to full every time a new invocation starts -
-    // otherwise a genuinely stuck edit could loop through continuation
-    // calls forever instead of ever hitting the real "give up" case.
-    const spentSoFar = Number.isFinite(roundsAlreadySpent) ? Math.max(0, roundsAlreadySpent) : 0;
-    const roundBudgetForThisCall = Number.isFinite(maxRoundsThisCall)
-        ? Math.max(1, Math.min(maxRoundsThisCall, MAX_TOOL_ROUNDS - spentSoFar))
-        : MAX_TOOL_ROUNDS;
-    // Whether this invocation is even allowed to report "still going, call
-    // me again" - false once the cumulative round count across the whole
-    // chain has actually reached the absolute ceiling, so a stuck edit
-    // still terminates with the real TOOL_LOOP_LIMIT message instead of
-    // looping continuation calls forever.
-    const continuationAllowed = Number.isFinite(maxRoundsThisCall) && (spentSoFar + roundBudgetForThisCall) < MAX_TOOL_ROUNDS;
     // FIX (روند/tool call های چندمرحله‌ای که وسط کار throw می‌کردند از صفر
     // شروع می‌شدند): قبلاً اینجا `[...contents]` یک کپی محلی می‌ساخت. تمام
     // push های بعدی (نتیجه جستجو، نتیجه tool call، پاسخ مدل) فقط روی همین
@@ -1849,30 +1803,44 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // same incoming user question.
     const scopedSearchState = searchState || { used: false, result: null };
 
-    // File Structure Intelligence is local and synchronous: do it BEFORE the
-    // first Gemini request for an edit. This keeps the UI step truthful while
-    // avoiding an extra Gemini function-call round that could consume RPM/TPM
-    // quota and trigger a misleading "quota exhausted" error.
+    // BLOCK MAP SETUP: build (or reuse, if this is a retry of the same
+    // HTTP request) one BlockFileState per text file, and inject the
+    // block map into the system prompt. blockStates lives on
+    // sharedRequestState (same object caller uses for the old
+    // inspectedFilesThisRequest/chunkReadsPerFile, now repurposed) so a
+    // key/model retry within the same request reuses the exact same
+    // block boundaries and read/edit progress instead of rebuilding from
+    // the original file content.
+    const blockStates = sharedRequestState?.blockStates || new Map();
     if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
         try {
-            if (onStep) onStep('در حال بررسی ساختار فایل...', 'inspect_file');
-            const structuralReports = textFiles.map((f) => {
-                const analysis = analyzeFileStructure(f.content || '', f.name || 'file', '');
-                return {
-                    file: f.name || 'file',
-                    structure: formatFileStructureForModel(analysis)
-                };
+            if (onStep) onStep('در حال بررسی ساختار فایل...', 'read_block');
+            const blockMaps = textFiles.map((f) => {
+                const key = f.name || 'file';
+                let state = blockStates.get(key);
+                if (!state) {
+                    state = createBlockFileState(f);
+                    blockStates.set(key, state);
+                }
+                return formatBlockMapForModel(state);
             });
-            systemText += `\n\n[تحلیل واقعی ساختار فایل - قبل از شروع ویرایش]\n${JSON.stringify(structuralReports, null, 2)}\n\nاین ساختار مستقیماً از محتوای فعلی فایل ساخته شده است. قبل از تولید file-edit از آن استفاده کن؛ کد یا قابلیت موجود را دوباره اضافه نکن و هدف تغییر را بر اساس همین ساختار انتخاب کن.\n`;
-            log.info('file.structure.preanalyzed', {
-                files: structuralReports.length,
-                names: structuralReports.map(x => x.file)
+            systemText += `\n\n[نقشه‌ی بلوک‌های فایل - این نقشه از محتوای واقعی فعلی فایل ساخته شده است]\n${JSON.stringify(blockMaps, null, 2)}\n\n` +
+                'قوانین ویرایش فایل:\n' +
+                '۱. برای دیدن محتوای واقعی یک بلوک، read_block را با شماره‌ی همان بلوک صدا بزن - هرگز حدس نزن.\n' +
+                '۲. برای تغییر، write_block را با شماره‌ی بلوک و کل محتوای جدید آن بلوک صدا بزن (خطوطی که تغییر نکرده‌اند را هم دوباره در newContent بنویس).\n' +
+                '۳. بعد از یک یا چند write_block موفق، قبل از پاسخ نهایی حتماً verify_file را صدا بزن و مطمئن شو valid:true برگردانده - در غیر این صورت اجازه‌ی پاسخ نهایی را نداری.\n' +
+                '۴. بعد از هر write_block موفق، شماره‌ی بلوک‌های فایل ممکن است تغییر کند (چون طول بلوک عوض شده) - همیشه از "newTotalBlocks" در نتیجه‌ی write_block یا نقشه‌ی جدید استفاده کن، نه شماره‌های قدیمی.\n' +
+                '۵. اگر بخشی از فایل که نیاز به تغییر ندارد، نیازی به read_block/write_block هم ندارد - فقط بلوک(های) مرتبط با درخواست کاربر را دست بزن.\n';
+            log.info('file.blocks.mapped', {
+                files: blockMaps.length,
+                names: blockMaps.map(x => x.file),
+                totalBlocks: blockMaps.map(x => x.totalBlocks)
             });
         } catch (error) {
-            log.warn('file.structure.preanalysis_failed', {
+            log.warn('file.blocks.mapping_failed', {
                 message: error?.message || String(error)
             });
-            // Do not fail the whole chat because a best-effort structural map
+            // Do not fail the whole chat because a best-effort block map
             // could not be produced. The model still has the original file.
         }
     }
@@ -1929,24 +1897,14 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
     const agentLoopStartedAt = Date.now();
 
-    // FIX (باگ در تلاش قبلی): این Set باید در طول کل درخواست (بیرون حلقه‌ی
-    // round) زنده بماند تا "inspect_file فقط یک‌بار" واقعاً اجرا شود. اگر
-    // داخل حلقه تعریف شود، هر round دوباره خالی می‌شود و محدودیت هیچ‌وقت
-    // واقعاً اعمال نمی‌شود.
-    const inspectedFilesThisRequest = new Set();
+    // NOTE (block-based rewrite): inspectedFilesThisRequest and
+    // chunkReadsPerFile (repeat-guards for the old inspect_file/
+    // get_file_chunk tools) were removed - those tools no longer exist.
+    // Their job (persisting file-editing progress across key/model
+    // retries within one HTTP request) is now done by blockStates, read
+    // from sharedRequestState at the top of this function.
 
-    // FIX (root cause واقعیِ "میره ۱۰۰-۲۰۰، بعد ۱۰۰۰، بعد دوباره
-    // ۱۰۰-۲۰۰"): برخلاف inspect_file، هیچ‌جای کد قبلی تعداد یا الگوی صدا
-    // زدن get_file_chunk را enforce نمی‌کرد - فقط توصیه‌ای در system
-    // prompt بود که مدل مجبور به رعایتش نبود. حالا برای هر فایل، محدوده‌های
-    // خوانده‌شده را نگه می‌داریم تا: (۱) اگر مدل دقیقاً همان محدوده (یا
-    // زیرمجموعه‌ی آن) را دوباره بخواهد، بدون تماس با Gemini با همان محتوای
-    // قبلی پاسخ داده شود (۲) اگر تعداد کل صداها از سقف منطقی گذشت، مدل
-    // مجبور شود به‌جای خواندن بیشتر، با آنچه دارد پچ بزند.
-    const chunkReadsPerFile = new Map(); // fileKey -> [{startLine, endLine, content}]
-    const MAX_CHUNK_READS_PER_FILE = 10; // با MAX_CHUNK_REQUEST_LINES=900 یعنی پوشش کامل فایل‌های ۵۰۰۰+ خطی + چند بار چک مجدد، نه پرسه‌زنی بی‌پایان
-
-    for (let round = 0; round < roundBudgetForThisCall; round++) {
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         lastToolCallWasChunkRead = false; // consumed for this round; re-armed below only if this round's own tool call is a chunk read
@@ -2154,6 +2112,32 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             totalTokens: lastUsage.totalTokenCount ?? null
         } : null;
 
+        // ENFORCEMENT (must verify before final answer): if any file has
+        // edited blocks but was not (re-)verified since the last
+        // write_block (state.verified === false), the model is not
+        // allowed to end the turn here even though it returned zero
+        // function calls this round. Instead of returning, force one more
+        // round by injecting a synthetic functionCall for verify_file - a
+        // real tool round, not just a text nudge, so the actual
+        // validatePatchedContent check runs and the model gets a real
+        // valid/invalid result to react to (it might still be wrong about
+        // "I'm done" even if verify_file itself passes, but at minimum the
+        // structural check always runs before delivery).
+        if (functionCalls.length === 0 && blockStates && blockStates.size > 0) {
+            const unverified = [...blockStates.values()].find(s => s.editedBlocks.size > 0 && !s.verified);
+            if (unverified) {
+                log.info('agent.verify_gate.forced', {
+                    file: unverified.name,
+                    editedBlockCount: unverified.editedBlocks.size,
+                    round
+                });
+                functionCalls.push({ name: 'verify_file', args: { file: unverified.name } });
+                // Keep any text the model produced this round (e.g. "الان
+                // فایل رو نهایی می‌کنم") - it will be followed by the
+                // verify_file round's own text, both streamed normally.
+            }
+        }
+
         if (functionCalls.length === 0) {
             // No tool call arrived after all. Release any selectively held
             // preamble so the final answer is not lost.
@@ -2281,7 +2265,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             scopedSearchState.used = true;
-            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache });
+            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates });
             scopedSearchState.result = result;
             searchResult = result;
             if (result.askUser) earlySearchAskUser = result.askUser;
@@ -2348,117 +2332,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         for (const call of functionCalls) {
             const label = describeToolCall(call.name, call.args);
 
-            if (call.name === 'inspect_file') {
-                const targetFileKey = String((call.args && call.args.file) || '').trim().toLowerCase();
-                if (inspectedFilesThisRequest.has(targetFileKey)) {
-                    responseParts.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: {
-                                error: 'inspect_file قبلاً برای این فایل صدا زده شده و نقشه‌ی ساختار/chunk آن را قبلاً داری. دوباره صدایش نزن - آن نقشه یا نتیجه‌ی قبلی get_file_chunk را مبنا قرار بده و مستقیماً با get_file_chunk محدوده‌ی مدنظر را بخوان یا apply_patch را بزن.'
-                            }
-                        }
-                    });
-                    continue;
-                }
-                inspectedFilesThisRequest.add(targetFileKey);
-            }
-
-            // FIX (root cause واقعیِ "میره ۱۰۰-۲۰۰، بعد ۱۰۰۰، بعد دوباره
-            // ۱۰۰-۲۰۰"): قبلاً هیچ enforcement واقعی‌ای روی get_file_chunk
-            // نبود - مدل می‌توانست هر تعداد بار و با هر ترتیبی صدایش بزند.
-            // این‌جا دو کار می‌کنیم: (۱) اگر محدوده‌ی درخواستی دقیقاً قبلاً
-            // برای همین فایل خوانده شده، به‌جای صدا زدن واقعی Gemini/فایل،
-            // همان محتوای قبلی را برمی‌گردانیم - این یعنی برگشتن به یک
-            // محدوده‌ی قبلی هیچ هزینه‌ی سهمیه‌ای اضافه نمی‌کند و مدل هم
-            // متوجه می‌شود که این کار بی‌فایده است. (۲) اگر تعداد کل صداها
-            // برای یک فایل از سقف گذشت، دیگر اجازه‌ی خواندن بیشتر نمی‌دهیم
-            // و صریحاً می‌گوییم با محتوای موجود پچ بزند - یک "پرسه‌زنی
-            // بی‌پایان" هرگز از این نقطه به بعد نمی‌تواند ادامه پیدا کند.
-            if (call.name === 'get_file_chunk') {
-                const chunkFileKey = String((call.args && call.args.file) || '').trim().toLowerCase();
-                const requestedStart = Number(call.args && call.args.startLine);
-                const requestedEnd = Number(call.args && call.args.endLine);
-                const priorReads = chunkReadsPerFile.get(chunkFileKey) || [];
-
-                // FIX: prevent stale/backward chunk jumps.
-                // If the agent already scanned a newer region of the same file,
-                // a later request for an older range usually means the model
-                // lost track of the current edit context. Do not restart the
-                // file walk; return the latest known context instead.
-                const latestRead = priorReads.reduce((latest, item) => {
-                    if (!latest || item.endLine > latest.endLine) return item;
-                    return latest;
-                }, null);
-
-                // FIX 2 (هنوز رخ می‌داد با overlap جزئی): شرط قبلی فقط زمانی
-                // فعال می‌شد که محدوده‌ی جدید کاملاً و بدون هیچ همپوشانی قبل
-                // از آخرین محدوده باشد (requestedEnd < latestRead.startLine).
-                // اما پرش‌هایی مثل «۱۱۵-۱۴۷۳ سپس ۱۳۵۰-۱۹۰۰» یک overlap جزئیِ
-                // رو‌به‌عقب هستند: start از جلوترین نقطه‌ی خوانده‌شده عقب‌تر
-                // است ولی end جلوتر می‌رود، پس هیچ‌کدام از دو محافظ (این شرط
-                // و exactOrSubsetMatch) فعال نمی‌شدند و chunk به‌عنوان جدید
-                // پردازش می‌شد - همان حلقه‌ی رفت‌وبرگشت مشاهده‌شده. حالا هر
-                // درخواستی که startLine آن به‌طور معنادار (بیش از نصف
-                // MIN_CHUNK_LINES) عقب‌تر از جلوترین نقطه‌ی خوانده‌شده باشد،
-                // به‌عنوان بازگشت به عقب شمرده می‌شود - even با overlap.
-                // BACKWARD_JUMP_TOLERANCE_LINES: چقدر می‌توان قبل‌تر از جلوترین
-                // نقطه‌ی خوانده‌شده رفت بدون این‌که "بازگشت به عقب" حساب شود.
-                // این باید بزرگ‌تر از نوسانِ طبیعیِ overlap بین chunkهای
-                // منطقی مجاور باشد (مثلاً وقتی مدل برای دیدنِ context اطراف
-                // یک تابع، چند خط قبل از مرز chunk قبلی را هم می‌خواهد) اما
-                // آن‌قدر کوچک بماند که پرش واقعی به عقب (صدها خط، مثل نمونه‌ی
-                // ۱۴۷۳ -> ۱۳۵۰) را همچنان بگیرد.
-                const BACKWARD_JUMP_TOLERANCE_LINES = 100;
-                const furthestReadEnd = priorReads.reduce((max, item) => Math.max(max, item.endLine), 0);
-                if (latestRead && Number.isFinite(requestedStart) && Number.isFinite(requestedEnd) && requestedStart < furthestReadEnd - BACKWARD_JUMP_TOLERANCE_LINES) {
-                    responseParts.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: {
-                                file: (call.args && call.args.file) || '',
-                                startLine: latestRead.startLine,
-                                endLine: latestRead.endLine,
-                                content: latestRead.content,
-                                error: `این فایل قبلاً تا خط ${latestRead.endLine} بررسی شده است. برگشت به محدوده قدیمی ${requestedStart}-${requestedEnd} متوقف شد؛ از context خوانده‌شده فعلی ادامه بده.`
-                            }
-                        }
-                    });
-                    continue;
-                }
-
-                const exactOrSubsetMatch = Number.isFinite(requestedStart) && Number.isFinite(requestedEnd)
-                    ? priorReads.find(r => requestedStart >= r.startLine && requestedEnd <= r.endLine)
-                    : null;
-
-                if (exactOrSubsetMatch) {
-                    responseParts.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: {
-                                file: (call.args && call.args.file) || '',
-                                startLine: exactOrSubsetMatch.startLine,
-                                endLine: exactOrSubsetMatch.endLine,
-                                content: exactOrSubsetMatch.content,
-                                note: 'این محدوده قبلاً خوانده شده بود؛ همان محتوای قبلی دوباره برگردانده شد. اگر هنوز مطمئن نیستی کجا باید پچ بزنی، به‌جای خواندن مجدد، از روی همین محتوا یا از chunk map اولیه تصمیم بگیر.'
-                            }
-                        }
-                    });
-                    continue;
-                }
-
-                if (priorReads.length >= MAX_CHUNK_READS_PER_FILE) {
-                    responseParts.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: {
-                                error: `به سقف ${MAX_CHUNK_READS_PER_FILE} بار خواندن chunk برای این فایل رسیدی. دیگر get_file_chunk صدا نزن - با محتوایی که تا الان از این فایل داری (chunk map اولیه + بخش‌های خوانده‌شده)، apply_patch را برای تغییر مدنظر بزن. اگر واقعاً بخش لازم را ندیده‌ای، دقیق‌ترین حدس بر پایه‌ی chunk map را انتخاب کن، نه خواندن بیشتر.`
-                            }
-                        }
-                    });
-                    continue;
-                }
-            }
+            // NOTE (block-based rewrite): the old inspect_file/get_file_chunk
+            // repeat-guards (inspectedFilesThisRequest, chunkReadsPerFile,
+            // backward-jump detection, MAX_CHUNK_READS_PER_FILE) lived here.
+            // They no longer apply - those two tools were removed from
+            // GEMINI_TOOLS entirely, replaced by read_block/write_block/
+            // verify_file, which use fixed block numbers instead of
+            // freeform line ranges. See the executeToolCall handlers for
+            // read_block/write_block/verify_file and the block-map
+            // injection near the top of runAgentLoop for the new approach.
 
             if (call.name === 'web_search') {
                 webSearchesThisRound++;
@@ -2496,24 +2378,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             const toolCallStartedAt = Date.now();
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates });
             const toolCallDurationMs = Date.now() - toolCallStartedAt;
 
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
-            if (call.name === 'get_file_chunk') lastToolCallWasChunkRead = true;
-
-            // ثبت محدوده‌ی واقعاً خوانده‌شده (پس از clamp احتمالی داخل
-            // executeToolCall) تا چک تکرار/سقف بالا برای صداهای بعدی درست
-            // کار کند - startLine/endLine واقعی از خودِ result می‌آید، نه
-            // از args خام (که ممکن است endLine بزرگ‌تر از حد مجاز خواسته
-            // باشد و در نتیجه clamp شده باشد).
-            if (call.name === 'get_file_chunk' && result && !result.error && Number.isFinite(result.startLine) && Number.isFinite(result.endLine)) {
-                const chunkFileKeyForStore = String((call.args && call.args.file) || '').trim().toLowerCase();
-                const list = chunkReadsPerFile.get(chunkFileKeyForStore) || [];
-                list.push({ startLine: result.startLine, endLine: result.endLine, content: result.content });
-                chunkReadsPerFile.set(chunkFileKeyForStore, list);
-            }
 
             // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
             // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
@@ -2530,21 +2399,21 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 durationMs: toolCallDurationMs,
                 ok: !(result && result.error),
                 error: (result && result.error) || null,
-                patched: !!(result && result.success && (call.name === 'apply_patch')),
+                patched: !!(result && result.success && (call.name === 'write_block')),
                 callIndexForThisTool: toolCallTally[call.name]
             });
 
             if (result.askUser) earlyAskUser = result.askUser;
 
             // FINAL AGENT CONTINUATION GUARD:
-// After reading a file chunk, explicitly tell the model that context is
-// already loaded. This prevents restarting inspect_file from zero.
+// After reading a block, explicitly tell the model that context is
+// already loaded. This prevents restarting file inspection from zero.
 let responseForModel = result;
-if (call.name === 'get_file_chunk' && result && !result.error) {
+if (call.name === 'read_block' && result && !result.error) {
     responseForModel = {
         ...result,
         agentInstruction:
-            'File chunk loaded successfully. Continue from this context. Do not restart file inspection or request inspect_file again unless absolutely required.'
+            'Block content loaded successfully. Continue from this context - do not re-read the same block again unless you are about to write_block it.'
     };
 }
 
@@ -2572,46 +2441,7 @@ responseParts.push({
         // loop continues: send the tool result(s) back to the model for round 2+
     }
 
-    // ARCHITECTURE (multi-request file editing): if this call was given a
-    // smaller round budget than the absolute MAX_TOOL_ROUNDS ceiling, this
-    // is NOT the "genuinely stuck" case below — it's this one function
-    // invocation simply running out of its Vercel-timeout-safe allowance
-    // while the edit was still legitimately in progress. Hand back
-    // everything the next invocation needs (the accumulated conversation
-    // AND any partially-patched file content) instead of giving up.
-    if (continuationAllowed) {
-        const partialFiles = (Array.isArray(textFiles) ? textFiles : [])
-            .filter(f => f && f._patched)
-            .map(f => ({
-                name: f.name,
-                editedName: f._editedName || f.name,
-                content: f.content || ''
-            }));
-        log.info('agent.round_budget_exhausted_continuing', {
-            roundBudgetForThisCall,
-            spentSoFar,
-            toolCallTally,
-            patchedFileCount: partialFiles.length
-        });
-        return {
-            needsContinuation: true,
-            finishReason: 'ROUND_BUDGET',
-            usage: lastUsage,
-            askUser: null,
-            partialFiles,
-            roundsSpentThisCall: roundBudgetForThisCall,
-            // Handed straight back into the next runAgentLoop call's
-            // `contents` param unchanged - workingContents already IS
-            // that accumulated array (see the mutate-in-place fix above),
-            // so no extra copying/reconstruction is needed here.
-            resumedContents: workingContents
-        };
-    }
-
-    // Safety net: too many tool rounds without a final answer, and this
-    // was already running with the full MAX_TOOL_ROUNDS budget - i.e. even
-    // across every continuation call, the edit never converged. This is
-    // the genuine "stuck" case, not a budget-ran-out-early case.
+    // Safety net: too many tool rounds without a final answer.
     // DIAGNOSTICS: این یکی از دو حالتی است که قبلاً هیچ اطلاعی از "چرا"
     // به کاربر نمی‌رسید - فقط همین پیام ثابت. حالا diagnostics هم برمی‌گردد
     // تا در "جزئیات بیشتر" معلوم باشد کدام ابزار چندبار تکرار شده بود.
@@ -2657,7 +2487,7 @@ function summarizeAgentTrace(roundTrace, toolCallTally, meta) {
     if (patchedFiles.length) {
         lines.push(`قبل از توقف، این فایل‌ها با موفقیت پچ خورده بودند: ${patchedFiles.join('، ')}`);
     } else {
-        lines.push('قبل از توقف، هیچ apply_patch موفقی ثبت نشده بود.');
+        lines.push('قبل از توقف، هیچ بلوکی با موفقیت بازنویسی نشده بود.');
     }
     if (lastRound) {
         lines.push(`آخرین مرحله (round ${lastRound.round}): finishReason=${lastRound.finishReason || 'نامشخص'}, متن تولیدشده=${lastRound.textChars} کاراکتر`);
@@ -2796,26 +2626,8 @@ async function handler(req, res) {
             // request at all, which is what actually bounds per-request
             // token cost as a chat's file history grows over time.
             archivedFileNames: rawArchivedFileNames,
-            archivedFiles: rawArchivedFiles,
-            // ARCHITECTURE (multi-request file editing): when the client is
-            // resuming a file edit that a PREVIOUS /api/chat call already
-            // made partial progress on (see the fileEditIntent path below),
-            // it sends back exactly the agentState this same server handed
-            // it at the end of that previous call. Absent on every normal
-            // first-time request - this is only ever non-null on a
-            // continuation call.
-            agentState: rawAgentState
+            archivedFiles: rawArchivedFiles
         } = req.body || {};
-
-        // Only trust the shape we actually produced; anything else is
-        // treated as "no state", which just makes this behave like a
-        // normal first request (worst case: starts the edit over, never
-        // crashes on a malformed/tampered client payload).
-        const agentState = (rawAgentState && typeof rawAgentState === 'object' &&
-            Array.isArray(rawAgentState.workingContents) &&
-            Number.isFinite(rawAgentState.roundsSpent))
-            ? rawAgentState
-            : null;
 
         const archivedFileNames = Array.isArray(rawArchivedFileNames) ? rawArchivedFileNames.filter(n => typeof n === 'string') : [];
         const archivedFiles = Array.isArray(rawArchivedFiles)
@@ -2932,29 +2744,7 @@ async function handler(req, res) {
                     f.content.length <= MAX_TEXT_FILE_CHARS
             );
 
-        // ARCHITECTURE (multi-request file editing): apply_patch mutates a
-        // textFiles entry in place (content/_patched/_editedName). On a
-        // continuation call, incomingFiles is whatever the client happened
-        // to resend - restore the patched state from the PREVIOUS
-        // invocation's agentState so apply_patch's in-place edits from
-        // earlier rounds aren't lost, and so a repeat apply_patch on the
-        // same file continues from the already-patched content instead of
-        // the original.
-        if (agentState && Array.isArray(agentState.patchedFiles)) {
-            for (const patched of agentState.patchedFiles) {
-                if (!patched || typeof patched.name !== 'string') continue;
-                const match = textFiles.find(f => f && f.name === patched.name);
-                if (match) {
-                    match.content = patched.content || '';
-                    match._patched = true;
-                    match._editedName = patched.editedName || match._editedName;
-                }
-            }
-        }
-
-        const fileEditIntent = agentState
-            ? !!agentState.fileEditIntent
-            : (textFiles.length > 0 && looksLikeFileEditIntent(text));
+        const fileEditIntent = textFiles.length > 0 && looksLikeFileEditIntent(text);
 
         const oversizedTextFiles =
             incomingFiles.filter(
@@ -2986,19 +2776,7 @@ async function handler(req, res) {
 
         let contents = [];
 
-        // ARCHITECTURE (multi-request file editing): a continuation call
-        // already has its full accumulated conversation - original
-        // history, the user's message, the injected file content, AND
-        // every tool round from earlier invocations - sitting in
-        // agentState.workingContents exactly as the previous call left it.
-        // Rebuilding contents from `history` here would silently DROP all
-        // of that accumulated tool-call progress and restart the edit from
-        // scratch, defeating the entire point of this mechanism. So on a
-        // continuation call, skip history/file-block reconstruction
-        // entirely and use the carried-over array verbatim.
-        if (agentState) {
-            contents = agentState.workingContents;
-        } else if (
+        if (
             history &&
             Array.isArray(history) &&
             history.length > 0
@@ -3053,7 +2831,7 @@ async function handler(req, res) {
         // actual incoming message text (searchQueryBase) as a new trailing
         // user turn. If there's no incoming text either, fall back to
         // dropping trailing model turns until a user turn is exposed.
-        if (!agentState && contents.length > 0 && contents[contents.length - 1].role !== 'user') {
+        if (contents.length > 0 && contents[contents.length - 1].role !== 'user') {
             if (searchQueryBase && searchQueryBase.trim()) {
                 contents.push({
                     role: 'user',
@@ -3101,7 +2879,6 @@ async function handler(req, res) {
         */
 
         if (
-            !agentState &&
             textFiles.length > 0 &&
             contents.length > 0
         ) {
@@ -3479,7 +3256,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
             systemText += `
 
-حالت ویرایش فایل:
+حالت ویرایش فایل (بلوک‌محور):
 
 - کاربر ${textFiles.length > 1
                     ? `${textFiles.length} فایل کد/متن (${fileNamesList})`
@@ -3489,53 +3266,21 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - محتوای فایل منبع معتبر کد است.
 - اگر کاربر تغییر کد خواست، واقعاً تغییر را روی فایل اعمال کن.
 - ساختارهای موجود را بررسی کن و چیزهای بی‌دلیل اختراع نکن.
-- به جای بازنویسی کل فایل، فقط قسمت لازم را تغییر بده.
+- به جای بازنویسی کل فایل، فقط بلوک(های) لازم را تغییر بده.
 
-دو حالت ویرایش داری - انتخاب درست بین این دو حالت مهم‌ترین قدم است:
-
-حالت A) خط‌محور (برای فایل‌های بزرگ یا وقتی inspect_file می‌گوید فایل بزرگ است - ترجیحی و پیش‌فرض):
-- به‌جای خواندن/کپی کردن متن، فقط شماره خط شروع/پایان بخش هدف را از chunk map یا get_file_chunk بگیر.
-- apply_patch را با {file, startLine, endLine, new} صدا بزن - بدون "old". این حالت نیازی به تطبیق رشته‌ای ندارد و خطای "پیدا نشد/مبهم" در آن پیش نمی‌آید.
-- برای تشخیص خط دقیق، همیشه اول get_file_chunk را روی محدوده‌ی مشکوک بخوان تا شماره خط‌ها را از محتوای واقعی (نه حدس) تأیید کنی.
-- تعداد دفعات صدا زدن get_file_chunk را کم نگه دار: از روی نقشه‌ی chunk (structure/chunks در inspect_file) محدوده‌ی درست را حدس نزن، اما هم نباید بیش از ۲-۳ بار برای یک تغییر ساده chunk بخوانی؛ اگر ندانستی کدام chunk درست است، از عنوان/preview هر chunk کمک بگیر نه از خواندن همه‌ی آن‌ها یکی‌یکی.
-
-حالت B) متن دقیق (فقط برای فایل‌های کوچک یا تغییرات یک‌خطی ساده):
-قوانین حیاتی برای فیلد "old" (در غیر این‌صورت ویرایش رد می‌شود):
-- "old" باید کاراکتر به کاراکتر (شامل فاصله‌ها، تورفتگی/indentation، و شکست خط) دقیقاً همان‌طور که در فایل اصلی آمده کپی شود؛ آن را از حافظه بازنویسی نکن.
-- "old" را تا حد امکان کوتاه نگه دار: فقط چند خط اطراف تغییر، نه یک بلوک بزرگ.
-- "old" باید در فایل دقیقاً یک‌بار ظاهر شود؛ اگر متنی که می‌خواهی تغییر بدهی در چند جای فایل تکرار شده، خط(های) قبل/بعدش را هم به "old" اضافه کن تا یکتا شود.
-- هرگز فاصله‌های اضافه، تب‌های متفاوت، یا خطوط خالی اضافی در "old" یا "new" وارد نکن که در فایل اصلی نیستند.
+نقشه‌ی بلوک‌های فایل از قبل در پیام سیستم (بخش [نقشه‌ی بلوک‌های فایل]) به تو داده شده - هر بلوک یک شماره، محدوده‌ی خط، و پیش‌نمایش دارد.
 
 روند اجباری ویرایش (هر مرحله قبل از بعدی):
-۱. ابزار inspect_file را برای فایل هدف، فقط یک‌بار در کل این مکالمه صدا بزن. اگر lineCount زیاد بود (نتیجه صراحتاً می‌گوید فایل بزرگ است)، کل فایل به تو داده نمی‌شود - فقط نقشه‌ی ساختار و chunk map داده می‌شود. این نقشه را نگه دار و از آن استفاده کن؛ صدا زدن دوباره‌ی inspect_file برای همان فایل رد می‌شود (چون نقشه از قبل داری) و فقط وقت و سهمیه را هدر می‌دهد.
-۲. نتیجه inspect_file (و در صورت نیاز get_file_chunk) را مبنای انتخاب تابع/بخش/عنصر هدف قرار بده و اگر قابلیت یا کد مشابه از قبل وجود دارد، آن را دوباره ایجاد نکن؛ همان بخش موجود را اصلاح کن.
-۳. برای فایل بزرگ: حالت A (خط‌محور) را انتخاب کن - get_file_chunk را برای محدوده‌ی هدف بخوان تا شماره خط دقیق را تأیید کنی، سپس apply_patch را با {file, startLine, endLine, new} صدا بزن.
-   برای فایل کوچک یا تغییر یک‌خطی: حالت B (متن دقیق) را انتخاب کن - apply_patch را با {file, old, new} صدا بزن.
-   - اگر success:true برگشت، patch تأیید شده است.
-   - اگر success:false برگشت، بر اساس خطای برگشتی (candidates برای حالت B، یا پیام خطای محدوده برای حالت A) اصلاح کن و دوباره صدا بزن. هرگز حدس نزن یا از fuzzy-match استفاده نکن.
-۴. اگر چند تغییر در فایل‌های بزرگ لازم است و همه خط‌محور هستند، آن‌ها را به ترتیب نزولی شماره خط (از پایین فایل به بالا) روی هم اعمال کن تا شماره خط‌های تغییرات قبلی به‌هم نریزد.
-۵. فقط بعد از اینکه همه‌ی apply_patch های لازم با success:true تمام شدند، دقیقاً یک بلاک file-edit در پایان پاسخ تولید کن که شامل همان patch های تأییدشده باشد (هر آیتم دقیقاً همان فیلدهایی را دارد که apply_patch با آن‌ها success:true گرفت - یا {startLine, endLine, new} یا {old, new}).
-۶. در فیلد "file" هر آیتم بلاک file-edit، به‌جای اسم فایل اصلی، از مقدار suggestedOutputName/editedName که apply_patch برگرداند استفاده کن (نه اسم فایلی که کاربر فرستاده).
+۱. از روی نقشه‌ی بلوک‌ها، شماره‌ی بلوک(های) مرتبط با درخواست کاربر را پیدا کن - حدس نزن، از preview هر بلوک در نقشه کمک بگیر.
+۲. read_block را با شماره‌ی همان بلوک صدا بزن تا محتوای واقعی و کامل آن را ببینی.
+۳. write_block را با شماره‌ی همان بلوک و newContent (محتوای کامل جدید بلوک، شامل خطوطی که تغییر نکرده‌اند اما باید بمانند) صدا بزن.
+   - اگر success:true برگشت، تغییر اعمال شد. توجه کن که "newTotalBlocks" ممکن است فرق کند - اگر بلوک دیگری هم باید تغییر کند، از نقشه‌ی به‌روز (در نتیجه‌ی بعدی یا پیام سیستم) استفاده کن، نه شماره‌ی قدیمی.
+   - اگر success:false برگشت، بر اساس خطای برگشتی (مثلاً مشکل ساختاری) بلوک را با read_block دوباره ببین و newContent را اصلاح کن.
+۴. اگر چند بلوک باید تغییر کنند، آن‌ها را یکی‌یکی (read_block -> write_block برای هرکدام) پردازش کن.
+۵. بعد از تمام write_block های لازم، حتماً verify_file را صدا بزن. اگر valid:false برگشت، بلوک(های) مشکل‌دار را اصلاح و دوباره verify_file را صدا بزن - تا valid:true نگیری اجازه‌ی پاسخ نهایی را نداری.
+۶. بعد از verify_file موفق (valid:true)، به کاربر بگو چه تغییری دادی؛ نیازی به چاپ کد کامل فایل یا هیچ بلاک JSON خاصی در پاسخ نیست - فایل نهایی از روی بلوک‌های ویرایش‌شده به کاربر تحویل داده می‌شود.
 
-فرمت نهایی (بعد از تأیید همه‌ی patch ها با apply_patch):
-
-\`\`\`file-edit
-[
-  {
-    "file": "editedName که apply_patch برگرداند",
-    "startLine": 855,
-    "endLine": 860,
-    "new": "متن دقیق جدید"
-  },
-  {
-    "file": "editedName که apply_patch برگرداند",
-    "old": "متن دقیق قدیمی (فقط برای حالت B)",
-    "new": "متن دقیق جدید"
-  }
-]
-\`\`\`
-
-خارج از file-edit کد کامل فایل را دوباره چاپ نکن.
+خارج از این روند، کد کامل فایل را دوباره چاپ نکن.
 `;
         }
 
@@ -3631,6 +3376,16 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
 
             let lastError = null;
+            // FIX 3 (block-based rewrite): shared across every key/model
+            // retry attempt for THIS one incoming HTTP request, so a
+            // mid-loop attempt failure (retryable rate-limit/timeout ->
+            // next key/model) does not reset block read/edit/verify
+            // progress back to zero. blockStates: fileName -> BlockFileState
+            // (see createBlockFileState). See the matching comment inside
+            // runAgentLoop for the full explanation.
+            const sharedRequestState = {
+                blockStates: new Map()
+            };
             let attemptsTried = 0; // diagnostic: how many model/key combos actually got a real try
 
             outerLoop:
@@ -3765,17 +3520,6 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             };
                         })();
 
-                        // ARCHITECTURE (multi-request file editing): only the
-                        // fileEditIntent path gets a small per-call round
-                        // budget - this is the profile that actually risks
-                        // running past Vercel's ~60s function timeout on a
-                        // large file (several get_file_chunk/apply_patch
-                        // rounds). Plain chat and search stay on the old
-                        // single-call behavior (maxRoundsThisCall omitted =
-                        // full MAX_TOOL_ROUNDS in one call), since neither
-                        // realistically needs enough rounds to approach that
-                        // ceiling.
-                        const FILE_EDIT_ROUNDS_PER_CALL = 3;
                         const agentResult = await runAgentLoop({
                             currentModel,
                             currentKey,
@@ -3789,13 +3533,10 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             searchState,
                             searchIntent: requestSearchIntent,
                             fileEditIntent,
+                            sharedRequestState,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
-                            ...(fileEditIntent ? {
-                                maxRoundsThisCall: FILE_EDIT_ROUNDS_PER_CALL,
-                                roundsAlreadySpent: agentState ? (agentState.roundsSpent || 0) : 0
-                            } : {}),
                             onStep: (label, toolName) => {
                                 if (toolName === 'web_search') searchWasPerformed = true;
                                 res.write(
@@ -3807,31 +3548,6 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                 codeStreamGate(textChunk);
                             }
                         });
-
-                        // ARCHITECTURE (multi-request file editing): the
-                        // agent ran out of ITS round budget while genuinely
-                        // still mid-edit (not stuck, not erroring) - hand
-                        // the client everything needed to resume with a
-                        // fresh /api/chat call instead of this same
-                        // long-lived function continuing to loop past
-                        // Vercel's hard timeout. This ends the SSE response
-                        // normally (not an error), so existing error-path
-                        // UI/retry logic is untouched.
-                        if (agentResult.needsContinuation) {
-                            res.write(`data: ${JSON.stringify({
-                                continueEdit: true,
-                                agentState: {
-                                    workingContents: agentResult.resumedContents,
-                                    patchedFiles: agentResult.partialFiles || [],
-                                    fileEditIntent: true,
-                                    roundsSpent: (agentState ? (agentState.roundsSpent || 0) : 0) + (agentResult.roundsSpentThisCall || 0)
-                                }
-                            })}\n\n`);
-                            if (typeof res.flush === 'function') res.flush();
-                            markKeyResult(currentKey, true);
-                            res.end();
-                            return;
-                        }
 
                         markKeyResult(currentKey, true);
                         log.info('model.connected', {
@@ -4044,6 +3760,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
 
         let lastError = null;
+        // FIX 3 (block-based rewrite): see the matching comment in the
+        // other attempt loop above and inside runAgentLoop — keeps block
+        // read/edit/verify progress alive across retryable key/model
+        // retries within this one HTTP request.
+        const sharedRequestState = {
+            blockStates: new Map()
+        };
         let attemptsTried = 0;
 
         outerLoopNonStream:
@@ -4095,6 +3818,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         searchCache,
                         searchState,
                         fileEditIntent,
+                        sharedRequestState,
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
                         hasVideoAttachment,
