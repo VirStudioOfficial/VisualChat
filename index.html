@@ -1007,6 +1007,11 @@
             z-index: 65;
             box-shadow: 0 20px 60px var(--shadow-b);
             overflow-y: auto;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        .settings-modal::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
         }
         .settings-modal.active { display: block; animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 
@@ -1758,7 +1763,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         statusEl.textContent = 'در حال ارسال...';
 
         try {
-            const uName = (localStorage.getItem('virtual_custom_name') || '').trim() || 'ناشناس';
+            const uName = (localStorage.getItem('virtual_user_custom_name') || '').trim() || 'ناشناس';
             const res = await fetch(BUG_REPORT_ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2012,14 +2017,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
             if (bugRes.status === 'fulfilled' && bugRes.value.ok) {
                 const bugData = await bugRes.value.json();
+                // FIX (لیست گزارش‌های شما همیشه خالی می‌ماند): سرور توی
+                // GET /api/bugreports?clientId=... از قبل فقط گزارش‌های همین
+                // کاربر را فیلتر و برمی‌گرداند، و برای حریم‌خصوصی فیلدهای
+                // clientId/userName را از هر آیتم حذف می‌کند (فقط id/status/
+                // createdAt/message را می‌فرستد - نگاه کن api/bugreports.js).
+                // این خط قبلاً دوباره روی همان آیتم‌های از-قبل-فیلترشده با
+                // b.clientId و b.userName فیلتر می‌کرد؛ چون این دو فیلد دیگر
+                // در پاسخ وجود ندارند (undefined هستند)، هیچ آیتمی هیچ‌وقت رد
+                // این فیلتر نمی‌شد و myBugReports همیشه خالی می‌ماند - همان
+                // چیزی که کاربر گزارش داد. سرور از قبل این فیلتر را انجام
+                // داده، پس اینجا فقط باید آرایه را مستقیم بپذیریم.
                 const allBugs = Array.isArray(bugData) ? bugData : (Array.isArray(bugData.items) ? bugData.items : []);
-                const myClientId = typeof getBugClientId === 'function' ? getBugClientId() : null;
-                const currentUName = (localStorage.getItem('virtual_custom_name') || '').trim();
-
-                myBugReports = allBugs.filter(b => 
-                    (myClientId && b.clientId === myClientId) ||
-                    (!b.clientId && currentUName && b.userName === currentUName)
-                );
+                myBugReports = allBugs;
             }
 
             checkBugStatusChanges();
