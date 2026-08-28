@@ -1773,7 +1773,16 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // پاسخ نهایی. سقف قبلی (۷) عملاً همان لحظه که مدل به دومین/سومین
     // get_file_chunk می‌رسید تمام می‌شد. بالا بردنش برای این پروفایل کاری
     // ضروری است - نه یک "مقدار امن دلخواه"، بلکه حداقل فضای واقعی لازم.
-    const MAX_TOOL_ROUNDS = 16;
+    // FIX (worst-case stall math): with the block map given upfront in the
+    // system prompt (no inspect_file round needed anymore), a realistic
+    // file-edit turn is read_block + write_block per target block (rarely
+    // more than 2-3 blocks) + one verify_file + the final answer - well
+    // under 10 rounds. 16 was sized for the old chunk-based flow's worse
+    // case and, combined with the fileEditIntent-blanket timeout fix above,
+    // produced a ~45min worst-case stall on a single key before quota even
+    // triggered. Lowered to 10: still generous headroom, much smaller blast
+    // radius if a round genuinely loops.
+    const MAX_TOOL_ROUNDS = 10;
     // FIX (روند/tool call های چندمرحله‌ای که وسط کار throw می‌کردند از صفر
     // شروع می‌شدند): قبلاً اینجا `[...contents]` یک کپی محلی می‌ساخت. تمام
     // push های بعدی (نتیجه جستجو، نتیجه tool call، پاسخ مدل) فقط روی همین
@@ -1881,12 +1890,28 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // فایل‌های بزرگ، تقریباً هر round این جریان به همان اندازه سنگین است -
     // پس به‌جای حدس زدن "کدام round سنگین‌تره"، وقتی fileEditIntent فعال
     // است، همه‌ی round ها مهلت بلند می‌گیرند.
+    // FIX (10+ minute stall before quota error): fileEditIntent alone was
+    // added to this condition to fix one real timeout, but fileEditIntent
+    // is now true for EVERY turn with an attached file (see the fix that
+    // dropped the keyword-regex gate) - not just turns that are actually
+    // mid-edit. That made EVERY round (even a plain question about an
+    // attached file, or round 0 before any tool has even been called) get
+    // the full 170s budget, and with MAX_TOOL_ROUNDS now 16, the worst case
+    // became 16 * 170s = ~45 minutes on a SINGLE key before even reaching
+    // the quota-exhausted error - which then repeats the whole climb on
+    // the next key. Scope the long budget back down to rounds that
+    // genuinely follow a heavy read (archive/block/chunk) or carry video,
+    // same as before fileEditIntent was blanket-added.
     const roundNeedsMoreTime = (round) =>
         hasVideoAttachment ||
-        fileEditIntent ||
-        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasChunkRead));
+        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasBlockRead));
     let lastToolCallWasArchiveRead = false;
-    let lastToolCallWasChunkRead = false;
+    // FIX (dead flag): lastToolCallWasChunkRead tracked get_file_chunk,
+    // which no longer exists in the block-based system - it was declared
+    // and reset every round but never re-armed anywhere, so it was always
+    // false. read_block is this system's equivalent heavy read and gets
+    // the same "give the NEXT round more time" treatment archive reads do.
+    let lastToolCallWasBlockRead = false;
 
     // DIAGNOSTICS (ردِ کامل اجرای عامل): برای هر round، یک رکورد ساختاریافته
     // نگه می‌داریم - نه فقط یک پیام خطای کلی در انتها. این آرایه همیشه (چه
@@ -1908,7 +1933,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
-        lastToolCallWasChunkRead = false; // consumed for this round; re-armed below only if this round's own tool call is a chunk read
+        lastToolCallWasBlockRead = false; // consumed for this round; re-armed below only if this round's own tool call is a block read
         const roundStartedAt = Date.now();
         const roundEntry = {
             round: round + 1,
@@ -2406,6 +2431,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
+            if (call.name === 'read_block') lastToolCallWasBlockRead = true;
 
             // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
             // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
