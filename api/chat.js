@@ -1267,7 +1267,11 @@ const GEMINI_TOOLS = [
                     'فقط زمانی صدا بزن که کاربر واقعاً به محتوای یک فایل قبلی نیاز دارد یا به آن ارجاع ' +
                     'می‌دهد (مثلاً «همون فایلی که قبلاً فرستادم رو ویرایش کن» یا «توی اون فایل دنبال X ' +
                     'بگرد») - نه صرفاً وقتی اسم فایل یک‌بار در گفتگو ذکر شده. اسم فایل‌های موجود در آرشیو ' +
-                    'این گفتگو در پرامپت سیستم به تو داده شده است.',
+                    'این گفتگو در پرامپت سیستم به تو داده شده است. اگر هدف کاربر ویرایش این فایل است، ' +
+                    'این ابزار خودش فایل را برای ویرایش فعال می‌کند و یک نقشه‌ی بلوک (blockMap) در نتیجه ' +
+                    'برمی‌گرداند - بعد از آن دقیقاً طبق همان قوانین ویرایش فایل (read_block → write_block) ' +
+                    'که برای فایل‌های تازه‌ضمیمه‌شده داری عمل کن؛ محتوای خام برگشتی از این ابزار دیگر ' +
+                    'کامل/قابل‌اعتماد برای ساخت ویرایش نیست و فقط برای خواندن/پاسخ به سؤال مناسب است.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1514,17 +1518,65 @@ async function executeToolCall(name, args, ctx) {
             return { error: `فایلی با نام «${fileName}» در آرشیو این گفتگو پیدا نشد.` };
         }
 
-        // FIX (token/quota exhaustion): a single archived file (e.g. a full
-        // index.html) can be tens of thousands of tokens. Handing back the
-        // ENTIRE file every time it's referenced - especially since it then
-        // rides along in workingContents for every subsequent tool round in
-        // the same turn - was spiking single-request token usage well above
-        // a normal message and burning through per-minute token quota fast,
-        // even across just 1-2 user messages. Cap what's returned so a huge
-        // file can still be searched/discussed without blowing the budget;
-        // the model is told the file was truncated so it doesn't silently
-        // assume it saw everything.
-        const MAX_ARCHIVED_FILE_CHARS = 70000; // raised from 40000 alongside MAX_TOOL_ROUNDS increase - edit flows need to see enough of a heavy file to build a matching patch
+        // FIX (archived-file edits silently produced no real edit / no
+        // download card): get_archived_file used to just hand back a
+        // (possibly truncated at 70k chars) text blob for the model to
+        // read and then describe changes to in prose. It was never wired
+        // into the block-map/read_block/write_block/verify_file system,
+        // which only ever looked at `textFiles` (files attached fresh in
+        // THIS message). So a request like "hide the scrollbars in the
+        // file I sent earlier" - with no fresh attachment this turn -
+        // had the model read a truncated archived copy, then just claim
+        // success in text with nothing real to back it up: no write_block
+        // ever ran, editedFiles stayed empty, no card ever reached the
+        // client, even though the user's original file WAS genuinely
+        // valid and the model wasn't lying about intent, just about
+        // outcome.
+        //
+        // Fix: promote the archived file into the SAME live editing
+        // system a freshly-attached file gets. We inject it into
+        // ctx.textFiles (so write_block's `files.find(...)` lookup can
+        // find it, exactly like a fresh attachment) and build/reuse its
+        // BlockFileState in ctx.blockStates (so read_block/write_block/
+        // verify_file work on it with full content - not the old 70k-char
+        // truncation, which silently hid anything past that point, e.g.
+        // CSS rules far down a large index.html). One archived file is
+        // promoted per get_archived_file call, so cost only appears when
+        // the model actually asks for it - never for archived files it
+        // doesn't touch.
+        const textFiles = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : null;
+        const blockStates = ctx && ctx.blockStates;
+        let alreadyPromoted = textFiles && textFiles.some(f => f && f.name === found.name);
+        if (textFiles && blockStates && !alreadyPromoted) {
+            const promoted = { name: found.name, content: found.content || '', mode: 'text' };
+            textFiles.push(promoted);
+            if (!blockStates.has(promoted.name)) {
+                blockStates.set(promoted.name, createBlockFileState(promoted));
+            }
+            alreadyPromoted = true;
+        }
+
+        log.info('agent.tool.get_archived_file', {
+            name: fileName,
+            contentLen: (found.content || '').length,
+            promotedToBlockEditing: alreadyPromoted
+        });
+
+        if (alreadyPromoted && blockStates) {
+            const state = blockStates.get(found.name);
+            return {
+                name: found.name,
+                promotedToBlockEditing: true,
+                blockMap: state ? formatBlockMapForModel(state) : null,
+                note: 'این فایل آرشیوشده حالا برای ویرایش فعال شده - محتوای کامل آن (بدون برش) در قالب بلوک‌های read_block/write_block در دسترس توست، دقیقاً مثل فایلی که تازه ضمیمه شده باشد. اگر کاربر خواسته این فایل ویرایش شود، دیگر محتوای خام اینجا لازم نیست - نقشه‌ی بلوک بالا را ببین و طبق قوانین ویرایش فایل (read_block → write_block → در صورت لزوم verify_file) پیش برو. اگر فقط برای مطالعه/پاسخ به سؤال لازمش داشتی (نه ویرایش)، از blockMap.blocks[].preview برای مرور کلی استفاده کن یا بلوک‌های لازم را با read_block بخوان.'
+            };
+        }
+
+        // Fallback (should be rare: only if textFiles/blockStates weren't
+        // supplied to this call, e.g. some other caller path): keep the
+        // old truncated-text behavior so nothing breaks, but this path no
+        // longer supports real edits producing a download card.
+        const MAX_ARCHIVED_FILE_CHARS = 70000;
         let content = found.content || '';
         let truncated = false;
         if (content.length > MAX_ARCHIVED_FILE_CHARS) {
@@ -1532,21 +1584,6 @@ async function executeToolCall(name, args, ctx) {
             truncated = true;
         }
 
-        log.info('agent.tool.get_archived_file', {
-            name: fileName,
-            contentLen: (found.content || '').length,
-            truncated
-        });
-
-        // FIX (retry-on-archived-file produced no real edit): fileEditIntent
-        // pre-analysis (analyzeFileStructure) previously only ran for files
-        // attached directly in the current message (textFiles), never for
-        // files pulled back from the archive. That meant an edit request
-        // that resolved to an archived file (e.g. after Retry) got no
-        // structural map at all, and the file-edit round had to build one
-        // from scratch on top of already needing to construct + verify the
-        // patch - routinely running out of round budget and silently
-        // producing nothing. Give archive reads the same structural report.
         let structureNote = '';
         try {
             const analysis = analyzeFileStructure(content, found.name || fileName, '');
