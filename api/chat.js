@@ -1334,8 +1334,12 @@ const GEMINI_TOOLS = [
                     'محتوای یک بلوک مشخص را کامل با متن جدید جایگزین می‌کند. قبل از این ابزار حتماً ' +
                     'همان بلوک را یک‌بار با read_block خوانده باش تا محتوای واقعی اطراف تغییر را بدانی. ' +
                     'کل بلوک (نه فقط خط تغییریافته) را با newContent بده - هر خطی از بلوک قدیم که باید ' +
-                    'بماند را هم دوباره در newContent بنویس، چون کل بلوک عوض می‌شود. بعد از این ابزار، ' +
-                    'قبل از پاسخ نهایی حتماً verify_file را صدا بزن.',
+                    'بماند را هم دوباره در newContent بنویس، چون کل بلوک عوض می‌شود. این ابزار خودش بعد ' +
+                    'از نوشتن، فایل کامل را اعتبارسنجی می‌کند و نتیجه را در فیلد valid برمی‌گرداند - اگر ' +
+                    'این آخرین بلوکی بود که نیاز به تغییر داشت و valid:true برگشت، دیگر نیازی به صدا زدن ' +
+                    'verify_file جداگانه نیست و می‌توانی مستقیم پاسخ نهایی را بدهی. verify_file را فقط ' +
+                    'در پایان لازم داری اگر بخواهی صرفاً یک بار دیگر وضعیت کل فایل را (بدون تغییر جدید) ' +
+                    'دوباره چک کنی.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1649,13 +1653,34 @@ async function executeToolCall(name, args, ctx) {
         // it can be handed back as final.
         state.lines = candidateLines;
         state.editedBlocks.add(blockNumber);
-        state.verified = false;
         recomputeBlocksAfterEdit(state);
 
         found.content = state.lines.join('\n');
         found._patched = true;
         found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
         state.editedName = found._editedName;
+
+        // FIX (quota burn: 3-4 real API calls per single-block edit):
+        // previously write_block only validated the CANDIDATE content
+        // (this block replaced) and then set state.verified = false,
+        // forcing a mandatory separate verify_file round afterwards -
+        // even when this was the only block touched, i.e. the candidate
+        // content and the "final" file content are the exact same
+        // string. That meant validatePatchedContent ran twice on
+        // identical content across two full model round-trips (extra
+        // upstream call + extra tokens) for the common case of a
+        // single-block edit.
+        // Now: since `validation` above already ran on the full file
+        // with this block swapped in (candidateContent), and state.lines
+        // now IS that exact content, we already know the current
+        // whole-file validity - no need to make the model spend another
+        // round asking verify_file to recompute the same check on the
+        // same content. We surface that result directly as `valid` here.
+        // The model still MUST call verify_file again only if it does
+        // more write_block calls after this one (those change the
+        // content again), which the mandatory-verify-before-final-answer
+        // gate below (blockStates verified flag) still enforces.
+        state.verified = true;
 
         log.info('agent.tool.write_block.success', {
             name: state.name,
@@ -1666,11 +1691,12 @@ async function executeToolCall(name, args, ctx) {
 
         return {
             success: true,
+            valid: true,
             file: state.name,
             block: blockNumber,
             editedName: found._editedName,
             newTotalBlocks: state.blocks.length,
-            note: 'بلوک با موفقیت بازنویسی شد. شماره‌ی بلوک‌های بعدی ممکن است عوض شده باشد - نقشه‌ی بلوک‌های به‌روز در پیام بعدی داده می‌شود. قبل از پاسخ نهایی حتماً verify_file را صدا بزن.'
+            note: 'بلوک با موفقیت بازنویسی و بررسی ساختاری شد (فایل کامل با این تغییر معتبر است). اگر بلوک دیگری هم نیاز به تغییر دارد، write_block بعدی را صدا بزن. اگر این آخرین تغییر بود، می‌توانی مستقیماً پاسخ نهایی را بدهی - نیازی به صدا زدن verify_file جداگانه بعد از یک write_block موفق نیست، چون این نتیجه (valid:true) از قبل معادل آن است.'
         };
     }
 
@@ -1776,13 +1802,61 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // FIX (worst-case stall math): with the block map given upfront in the
     // system prompt (no inspect_file round needed anymore), a realistic
     // file-edit turn is read_block + write_block per target block (rarely
-    // more than 2-3 blocks) + one verify_file + the final answer - well
-    // under 10 rounds. 16 was sized for the old chunk-based flow's worse
-    // case and, combined with the fileEditIntent-blanket timeout fix above,
-    // produced a ~45min worst-case stall on a single key before quota even
-    // triggered. Lowered to 10: still generous headroom, much smaller blast
-    // radius if a round genuinely loops.
-    const MAX_TOOL_ROUNDS = 10;
+    // more than 2-3 blocks) + the final answer - well under 10 rounds. 16
+    // was sized for the old chunk-based flow's worse case and, combined
+    // with the fileEditIntent-blanket timeout fix above, produced a
+    // ~45min worst-case stall on a single key before quota even
+    // triggered. Lowered to 10 originally, and now write_block auto-
+    // verifies itself (see write_block above), so a single-block edit no
+    // longer needs a dedicated verify_file round at all.
+    //
+    // FIX (quota burn: fixed 10-round ceiling too generous for small
+    // files, too tight for huge multi-block ones): a fixed cap either
+    // wastes quota headroom letting a trivial 1-block edit theoretically
+    // run 10 rounds if the model dithers, or forces a legitimately large
+    // multi-block edit (e.g. a 5000-line file needing 8 separate blocks
+    // touched) to hit the ceiling and get cut off mid-edit, which then
+    // burns an entire extra key-attempt just to resume. Instead of a
+    // fixed number, size the round budget off how many blocks THIS
+    // file/request actually has to work with - Gemini decides how many
+    // of those rounds it actually needs, this only sets the ceiling so a
+    // genuinely stuck loop still can't run away.
+    //
+    // Budget model: read_block + write_block per block actually touched
+    // (worst case: every block in the file, though a real edit only
+    // touches a handful), plus a small fixed overhead for the initial
+    // "figure out which blocks" rounds and the final answer round, plus
+    // slack for one round of re-read+re-write per block in case a
+    // write_block gets rejected by validation and needs a retry.
+    // Clamped so tiny files don't get an absurdly small ceiling (a model
+    // still needs room to read before it writes) and huge files don't
+    // get an unbounded one (still a hard outer limit against a genuinely
+    // looping model).
+    const MIN_TOOL_ROUNDS = 6;
+    const MAX_TOOL_ROUNDS_CEILING = 40;
+    const ROUNDS_PER_BLOCK = 2.5; // read + write, plus slack for one retry every ~2 blocks
+    const FIXED_ROUND_OVERHEAD = 4; // initial orientation + final answer + margin
+    let MAX_TOOL_ROUNDS;
+    if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
+        // Use the largest file's block count - a request can touch
+        // multiple files, and the round budget must cover whichever one
+        // needs the most work, not just the first.
+        const maxBlocksInRequest = Math.max(
+            1,
+            ...textFiles.map(f => computeFileBlocks(String(f.content || ''), f.name).length)
+        );
+        const estimatedRounds = Math.ceil(maxBlocksInRequest * ROUNDS_PER_BLOCK) + FIXED_ROUND_OVERHEAD;
+        MAX_TOOL_ROUNDS = Math.min(MAX_TOOL_ROUNDS_CEILING, Math.max(MIN_TOOL_ROUNDS, estimatedRounds));
+        log.info('agent.rounds.dynamic', {
+            maxBlocksInRequest,
+            estimatedRounds,
+            finalMaxToolRounds: MAX_TOOL_ROUNDS
+        });
+    } else {
+        // Non-file-edit turns (plain chat, web_search) never needed a
+        // large budget - keep the old modest fixed cap for those.
+        MAX_TOOL_ROUNDS = MIN_TOOL_ROUNDS;
+    }
     // FIX (روند/tool call های چندمرحله‌ای که وسط کار throw می‌کردند از صفر
     // شروع می‌شدند): قبلاً اینجا `[...contents]` یک کپی محلی می‌ساخت. تمام
     // push های بعدی (نتیجه جستجو، نتیجه tool call، پاسخ مدل) فقط روی همین
@@ -1837,7 +1911,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 'قوانین ویرایش فایل:\n' +
                 '۱. برای دیدن محتوای واقعی یک بلوک، read_block را با شماره‌ی همان بلوک صدا بزن - هرگز حدس نزن.\n' +
                 '۲. برای تغییر، write_block را با شماره‌ی بلوک و کل محتوای جدید آن بلوک صدا بزن (خطوطی که تغییر نکرده‌اند را هم دوباره در newContent بنویس).\n' +
-                '۳. بعد از یک یا چند write_block موفق، قبل از پاسخ نهایی حتماً verify_file را صدا بزن و مطمئن شو valid:true برگردانده - در غیر این صورت اجازه‌ی پاسخ نهایی را نداری.\n' +
+                '۳. هر write_block موفق خودش نتیجه‌ی اعتبارسنجی فایل کامل را در فیلد valid برمی‌گرداند. اگر آخرین write_block لازم را زدی و valid:true گرفتی، مستقیم می‌توانی پاسخ نهایی را بدهی - نیازی به verify_file جداگانه نیست مگر بخواهی بدون تغییر جدید یک بار دیگر وضعیت فعلی را چک کنی.\n' +
                 '۴. بعد از هر write_block موفق، شماره‌ی بلوک‌های فایل ممکن است تغییر کند (چون طول بلوک عوض شده) - همیشه از "newTotalBlocks" در نتیجه‌ی write_block یا نقشه‌ی جدید استفاده کن، نه شماره‌های قدیمی.\n' +
                 '۵. اگر بخشی از فایل که نیاز به تغییر ندارد، نیازی به read_block/write_block هم ندارد - فقط بلوک(های) مرتبط با درخواست کاربر را دست بزن.\n' +
                 '۶. اگر "alreadyRead" یک بلوک true است، یعنی محتوای آن را قبلاً در همین درخواست خوانده‌ای (حتی اگر این یک retry باشد) - آن را دوباره با read_block نخوان؛ از محتوایی که قبلاً دیدی استفاده کن. فقط بلوکی را دوباره بخوان که بعد از خواندنش با write_block تغییر کرده باشد (چون شماره‌بندی ممکن است عوض شده باشد).\n';
