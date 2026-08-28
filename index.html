@@ -4089,7 +4089,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 // the block-based write_block/verify_file system never
                 // produces - so it never fired for this exact failure mode.
                 // Check the real block-based delivery channel instead.
-                const claimsSuccess = /با موفقیت (ذخیره|ویرایش|اعمال)|تغییرات? (اعمال|ذخیره) شد|فایل .* (ذخیره|ویرایش) شد/.test(displayText || '');
+                // FIX (false positive on plain chat with no attached file):
+                // this check used to fire on ANY message containing success-
+                // sounding phrases (\u0630\u062e\u06cc\u0631\u0647/\u062b\u0628\u062a/\u0627\u0639\u0645\u0627\u0644 \u0634\u062f), even when the user
+                // never attached an editable file at all (e.g. casual chat
+                // that happens to mention "settings are saved"). The warning
+                // only makes sense when this specific request actually had
+                // at least one editable text file attached - otherwise there
+                // was never any real edit to have failed. mergedTextFiles is
+                // this exact request's attached/merged text files (captured
+                // above, before the request was sent).
+                const hadEditableFileThisRequest = Array.isArray(mergedTextFiles) && mergedTextFiles.length > 0;
+                const claimsSuccess = hadEditableFileThisRequest && /با موفقیت (ذخیره|ویرایش|اعمال)|تغییرات? (اعمال|ذخیره) شد|فایل .* (ذخیره|ویرایش) شد/.test(displayText || '');
                 if (claimsSuccess && (!edits || !edits.length) && (!streamEditedFiles || !streamEditedFiles.length)) {
                     finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">احتمالاً مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده.</div></div>`;
                 }
@@ -5208,17 +5219,33 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const rendered=rawParts.map((rawPart,index)=>{
             if(index%2===1){
                 // نسخه‌ی خام کد (بدون escape) برای کپی/دانلود نگه
-                // داشته می‌شود، اما دیگر به‌صورت متن داخل چت نمایش داده
-                // نمی‌شود؛ فقط کارت فایل با امکان کپی و دانلود نمایش داده می‌شود.
+                // داشته می‌شود. طبق تصمیم جدید: کد کوتاه (زیر ۵۰ خط) به
+                // همان شکل معمول همه‌ی دستیارهای هوش مصنوعی، مستقیم به‌صورت
+                // بلوک کد داخل چت (با دکمه‌ی کپی) نمایش داده می‌شود؛ فقط
+                // کد بلند (۵۰ خط یا بیشتر) به‌صورت کارت فایل جمع‌شده (با
+                // دکمه‌ی کپی + دانلود، بدون نمایش مستقیم متن کد) نشان داده
+                // می‌شود - چون کد به این بلندی داخل حباب چت غیرقابل‌استفاده
+                // می‌شود و منطقی‌تر است به‌عنوان یک فایل تحویل داده شود.
                 const raw=rawPart.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
                 const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
                 const rawCode=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim();
                 const encoded=encodeURIComponent(rawCode);
-                // دکمه‌ی پیش‌نمایش زنده (iframe) عمداً حذف شده — طبق درخواست،
-                // کد تولیدشده توسط مدل هم باید فقط به‌صورت کارت فایل (با
-                // امکان کپی/دانلود) نمایش داده بشود، بدون اجرای زنده.
                 const lineCount=rawCode?rawCode.split('\n').length:0;
                 const ext=(CODE_LANG_EXTENSIONS[(lang||'').toLowerCase()]||'txt');
+                const CODE_CARD_LINE_THRESHOLD = 50;
+                if (lineCount < CODE_CARD_LINE_THRESHOLD) {
+                    // کد کوتاه: بلوک کد معمولی داخل چت، فقط با دکمه‌ی کپی.
+                    return `<div class="code-card">
+                        <div class="code-card-head">
+                            <span>${escapeHtml(lang||'code')}</span>
+                            <div class="code-actions">
+                                <button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>
+                            </div>
+                        </div>
+                        <pre><code>${escapeHtml(rawCode)}</code></pre>
+                    </div>`;
+                }
+                // کد بلند: همان کارت فایل جمع‌شده‌ی قبلی، با دکمه‌ی دانلود.
                 const fileLabel=`code.${ext}`;
                 return `<div class="code-card code-card-collapsed">
                     <div class="code-card-head">
