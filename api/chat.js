@@ -1599,6 +1599,31 @@ async function executeToolCall(name, args, ctx) {
             return { error: `فایلی با نام «${fileName}» در آرشیو این گفتگو پیدا نشد.` };
         }
 
+        // FIX (مدل به‌جای فایل تازه‌ی ضمیمه‌شده، نسخه‌ی قدیمی از آرشیو را
+        // ویرایش می‌کرد): تا پیش از این، جلوگیری از این اشتباه فقط یک جمله
+        // در system prompt بود ("اگر کاربر همین پیام فایلی ضمیمه کرده،
+        // get_archived_file را صدا نزن") - یک دستور صرفاً متنی که مدل به
+        // راحتی نادیده می‌گرفت (دقیقاً همین اتفاق برای کاربر افتاد: فایل
+        // ۵۰۰۰+ خطیِ تازه ضمیمه شده بود، ولی مدل رفت سراغ get_archived_file
+        // و یک نسخه‌ی قدیمی‌تر و هم‌نام از آرشیو (که کاربر قبلاً در همین
+        // گفتگو فرستاده بود) را پیدا کرد و آن را ویرایش کرد - نتیجه یک فایل
+        // اشتباه اما "معتبر" بود که با موفقیت به کاربر تحویل داده شد.
+        // این‌جا یک قفل فنی واقعی می‌گذاریم: اگر در همین پیام حداقل یک فایل
+        // تازه‌ی متنی (ctx.textFiles) ضمیمه شده، فراخوانی get_archived_file
+        // را کلاً رد می‌کنیم و به مدل می‌گوییم از همان فایل تازه استفاده
+        // کند - مهم نیست چه اسمی خواسته، چون هیچ سناریوی درستی وجود ندارد
+        // که با فایل تازه در دست، رفتن سراغ آرشیو صحیح باشد.
+        const freshTextFiles = (ctx && ctx.originalFreshFileNames instanceof Set) ? [...ctx.originalFreshFileNames] : [];
+        if (freshTextFiles.length > 0) {
+            log.warn('agent.tool.get_archived_file.blocked_fresh_attachment_present', {
+                requestedName: fileName,
+                freshFileNames: freshTextFiles
+            });
+            return {
+                error: `درخواست رد شد: کاربر در همین پیام فایل «${freshTextFiles.join('، ')}» را تازه ضمیمه کرده - این همان فایلی است که باید ویرایش شود، نه «${fileName}» از آرشیو. get_archived_file را دیگر صدا نزن؛ مستقیماً با read_block روی همان فایل تازه (که در بخش فایل‌های فعلی موجود است) کار کن.`
+            };
+        }
+
         // FIX (archived-file edits silently produced no real edit / no
         // download card): get_archived_file used to just hand back a
         // (possibly truncated at 70k chars) text blob for the model to
@@ -1927,6 +1952,14 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, sharedRequestState }) {
+    // FIX (تشخیص فایل تازه‌ی ضمیمه‌شده در برابر فایل promote-شده از آرشیو):
+    // textFiles یک آرایه‌ی mutable است که get_archived_file هم به آن
+    // فایل‌های آرشیوی را push می‌کند (ببین «promoted.push» در آن هندلر).
+    // برای این‌که بعداً بتوانیم فرق بگذاریم «کاربر همین پیام واقعاً چیزی
+    // ضمیمه کرده بود» از «این فایل بعداً توسط خودِ get_archived_file به
+    // textFiles اضافه شد»، نام فایل‌های تازه‌ی *واقعی* (قبل از هر promote)
+    // را همین ابتدا، قبل از هر تغییر، اسنپ‌شات می‌گیریم.
+    const originalFreshFileNames = new Set((Array.isArray(textFiles) ? textFiles : []).map(f => f && f.name).filter(Boolean));
     // FIX (فایل‌های ۵۰۰۰+ خطی): با MAX_CHUNK_REQUEST_LINES=900، یک فایل
     // ۵۰۰۰ خطی حداقل به ۶-۷ بار get_file_chunk نیاز دارد اگر مدل مجبور
     // شود همه‌ی فایل را پیمایش کند، به‌علاوه‌ی inspect_file و apply_patch و
@@ -2510,6 +2543,20 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // چون ممکن است متن واقعاً درست باشد (مثلاً مدل صادقانه گفته
             // "نتونستم ویرایش کنم")؛ اینجا فقط داده‌ی تشخیصی اضافه می‌شود
             // تا کلاینت بتواند در صورت نیاز هشدار نشان دهد.
+            //
+            // FIX ۲ (حالت بدتر: write_block اصلاً صدا زده نشده): حالت بالا
+            // فقط زمانی فعال می‌شد که write_block حداقل یک بار رد شده
+            // باشد. اما یک حالت بدتر هم وجود دارد - وقتی کاربر واقعاً یک
+            // فایل تازه برای ویرایش ضمیمه کرده (fileEditIntent === true،
+            // یعنی blockStates ساخته شده) ولی مدل کلاً هیچ‌وقت write_block
+            // را روی هیچ بلوکی صدا نزده (نه موفق، نه رد شده) و مستقیم با
+            // متنی که به نظر ادعای انجام‌شدن تغییر دارد به پایان رسیده. این
+            // را هم با شمارش کل فراخوانی‌های write_block (از toolCallTally)
+            // تشخیص می‌دهیم: اگر بلوک‌استیت‌ای برای ویرایش وجود داشت اما
+            // write_block اصلاً صدا زده نشد و هیچ فایلی patch نشد، این هم
+            // همان کلاس مشکل است.
+            const writeBlockCallCount = toolCallTally['write_block'] || 0;
+            const hadEditableFiles = blockStates && blockStates.size > 0;
             let unresolvedEditFailure = null;
             if (rejectedWriteBlocksByFile && rejectedWriteBlocksByFile.size > 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
                 const entries = [...rejectedWriteBlocksByFile.entries()];
@@ -2517,8 +2564,16 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     files: entries.map(([name, info]) => ({ name, rejectedAttempts: info.count, lastReason: info.lastReason })),
                     note: 'مدل حداقل یک بار write_block روی این فایل(ها) را امتحان کرد و رد شد (فایل نامعتبر می‌شد)، و در نهایت بدون هیچ ویرایش موفقی به پایان رسید. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، آن ادعا مربوط به این فایل(ها) نیست - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
                 };
+            } else if (hadEditableFiles && writeBlockCallCount === 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
+                unresolvedEditFailure = {
+                    files: [...blockStates.keys()].map(name => ({ name, rejectedAttempts: 0, lastReason: null })),
+                    note: 'کاربر فایلی برای ویرایش در دسترس مدل قرار داده بود، اما مدل حتی یک‌بار هم write_block را روی آن صدا نزد - یعنی هیچ تلاشی برای اعمال تغییر واقعی انجام نشده. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، این ادعا نادرست است - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
+                };
+            }
+            if (unresolvedEditFailure) {
                 log.warn('agent.unresolved_edit_failure', {
                     files: unresolvedEditFailure.files,
+                    writeBlockCallCount,
                     finishReason,
                     round
                 });
@@ -2666,7 +2721,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             const toolCallStartedAt = Date.now();
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates, rejectedWriteBlocksByFile });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates, rejectedWriteBlocksByFile, originalFreshFileNames });
             const toolCallDurationMs = Date.now() - toolCallStartedAt;
 
             if (call.name === 'web_search') scopedSearchState.result = result;
