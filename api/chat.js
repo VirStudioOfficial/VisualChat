@@ -965,6 +965,222 @@ function nextEditedFileName(originalName) {
 // MAX_TOOL_ROUNDS ceiling computed from block count below. This does not
 // change the read_block/write_block/verify_file contract or validation
 // logic - only how finely the same file is sliced.
+// ==========================================================================
+// REWRITE (block architecture -> SEARCH/REPLACE with fallback, Aider-style)
+// ==========================================================================
+// جایگزین کامل بلوک‌بندی: مدل مستقیماً یک قطعه‌ی متن دقیق موجود (search) و
+// متن جایگزین (replace) می‌دهد. به‌جای شماره‌ی بلوک ثابت (که با هر ویرایش
+// دوباره محاسبه می‌شد و مدل باید دائم نقشه‌ی جدید را دنبال می‌کرد)، خودِ
+// محتوا معیار است. ۴ لایه‌ی fallback به ترتیب امتحان می‌شود:
+//   ۱) تطبیق دقیق (exact substring)
+//   ۲) تطبیق با انعطاف فاصله/تب/whitespace (خطوط normalize شده مقایسه می‌شوند)
+//   ۳) تطبیق fuzzy خط‌به‌خط (نادیده گرفتن فاصله‌ی ابتدا/انتهای خط)
+//   ۴) شکست: گزارش دقیق با نزدیک‌ترین context ها برگردانده می‌شود تا مدل
+//      search را اصلاح کند و دوباره صدا بزند - هیچ حدسی به‌جای مدل زده نمی‌شود.
+// اگر search بیش از یک‌بار در فایل پیدا شود (ابهام)، رد می‌شود مگر
+// occurrence مشخص شده باشد.
+
+// \r تنها (بدون \n بعدش) می‌تواند از برش نادرست متن توسط مدل ایجاد شود؛ اگر
+// نرمال‌سازی شود، \r\n\r واقعی خراب نمی‌شود چون ابتدا \r\n کامل تبدیل و حذف
+// می‌شود و فقط \r باقی‌مانده (تنها) در پایان تبدیل می‌شود.
+function normalizeLineEndings(text) {
+    return String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function normalizeForFuzzyMatch(line) {
+    return line.trim().replace(/\s+/g, ' ');
+}
+
+// لایه‌ی ۱: تطبیق دقیق substring.
+function findExactMatches(content, search) {
+    const indices = [];
+    let from = 0;
+    while (true) {
+        const idx = content.indexOf(search, from);
+        if (idx === -1) break;
+        indices.push(idx);
+        from = idx + Math.max(1, search.length);
+    }
+    return indices;
+}
+
+// لایه‌ی ۲: تطبیق با نادیده گرفتن تفاوت‌های whitespace (هر دو طرف
+// normalizeLineEndings شده و خط‌به‌خط با فاصله‌ی یکسان‌شده مقایسه می‌شوند).
+// چون طول ممکن است عوض شود (تعداد فاصله‌ها فرق دارد)، به‌جای indexOf ساده،
+// یک تطبیق خط‌به‌خط روی آرایه‌ی خطوط انجام می‌شود و بازه‌ی خط برگردانده می‌شود.
+function findWhitespaceFlexibleMatch(contentLines, searchLines) {
+    if (searchLines.length === 0) return null;
+    const normSearch = searchLines.map(normalizeForFuzzyMatch);
+    const matches = [];
+    for (let i = 0; i <= contentLines.length - searchLines.length; i++) {
+        let ok = true;
+        for (let j = 0; j < searchLines.length; j++) {
+            if (normalizeForFuzzyMatch(contentLines[i + j]) !== normSearch[j]) { ok = false; break; }
+        }
+        if (ok) matches.push(i);
+    }
+    return matches;
+}
+
+// لایه‌ی ۳: fuzzy - فقط خطوط غیرخالی search باید به ترتیب (با اجازه‌ی
+// چسبیدگی نه‌چندان‌سخت‌گیرانه) در محتوا پیدا شوند؛ خطوط خالی داخل search
+// نادیده گرفته می‌شوند. این آخرین لایه قبل از شکست کامل است و فقط زمانی
+// استفاده می‌شود که لایه‌ی ۱ و ۲ هر دو صفر تطبیق داشته باشند.
+function findFuzzyMatch(contentLines, searchLines) {
+    const meaningfulSearch = searchLines.map(normalizeForFuzzyMatch).filter(Boolean);
+    if (meaningfulSearch.length === 0) return null;
+    const matches = [];
+    const windowSize = searchLines.length;
+    for (let i = 0; i <= contentLines.length - windowSize; i++) {
+        const windowNorm = contentLines.slice(i, i + windowSize).map(normalizeForFuzzyMatch).filter(Boolean);
+        if (windowNorm.length !== meaningfulSearch.length) continue;
+        let ok = true;
+        for (let j = 0; j < meaningfulSearch.length; j++) {
+            if (windowNorm[j] !== meaningfulSearch[j]) { ok = false; break; }
+        }
+        if (ok) matches.push(i);
+    }
+    return matches;
+}
+
+// گزارش شکست: نزدیک‌ترین context ها را (بر اساس اولین خط غیرخالی search)
+// پیدا می‌کند تا مدل بتواند search را دقیق‌تر کپی کند.
+function buildEditFailureReport(content, search, reasonText) {
+    const searchLines = search.split('\n');
+    const firstMeaningfulLine = (searchLines.find(l => l.trim()) || '').trim();
+    const contentLines = content.split('\n');
+    const candidates = [];
+    const needle = firstMeaningfulLine.slice(0, Math.min(30, firstMeaningfulLine.length));
+    if (needle) {
+        contentLines.forEach((line, idx) => {
+            if (line.includes(needle)) {
+                const start = Math.max(0, idx - 3);
+                const end = Math.min(contentLines.length, idx + 4);
+                candidates.push({
+                    lineNumber: idx + 1,
+                    context: contentLines.slice(start, end).join('\n')
+                });
+            }
+        });
+    }
+    return {
+        reason: reasonText,
+        candidatesFound: candidates.length,
+        candidates: candidates.slice(0, 5),
+        hint: 'search را دقیقاً از یکی از این context ها کپی کن (کاراکتر به کاراکتر، شامل فاصله‌گذاری و تورفتگی) تا یکتا و کامل تطبیق پیدا شود، سپس دوباره apply_edit را صدا بزن. اگر مطمئن نیستی محتوای دقیق کجاست، ابتدا با read_file_section بخشی از فایل را ببین.'
+    };
+}
+
+// موتور اصلی: content کامل + search + replace می‌گیرد، هر ۴ لایه را به
+// ترتیب امتحان می‌کند و یا content جدید را برمی‌گرداند یا خطای دقیق.
+// occurrence (اختیاری، ۱-پایه) برای زمانی است که search عمداً چندبار در
+// فایل تکرار شده و مدل مشخص کرده کدام نمونه مدنظرش است.
+function applySearchReplace(content, search, replace, occurrence) {
+    if (!search || typeof search !== 'string') {
+        return { success: false, reason: 'not_found', report: buildEditFailureReport(content, search || '', 'search خالی یا نامعتبر بود.') };
+    }
+
+    const originalHadCRLF = /\r\n/.test(content);
+    const normContent = normalizeLineEndings(content);
+    const normSearch = normalizeLineEndings(search);
+    const normReplace = normalizeLineEndings(replace == null ? '' : replace);
+
+    const applyAt = (startIdx, endIdx) => {
+        let result = normContent.slice(0, startIdx) + normReplace + normContent.slice(endIdx);
+        if (originalHadCRLF) result = result.replace(/\n/g, '\r\n');
+        return result;
+    };
+
+    // لایه ۱: تطبیق دقیق
+    const exactMatches = findExactMatches(normContent, normSearch);
+    if (exactMatches.length === 1) {
+        return { success: true, content: applyAt(exactMatches[0], exactMatches[0] + normSearch.length), layer: 'exact' };
+    }
+    if (exactMatches.length > 1) {
+        if (Number.isFinite(occurrence) && occurrence >= 1 && occurrence <= exactMatches.length) {
+            const idx = exactMatches[occurrence - 1];
+            return { success: true, content: applyAt(idx, idx + normSearch.length), layer: 'exact_occurrence' };
+        }
+        return {
+            success: false,
+            reason: 'ambiguous',
+            report: {
+                reason: `این search دقیقاً ${exactMatches.length} بار در فایل پیدا شد - باید یکتا باشد یا occurrence مشخص شود.`,
+                candidatesFound: exactMatches.length,
+                candidates: exactMatches.slice(0, 5).map(idx => ({
+                    lineNumber: normContent.slice(0, idx).split('\n').length,
+                    context: normContent.slice(Math.max(0, idx - 60), idx + normSearch.length + 60)
+                })),
+                hint: 'یا search را با چند خط اطراف بیشتر یکتا کن، یا occurrence (شماره‌ی نمونه‌ی موردنظر، از ۱ شروع) را در فراخوانی apply_edit مشخص کن.'
+            }
+        };
+    }
+
+    // لایه ۲: whitespace-flexible خط‌به‌خط
+    const contentLines = normContent.split('\n');
+    const searchLines = normSearch.split('\n');
+    const wsMatches = findWhitespaceFlexibleMatch(contentLines, searchLines);
+    if (wsMatches && wsMatches.length >= 1) {
+        if (wsMatches.length === 1 || (Number.isFinite(occurrence) && occurrence >= 1 && occurrence <= wsMatches.length)) {
+            const lineIdx = wsMatches.length === 1 ? wsMatches[0] : wsMatches[occurrence - 1];
+            const startIdx = contentLines.slice(0, lineIdx).join('\n').length + (lineIdx > 0 ? 1 : 0);
+            const matchedText = contentLines.slice(lineIdx, lineIdx + searchLines.length).join('\n');
+            const endIdx = startIdx + matchedText.length;
+            return { success: true, content: applyAt(startIdx, endIdx), layer: 'whitespace_flexible' };
+        }
+        return {
+            success: false,
+            reason: 'ambiguous',
+            report: {
+                reason: `این search (با نادیده گرفتن فاصله‌گذاری) ${wsMatches.length} بار پیدا شد - باید یکتا باشد یا occurrence مشخص شود.`,
+                candidatesFound: wsMatches.length,
+                candidates: wsMatches.slice(0, 5).map(lineIdx => ({
+                    lineNumber: lineIdx + 1,
+                    context: contentLines.slice(Math.max(0, lineIdx - 3), lineIdx + searchLines.length + 3).join('\n')
+                })),
+                hint: 'search را با فاصله‌گذاری دقیق‌تر بده یا occurrence مشخص کن.'
+            }
+        };
+    }
+
+    // لایه ۳: fuzzy (نادیده گرفتن خطوط خالی داخل search + فاصله‌ی اطراف)
+    const fuzzyMatches = findFuzzyMatch(contentLines, searchLines);
+    if (fuzzyMatches && fuzzyMatches.length === 1) {
+        const lineIdx = fuzzyMatches[0];
+        const startIdx = contentLines.slice(0, lineIdx).join('\n').length + (lineIdx > 0 ? 1 : 0);
+        const matchedText = contentLines.slice(lineIdx, lineIdx + searchLines.length).join('\n');
+        const endIdx = startIdx + matchedText.length;
+        return { success: true, content: applyAt(startIdx, endIdx), layer: 'fuzzy' };
+    }
+    if (fuzzyMatches && fuzzyMatches.length > 1) {
+        return {
+            success: false,
+            reason: 'ambiguous',
+            report: buildEditFailureReport(normContent, normSearch, `این search حتی به‌صورت fuzzy هم ${fuzzyMatches.length} بار مشابه پیدا شد - مبهم است.`)
+        };
+    }
+
+    // لایه ۴: شکست کامل
+    return {
+        success: false,
+        reason: 'not_found',
+        report: buildEditFailureReport(normContent, normSearch, 'این متن (search) دقیقاً یا حتی به‌صورت fuzzy در فایل پیدا نشد.')
+    };
+}
+
+// یک FileEditState برای یک فایل می‌سازد - جایگزین ساده‌ی BlockFileState.
+// فقط محتوای فعلی + تاریخچه‌ی ادیت‌ها را نگه می‌دارد؛ هیچ شماره‌بندی بلوکی
+// در کار نیست، پس نیازی به recompute بعد از هر تغییر طول هم نیست.
+function createFileEditState(file) {
+    return {
+        name: file.name,
+        content: String(file.content || ''),
+        editCount: 0,
+        verified: false,
+        editedName: null
+    };
+}
+
 const FILE_BLOCK_TARGET_LINES = 500; // اندازه‌ی هدف هر بلوک - نه سقف سخت، نزدیک‌ترین مرز منطقی (خط خالی/section) به این عدد انتخاب می‌شود
 
 // یک فایل را به بلوک‌های ثابت تقسیم می‌کند. مرز هر بلوک تا حد امکان روی یک
@@ -1349,10 +1565,9 @@ const GEMINI_TOOLS = [
                     'می‌دهد (مثلاً «همون فایلی که قبلاً فرستادم رو ویرایش کن» یا «توی اون فایل دنبال X ' +
                     'بگرد») - نه صرفاً وقتی اسم فایل یک‌بار در گفتگو ذکر شده. اسم فایل‌های موجود در آرشیو ' +
                     'این گفتگو در پرامپت سیستم به تو داده شده است. اگر هدف کاربر ویرایش این فایل است، ' +
-                    'این ابزار خودش فایل را برای ویرایش فعال می‌کند و یک نقشه‌ی بلوک (blockMap) در نتیجه ' +
-                    'برمی‌گرداند - بعد از آن دقیقاً طبق همان قوانین ویرایش فایل (read_block → write_block) ' +
-                    'که برای فایل‌های تازه‌ضمیمه‌شده داری عمل کن؛ محتوای خام برگشتی از این ابزار دیگر ' +
-                    'کامل/قابل‌اعتماد برای ساخت ویرایش نیست و فقط برای خواندن/پاسخ به سؤال مناسب است.',
+                    'این ابزار خودش فایل را برای ویرایش فعال می‌کند و محتوای کامل آن را در نتیجه برمی‌گرداند - ' +
+                    'بعد از آن دقیقاً طبق همان قوانین ویرایش فایل (apply_edit با search/replace) که برای ' +
+                    'فایل‌های تازه‌ضمیمه‌شده داری عمل کن.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1383,65 +1598,58 @@ const GEMINI_TOOLS = [
                 }
             },
             {
-                // نقشه‌ی بلوک‌های فایل (شماره، محدوده‌ی خط، پیش‌نمایش، وضعیت
-                // خوانده/ویرایش‌شده) همیشه در system prompt به مدل داده
-                // می‌شود - نیازی به یک ابزار جدا برای "دیدن ساختار" نیست.
-                // این ابزار فقط محتوای واقعی یک بلوک مشخص را برمی‌گرداند.
-                name: 'read_block',
+                // اگر فایل خیلی بزرگ باشد و مدل قبل از نوشتن search نیاز به
+                // دیدن دقیق یک بخش خاص داشته باشد (مثلاً برای کپی دقیق
+                // تورفتگی/فاصله‌گذاری)، این ابزار یک بازه‌ی خط مشخص را
+                // برمی‌گرداند. اکثر ویرایش‌ها به این ابزار نیاز ندارند چون
+                // محتوای کامل فایل و تحلیل ساختار آن از قبل در دسترس مدل است.
+                name: 'read_file_section',
                 description:
-                    'محتوای واقعی یک بلوک مشخص از فایل را برمی‌گرداند (نه کل فایل). نقشه‌ی بلوک‌ها ' +
-                    '(شماره هر بلوک، محدوده‌ی خط، پیش‌نمایش) از قبل در system prompt به تو داده شده - ' +
-                    'فقط شماره‌ی بلوکی که واقعاً برای پاسخ/ویرایش لازم داری را اینجا بده. حدس زدن ' +
-                    'محدوده‌ی خط لازم نیست و اصلاً پشتیبانی نمی‌شود - فقط شماره‌ی بلوک.',
+                    'بخشی از محتوای فایل را بین دو شماره خط مشخص برمی‌گرداند. فقط زمانی از این استفاده ' +
+                    'کن که برای نوشتن یک search دقیق (کاراکتر‌به‌کاراکتر) نیاز به دیدن دوباره‌ی متن ' +
+                    'واقعی یک بخش خاص داری - مثلاً برای اطمینان از فاصله‌گذاری/تورفتگی دقیق. اکثر ' +
+                    'ویرایش‌ها به این ابزار نیاز ندارند چون محتوای کامل فایل از قبل در پیام اولیه به تو داده شده.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        file: {
-                            type: 'string',
-                            description: 'نام دقیق فایل هدف (همانی که در نقشه‌ی بلوک‌ها آمده).'
-                        },
-                        block: {
-                            type: 'number',
-                            description: 'شماره‌ی بلوکی که می‌خواهی محتوایش را ببینی (از نقشه‌ی بلوک‌ها).'
-                        }
+                        file: { type: 'string', description: 'نام دقیق فایل هدف.' },
+                        startLine: { type: 'number', description: 'شماره خط شروع (از ۱).' },
+                        endLine: { type: 'number', description: 'شماره خط پایان (شامل خودش).' }
                     },
-                    required: ['file', 'block']
+                    required: ['file', 'startLine', 'endLine']
                 }
             },
             {
-                // جایگزین apply_patch: به‌جای تطبیق متنی شکننده (old/new) یا
-                // محدوده‌ی خط دلخواه، کل یک بلوک با شماره‌ی مشخص با محتوای
-                // جدید جایگزین می‌شود. قبل از پذیرفتن، فایل کامل (با این
-                // بلوک جایگزین‌شده) از validatePatchedContent رد می‌شود تا
-                // یک بلوک بد کل فایل را خراب نکند.
-                name: 'write_block',
+                // جایگزین کامل write_block/apply_patch قدیمی: مدل مستقیماً
+                // یک قطعه‌ی دقیق متن موجود (search) و متن جایگزین (replace)
+                // می‌دهد - دقیقاً مثل SEARCH/REPLACE در Aider. موتور ۴ لایه
+                // fallback (تطبیق دقیق → whitespace-flexible → fuzzy → گزارش
+                // خطای دقیق) را امتحان می‌کند. قبل از پذیرفتن، فایل کامل
+                // (بعد از اعمال تغییر) از validatePatchedContent رد می‌شود.
+                name: 'apply_edit',
                 description:
-                    'محتوای یک بلوک مشخص را کامل با متن جدید جایگزین می‌کند. قبل از این ابزار حتماً ' +
-                    'همان بلوک را یک‌بار با read_block خوانده باش تا محتوای واقعی اطراف تغییر را بدانی. ' +
-                    'کل بلوک (نه فقط خط تغییریافته) را با newContent بده - هر خطی از بلوک قدیم که باید ' +
-                    'بماند را هم دوباره در newContent بنویس، چون کل بلوک عوض می‌شود. این ابزار خودش بعد ' +
-                    'از نوشتن، فایل کامل را اعتبارسنجی می‌کند و نتیجه را در فیلد valid برمی‌گرداند - اگر ' +
-                    'این آخرین بلوکی بود که نیاز به تغییر داشت و valid:true برگشت، دیگر نیازی به صدا زدن ' +
-                    'verify_file جداگانه نیست و می‌توانی مستقیم پاسخ نهایی را بدهی. verify_file را فقط ' +
-                    'در پایان لازم داری اگر بخواهی صرفاً یک بار دیگر وضعیت کل فایل را (بدون تغییر جدید) ' +
-                    'دوباره چک کنی.',
+                    'یک قطعه‌ی متن دقیق موجود در فایل (search) را با متن جدید (replace) جایگزین می‌کند. ' +
+                    'search باید دقیقاً همان متنی باشد که الان در فایل هست (از محتوای کامل فایل که در ' +
+                    'پیام اولیه داری کپی کن) - شامل چند خط اطراف تغییر برای یکتا بودن، نه فقط یک خط ' +
+                    'کوتاه که ممکن است چندبار در فایل تکرار شده باشد. replace باید متن نهایی همان بخش ' +
+                    'باشد (خطوطی که باید بمانند را هم اگر داخل بازه‌ی search هستند دوباره در replace ' +
+                    'بنویس). این ابزار خودش کمی انعطاف در فاصله‌گذاری/تورفتگی دارد و اگر search دقیق ' +
+                    'پیدا نشود چند لایه تطبیق نرم‌تر را هم امتحان می‌کند، اما اگر باز هم شکست خورد یا ' +
+                    'مبهم بود (بیش از یک‌بار در فایل پیدا شد)، یک گزارش دقیق با نزدیک‌ترین context های ' +
+                    'واقعی فایل برمی‌گرداند - search را دقیقاً از همان context کپی کن و دوباره صدا بزن. ' +
+                    'برای حذف یک بخش، replace را رشته‌ی خالی بده. این ابزار خودش بعد از نوشتن، فایل ' +
+                    'کامل را اعتبارسنجی می‌کند و نتیجه را در فیلد valid برمی‌گرداند - اگر این آخرین ' +
+                    'تغییری بود که نیاز داشتی و valid:true برگشت، دیگر نیازی به verify_file جداگانه ' +
+                    'نیست و می‌توانی مستقیم پاسخ نهایی را بدهی.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        file: {
-                            type: 'string',
-                            description: 'نام دقیق فایل هدف.'
-                        },
-                        block: {
-                            type: 'number',
-                            description: 'شماره‌ی بلوکی که باید کامل جایگزین شود.'
-                        },
-                        newContent: {
-                            type: 'string',
-                            description: 'محتوای کامل جدید این بلوک (شامل خطوطی که تغییر نکرده‌اند اما باید بمانند).'
-                        }
+                        file: { type: 'string', description: 'نام دقیق فایل هدف.' },
+                        search: { type: 'string', description: 'متن دقیق موجود در فایل که باید جایگزین شود (چند خط برای یکتا بودن).' },
+                        replace: { type: 'string', description: 'متن جدیدی که باید جایگزین search شود (برای حذف، رشته‌ی خالی).' },
+                        occurrence: { type: 'number', description: 'اختیاری - اگر search بیش از یک‌بار در فایل تکرار شده و عمداً همه یکسان‌اند، شماره‌ی نمونه‌ی موردنظر (از ۱ شروع) را بده.' }
                     },
-                    required: ['file', 'block', 'newContent']
+                    required: ['file', 'search', 'replace']
                 }
             },
             {
@@ -1454,9 +1662,9 @@ const GEMINI_TOOLS = [
                 name: 'verify_file',
                 description:
                     'فایل کامل را (با تمام ویرایش‌های اعمال‌شده تا این لحظه) از نظر ساختاری/سنتکسی ' +
-                    'بررسی می‌کند. باید حتماً بعد از آخرین write_block و قبل از تحویل نهایی صدا زده ' +
-                    'شود. اگر مشکل پیدا کند، بلوک(های) مشکل‌دار را با read_block دوباره بخوان و با ' +
-                    'write_block اصلاح کن، سپس دوباره verify_file را صدا بزن.',
+                    'بررسی می‌کند. باید حتماً بعد از آخرین apply_edit و قبل از تحویل نهایی صدا زده ' +
+                    'شود. اگر مشکل پیدا کند، با apply_edit دیگری بخش مشکل‌دار را اصلاح کن، سپس دوباره ' +
+                    'verify_file را صدا بزن.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1498,11 +1706,11 @@ function describeToolCall(name, args) {
     if (name === 'ask_user') {
         return 'قبل از ادامه، یه سؤال دارم...';
     }
-    if (name === 'read_block') {
-        return `در حال خواندن بخش ${(args && args.block) || '?'} از فایل «${(args && args.file) || ''}»...`;
+    if (name === 'read_file_section') {
+        return `در حال خواندن بخشی از فایل «${(args && args.file) || ''}»...`;
     }
-    if (name === 'write_block') {
-        return `در حال اعمال تغییرات روی بخش ${(args && args.block) || '?'} از فایل «${(args && args.file) || ''}»...`;
+    if (name === 'apply_edit') {
+        return `در حال اعمال تغییرات روی فایل «${(args && args.file) || ''}»...`;
     }
     if (name === 'verify_file') {
         return `در حال بررسی نهایی فایل «${(args && args.file) || ''}»...`;
@@ -1538,6 +1746,47 @@ function validatePatchedContent(content, fileName) {
         }
     }
     if (language === 'html') {
+        // FIX (باگ ریشه‌ای: </g> در وسط یک regex جاوااسکریپت مثل
+        // .replace(/</g, '&lt;') به‌عنوان تگ HTML بسته‌ی نامتناظر رد
+        // می‌شد): تگ‌ماچینگ زیر یک regex ساده روی کل متن است و نمی‌داند کجا
+        // داخل <script>/<style> است - یعنی هر کاراکتر < داخل جاوااسکریپت
+        // (چه در regex literal، چه در رشته، چه در کامنت) را با یک تگ HTML
+        // واقعی اشتباه می‌گیرد. راه‌حل: قبل از تگ‌ماچینگ، محتوای داخل هر
+        // <script>...</script> و <style>...</style> (خودِ تگ باز/بسته حفظ
+        // می‌شود، فقط محتوای داخلی خنثی/جایگزین می‌شود) با فاصله‌ی هم‌طول
+        // (برای حفظ شماره خط در پیام خطا) خنثی می‌شود، و جاوااسکریپت داخل هر
+        // <script> جدا و مستقل با validatePatchedContent نوع javascript
+        // (new Function) بررسی می‌شود - نه با پارسر تگ HTML.
+        let scriptJsErrors = [];
+        const neutralizedContent = content.replace(
+            /<(script)\b([^>]*)>([\s\S]*?)<\/script>/gi,
+            (full, tagName, attrs, inner) => {
+                const isExternal = /\bsrc\s*=/i.test(attrs);
+                const isNonJs = /\btype\s*=\s*["'](?!(?:text\/javascript|application\/javascript|module)["'])[^"']*["']/i.test(attrs);
+                if (!isExternal && !isNonJs && inner.trim()) {
+                    try {
+                        new Function(inner);
+                    } catch (error) {
+                        scriptJsErrors.push(error?.message || String(error));
+                    }
+                }
+                // خنثی‌سازی: هر کاراکتر غیرخط‌جدید با فاصله جایگزین می‌شود تا
+                // طول/شماره‌خط عوض نشود ولی هیچ < یا > داخلش برای پارسر HTML
+                // باقی نماند.
+                const blanked = inner.replace(/[^\n]/g, ' ');
+                return `<${tagName}${attrs}>${blanked}</script>`;
+            }
+        ).replace(
+            /<(style)\b([^>]*)>([\s\S]*?)<\/style>/gi,
+            (full, tagName, attrs, inner) => {
+                const blanked = inner.replace(/[^\n]/g, ' ');
+                return `<${tagName}${attrs}>${blanked}</style>`;
+            }
+        );
+        if (scriptJsErrors.length > 0) {
+            return { valid: false, reason: `سنتکس جاوااسکریپت داخل یک تگ <script> نامعتبر است: ${scriptJsErrors[0]}` };
+        }
+
         // Balance-check void-aware tag nesting rather than full DOM
         // parsing - enough to catch the common breakage (an unclosed or
         // mismatched tag from a bad line range) without a heavy parser.
@@ -1560,7 +1809,7 @@ function validatePatchedContent(content, fileName) {
         const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
         const stack = [];
         let m;
-        while ((m = tagRe.exec(content))) {
+        while ((m = tagRe.exec(neutralizedContent))) {
             const tag = m[1].toLowerCase();
             const isClosing = m[0][1] === '/';
             const isSelfClosing = m[2] === '/' || voidTags.has(tag);
@@ -1620,7 +1869,7 @@ async function executeToolCall(name, args, ctx) {
                 freshFileNames: freshTextFiles
             });
             return {
-                error: `درخواست رد شد: کاربر در همین پیام فایل «${freshTextFiles.join('، ')}» را تازه ضمیمه کرده - این همان فایلی است که باید ویرایش شود، نه «${fileName}» از آرشیو. get_archived_file را دیگر صدا نزن؛ مستقیماً با read_block روی همان فایل تازه (که در بخش فایل‌های فعلی موجود است) کار کن.`
+                error: `درخواست رد شد: کاربر در همین پیام فایل «${freshTextFiles.join('، ')}» را تازه ضمیمه کرده - این همان فایلی است که باید ویرایش شود، نه «${fileName}» از آرشیو. get_archived_file را دیگر صدا نزن؛ مستقیماً با apply_edit روی همان فایل تازه (که در بخش فایل‌های فعلی موجود است) کار کن.`
             };
         }
 
@@ -1643,7 +1892,7 @@ async function executeToolCall(name, args, ctx) {
         // system a freshly-attached file gets. We inject it into
         // ctx.textFiles (so write_block's `files.find(...)` lookup can
         // find it, exactly like a fresh attachment) and build/reuse its
-        // BlockFileState in ctx.blockStates (so read_block/write_block/
+        // FileEditState in ctx.editStates (so apply_edit/
         // verify_file work on it with full content - not the old 70k-char
         // truncation, which silently hid anything past that point, e.g.
         // CSS rules far down a large index.html). One archived file is
@@ -1651,13 +1900,13 @@ async function executeToolCall(name, args, ctx) {
         // the model actually asks for it - never for archived files it
         // doesn't touch.
         const textFiles = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : null;
-        const blockStates = ctx && ctx.blockStates;
+        const editStates = ctx && ctx.editStates;
         let alreadyPromoted = textFiles && textFiles.some(f => f && f.name === found.name);
-        if (textFiles && blockStates && !alreadyPromoted) {
+        if (textFiles && editStates && !alreadyPromoted) {
             const promoted = { name: found.name, content: found.content || '', mode: 'text' };
             textFiles.push(promoted);
-            if (!blockStates.has(promoted.name)) {
-                blockStates.set(promoted.name, createBlockFileState(promoted));
+            if (!editStates.has(promoted.name)) {
+                editStates.set(promoted.name, createFileEditState(promoted));
             }
             alreadyPromoted = true;
         }
@@ -1668,17 +1917,17 @@ async function executeToolCall(name, args, ctx) {
             promotedToBlockEditing: alreadyPromoted
         });
 
-        if (alreadyPromoted && blockStates) {
-            const state = blockStates.get(found.name);
+        if (alreadyPromoted && editStates) {
+            const state = editStates.get(found.name);
             return {
                 name: found.name,
                 promotedToBlockEditing: true,
-                blockMap: state ? formatBlockMapForModel(state) : null,
-                note: 'این فایل آرشیوشده حالا برای ویرایش فعال شده - محتوای کامل آن (بدون برش) در قالب بلوک‌های read_block/write_block در دسترس توست، دقیقاً مثل فایلی که تازه ضمیمه شده باشد. اگر کاربر خواسته این فایل ویرایش شود، دیگر محتوای خام اینجا لازم نیست - نقشه‌ی بلوک بالا را ببین و طبق قوانین ویرایش فایل (read_block → write_block → در صورت لزوم verify_file) پیش برو. اگر فقط برای مطالعه/پاسخ به سؤال لازمش داشتی (نه ویرایش)، از blockMap.blocks[].preview برای مرور کلی استفاده کن یا بلوک‌های لازم را با read_block بخوان.'
+                content: state ? state.content : (found.content || ''),
+                note: 'این فایل آرشیوشده حالا برای ویرایش فعال شده - محتوای کامل آن (بدون برش) بالا برگردانده شد، دقیقاً مثل فایلی که تازه ضمیمه شده باشد. اگر کاربر خواسته این فایل ویرایش شود، طبق قوانین ویرایش فایل (apply_edit با search/replace → در صورت لزوم verify_file) پیش برو. اگر فقط برای مطالعه/پاسخ به سؤال لازمش داشتی (نه ویرایش)، همین محتوا را بخوان.'
             };
         }
 
-        // Fallback (should be rare: only if textFiles/blockStates weren't
+        // Fallback (should be rare: only if textFiles/editStates weren't
         // supplied to this call, e.g. some other caller path): keep the
         // old truncated-text behavior so nothing breaks, but this path no
         // longer supports real edits producing a download card.
@@ -1710,82 +1959,65 @@ async function executeToolCall(name, args, ctx) {
         };
     }
 
-    if (name === 'read_block') {
+    if (name === 'read_file_section') {
         const fileName = String((args && args.file) || '').trim();
-        const blockNumber = Number(args && args.block);
+        const startLine = Number(args && args.startLine);
+        const endLine = Number(args && args.endLine);
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
             return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
         }
-        const state = ctx && ctx.blockStates && ctx.blockStates.get(found.name || fileName);
+        const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
         if (!state) {
-            return { error: `وضعیت بلوک‌بندی برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
+            return { error: `وضعیت ویرایش برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
         }
-        if (!Number.isFinite(blockNumber)) {
-            return { error: 'شماره‌ی بلوک نامعتبر است.' };
+        if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
+            return { error: 'startLine/endLine نامعتبر است.' };
         }
-        const block = state.blocks.find(b => b.number === blockNumber);
-        if (!block) {
-            return { error: `بلوک شماره ${blockNumber} وجود ندارد. فایل ${state.blocks.length} بلوک دارد (۱ تا ${state.blocks.length}).` };
-        }
-        const content = state.lines.slice(block.startLine - 1, block.endLine).join('\n');
-        state.readBlocks.add(blockNumber);
-        log.info('agent.tool.read_block', {
-            name: state.name,
-            block: blockNumber,
-            startLine: block.startLine,
-            endLine: block.endLine
-        });
-        return {
-            file: state.name,
-            block: blockNumber,
-            startLine: block.startLine,
-            endLine: block.endLine,
-            content
-        };
+        const lines = state.content.split(/\r?\n/);
+        const clampedEnd = Math.min(endLine, lines.length);
+        const content = lines.slice(startLine - 1, clampedEnd).join('\n');
+        log.info('agent.tool.read_file_section', { name: state.name, startLine, endLine: clampedEnd });
+        return { file: state.name, startLine, endLine: clampedEnd, totalLines: lines.length, content };
     }
 
-    if (name === 'write_block') {
+    if (name === 'apply_edit') {
         const fileName = String((args && args.file) || '').trim();
-        const blockNumber = Number(args && args.block);
-        const newContent = String((args && args.newContent) ?? '');
+        const search = String((args && args.search) ?? '');
+        const replace = String((args && args.replace) ?? '');
+        const occurrence = Number(args && args.occurrence);
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
             return { success: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
         }
-        const state = ctx && ctx.blockStates && ctx.blockStates.get(found.name || fileName);
+        const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
         if (!state) {
-            return { success: false, error: `وضعیت بلوک‌بندی برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
-        }
-        if (!Number.isFinite(blockNumber)) {
-            return { success: false, error: 'شماره‌ی بلوک نامعتبر است.' };
-        }
-        const block = state.blocks.find(b => b.number === blockNumber);
-        if (!block) {
-            return { success: false, error: `بلوک شماره ${blockNumber} وجود ندارد. فایل ${state.blocks.length} بلوک دارد (۱ تا ${state.blocks.length}). اگر نقشه‌ی بلوک‌ها عوض شده (بعد از یک ویرایش قبلی)، از نقشه‌ی جدید در system prompt استفاده کن.` };
+            return { success: false, error: `وضعیت ویرایش برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
         }
 
-        // Build the candidate full-file content with this block's lines
-        // replaced, WITHOUT mutating state yet - validate first.
-        const newBlockLines = newContent.split(/\r?\n/);
-        const candidateLines = [
-            ...state.lines.slice(0, block.startLine - 1),
-            ...newBlockLines,
-            ...state.lines.slice(block.endLine)
-        ];
-        const candidateContent = candidateLines.join('\n');
-
-        const validation = validatePatchedContent(candidateContent, state.name);
-        if (!validation.valid) {
-            log.warn('agent.tool.write_block.rejected_invalid', {
+        const editResult = applySearchReplace(state.content, search, replace, Number.isFinite(occurrence) ? occurrence : undefined);
+        if (!editResult.success) {
+            log.warn('agent.tool.apply_edit.no_match', {
                 name: state.name,
-                block: blockNumber,
+                reason: editResult.reason
+            });
+            return {
+                success: false,
+                error: editResult.reason === 'ambiguous' ? 'این search بیش از یک‌بار در فایل پیدا شد - مبهم است.' : 'این search در فایل پیدا نشد.',
+                ...editResult.report
+            };
+        }
+
+        const validation = validatePatchedContent(editResult.content, state.name);
+        if (!validation.valid) {
+            log.warn('agent.tool.apply_edit.rejected_invalid', {
+                name: state.name,
                 reason: validation.reason
             });
             // FIX (ادعای دروغین موفقیت): این رد شدن را ثبت کن تا اگر مدل
-            // بعداً - بدون هیچ write_block موفقی روی این فایل - متن نهایی
+            // بعداً - بدون هیچ apply_edit موفقی روی این فایل - متن نهایی
             // را طوری بنویسد که انگار ویرایش انجام شده، بتوانیم این
             // ناسازگاری را در پایان runAgentLoop تشخیص دهیم و جلوی رفتن
             // پاسخ گمراه‌کننده به کاربر را بگیریم.
@@ -1799,19 +2031,16 @@ async function executeToolCall(name, args, ctx) {
             }
             return {
                 success: false,
-                error: `این تغییر رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} بلوک را دوباره با read_block بررسی کن و newContent را اصلاح کن.`
+                error: `این تغییر رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} search/replace را اصلاح کن و دوباره apply_edit را صدا بزن.`
             };
         }
 
-        // Accept: commit the new lines, recompute the block map (line
-        // numbers shift if the new block has a different length than the
-        // old one), and mark this file as needing verify_file again before
-        // it can be handed back as final.
-        state.lines = candidateLines;
-        state.editedBlocks.add(blockNumber);
-        recomputeBlocksAfterEdit(state);
+        // Accept: commit new content, mark this file as edited.
+        state.content = editResult.content;
+        state.editCount += 1;
+        state.verified = true; // validated the exact content now stored, same as before
 
-        found.content = state.lines.join('\n');
+        found.content = state.content;
         found._patched = true;
         found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
         state.editedName = found._editedName;
@@ -1819,43 +2048,19 @@ async function executeToolCall(name, args, ctx) {
             ctx.rejectedWriteBlocksByFile.delete(state.name);
         }
 
-        // FIX (quota burn: 3-4 real API calls per single-block edit):
-        // previously write_block only validated the CANDIDATE content
-        // (this block replaced) and then set state.verified = false,
-        // forcing a mandatory separate verify_file round afterwards -
-        // even when this was the only block touched, i.e. the candidate
-        // content and the "final" file content are the exact same
-        // string. That meant validatePatchedContent ran twice on
-        // identical content across two full model round-trips (extra
-        // upstream call + extra tokens) for the common case of a
-        // single-block edit.
-        // Now: since `validation` above already ran on the full file
-        // with this block swapped in (candidateContent), and state.lines
-        // now IS that exact content, we already know the current
-        // whole-file validity - no need to make the model spend another
-        // round asking verify_file to recompute the same check on the
-        // same content. We surface that result directly as `valid` here.
-        // The model still MUST call verify_file again only if it does
-        // more write_block calls after this one (those change the
-        // content again), which the mandatory-verify-before-final-answer
-        // gate below (blockStates verified flag) still enforces.
-        state.verified = true;
-
-        log.info('agent.tool.write_block.success', {
+        log.info('agent.tool.apply_edit.success', {
             name: state.name,
             editedName: found._editedName,
-            block: blockNumber,
-            newBlockCount: state.blocks.length
+            layer: editResult.layer,
+            editCount: state.editCount
         });
 
         return {
             success: true,
             valid: true,
             file: state.name,
-            block: blockNumber,
             editedName: found._editedName,
-            newTotalBlocks: state.blocks.length,
-            note: 'بلوک با موفقیت بازنویسی و بررسی ساختاری شد (فایل کامل با این تغییر معتبر است). اگر بلوک دیگری هم نیاز به تغییر دارد، write_block بعدی را صدا بزن. اگر این آخرین تغییر بود، می‌توانی مستقیماً پاسخ نهایی را بدهی - نیازی به صدا زدن verify_file جداگانه بعد از یک write_block موفق نیست، چون این نتیجه (valid:true) از قبل معادل آن است.'
+            note: 'تغییر با موفقیت اعمال و بررسی ساختاری شد (فایل کامل با این تغییر معتبر است). اگر بخش دیگری هم نیاز به تغییر دارد، apply_edit بعدی را صدا بزن. اگر این آخرین تغییر بود، می‌توانی مستقیماً پاسخ نهایی را بدهی - نیازی به صدا زدن verify_file جداگانه بعد از یک apply_edit موفق نیست، چون این نتیجه (valid:true) از قبل معادل آن است.'
         };
     }
 
@@ -1866,33 +2071,32 @@ async function executeToolCall(name, args, ctx) {
         if (!found) {
             return { valid: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
         }
-        const state = ctx && ctx.blockStates && ctx.blockStates.get(found.name || fileName);
+        const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
         if (!state) {
-            return { valid: false, error: `وضعیت بلوک‌بندی برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
+            return { valid: false, error: `وضعیت ویرایش برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
         }
 
-        const finalContent = state.lines.join('\n');
-        const validation = validatePatchedContent(finalContent, state.name);
+        const validation = validatePatchedContent(state.content, state.name);
         state.verified = validation.valid;
 
         log.info('agent.tool.verify_file', {
             name: state.name,
             valid: validation.valid,
             reason: validation.valid ? null : validation.reason,
-            editedBlockCount: state.editedBlocks.size
+            editCount: state.editCount
         });
 
         if (!validation.valid) {
             return {
                 valid: false,
-                error: `فایل نهایی مشکل ساختاری دارد: ${validation.reason} بلوک(های) مربوطه را با read_block بررسی و با write_block اصلاح کن، سپس دوباره verify_file را صدا بزن. تا این verify پاس نشود، نمی‌توانی پاسخ نهایی بدهی.`
+                error: `فایل نهایی مشکل ساختاری دارد: ${validation.reason} با apply_edit دیگری اصلاح کن، سپس دوباره verify_file را صدا بزن. تا این verify پاس نشود، نمی‌توانی پاسخ نهایی بدهی.`
             };
         }
         return {
             valid: true,
             file: state.name,
             editedName: found._editedName || state.name,
-            editedBlockCount: state.editedBlocks.size,
+            editCount: state.editCount,
             note: 'فایل بررسی شد و مشکل ساختاری ندارد. حالا می‌توانی پاسخ نهایی بدهی.'
         };
     }
@@ -2001,21 +2205,17 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // looping model).
     const MIN_TOOL_ROUNDS = 6;
     const MAX_TOOL_ROUNDS_CEILING = 40;
-    const ROUNDS_PER_BLOCK = 2.5; // read + write, plus slack for one retry every ~2 blocks
+    const ROUNDS_PER_EDITABLE_FILE = 6; // چند apply_edit + یک احتمال retry به‌ازای هر فایل قابل‌ویرایش
     const FIXED_ROUND_OVERHEAD = 4; // initial orientation + final answer + margin
     let MAX_TOOL_ROUNDS;
     if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
-        // Use the largest file's block count - a request can touch
-        // multiple files, and the round budget must cover whichever one
-        // needs the most work, not just the first.
-        const maxBlocksInRequest = Math.max(
-            1,
-            ...textFiles.map(f => computeFileBlocks(String(f.content || ''), f.name).length)
-        );
-        const estimatedRounds = Math.ceil(maxBlocksInRequest * ROUNDS_PER_BLOCK) + FIXED_ROUND_OVERHEAD;
+        // بدون بلوک‌بندی، بودجه دیگر به تعداد بلوک وابسته نیست - به تعداد
+        // فایل‌های قابل‌ویرایش این درخواست (چند apply_edit ممکن روی هرکدام)
+        // وابسته است.
+        const estimatedRounds = Math.ceil(textFiles.length * ROUNDS_PER_EDITABLE_FILE) + FIXED_ROUND_OVERHEAD;
         MAX_TOOL_ROUNDS = Math.min(MAX_TOOL_ROUNDS_CEILING, Math.max(MIN_TOOL_ROUNDS, estimatedRounds));
         log.info('agent.rounds.dynamic', {
-            maxBlocksInRequest,
+            editableFiles: textFiles.length,
             estimatedRounds,
             finalMaxToolRounds: MAX_TOOL_ROUNDS
         });
@@ -2053,45 +2253,42 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // same incoming user question.
     const scopedSearchState = searchState || { used: false, result: null };
 
-    // BLOCK MAP SETUP: build (or reuse, if this is a retry of the same
-    // HTTP request) one BlockFileState per text file, and inject the
-    // block map into the system prompt. blockStates lives on
-    // sharedRequestState (same object caller uses for the old
-    // inspectedFilesThisRequest/chunkReadsPerFile, now repurposed) so a
-    // key/model retry within the same request reuses the exact same
-    // block boundaries and read/edit progress instead of rebuilding from
-    // the original file content.
-    const blockStates = sharedRequestState?.blockStates || new Map();
+    // EDIT STATE SETUP: build (or reuse, if this is a retry of the same
+    // HTTP request) one FileEditState per text file, and inject the full
+    // current content of each into the system prompt. editStates lives on
+    // sharedRequestState so a key/model retry within the same request
+    // reuses the exact same in-progress content instead of rebuilding
+    // from the original file.
+    const editStates = sharedRequestState?.editStates || new Map();
     if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
         try {
-            if (onStep) onStep('در حال بررسی ساختار فایل...', 'read_block');
-            const blockMaps = textFiles.map((f) => {
+            if (onStep) onStep('در حال بررسی فایل...', 'apply_edit');
+            const fileDumps = textFiles.map((f) => {
                 const key = f.name || 'file';
-                let state = blockStates.get(key);
+                let state = editStates.get(key);
                 if (!state) {
-                    state = createBlockFileState(f);
-                    blockStates.set(key, state);
+                    state = createFileEditState(f);
+                    editStates.set(key, state);
                 }
-                return formatBlockMapForModel(state);
+                return { file: state.name, totalLines: state.content.split(/\r?\n/).length, content: state.content };
             });
-            systemText += `\n\n[نقشه‌ی بلوک‌های فایل - این نقشه از محتوای واقعی فعلی فایل ساخته شده است]\n${JSON.stringify(blockMaps, null, 2)}\n\n` +
+            systemText += `\n\n[محتوای کامل فایل(های) قابل ویرایش - این محتوای واقعی فعلی است]\n${JSON.stringify(fileDumps, null, 2)}\n\n` +
                 'قوانین ویرایش فایل:\n' +
-                '۱. برای دیدن محتوای واقعی یک بلوک، read_block را با شماره‌ی همان بلوک صدا بزن - هرگز حدس نزن.\n' +
-                '۲. برای تغییر، write_block را با شماره‌ی بلوک و کل محتوای جدید آن بلوک صدا بزن (خطوطی که تغییر نکرده‌اند را هم دوباره در newContent بنویس).\n' +
-                '۳. هر write_block موفق خودش نتیجه‌ی اعتبارسنجی فایل کامل را در فیلد valid برمی‌گرداند. اگر آخرین write_block لازم را زدی و valid:true گرفتی، مستقیم می‌توانی پاسخ نهایی را بدهی - نیازی به verify_file جداگانه نیست مگر بخواهی بدون تغییر جدید یک بار دیگر وضعیت فعلی را چک کنی.\n' +
-                '۴. بعد از هر write_block موفق، شماره‌ی بلوک‌های فایل ممکن است تغییر کند (چون طول بلوک عوض شده) - همیشه از "newTotalBlocks" در نتیجه‌ی write_block یا نقشه‌ی جدید استفاده کن، نه شماره‌های قدیمی.\n' +
-                '۵. اگر بخشی از فایل که نیاز به تغییر ندارد، نیازی به read_block/write_block هم ندارد - فقط بلوک(های) مرتبط با درخواست کاربر را دست بزن.\n' +
-                '۶. اگر "alreadyRead" یک بلوک true است، یعنی محتوای آن را قبلاً در همین درخواست خوانده‌ای (حتی اگر این یک retry باشد) - آن را دوباره با read_block نخوان؛ از محتوایی که قبلاً دیدی استفاده کن. فقط بلوکی را دوباره بخوان که بعد از خواندنش با write_block تغییر کرده باشد (چون شماره‌بندی ممکن است عوض شده باشد).\n';
-            log.info('file.blocks.mapped', {
-                files: blockMaps.length,
-                names: blockMaps.map(x => x.file),
-                totalBlocks: blockMaps.map(x => x.totalBlocks)
+                '۱. برای تغییر، apply_edit را با search (متن دقیق موجود در محتوای بالا) و replace (متن جدید) صدا بزن. search باید چند خط اطراف تغییر را هم شامل شود تا در کل فایل یکتا باشد.\n' +
+                '۲. هر apply_edit موفق خودش نتیجه‌ی اعتبارسنجی فایل کامل را در فیلد valid برمی‌گرداند. اگر آخرین تغییر لازم را زدی و valid:true گرفتی، مستقیم می‌توانی پاسخ نهایی را بدهی - نیازی به verify_file جداگانه نیست مگر بخواهی بدون تغییر جدید یک بار دیگر وضعیت فعلی را چک کنی.\n' +
+                '۳. اگر apply_edit به دلیل «پیدا نشدن» یا «ابهام» رد شد، از context هایی که در پاسخ خطا برمی‌گردد استفاده کن تا search را دقیق‌تر و یکتا کنی، سپس دوباره صدا بزن.\n' +
+                '۴. اگر فایل خیلی بزرگ است و برای نوشتن search دقیق نیاز به دیدن دوباره‌ی یک بخش خاص داری (نه محتوای بالا که ممکن است کوتاه‌شده باشد)، از read_file_section استفاده کن.\n' +
+                '۵. بعد از هر apply_edit موفق، محتوای فایل عوض شده - برای ویرایش بعدی روی همان فایل، search را از متن جدید (نه متن اولیه‌ی بالا) انتخاب کن، مگر بخش موردنظر دست‌نخورده مانده باشد.\n';
+            log.info('file.edit_state.mapped', {
+                files: fileDumps.length,
+                names: fileDumps.map(x => x.file),
+                totalLines: fileDumps.map(x => x.totalLines)
             });
         } catch (error) {
-            log.warn('file.blocks.mapping_failed', {
+            log.warn('file.edit_state.mapping_failed', {
                 message: error?.message || String(error)
             });
-            // Do not fail the whole chat because a best-effort block map
+            // Do not fail the whole chat because a best-effort dump
             // could not be produced. The model still has the original file.
         }
     }
@@ -2145,14 +2342,14 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // same as before fileEditIntent was blanket-added.
     const roundNeedsMoreTime = (round) =>
         hasVideoAttachment ||
-        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasBlockRead));
+        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasSectionRead));
     let lastToolCallWasArchiveRead = false;
     // FIX (dead flag): lastToolCallWasChunkRead tracked get_file_chunk,
     // which no longer exists in the block-based system - it was declared
     // and reset every round but never re-armed anywhere, so it was always
     // false. read_block is this system's equivalent heavy read and gets
     // the same "give the NEXT round more time" treatment archive reads do.
-    let lastToolCallWasBlockRead = false;
+    let lastToolCallWasSectionRead = false;
 
     // DIAGNOSTICS (ردِ کامل اجرای عامل): برای هر round، یک رکورد ساختاریافته
     // نگه می‌داریم - نه فقط یک پیام خطای کلی در انتها. این آرایه همیشه (چه
@@ -2175,13 +2372,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // chunkReadsPerFile (repeat-guards for the old inspect_file/
     // get_file_chunk tools) were removed - those tools no longer exist.
     // Their job (persisting file-editing progress across key/model
-    // retries within one HTTP request) is now done by blockStates, read
+    // retries within one HTTP request) is now done by editStates, read
     // from sharedRequestState at the top of this function.
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
-        lastToolCallWasBlockRead = false; // consumed for this round; re-armed below only if this round's own tool call is a block read
+        lastToolCallWasSectionRead = false; // consumed for this round; re-armed below only if this round's own tool call is a section read
         const roundStartedAt = Date.now();
         const roundEntry = {
             round: round + 1,
@@ -2397,8 +2594,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         // valid/invalid result to react to (it might still be wrong about
         // "I'm done" even if verify_file itself passes, but at minimum the
         // structural check always runs before delivery).
-        if (functionCalls.length === 0 && blockStates && blockStates.size > 0) {
-            const unverified = [...blockStates.values()].find(s => s.editedBlocks.size > 0 && !s.verified);
+        if (functionCalls.length === 0 && editStates && editStates.size > 0) {
+            const unverified = [...editStates.values()].find(s => s.editCount > 0 && !s.verified);
             if (unverified) {
                 log.info('agent.verify_gate.forced', {
                     file: unverified.name,
@@ -2548,7 +2745,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // فقط زمانی فعال می‌شد که write_block حداقل یک بار رد شده
             // باشد. اما یک حالت بدتر هم وجود دارد - وقتی کاربر واقعاً یک
             // فایل تازه برای ویرایش ضمیمه کرده (fileEditIntent === true،
-            // یعنی blockStates ساخته شده) ولی مدل کلاً هیچ‌وقت write_block
+            // یعنی editStates ساخته شده) ولی مدل کلاً هیچ‌وقت apply_edit
             // را روی هیچ بلوکی صدا نزده (نه موفق، نه رد شده) و مستقیم با
             // متنی که به نظر ادعای انجام‌شدن تغییر دارد به پایان رسیده. این
             // را هم با شمارش کل فراخوانی‌های write_block (از toolCallTally)
@@ -2556,7 +2753,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // write_block اصلاً صدا زده نشد و هیچ فایلی patch نشد، این هم
             // همان کلاس مشکل است.
             const writeBlockCallCount = toolCallTally['write_block'] || 0;
-            const hadEditableFiles = blockStates && blockStates.size > 0;
+            const hadEditableFiles = editStates && editStates.size > 0;
             let unresolvedEditFailure = null;
             if (rejectedWriteBlocksByFile && rejectedWriteBlocksByFile.size > 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
                 const entries = [...rejectedWriteBlocksByFile.entries()];
@@ -2566,7 +2763,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 };
             } else if (hadEditableFiles && writeBlockCallCount === 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
                 unresolvedEditFailure = {
-                    files: [...blockStates.keys()].map(name => ({ name, rejectedAttempts: 0, lastReason: null })),
+                    files: [...editStates.keys()].map(name => ({ name, rejectedAttempts: 0, lastReason: null })),
                     note: 'کاربر فایلی برای ویرایش در دسترس مدل قرار داده بود، اما مدل حتی یک‌بار هم write_block را روی آن صدا نزد - یعنی هیچ تلاشی برای اعمال تغییر واقعی انجام نشده. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، این ادعا نادرست است - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
                 };
             }
@@ -2608,7 +2805,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             scopedSearchState.used = true;
-            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates });
+            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache, editStates });
             scopedSearchState.result = result;
             searchResult = result;
             if (result.askUser) earlySearchAskUser = result.askUser;
@@ -2721,12 +2918,12 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             const toolCallStartedAt = Date.now();
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates, rejectedWriteBlocksByFile, originalFreshFileNames });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, editStates, rejectedWriteBlocksByFile, originalFreshFileNames });
             const toolCallDurationMs = Date.now() - toolCallStartedAt;
 
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
-            if (call.name === 'read_block') lastToolCallWasBlockRead = true;
+            if (call.name === 'read_file_section') lastToolCallWasSectionRead = true;
 
             // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
             // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
@@ -2743,7 +2940,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 durationMs: toolCallDurationMs,
                 ok: !(result && result.error),
                 error: (result && result.error) || null,
-                patched: !!(result && result.success && (call.name === 'write_block')),
+                patched: !!(result && result.success && (call.name === 'apply_edit')),
                 callIndexForThisTool: toolCallTally[call.name]
             });
 
@@ -2753,11 +2950,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 // After reading a block, explicitly tell the model that context is
 // already loaded. This prevents restarting file inspection from zero.
 let responseForModel = result;
-if (call.name === 'read_block' && result && !result.error) {
+if (call.name === 'read_file_section' && result && !result.error) {
     responseForModel = {
         ...result,
         agentInstruction:
-            'Block content loaded successfully. Continue from this context - do not re-read the same block again unless you are about to write_block it.'
+            'Section content loaded successfully. Continue from this context - use it to build an exact search for apply_edit.'
     };
 }
 
@@ -3614,7 +3811,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
             systemText += `
 
-حالت ویرایش فایل (بلوک‌محور):
+حالت ویرایش فایل (SEARCH/REPLACE):
 
 - کاربر ${textFiles.length > 1
                     ? `${textFiles.length} فایل کد/متن (${fileNamesList})`
@@ -3624,26 +3821,26 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - محتوای فایل منبع معتبر کد است.
 - اگر کاربر تغییر کد خواست، واقعاً تغییر را روی فایل اعمال کن.
 - ساختارهای موجود را بررسی کن و چیزهای بی‌دلیل اختراع نکن.
-- به جای بازنویسی کل فایل، فقط بلوک(های) لازم را تغییر بده.
+- به جای بازنویسی کل فایل، فقط قطعه(های) لازم را با apply_edit تغییر بده.
 
-نقشه‌ی بلوک‌های فایل از قبل در پیام سیستم (بخش [نقشه‌ی بلوک‌های فایل]) به تو داده شده - هر بلوک یک شماره، محدوده‌ی خط، و پیش‌نمایش دارد.
+محتوای کامل هر فایل از قبل در پیام سیستم (بخش [محتوای کامل فایل(های) قابل ویرایش]) به تو داده شده است.
 
 روند اجباری ویرایش (هر مرحله قبل از بعدی):
-۱. از روی نقشه‌ی بلوک‌ها، شماره‌ی بلوک(های) مرتبط با درخواست کاربر را پیدا کن - حدس نزن، از preview هر بلوک در نقشه کمک بگیر.
-۲. read_block را با شماره‌ی همان بلوک صدا بزن تا محتوای واقعی و کامل آن را ببینی.
-۳. write_block را با شماره‌ی همان بلوک و newContent (محتوای کامل جدید بلوک، شامل خطوطی که تغییر نکرده‌اند اما باید بمانند) صدا بزن.
-   - اگر success:true برگشت، تغییر اعمال شد. توجه کن که "newTotalBlocks" ممکن است فرق کند - اگر بلوک دیگری هم باید تغییر کند، از نقشه‌ی به‌روز (در نتیجه‌ی بعدی یا پیام سیستم) استفاده کن، نه شماره‌ی قدیمی.
-   - اگر success:false برگشت، بر اساس خطای برگشتی (مثلاً مشکل ساختاری) بلوک را با read_block دوباره ببین و newContent را اصلاح کن.
-۴. اگر چند بلوک باید تغییر کنند، آن‌ها را یکی‌یکی (read_block -> write_block برای هرکدام) پردازش کن.
-۵. بعد از تمام write_block های لازم، حتماً verify_file را صدا بزن. اگر valid:false برگشت، بلوک(های) مشکل‌دار را اصلاح و دوباره verify_file را صدا بزن - تا valid:true نگیری اجازه‌ی پاسخ نهایی را نداری.
-۶. بعد از verify_file موفق (valid:true)، به کاربر بگو چه تغییری دادی؛ نیازی به چاپ کد کامل فایل یا هیچ بلاک JSON خاصی در پاسخ نیست - فایل نهایی از روی بلوک‌های ویرایش‌شده به کاربر تحویل داده می‌شود.
+۱. از روی محتوای کامل فایل که داری، بخش دقیقی که باید تغییر کند را پیدا کن - حدس نزن، متن واقعی را از همان محتوا کپی کن.
+۲. apply_edit را با file، search (متن دقیق موجود - چند خط اطراف تغییر برای یکتا بودن) و replace (متن نهایی جدید همان بخش) صدا بزن.
+   - اگر success:true و valid:true برگشت، تغییر اعمال شد.
+   - اگر success:false برگشت (پیدا نشد یا مبهم بود)، از context هایی که در پاسخ خطا برگردانده می‌شود کمک بگیر تا search را دقیق‌تر/یکتاتر کنی، سپس دوباره صدا بزن. هرگز حدس نزن یا محتوا را از حافظه بازسازی نکن - از context واقعی برگشتی استفاده کن.
+   - اگر لازم بود متن دقیق یک بخش را دوباره ببینی (فایل خیلی بزرگ بود یا مطمئن نبودی)، read_file_section را با startLine/endLine صدا بزن.
+۳. اگر چند بخش جدا از هم باید تغییر کنند، apply_edit را یکی‌یکی برای هرکدام صدا بزن.
+۴. بعد از تمام apply_edit های لازم، حتماً verify_file را صدا بزن. اگر valid:false برگشت، بخش مشکل‌دار را با apply_edit دیگری اصلاح و دوباره verify_file را صدا بزن - تا valid:true نگیری اجازه‌ی پاسخ نهایی را نداری.
+۵. بعد از verify_file موفق (valid:true)، به کاربر بگو چه تغییری دادی؛ نیازی به چاپ کد کامل فایل یا هیچ بلاک JSON خاصی در پاسخ نیست - فایل نهایی از روی تغییرات اعمال‌شده به کاربر تحویل داده می‌شود.
 
 خارج از این روند، کد کامل فایل را دوباره چاپ نکن.
 
 قوانین حیاتی درباره‌ی ادعای موفقیت (بسیار مهم - نقض این قوانین یعنی کاربر هیچ فایلی دریافت نمی‌کند):
-- هرگز جمله‌هایی مثل «با موفقیت ذخیره/ویرایش/اعمال شد» یا مشابه آن ننویس مگر اینکه واقعاً write_block را صدا زده باشی (و success:true گرفته باشی) و سپس verify_file را صدا زده باشی و valid:true گرفته باشی. اگر این دو ابزار صدا زده نشده یا شکست خورده‌اند، هرگز ادعای موفقیت نکن - فقط بگو که هنوز موفق نشده‌ای.
-- تغییر کد را هرگز به‌صورت یک بلوک کد جدا (مثلاً \`\`\`html ... \`\`\` یا \`\`\`css ... \`\`\`) در متن پاسخ ننویس یا نشان نده، حتی اگر بخواهی فقط توضیح بدهی چه چیزی عوض شده - این کار توسط رابط کاربری به‌عنوان یک فایل جدید و جداگانه (نه ویرایش فایل موجود) نمایش داده می‌شود، هیچ دکمه‌ی دانلود واقعی ندارد، و کاربر را گیج می‌کند چون فکر می‌کند این همان فایل ویرایش‌شده است در حالی که نیست. اگر می‌خواهی تغییر را توضیح دهی، فقط در قالب متن عادی (بدون \`\`\`) توضیح بده؛ تغییر واقعی فقط و فقط از طریق read_block + write_block + verify_file اعمال می‌شود.
-- اگر write_block یا verify_file شکست خوردند و نتوانستی با تلاش مجدد درستشان کنی، صادقانه بگو که ویرایش انجام نشد و چرا - هرگز وانمود نکن که انجام شده، و هرگز به‌جای انجام واقعی ویرایش، فقط فایل را در پاسخ متنی بازنویسی نکن.
+- هرگز جمله‌هایی مثل «با موفقیت ذخیره/ویرایش/اعمال شد» یا مشابه آن ننویس مگر اینکه واقعاً apply_edit را صدا زده باشی (و success:true گرفته باشی) و سپس verify_file را صدا زده باشی و valid:true گرفته باشی. اگر این دو ابزار صدا زده نشده یا شکست خورده‌اند، هرگز ادعای موفقیت نکن - فقط بگو که هنوز موفق نشده‌ای.
+- تغییر کد را هرگز به‌صورت یک بلوک کد جدا (مثلاً \`\`\`html ... \`\`\` یا \`\`\`css ... \`\`\`) در متن پاسخ ننویس یا نشان نده، حتی اگر بخواهی فقط توضیح بدهی چه چیزی عوض شده - این کار توسط رابط کاربری به‌عنوان یک فایل جدید و جداگانه (نه ویرایش فایل موجود) نمایش داده می‌شود، هیچ دکمه‌ی دانلود واقعی ندارد، و کاربر را گیج می‌کند چون فکر می‌کند این همان فایل ویرایش‌شده است در حالی که نیست. اگر می‌خواهی تغییر را توضیح دهی، فقط در قالب متن عادی (بدون \`\`\`) توضیح بده؛ تغییر واقعی فقط و فقط از طریق apply_edit + verify_file اعمال می‌شود.
+- اگر apply_edit یا verify_file شکست خوردند و نتوانستی با تلاش مجدد درستشان کنی، صادقانه بگو که ویرایش انجام نشد و چرا - هرگز وانمود نکن که انجام شده، و هرگز به‌جای انجام واقعی ویرایش، فقط فایل را در پاسخ متنی بازنویسی نکن.
 `;
         }
 
@@ -3743,11 +3940,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             // retry attempt for THIS one incoming HTTP request, so a
             // mid-loop attempt failure (retryable rate-limit/timeout ->
             // next key/model) does not reset block read/edit/verify
-            // progress back to zero. blockStates: fileName -> BlockFileState
+            // progress back to zero. editStates: fileName -> FileEditState
             // (see createBlockFileState). See the matching comment inside
             // runAgentLoop for the full explanation.
             const sharedRequestState = {
-                blockStates: new Map()
+                editStates: new Map()
             };
             let attemptsTried = 0; // diagnostic: how many model/key combos actually got a real try
 
@@ -4163,7 +4360,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         // read/edit/verify progress alive across retryable key/model
         // retries within this one HTTP request.
         const sharedRequestState = {
-            blockStates: new Map()
+            editStates: new Map()
         };
         let attemptsTried = 0;
 
