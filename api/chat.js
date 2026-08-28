@@ -972,6 +972,42 @@ const FILE_BLOCK_TARGET_LINES = 500; // اندازه‌ی هدف هر بلوک -
 // تابع/تگ قطع نشود؛ اما این فقط برای خوانایی preview است - چون write_block
 // همیشه کل بلوک را عوض می‌کند نه یک semantic unit را، قطع شدن وسط تابع هیچ
 // مشکل صحتی ایجاد نمی‌کند.
+// محاسبه‌ی عمق تودرتویی تگ‌های XML/HTML در انتهای هر خط، برای فایل‌های
+// html/svg/xml. این فقط یک شمارنده‌ی ساده‌ی باز/بسته (بدون پارس واقعی) است -
+// کافی است تا بفهمیم مرز بین دو خط "داخل یک تگ باز" است یا نه. تگ‌های
+// self-closing (<path .../>) و void element های HTML (br, img, ...) عمق را
+// تغییر نمی‌دهند. کامنت‌های XML/HTML (<!-- ... -->) نادیده گرفته می‌شوند تا
+// تگ داخل کامنت باعث اشتباه شمارش نشود.
+const VOID_HTML_TAGS = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+function computeTagDepthPerLine(content) {
+    const lines = String(content || '').split(/\r?\n/);
+    const depths = new Array(lines.length + 1).fill(0); // depths[i] = عمق بعد از پایان خط i (1-indexed)
+    let depth = 0;
+    let insideComment = false;
+    const tagRe = /<!--|-->|<\/?([a-zA-Z][a-zA-Z0-9:-]*)[^>]*?(\/?)>/g;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        let m;
+        tagRe.lastIndex = 0;
+        while ((m = tagRe.exec(line))) {
+            const token = m[0];
+            if (token === '<!--') { insideComment = true; continue; }
+            if (token === '-->') { insideComment = false; continue; }
+            if (insideComment) continue;
+            const tagName = (m[1] || '').toLowerCase();
+            const selfClosing = m[2] === '/' || VOID_HTML_TAGS.has(tagName);
+            if (selfClosing) continue;
+            if (token.startsWith('</')) {
+                depth = Math.max(0, depth - 1);
+            } else {
+                depth++;
+            }
+        }
+        depths[i + 1] = depth;
+    }
+    return depths;
+}
+
 function computeFileBlocks(content, fileName) {
     const lines = String(content || '').split(/\r?\n/);
     const totalLines = lines.length;
@@ -993,6 +1029,16 @@ function computeFileBlocks(content, fileName) {
             .forEach(item => { if (item && Number.isFinite(item.line)) preferredBoundaries.add(item.line); });
     }
 
+    // FIX (بلوک وسط <g>/<svg>... قطع می‌شد): برای html/svg/xml، مرز بلوک
+    // هرگز نباید جایی باشد که عمق تگ باز است - یعنی هنوز داخل یک تگ نبسته
+    // هستیم. بدون این چک، preferredBoundaries فقط تگ‌های شناخته‌شده‌ی محدود
+    // (div/section/...) را می‌دید و <g>/<path>/عناصر SVG را اصلاً نمی‌شناخت،
+    // پس یک خط خالیِ تصادفیِ وسط <g> به‌عنوان مرز انتخاب می‌شد و write_block
+    // روی یک تگ نصفه رد می‌شد.
+    const lowerName = String(fileName || '').toLowerCase();
+    const isMarkup = /\.(html?|htm|svg|xml)$/.test(lowerName) || /<svg[\s>]/i.test(content.slice(0, 2000));
+    const tagDepths = isMarkup ? computeTagDepthPerLine(content) : null;
+
     let cursor = 1;
     let blockNumber = 1;
     while (cursor <= totalLines) {
@@ -1003,12 +1049,32 @@ function computeFileBlocks(content, fileName) {
             const searchWindow = 40;
             let bestEnd = null;
             for (let candidate = idealEnd; candidate > Math.max(cursor, idealEnd - searchWindow); candidate--) {
+                // اگر داخل یک تگ باز هستیم (عمق > ۰ در انتهای این خط)، این
+                // نقطه هرگز مرز معتبر نیست - حتی اگر preferredBoundaries یا
+                // خط خالی باشد، چون قطع کردن اینجا یک تگ باز را نصفه رها
+                // می‌کند.
+                if (tagDepths && tagDepths[candidate] > 0) continue;
+
                 const lineText = lines[candidate - 1];
                 const nextLineIsBoundary = preferredBoundaries.has(candidate + 1);
                 const thisLineBlank = lineText !== undefined && lineText.trim() === '';
                 if (nextLineIsBoundary || thisLineBlank) {
                     bestEnd = candidate;
                     break;
+                }
+            }
+            // اگر هیچ مرز "ایده‌آل" با عمق صفر پیدا نشد، حداقل نزدیک‌ترین
+            // نقطه‌ی عمق-صفر را در کل بازه‌ی مجاز پیدا کن (نه فقط پنجره‌ی
+            // ۴۰ خطی) تا مطمئن شویم بلوک هرگز وسط تگ باز قطع نمی‌شود، حتی
+            // اگر تگ خیلی طولانی (چند صد خط) باشد.
+            if (!bestEnd && tagDepths) {
+                for (let candidate = idealEnd; candidate >= cursor; candidate--) {
+                    if (tagDepths[candidate] === 0) { bestEnd = candidate; break; }
+                }
+                if (!bestEnd) {
+                    for (let candidate = idealEnd + 1; candidate <= totalLines; candidate++) {
+                        if (tagDepths[candidate] === 0) { bestEnd = candidate; break; }
+                    }
                 }
             }
             end = bestEnd || idealEnd;
@@ -1693,6 +1759,19 @@ async function executeToolCall(name, args, ctx) {
                 block: blockNumber,
                 reason: validation.reason
             });
+            // FIX (ادعای دروغین موفقیت): این رد شدن را ثبت کن تا اگر مدل
+            // بعداً - بدون هیچ write_block موفقی روی این فایل - متن نهایی
+            // را طوری بنویسد که انگار ویرایش انجام شده، بتوانیم این
+            // ناسازگاری را در پایان runAgentLoop تشخیص دهیم و جلوی رفتن
+            // پاسخ گمراه‌کننده به کاربر را بگیریم.
+            if (ctx && ctx.rejectedWriteBlocksByFile) {
+                const key = state.name;
+                const prev = ctx.rejectedWriteBlocksByFile.get(key) || { count: 0, lastReason: null };
+                ctx.rejectedWriteBlocksByFile.set(key, {
+                    count: prev.count + 1,
+                    lastReason: validation.reason
+                });
+            }
             return {
                 success: false,
                 error: `این تغییر رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} بلوک را دوباره با read_block بررسی کن و newContent را اصلاح کن.`
@@ -1711,6 +1790,9 @@ async function executeToolCall(name, args, ctx) {
         found._patched = true;
         found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
         state.editedName = found._editedName;
+        if (ctx && ctx.rejectedWriteBlocksByFile) {
+            ctx.rejectedWriteBlocksByFile.delete(state.name);
+        }
 
         // FIX (quota burn: 3-4 real API calls per single-block edit):
         // previously write_block only validated the CANDIDATE content
@@ -1889,29 +1971,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const ROUNDS_PER_BLOCK = 2.5; // read + write, plus slack for one retry every ~2 blocks
     const FIXED_ROUND_OVERHEAD = 4; // initial orientation + final answer + margin
     let MAX_TOOL_ROUNDS;
-    // FIX (paired with the fileEditIntent widening above): the round
-    // budget itself must also account for archived files, not just
-    // textFiles. At the moment runAgentLoop starts, an archived-only edit
-    // turn has an EMPTY textFiles - the promotion into textFiles only
-    // happens later, inside executeToolCall, once the model actually
-    // calls get_archived_file. So block-counting only textFiles here
-    // would still under-budget that first round, even with
-    // fileEditIntent now true. archivedFiles already carries full content
-    // (see the FEATURE comment where it's read from the request body), so
-    // computing its block count costs nothing extra - it just makes sure
-    // a heavy archived file gets the same realistic round ceiling a
-    // freshly-attached one already does.
-    const relevantFilesForBudget = [
-        ...(Array.isArray(textFiles) ? textFiles : []),
-        ...(Array.isArray(archivedFiles) ? archivedFiles : [])
-    ];
-    if (fileEditIntent && relevantFilesForBudget.length > 0) {
+    if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
         // Use the largest file's block count - a request can touch
         // multiple files, and the round budget must cover whichever one
         // needs the most work, not just the first.
         const maxBlocksInRequest = Math.max(
             1,
-            ...relevantFilesForBudget.map(f => computeFileBlocks(String(f.content || ''), f.name).length)
+            ...textFiles.map(f => computeFileBlocks(String(f.content || ''), f.name).length)
         );
         const estimatedRounds = Math.ceil(maxBlocksInRequest * ROUNDS_PER_BLOCK) + FIXED_ROUND_OVERHEAD;
         MAX_TOOL_ROUNDS = Math.min(MAX_TOOL_ROUNDS_CEILING, Math.max(MIN_TOOL_ROUNDS, estimatedRounds));
@@ -2064,6 +2130,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const roundTrace = [];
     const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
     const agentLoopStartedAt = Date.now();
+    // FIX (ادعای دروغین موفقیت بعد از write_block ردشده): وقتی write_block
+    // به دلیل نامعتبر شدن فایل رد می‌شود (validatePatchedContent) و مدل به
+    // جای اصلاح newContent، سراغ منابع دیگر می‌رود و در متن نهایی وانمود
+    // می‌کند ویرایش انجام شده، هیچ _patched ای روی فایل ثبت نشده - این
+    // Map برای هر فایل، تعداد write_block های ردشده و آخرین دلیل رد شدن را
+    // نگه می‌دارد تا در پایان بتوانیم این ناسازگاری را تشخیص دهیم.
+    const rejectedWriteBlocksByFile = new Map(); // fileName -> { count, lastReason }
 
     // NOTE (block-based rewrite): inspectedFilesThisRequest and
     // chunkReadsPerFile (repeat-guards for the old inspect_file/
@@ -2427,13 +2500,38 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     content: f.content || ''
                 }));
 
+            // FIX (ادعای دروغین موفقیت): اگر روی این درخواست حداقل یک
+            // write_block رد شده (فایل هیچ‌وقت واقعاً پچ نشده - نه در
+            // editedFiles و نه در partialFiles) و مدل با این حال دارد
+            // متنی می‌فرستد که به نظر ادعای انجام‌شدن ویرایش را دارد،
+            // این حالت را واقعی و صریح به کاربر/کلاینت اطلاع بده به‌جای
+            // رها کردن متن گمراه‌کننده‌ی مدل بدون هیچ نشانه‌ای. این فقط
+            // یک فلگ اطلاعاتی است - finalText مدل دست‌نخورده می‌ماند،
+            // چون ممکن است متن واقعاً درست باشد (مثلاً مدل صادقانه گفته
+            // "نتونستم ویرایش کنم")؛ اینجا فقط داده‌ی تشخیصی اضافه می‌شود
+            // تا کلاینت بتواند در صورت نیاز هشدار نشان دهد.
+            let unresolvedEditFailure = null;
+            if (rejectedWriteBlocksByFile && rejectedWriteBlocksByFile.size > 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
+                const entries = [...rejectedWriteBlocksByFile.entries()];
+                unresolvedEditFailure = {
+                    files: entries.map(([name, info]) => ({ name, rejectedAttempts: info.count, lastReason: info.lastReason })),
+                    note: 'مدل حداقل یک بار write_block روی این فایل(ها) را امتحان کرد و رد شد (فایل نامعتبر می‌شد)، و در نهایت بدون هیچ ویرایش موفقی به پایان رسید. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، آن ادعا مربوط به این فایل(ها) نیست - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
+                };
+                log.warn('agent.unresolved_edit_failure', {
+                    files: unresolvedEditFailure.files,
+                    finishReason,
+                    round
+                });
+            }
+
             return {
                 finalText: textParts.join(''),
                 finishReason: finishReason,
                 usage: lastUsage,
                 askUser: null,
                 ...(partialFilesOnCutoff.length ? { partialFiles: partialFilesOnCutoff } : {}),
-                ...(editedFiles.length ? { editedFiles } : {})
+                ...(editedFiles.length ? { editedFiles } : {}),
+                ...(unresolvedEditFailure ? { unresolvedEditFailure } : {})
             };
         }
 
@@ -2568,7 +2666,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             const toolCallStartedAt = Date.now();
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates });
+            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, blockStates, rejectedWriteBlocksByFile });
             const toolCallDurationMs = Date.now() - toolCallStartedAt;
 
             if (call.name === 'web_search') scopedSearchState.result = result;
@@ -2595,28 +2693,6 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             });
 
             if (result.askUser) earlyAskUser = result.askUser;
-
-            // DIAGNOSTICS (visible-in-stream write_block outcome): the
-            // success/failure of write_block was previously only visible
-            // in server logs (agent.tool.write_block.success /
-            // .rejected_invalid) or, on a TOOL_LOOP_LIMIT cutoff, inside
-            // diagnostics - never in the live SSE step stream on a clean
-            // STOP finish. That made it impossible to tell, from the
-            // client/Network-tab side alone, whether a turn that ended
-            // with confident-sounding prose actually had a successful
-            // write_block behind it, or whether write_block was rejected
-            // and the model just gave up and answered in prose without
-            // saying so. Surface the real outcome as its own step event so
-            // it shows up in the captured SSE response either way.
-            if (call.name === 'write_block' && onStep) {
-                try {
-                    if (result && result.success) {
-                        onStep(`بخش ${call.args?.block ?? '?'} از «${call.args?.file ?? ''}» با موفقیت بازنویسی شد ✅`, 'write_block_result');
-                    } else {
-                        onStep(`ویرایش بخش ${call.args?.block ?? '?'} از «${call.args?.file ?? ''}» رد شد ❌: ${(result && result.error) || 'نامشخص'}`, 'write_block_result');
-                    }
-                } catch (_) {}
-            }
 
             // FINAL AGENT CONTINUATION GUARD:
 // After reading a block, explicitly tell the model that context is
@@ -2663,28 +2739,12 @@ responseParts.push({
         round: MAX_TOOL_ROUNDS
     });
     log.warn('agent.tool_loop_limit_hit', { toolCallTally, roundTrace });
-    // FIX (patched-but-never-delivered file on round-limit cutoff): if
-    // write_block already succeeded and set _patched on one or more files
-    // before the loop ran out of rounds (e.g. verify_file never got its
-    // own round in time), the edit is real and sitting on textFiles right
-    // now - same as the clean-success path above. Previously this return
-    // had no editedFiles field at all, so hitting the round cap after a
-    // real, valid patch silently threw the result away and never showed a
-    // download card, even though the content was correct and available.
-    const loopLimitEditedFiles = (Array.isArray(textFiles) ? textFiles : [])
-        .filter(f => f && f._patched)
-        .map(f => ({
-            name: f.name,
-            editedName: f._editedName || f.name,
-            content: f.content || ''
-        }));
     return {
         finalText: 'متأسفم، در پردازش این درخواست به مشکل خوردم (تعداد مراحل زیاد شد). می‌تونی دوباره یا واضح‌تر بپرسی؟',
         finishReason: 'TOOL_LOOP_LIMIT',
         usage: lastUsage,
         askUser: null,
-        diagnostics: loopLimitTrace,
-        ...(loopLimitEditedFiles.length ? { editedFiles: loopLimitEditedFiles } : {})
+        diagnostics: loopLimitTrace
     };
 }
 
@@ -2987,27 +3047,7 @@ async function handler(req, res) {
         // costs nothing when the user isn't actually asking for an edit
         // (the model just never calls read_block/write_block), so there's no
         // downside to always doing it whenever textFiles is non-empty.
-        // FIX (archived-file-only edit turns silently got the wrong round
-        // budget and lost their download card): fileEditIntent was gated
-        // ONLY on textFiles (files freshly attached in THIS message). A
-        // turn like "توی این فایل که قبلاً دادم دوباره X رو درست کن" with
-        // no new attachment - editing a previously archived file via
-        // get_archived_file - left textFiles empty, so fileEditIntent was
-        // false: the block-map system prompt, the "don't call
-        // get_archived_file when a file is attached" guard, and the
-        // block-count-based MAX_TOOL_ROUNDS sizing (see below) never
-        // activated for that request. get_archived_file's own promotion
-        // logic still worked and write_block/verify_file could still
-        // succeed, but with the generic MIN_TOOL_ROUNDS=6 budget a heavy
-        // archived file can exhaust the round cap (TOOL_LOOP_LIMIT) before
-        // reaching a clean verified finish - which returns no editedFiles
-        // at all, so no download card ever reaches the client even though
-        // the edit may have partially or fully applied server-side.
-        // archivedFiles already carries full content at zero extra request
-        // cost (see the FEATURE comment above where it's destructured), so
-        // checking it here doesn't add any new cost - it just stops
-        // undercounting turns that reference a previously-sent file.
-        const fileEditIntent = textFiles.length > 0 || archivedFiles.length > 0;
+        const fileEditIntent = textFiles.length > 0;
 
         const oversizedTextFiles =
             incomingFiles.filter(
@@ -3908,6 +3948,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                     : {}),
                                 ...(agentResult.editedFiles?.length
                                     ? { editedFiles: agentResult.editedFiles }
+                                    : {}),
+                                ...(agentResult.unresolvedEditFailure
+                                    ? { unresolvedEditFailure: agentResult.unresolvedEditFailure }
                                     : {})
                             })}\n\n`
                         );
@@ -4164,7 +4207,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         // DIAGNOSTICS: فقط وقتی finishReason غیرعادی است
                         // (سقف مراحل و مشابه آن) پر می‌شود؛ روی پاسخ‌های
                         // معمولی چیزی اضافه نمی‌کند.
-                        ...(agentResult.diagnostics ? { diagnostics: agentResult.diagnostics } : {})
+                        ...(agentResult.diagnostics ? { diagnostics: agentResult.diagnostics } : {}),
+                        ...(agentResult.editedFiles?.length ? { editedFiles: agentResult.editedFiles } : {}),
+                        ...(agentResult.unresolvedEditFailure ? { unresolvedEditFailure: agentResult.unresolvedEditFailure } : {})
                     });
 
                 } catch (error) {
