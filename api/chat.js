@@ -3501,6 +3501,18 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     // logging the connect time. Hoisting it removes that
                     // class of bug entirely, regardless of deploy state.
                     let attemptStartedAt = Date.now();
+                    // FIX (deadlineTimer is not defined): same class of bug
+                    // as attemptStartedAt above. deadlineTimer was declared
+                    // with const INSIDE the try block; if anything threw
+                    // before that declaration line executed (e.g. log.info
+                    // itself, or an error early in the try), the catch block
+                    // below referenced a deadlineTimer that was never
+                    // initialized in this iteration - a real ReferenceError,
+                    // not a hypothetical one (this is exactly what the
+                    // screenshot showed). Hoisted above try, defaulting to
+                    // null, so clearTimeout(deadlineTimer) in catch is always
+                    // safe regardless of where inside try the throw happened.
+                    let deadlineTimer = null;
 
                     try {
                         attemptStartedAt = Date.now();
@@ -3526,7 +3538,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         // deadline passes, same signal path onAbort/fetch
                         // already listens to for client-disconnect.
                         const deadlineMsRemaining = Math.max(0, overallDeadline - Date.now());
-                        const deadlineTimer = setTimeout(() => abortController.abort(), deadlineMsRemaining);
+                        deadlineTimer = setTimeout(() => abortController.abort(), deadlineMsRemaining);
 
                         // FIX: previously this whole section made one raw
                         // streamGenerateContent call and piped SSE chunks
@@ -3882,6 +3894,12 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
                 attemptsTried++;
 
+                // FIX (same class as deadlineTimer in the streaming loop):
+                // hoisted above try so clearTimeout in the catch block below
+                // is always safe, even if something throws before this
+                // iteration's setTimeout call executes.
+                let deadlineTimerNonStream = null;
+
                 try {
                     log.info('model.attempt', {
                         mode: 'non-stream',
@@ -3896,7 +3914,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     // attempts (which let one stuck attempt run far past
                     // the intended request-wide time budget).
                     const deadlineMsRemainingNonStream = Math.max(0, overallDeadline - Date.now());
-                    const deadlineTimerNonStream = setTimeout(() => abortController.abort(), deadlineMsRemainingNonStream);
+                    deadlineTimerNonStream = setTimeout(() => abortController.abort(), deadlineMsRemainingNonStream);
 
                     // Same tool-calling loop as the streaming path (see
                     // comment there) - non-stream mode just doesn't narrate
