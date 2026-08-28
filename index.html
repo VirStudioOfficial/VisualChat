@@ -4031,6 +4031,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             streamErrorDetail = parsed.error;
                         }
                     }
+                    // FIX (missing download card on large/heavy edited files):
+                    // when the last SSE chunk (the one carrying done:true and
+                    // editedFiles) doesn't end with a newline before the
+                    // stream closes, it never gets pushed through the main
+                    // parsing loop above and instead ends up here as a
+                    // leftover fragment in sseBuffer. This branch used to only
+                    // pull `text`/`error` out of it and silently drop
+                    // `editedFiles`, so on a verified, successfully-patched
+                    // heavy file the user would see no download box at all -
+                    // exactly like the light-file path (line ~4014) but
+                    // missing here. Mirror that same extraction here.
+                    if (parsed.done && Array.isArray(parsed.editedFiles) && parsed.editedFiles.length) {
+                        streamEditedFiles = parsed.editedFiles;
+                    }
                 } catch (_) {}
             }
 
