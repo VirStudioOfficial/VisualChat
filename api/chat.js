@@ -1889,13 +1889,29 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const ROUNDS_PER_BLOCK = 2.5; // read + write, plus slack for one retry every ~2 blocks
     const FIXED_ROUND_OVERHEAD = 4; // initial orientation + final answer + margin
     let MAX_TOOL_ROUNDS;
-    if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
+    // FIX (paired with the fileEditIntent widening above): the round
+    // budget itself must also account for archived files, not just
+    // textFiles. At the moment runAgentLoop starts, an archived-only edit
+    // turn has an EMPTY textFiles - the promotion into textFiles only
+    // happens later, inside executeToolCall, once the model actually
+    // calls get_archived_file. So block-counting only textFiles here
+    // would still under-budget that first round, even with
+    // fileEditIntent now true. archivedFiles already carries full content
+    // (see the FEATURE comment where it's read from the request body), so
+    // computing its block count costs nothing extra - it just makes sure
+    // a heavy archived file gets the same realistic round ceiling a
+    // freshly-attached one already does.
+    const relevantFilesForBudget = [
+        ...(Array.isArray(textFiles) ? textFiles : []),
+        ...(Array.isArray(archivedFiles) ? archivedFiles : [])
+    ];
+    if (fileEditIntent && relevantFilesForBudget.length > 0) {
         // Use the largest file's block count - a request can touch
         // multiple files, and the round budget must cover whichever one
         // needs the most work, not just the first.
         const maxBlocksInRequest = Math.max(
             1,
-            ...textFiles.map(f => computeFileBlocks(String(f.content || ''), f.name).length)
+            ...relevantFilesForBudget.map(f => computeFileBlocks(String(f.content || ''), f.name).length)
         );
         const estimatedRounds = Math.ceil(maxBlocksInRequest * ROUNDS_PER_BLOCK) + FIXED_ROUND_OVERHEAD;
         MAX_TOOL_ROUNDS = Math.min(MAX_TOOL_ROUNDS_CEILING, Math.max(MIN_TOOL_ROUNDS, estimatedRounds));
@@ -2625,12 +2641,28 @@ responseParts.push({
         round: MAX_TOOL_ROUNDS
     });
     log.warn('agent.tool_loop_limit_hit', { toolCallTally, roundTrace });
+    // FIX (patched-but-never-delivered file on round-limit cutoff): if
+    // write_block already succeeded and set _patched on one or more files
+    // before the loop ran out of rounds (e.g. verify_file never got its
+    // own round in time), the edit is real and sitting on textFiles right
+    // now - same as the clean-success path above. Previously this return
+    // had no editedFiles field at all, so hitting the round cap after a
+    // real, valid patch silently threw the result away and never showed a
+    // download card, even though the content was correct and available.
+    const loopLimitEditedFiles = (Array.isArray(textFiles) ? textFiles : [])
+        .filter(f => f && f._patched)
+        .map(f => ({
+            name: f.name,
+            editedName: f._editedName || f.name,
+            content: f.content || ''
+        }));
     return {
         finalText: 'متأسفم، در پردازش این درخواست به مشکل خوردم (تعداد مراحل زیاد شد). می‌تونی دوباره یا واضح‌تر بپرسی؟',
         finishReason: 'TOOL_LOOP_LIMIT',
         usage: lastUsage,
         askUser: null,
-        diagnostics: loopLimitTrace
+        diagnostics: loopLimitTrace,
+        ...(loopLimitEditedFiles.length ? { editedFiles: loopLimitEditedFiles } : {})
     };
 }
 
@@ -2933,7 +2965,27 @@ async function handler(req, res) {
         // costs nothing when the user isn't actually asking for an edit
         // (the model just never calls read_block/write_block), so there's no
         // downside to always doing it whenever textFiles is non-empty.
-        const fileEditIntent = textFiles.length > 0;
+        // FIX (archived-file-only edit turns silently got the wrong round
+        // budget and lost their download card): fileEditIntent was gated
+        // ONLY on textFiles (files freshly attached in THIS message). A
+        // turn like "توی این فایل که قبلاً دادم دوباره X رو درست کن" with
+        // no new attachment - editing a previously archived file via
+        // get_archived_file - left textFiles empty, so fileEditIntent was
+        // false: the block-map system prompt, the "don't call
+        // get_archived_file when a file is attached" guard, and the
+        // block-count-based MAX_TOOL_ROUNDS sizing (see below) never
+        // activated for that request. get_archived_file's own promotion
+        // logic still worked and write_block/verify_file could still
+        // succeed, but with the generic MIN_TOOL_ROUNDS=6 budget a heavy
+        // archived file can exhaust the round cap (TOOL_LOOP_LIMIT) before
+        // reaching a clean verified finish - which returns no editedFiles
+        // at all, so no download card ever reaches the client even though
+        // the edit may have partially or fully applied server-side.
+        // archivedFiles already carries full content at zero extra request
+        // cost (see the FEATURE comment above where it's destructured), so
+        // checking it here doesn't add any new cost - it just stops
+        // undercounting turns that reference a previously-sent file.
+        const fileEditIntent = textFiles.length > 0 || archivedFiles.length > 0;
 
         const oversizedTextFiles =
             incomingFiles.filter(
