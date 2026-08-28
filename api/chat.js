@@ -950,7 +950,22 @@ function nextEditedFileName(originalName) {
 |==========================================================================
 */
 
-const FILE_BLOCK_TARGET_LINES = 250; // اندازه‌ی هدف هر بلوک - نه سقف سخت، نزدیک‌ترین مرز منطقی (خط خالی/section) به این عدد انتخاب می‌شود
+// PERF (Vercel Hobby 60s function timeout on heavy files): each round in
+// runAgentLoop is a fully sequential, blocking network round-trip to
+// Gemini - there is no parallelism between read_block/write_block/
+// verify_file calls. A targeted edit on a heavy file (e.g. a single CSS
+// rule change on a 5000+ line index.html) still costs one round per
+// block it touches, so the fewer/larger the blocks, the fewer
+// round-trips a normal edit needs, and the less real wall-clock time the
+// whole request burns before Vercel's hard timeout kills the connection
+// with no response at all (see the "پاسخی دریافت نشد" case). Doubled
+// from 250 -> 500: a typical single-section edit still fits inside one
+// or two blocks (unchanged behavior), but a 5000-line file now maps to
+// roughly half as many total blocks, which also roughly halves the
+// MAX_TOOL_ROUNDS ceiling computed from block count below. This does not
+// change the read_block/write_block/verify_file contract or validation
+// logic - only how finely the same file is sliced.
+const FILE_BLOCK_TARGET_LINES = 500; // اندازه‌ی هدف هر بلوک - نه سقف سخت، نزدیک‌ترین مرز منطقی (خط خالی/section) به این عدد انتخاب می‌شود
 
 // یک فایل را به بلوک‌های ثابت تقسیم می‌کند. مرز هر بلوک تا حد امکان روی یک
 // خط خالی یا مرز section (از analyzeFileStructure) قرار می‌گیرد تا وسط یک
