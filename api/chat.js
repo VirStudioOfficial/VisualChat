@@ -3512,6 +3512,21 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         });
 
                         const abortController = new AbortController();
+                        // FIX (single key attempt could blow past
+                        // overallDeadline entirely): overallDeadline was
+                        // only ever checked BEFORE starting a new attempt
+                        // (the `if (Date.now() > overallDeadline) break`
+                        // above), never enforced WHILE an attempt was
+                        // in-flight. With MAX_TOOL_ROUNDS=10 and up to 170s
+                        // per round, one stuck attempt could run ~28
+                        // minutes uninterrupted - far past the intended
+                        // <=10min overallDeadline - before the check ever
+                        // got a chance to fire again. Force-abort this
+                        // attempt's own controller the moment the shared
+                        // deadline passes, same signal path onAbort/fetch
+                        // already listens to for client-disconnect.
+                        const deadlineMsRemaining = Math.max(0, overallDeadline - Date.now());
+                        const deadlineTimer = setTimeout(() => abortController.abort(), deadlineMsRemaining);
 
                         // FIX: previously this whole section made one raw
                         // streamGenerateContent call and piped SSE chunks
@@ -3617,6 +3632,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             }
                         });
 
+                        clearTimeout(deadlineTimer);
                         markKeyResult(currentKey, true);
                         log.info('model.connected', {
                             mode: 'stream',
@@ -3705,6 +3721,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         return res.end();
 
                     } catch (error) {
+                        clearTimeout(deadlineTimer);
                         const classified = classifyGeminiError(error?.body || error);
                         if (classified.keySpecific) markKeyResult(currentKey, false);
                         log.error('model.stream_error', {
@@ -3873,6 +3890,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     });
 
                     const abortController = new AbortController();
+                    // Same fix as the streaming loop: force-abort this
+                    // attempt once the shared overallDeadline passes,
+                    // instead of only checking the deadline between
+                    // attempts (which let one stuck attempt run far past
+                    // the intended request-wide time budget).
+                    const deadlineMsRemainingNonStream = Math.max(0, overallDeadline - Date.now());
+                    const deadlineTimerNonStream = setTimeout(() => abortController.abort(), deadlineMsRemainingNonStream);
 
                     // Same tool-calling loop as the streaming path (see
                     // comment there) - non-stream mode just doesn't narrate
@@ -3896,6 +3920,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         onStep: null
                     });
 
+                    clearTimeout(deadlineTimerNonStream);
                     markKeyResult(currentKey, true);
                     log.info('request.completed', {
                         mode: 'non-stream',
@@ -3925,6 +3950,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     });
 
                 } catch (error) {
+                    clearTimeout(deadlineTimerNonStream);
                     const classified = classifyGeminiError(error?.body || error);
                     if (classified.keySpecific) markKeyResult(currentKey, false);
                     log.error('model.error', {
