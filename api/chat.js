@@ -2596,6 +2596,28 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
             if (result.askUser) earlyAskUser = result.askUser;
 
+            // DIAGNOSTICS (visible-in-stream write_block outcome): the
+            // success/failure of write_block was previously only visible
+            // in server logs (agent.tool.write_block.success /
+            // .rejected_invalid) or, on a TOOL_LOOP_LIMIT cutoff, inside
+            // diagnostics - never in the live SSE step stream on a clean
+            // STOP finish. That made it impossible to tell, from the
+            // client/Network-tab side alone, whether a turn that ended
+            // with confident-sounding prose actually had a successful
+            // write_block behind it, or whether write_block was rejected
+            // and the model just gave up and answered in prose without
+            // saying so. Surface the real outcome as its own step event so
+            // it shows up in the captured SSE response either way.
+            if (call.name === 'write_block' && onStep) {
+                try {
+                    if (result && result.success) {
+                        onStep(`بخش ${call.args?.block ?? '?'} از «${call.args?.file ?? ''}» با موفقیت بازنویسی شد ✅`, 'write_block_result');
+                    } else {
+                        onStep(`ویرایش بخش ${call.args?.block ?? '?'} از «${call.args?.file ?? ''}» رد شد ❌: ${(result && result.error) || 'نامشخص'}`, 'write_block_result');
+                    }
+                } catch (_) {}
+            }
+
             // FINAL AGENT CONTINUATION GUARD:
 // After reading a block, explicitly tell the model that context is
 // already loaded. This prevents restarting file inspection from zero.
