@@ -452,6 +452,14 @@
         .history-item i { font-size: 0.75rem; flex-shrink: 0; }
         .history-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
+        /* رفع باگ: بدون این خط، مرورگر به‌طور پیش‌فرض دور آیتمی که کلیک/فوکوس
+           شده یک outline آبی می‌کشه که ربطی به استایل .active ما نداره. این
+           outline فقط روی همون آیتمی می‌مونه که آخرین بار فوکوس گرفته - نه
+           لزوماً چتِ باز فعلی - و با کلیک روی چت دیگه هم پاک نمی‌شه مگر
+           فوکوس عوض بشه. حذفش می‌کنیم و به‌جاش outline رو با استایل خودمون
+           هماهنگ می‌کنیم تا با .active قاطی نشه. */
+        .history-item:focus,
+        .history-item:focus-visible { outline: none; }
         .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: color-mix(in srgb, var(--accent-1) 35%, transparent); }
         .history-item.active i { color: var(--accent-2); }
         .history-item-menu-btn {
@@ -2600,7 +2608,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function pullChatsFromServer() {
         if (!currentUser?.email) return;
         try {
-            const listRes = await authFetch(CHATS_API_URL);
+            // یک بار توکن رو از قبل می‌گیریم و برای همه‌ی درخواست‌های این
+            // تابع (چه لیست، چه هر چت داخل حلقه) از همون استفاده می‌کنیم.
+            // قبلاً هر صدا زدن authFetch جدا getFreshGoogleIdToken رو صدا
+            // می‌زد و برای هر چت یک بار google.accounts.id.initialize/prompt
+            // اجرا می‌شد - همین باعث می‌شد پاپ‌آپ ورود گوگل پشت‌سرهم و مکرر
+            // (تقریباً هر ثانیه) دوباره ظاهر بشه.
+            const sharedToken = await getFreshGoogleIdToken();
+            const authHeaders = sharedToken ? { 'Authorization': `Bearer ${sharedToken}` } : {};
+
+            const listRes = await fetch(CHATS_API_URL, { headers: authHeaders });
             if (!listRes.ok) return;
             const { items } = await listRes.json();
             if (!Array.isArray(items) || !items.length) return;
@@ -2611,7 +2628,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const remoteIsNewer = !localChat || (remote.updated_at || 0) > (localChat.updatedAt || 0);
                 if (!remoteIsNewer) continue;
 
-                const fullRes = await authFetch(`${CHATS_API_URL}?chatId=${encodeURIComponent(remote.chat_id)}`);
+                const fullRes = await fetch(`${CHATS_API_URL}?chatId=${encodeURIComponent(remote.chat_id)}`, { headers: authHeaders });
                 if (!fullRes.ok) continue;
                 const full = await fullRes.json();
 
