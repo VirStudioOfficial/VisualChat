@@ -2,6 +2,20 @@
 
 /*
 |--------------------------------------------------------------------------
+| Think mode levels
+|--------------------------------------------------------------------------
+| Maps the client's "حالت تفکر" selector (off/low/medium/high) to Gemini's
+| thinkingLevel values. 'off' (or anything unrecognized) falls back to the
+| existing per-model default in runAgentLoop - Think mode is opt-in.
+*/
+const THINK_LEVEL_MAP = {
+    low: 'low',
+    medium: 'medium',
+    high: 'high'
+};
+
+/*
+|--------------------------------------------------------------------------
 | Logger - structured, no secrets ever printed
 |--------------------------------------------------------------------------
 | Every log line is one JSON object so it's easy to grep/parse in Vercel
@@ -2155,7 +2169,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, sharedRequestState }) {
+async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, sharedRequestState, thinkLevel }) {
     // FIX (تشخیص فایل تازه‌ی ضمیمه‌شده در برابر فایل promote-شده از آرشیو):
     // textFiles یک آرایه‌ی mutable است که get_archived_file هم به آن
     // فایل‌های آرشیوی را push می‌کند (ببین «promoted.push» در آن هندلر).
@@ -2421,9 +2435,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         // اجازه‌ی خاموش کامل تفکر را نمی‌دهند) تاخیر قبل از
                         // شروع پاسخ را به‌شدت کم می‌کند بدون این‌که کیفیت
                         // پاسخ‌های معمولی افت محسوسی داشته باشد.
+                        // FEATURE (Think mode toggle): thinkLevel comes from
+                        // the client's "حالت تفکر" control (off by default -
+                        // see index.html). 'off' keeps the original speed-fix
+                        // behavior (minimal/low per model); when the user
+                        // explicitly turns Think on and picks low/medium/high,
+                        // that overrides the default for every model.
                         generationConfig: {
                             thinkingConfig: {
-                                thinkingLevel: currentModel === 'gemini-3.1-pro-preview' ? 'low' : 'minimal'
+                                thinkingLevel: THINK_LEVEL_MAP[thinkLevel] || (currentModel === 'gemini-3.1-pro-preview' ? 'low' : 'minimal')
                             }
                         },
                         // See hasVideoAttachment / disableTools comment above
@@ -3170,6 +3190,7 @@ async function handler(req, res) {
             rawText,
             file,
             webSearch,
+            thinkLevel,
             history: rawHistory,
             model,
             // FEATURE (recent-chats summary): a short, already-built-on-the-
@@ -3279,6 +3300,7 @@ async function handler(req, res) {
         log.info('request.received', {
             hasFile: !!file || (Array.isArray(req.body?.files) && req.body.files.length > 0),
             webSearch: !!webSearch,
+            thinkLevel: thinkLevel || 'off',
             model: model || 'default',
             historyTurns: history.length,
             stream: wantsStream
@@ -4115,6 +4137,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
                             hasVideoAttachment,
+                            thinkLevel,
                             onStep: (label, toolName) => {
                                 if (toolName === 'web_search') searchWasPerformed = true;
                                 res.write(
@@ -4421,6 +4444,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
                         hasVideoAttachment,
+                        thinkLevel,
                         onStep: null
                     });
 
