@@ -5537,9 +5537,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const chatBox = document.getElementById("chatBox");
         if (!chatBox) return;
         const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
+        // FIX: قبلاً این‌جا chats[currentChatId] کاملاً بازنویسی می‌شد و
+        // pinned قبلی‌ش پاک می‌شد (هر پیام جدید = چت از پین دراومدن!). حالا
+        // فیلدهای قبلی رو نگه می‌داریم و فقط چیزهایی که واقعاً باید عوض
+        // بشن رو آپدیت می‌کنیم. updatedAt هم دقیقاً همین‌جا (نه در باز کردن
+        // چت) به‌روز می‌شه، چون این تابع فقط وقتی صدا زده می‌شه که واقعاً
+        // پیامی رد و بدل شده - همون رفتاری که برای "چت فعال بره بالای
+        // لیست" واقعاً می‌خوایم.
+        const prev = chats[currentChatId] || {};
         chats[currentChatId] = {
+            ...prev,
             title: firstUserMsg.substring(0, 20) + "...",
-            html: chatBox.innerHTML
+            html: chatBox.innerHTML,
+            updatedAt: Date.now()
         };
         queueChatSave(currentChatId);
         try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
@@ -5667,10 +5677,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 </button>
             `;
             item.onclick = () => {
-                console.log('[DEBUG] history item clicked, id=', id, 'typeof id=', typeof id, 'historySelectMode=', historySelectMode, 'isGenerating=', isGenerating, 'currentChatId(before)=', currentChatId);
                 if (historySelectMode) { toggleHistoryItemSelected(id); return; }
                 if (!isGenerating) loadChat(id);
-                console.log('[DEBUG] currentChatId(after)=', currentChatId);
             };
             list.appendChild(item);
         });
@@ -5809,9 +5817,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
 
     function loadChat(id, isInitialLoad = false) {
-        console.log('[DEBUG] loadChat() called with id=', id, 'isInitialLoad=', isInitialLoad, 'chats[id] exists?', !!chats[id]);
         if (isGenerating) stopGeneration();
-        if (!chats[id]) { console.log('[DEBUG] loadChat() ABORTED - chats[id] is falsy'); return; }
+        if (!chats[id]) return;
         currentChatId = id;
         try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
         isFirstMessage = false;
@@ -5819,17 +5826,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         clearCodeFilesMemory();
         lastCodeFilesForEdit = [];
         lastFailedRequest = null;
-        // FEATURE (باز کردن یه چت قدیمی باید اون رو راحت‌ترین چت برای دسترسی
-        // بعدی کنه): قبلاً updatedAt فقط موقع ارسال پیام جدید آپدیت می‌شد، نه
-        // موقع صرفاً باز کردن/خوندن یه چت قدیمی - پس چتی که همین الان بازش
-        // کردی، توی لیست همون‌جای قبلی‌ش (پایین‌تر) می‌موند. حالا با هر بار
-        // باز کردن، updatedAt رو هم به همین لحظه به‌روز می‌کنیم تا چت باز‌شده
-        // بره بالای لیست - مگر این‌که پین‌شده باشه که ترتیب پین‌ها اولویت داره،
-        // یا از قبل همین چت بالای لیست غیرپین‌ها بوده (کار اضافه نکنیم).
-        if (!isInitialLoad) {
-            chats[id].updatedAt = Date.now();
-            queueChatSave(id);
-        }
+        // FIX (چت‌ها هنگام صرفاً باز کردن جابه‌جا می‌شدند و کلیک بعدی به چت
+        // اشتباه می‌خورد): این‌جا قبلاً updatedAt چت را با هر بار *باز کردنش*
+        // (نه فقط با فرستادن پیام تازه) به الان تغییر می‌داد و لیست را
+        // renderHistoryList می‌کرد - یعنی همون لحظه‌ی کلیک، چت به بالای
+        // لیست می‌پرید. چون این جابه‌جایی زیر دست کاربر اتفاق می‌افتاد،
+        // کلیک بعدی روی همون مختصات، عملاً به چت دیگری (که تازه به آن‌جا
+        // منتقل شده بود) می‌خورد و حس می‌شد که هایلایت/انتخاب اشتباه است.
+        // الان updatedAt فقط جایی که واقعاً پیام جدید ذخیره می‌شود (مثلاً
+        // queueChatSave از سمت ارسال پیام) به‌روز می‌شود، نه با صرفِ باز
+        // کردن یک چت قدیمی برای خواندن.
+        
         const chatBox = document.getElementById("chatBox");
         document.getElementById("homeScreen").style.display = 'none';
         chatBox.style.display = 'flex';
