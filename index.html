@@ -599,7 +599,7 @@
             animation: dropUp 0.18s ease;
         }
         @media (max-width: 900px) {
-            .composer-model-selector .model-name { display: inline-block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+            .composer-model-selector .model-name { display: none; }
             .composer-model-selector .model-dropdown { left: auto; right: 0; }
         }
         @keyframes dropUp {
@@ -813,14 +813,26 @@
             border-radius: 22px;
             padding: 6px 10px;
             display: flex;
-            align-items: center;
-            gap: 4px;
+            flex-direction: column;
             box-shadow: 0 6px 24px var(--shadow-a);
             transition: border-color 0.2s, box-shadow 0.2s;
         }
         .input-box:focus-within {
             border-color: color-mix(in srgb, var(--accent-1) 55%, transparent);
             box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-1) 12%, transparent), 0 6px 24px var(--shadow-a);
+        }
+
+        /* پیش‌نمایش فایل/عکس‌های ضمیمه اکنون ردیف بالاییِ خودِ نوار چت است
+           (نه یک باکس شناور جدا)، با یک جداکننده از ردیف تایپ. چون این
+           بخش یک ردیف flex کاملاً مجزاست (نه سیبلینگ textarea در همون
+           ردیف)، هیچ تداخلی با تایپ/نوشتن متن کاربر ندارد. نمایش/عدم‌نمایش
+           با کلاس has-items کنترل می‌شود، نه style.display مستقیم، تا از
+           همون باگی که باعث می‌شد پیش‌نمایش عکس گاهی درجا ناپدید بشه دوباره
+           تکرار نشود. */
+        .input-box-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
 
         /* REDESIGN (چیدمان جمع‌وجورتر نوار ورودی): ترتیب بصری در RTL از
@@ -837,10 +849,14 @@
         textarea#userInput {
             flex: 1;
             color: var(--text-main) !important;
-            -webkit-appearance: auto !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+            field-sizing: fixed !important;
             resize: none !important;
-            overflow-y: auto !important;
-            height: 24px;
+            overflow-y: hidden !important;
+            height: 27px;
+            min-height: 27px;
             max-height: 180px;
             font-size: 0.94rem;
             padding: 4px 2px;
@@ -850,6 +866,9 @@
             box-shadow: none !important;
             scrollbar-width: thin;
             scrollbar-color: var(--border) transparent;
+        }
+        textarea#userInput.overflowing {
+            overflow-y: auto !important;
         }
 
         textarea#userInput::-webkit-scrollbar {
@@ -1039,7 +1058,22 @@
             flex-wrap: wrap;
             align-items: flex-end;
             gap: 10px;
-            padding: 10px 10px 0 10px;
+            padding: 0;
+            max-height: 0;
+            overflow: hidden;
+        }
+        .file-preview-bar.has-items {
+            display: flex;
+            padding: 8px 6px 10px 6px;
+            max-height: none;
+            overflow: visible;
+            border-bottom: 1px solid var(--border-soft);
+            margin-bottom: 6px;
+        }
+        #codeFilesBar.has-items {
+            display: flex;
+            border-bottom: 1px solid var(--border-soft);
+            margin-bottom: 6px;
         }
 
         .file-preview {
@@ -1457,7 +1491,7 @@
             backdrop-filter: blur(2px);
         }
         textarea#userInput {
-            min-height: 24px;
+            min-height: 27px;
             line-height: 1.45 !important;
             padding: 2px 2px !important;
             font-size: .95rem !important;
@@ -1877,9 +1911,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            <div id="filePreviewList" class="file-preview-bar"></div>
-            <div id="codeFilesBar" style="display:none; flex-wrap:wrap; gap:6px; padding:6px 4px;"></div>
-
             <div class="command-menu" id="commandMenu">
                 <div class="command-item" onclick="runComposerCommand('web')"><span><i class="lucide-icon" data-lucide="globe"></i> جستجو در وب</span><span>/web</span></div>
                 <div class="command-item" onclick="runComposerCommand('code')"><span><i class="lucide-icon" data-lucide="code"></i> حالت کدنویسی</span><span>/code</span></div>
@@ -1888,6 +1919,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="composer-hint"><kbd>Enter</kbd> ارسال <span>·</span> <kbd>Shift</kbd>+<kbd>Enter</kbd> خط جدید <span>·</span> / فرمان‌ها</div>
             <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="lucide-icon" data-lucide="arrow-down"></i></button>
             <div class="input-box">
+                <div id="filePreviewList" class="file-preview-bar"></div>
+                <div id="codeFilesBar" style="flex-wrap:wrap; gap:6px;"></div>
+
+                <div class="input-box-row">
                 <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
                     <i class="ph-fill ph-paper-plane-tilt" id="actionIcon"></i>
                 </button>
@@ -1952,6 +1987,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
                         </div>
                     </div>
+                </div>
                 </div>
             </div>
         </div>
@@ -2545,7 +2581,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function autoResizeTextarea(textarea) {
         checkAutoConvertLongText(textarea);
         textarea.style.height = 'auto';
-        textarea.style.height = Math.min(textarea.scrollHeight, 180) + 'px';
+        const newHeight = Math.min(textarea.scrollHeight, 180);
+        textarea.style.height = newHeight + 'px';
+        // FIX (خط اسکرول‌بار ناخواسته کنار دکمه‌ی Think روی تبلت/موبایل):
+        // وقتی جعبه‌ی متن خالیه یا فقط یک خط داره، overflow-y باید hidden
+        // بمونه - چون حتی یک پیکسل اختلاف بین scrollHeight واقعی placeholder
+        // (که گاهی به‌خاطر عرض کم می‌شکنه به دو خط) و max-height باعث می‌شد
+        // مرورگرهای موبایل یک اسکرول‌بار عمودی نازک و همیشگی نشون بدن، با
+        // اینکه چیزی برای اسکرول کردن عملاً وجود نداشت. فقط وقتی واقعاً به
+        // سقف 180px رسیدیم و متن باید داخلی اسکرول بشه، کلاس overflowing
+        // اضافه می‌شه تا overflow-y به auto برگرده.
+        textarea.classList.toggle('overflowing', textarea.scrollHeight > 180);
         // Keep the caret's line in view: once the box hits its max height
         // and becomes internally scrollable, always snap to the bottom so
         // the line currently being typed never gets pushed out of sight.
@@ -3673,11 +3719,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const bar = document.getElementById('codeFilesBar');
         if (!bar) return;
         if (!codeFilesMemory.length) {
-            bar.style.display = 'none';
+            bar.classList.remove('has-items');
             bar.innerHTML = '';
             return;
         }
-        bar.style.display = 'flex';
+        bar.classList.add('has-items');
         bar.innerHTML = codeFilesMemory.map(f => `
             <span class="file-preview" style="display:inline-flex;position:relative;" onclick="openTextFileEditor('${f.name.replace(/'/g, "\\'")}')">
                 <button class="fp-remove" type="button" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="lucide-icon" data-lucide="x"></i></button>
@@ -3746,7 +3792,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function hideCodeFilesBar() {
         const bar = document.getElementById('codeFilesBar');
         if (bar) {
-            bar.style.display = 'none';
+            bar.classList.remove('has-items');
         }
     }
 
@@ -3784,15 +3830,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function addFilePreviewItem(name) {
         const id = 'fp' + (++__filePreviewSeq);
         const list = document.getElementById('filePreviewList');
-        list.style.display = 'flex';
+        list.classList.add('has-items');
         const row = document.createElement('div');
         row.className = 'file-preview';
         row.style.display = 'flex';
         row.id = id;
         row.innerHTML = `
             <button class="fp-remove" type="button" onclick="removeFileItem('${id}')" title="حذف"><i class="lucide-icon" data-lucide="x"></i></button>
+            <img class="fp-thumb" src="" alt="" style="display:none;">
             <div class="fp-icon-wrap">
-                <img class="fp-thumb" src="" alt="" style="display:none;">
                 <i class="lucide-icon fp-type-icon" data-lucide="${getFileTypeIcon(name)}"></i>
             </div>
             <div class="fp-text">
@@ -3841,7 +3887,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // just removed silently reappears in the send payload a moment later.
         cancelledPreviewIds.add(id);
         const list = document.getElementById('filePreviewList');
-        if (list && !list.children.length) list.style.display = 'none';
+        if (list && !list.children.length) list.classList.remove('has-items');
     }
 
     let filesProcessingCount = 0;
@@ -4143,7 +4189,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         selectedFilesData = [];
         document.getElementById('fileInput').value = '';
         const list = document.getElementById('filePreviewList');
-        if (list) { list.innerHTML = ''; list.style.display = 'none'; }
+        if (list) { list.innerHTML = ''; list.classList.remove('has-items'); }
     }
 
     function setupFileDropAndPaste() {
