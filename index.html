@@ -2541,7 +2541,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // انجام می‌دهیم و درخواست را یک بار دیگر تکرار می‌کنیم.
         if (res.status === 401) {
             const freshToken = await forceRefreshGoogleIdToken();
-            if (freshToken) return doFetch(freshToken);
+            if (freshToken) {
+                const retryRes = await doFetch(freshToken);
+                if (retryRes.status !== 401) return retryRes;
+            }
+            // FIX (کاربران موبایل/اندروید بدون دسترسی به Console): اگر بعد از
+            // تلاش برای رفرش هم سرور همچنان 401 بدهد، یعنی توکن ذخیره‌شده
+            // قطعاً خراب/نامعتبر است (نه صرفاً نزدیک به انقضا). قبلاً اینجا
+            // درخواست فقط بی‌صدا شکست می‌خورد و کاربر تا ابد گیر می‌کرد چون
+            // راهی برای پاک کردن دستی localStorage نداشت. حالا به‌صورت خودکار
+            // توکن خراب را پاک می‌کنیم و کاربر را به صفحه‌ی لاگین برمی‌گردانیم.
+            try {
+                localStorage.removeItem('vc_google_id_token');
+                localStorage.removeItem('vc_google_id_token_issued_at');
+                localStorage.removeItem('virtual_chat_user');
+            } catch (_) {}
+            const overlay = document.getElementById('authOverlay');
+            if (overlay) overlay.classList.add('active');
         }
         return res;
     }
