@@ -76,7 +76,7 @@
     <script src="https://accounts.google.com/gsi/client" defer></script>
 
     <style>
-        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.1; }
+        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.35; shape-rendering: geometricPrecision; }
         [class*="ph-"] { vertical-align: -0.09em; }
         :root {
             --bg-main: #000000;
@@ -139,7 +139,10 @@
             margin: 0;
             padding: 0;
             font-family: 'Vazirmatn', sans-serif;
+            font-weight: 500;
             -webkit-tap-highlight-color: transparent;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
         }
 
         select, input, button {
@@ -670,6 +673,12 @@
             position: relative;
         }
 
+        .msg-content-in { animation: msgContentIn 0.42s cubic-bezier(0.22, 1, 0.36, 1); }
+        @keyframes msgContentIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
         .message.user {
             background-color: var(--bg-card);
             border: none;
@@ -972,44 +981,113 @@
             position: fixed;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            width: 92%;
-            max-width: 420px;
-            max-height: 85vh;
+            width: 94%;
+            max-width: 760px;
+            height: 82vh;
+            max-height: 640px;
             background: var(--bg-sidebar);
             border: 1px solid var(--border-soft);
             border-radius: 20px;
-            padding: 22px;
+            padding: 0;
             z-index: 65;
             box-shadow: 0 20px 60px var(--shadow-b);
+            overflow: hidden;
+        }
+        .settings-modal.active { display: flex; animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+        .settings-layout { display: flex; width: 100%; height: 100%; }
+
+        .settings-nav {
+            width: 220px;
+            flex-shrink: 0;
+            border-left: 1px solid var(--border-soft);
+            background: color-mix(in srgb, var(--bg-card) 45%, transparent);
+            padding: 16px 10px;
             overflow-y: auto;
-            scrollbar-width: none; /* Firefox */
-            -ms-overflow-style: none; /* IE and Edge */
-            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
-            mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+            scrollbar-width: none;
         }
-        .settings-modal::-webkit-scrollbar {
-            display: none; /* Chrome, Safari, Opera */
+        .settings-nav::-webkit-scrollbar { display: none; }
+        .settings-nav-title { font-size: 0.78rem; font-weight: 700; color: var(--text-muted); padding: 6px 12px 12px; }
+        .settings-nav-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 9px 12px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            margin-bottom: 2px;
         }
-        .settings-modal.active { display: block; animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+        .settings-nav-item i { font-size: 1rem; width: 18px; text-align: center; flex-shrink: 0; }
+        .settings-nav-item:hover { background: var(--bg-card); color: var(--text-main); }
+        .settings-nav-item.active { background: var(--accent-grad); color: #fff; }
+
+        .settings-main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
 
         .settings-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin: -22px -22px 20px -22px;
-            padding: 22px 22px 10px 22px;
-            position: sticky;
-            top: -22px;
-            background: var(--bg-sidebar);
-            z-index: 2;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-soft);
+            flex-shrink: 0;
+        }
+        .settings-header h2 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .settings-header h2 i { color: var(--accent-2); font-size: 0.95rem; }
+
+        .settings-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 22px 24px;
+            scrollbar-width: none;
+        }
+        .settings-body::-webkit-scrollbar { display: none; }
+
+        .settings-page { display: none; }
+        .settings-page.active { display: block; animation: fadeIn 0.18s ease; }
+
+        .settings-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 14px;
+            padding: 13px 2px;
             border-bottom: 1px solid var(--border-soft);
         }
-        .settings-header h2 { font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-        .settings-header h2 i { color: var(--accent-2); font-size: 0.95rem; }
+        .settings-row:last-child { border-bottom: none; }
+        .settings-row-title { font-size: 0.88rem; font-weight: 600; color: var(--text-main); }
+        .settings-row-desc { font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+
+        .toggle-switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-switch .toggle-track {
+            position: absolute; inset: 0; border-radius: 999px; cursor: pointer;
+            background: var(--border-soft); transition: background 0.2s;
+        }
+        .toggle-switch .toggle-track::before {
+            content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+            border-radius: 50%; background: #fff; transition: transform 0.2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .toggle-switch input:checked + .toggle-track { background: var(--accent-grad); }
+        .toggle-switch input:checked + .toggle-track::before { transform: translateX(-18px); }
 
         .settings-section { margin-bottom: 22px; }
         .settings-section:last-child { margin-bottom: 0; }
         .settings-label { font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; }
+
+        @media (max-width: 640px) {
+            .settings-modal { width: 96%; height: 88vh; max-height: none; border-radius: 16px; }
+            .settings-nav { width: 76px; padding: 12px 6px; }
+            .settings-nav-title { display: none; }
+            .settings-nav-item span { display: none; }
+            .settings-nav-item { justify-content: center; padding: 11px 6px; }
+            .settings-nav-item i { width: auto; font-size: 1.15rem; }
+        }
 
         .settings-input-text {
             width: 100%;
@@ -1697,52 +1775,110 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     <div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
     <div class="settings-modal" id="settingsModal">
-        <div class="settings-header">
-            <h2><i class="lucide-icon" data-lucide="sliders-horizontal"></i> تنظیمات و شخصی‌سازی</h2>
-            <button class="icon-btn" type="button" onclick="closeSettings()" title="بستن"><i class="lucide-icon" data-lucide="x"></i></button>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">نام شما در چت</div>
-            <input type="text" class="settings-input-text" id="customUserNameInput" placeholder="مثلاً: ارشیا" onchange="updateCustomName(this.value)">
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-label">حالت نمایش</div>
-            <div class="segmented" id="themeSegmented">
-                <button class="segmented-btn" data-value="light"><i class="ph-fill ph-sun"></i> روشن</button>
-                <button class="segmented-btn" data-value="dark"><i class="ph-fill ph-moon-stars"></i> تاریک</button>
-                <button class="segmented-btn" data-value="auto"><i class="lucide-icon" data-lucide="contrast"></i> خودکار</button>
+        <div class="settings-layout">
+            <div class="settings-nav">
+                <div class="settings-nav-title">تنظیمات</div>
+                <div class="settings-nav-item active" data-page="general" onclick="switchSettingsPage('general', this)">
+                    <i class="lucide-icon" data-lucide="settings"></i><span>عمومی</span>
+                </div>
+                <div class="settings-nav-item" data-page="appearance" onclick="switchSettingsPage('appearance', this)">
+                    <i class="lucide-icon" data-lucide="palette"></i><span>ظاهر</span>
+                </div>
+                <div class="settings-nav-item" data-page="chat-tools" onclick="switchSettingsPage('chat-tools', this)">
+                    <i class="lucide-icon" data-lucide="message-square"></i><span>ابزار گفتگو</span>
+                </div>
+                <div class="settings-nav-item" data-page="support" onclick="switchSettingsPage('support', this)">
+                    <i class="lucide-icon" data-lucide="life-buoy"></i><span>پشتیبانی</span>
+                </div>
             </div>
-        </div>
 
-        <div class="settings-section">
-            <div class="settings-label">اندازه‌ی متن گفتگو</div>
-            <div class="segmented" id="fontSegmented">
-                <button class="segmented-btn" data-value="small">کوچک</button>
-                <button class="segmented-btn" data-value="normal">معمولی</button>
-                <button class="segmented-btn" data-value="large">بزرگ</button>
-            </div>
-        </div>
+            <div class="settings-main">
+                <div class="settings-header">
+                    <h2 id="settingsPageTitle"><i class="lucide-icon" data-lucide="settings"></i> عمومی</h2>
+                    <button class="icon-btn" type="button" onclick="closeSettings()" title="بستن"><i class="lucide-icon" data-lucide="x"></i></button>
+                </div>
 
-        <div class="settings-section">
-            <div class="settings-label">ابزار گفتگو</div>
-            <div class="chat-empty-tools">
-                <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="lucide-icon" data-lucide="file-down"></i> خروجی Markdown</button>
-                <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="lucide-icon" data-lucide="copy"></i> خروجی متن</button>
-                <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="lucide-icon" data-lucide="trash-2"></i> پاک کردن گفتگو</button>
-            </div>
-        </div>
+                <div class="settings-body">
+                    <!-- General page -->
+                    <div class="settings-page active" data-page="general">
+                        <div class="settings-section">
+                            <div class="settings-label">نام شما در چت</div>
+                            <input type="text" class="settings-input-text" id="customUserNameInput" placeholder="مثلاً: ارشیا" onchange="updateCustomName(this.value)">
+                        </div>
+                    </div>
 
-        <div class="settings-section">
-            <div class="settings-label">گزارش مشکل</div>
-            <textarea id="bugReportText" class="settings-input-text" rows="3" style="width:100%; resize:vertical; font-family:inherit;" placeholder="چه مشکلی دیدی؟ هرچی دقیق‌تر بنویسی بهتره..."></textarea>
-            <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
-                <button class="mini-tool" type="button" id="bugReportSendBtn" onclick="sendBugReport()"><i class="ph-bold ph-bug"></i> ارسال گزارش</button>
-                <span id="bugReportStatus" style="font-size:0.82em; color:var(--text-muted, #94a3b8);"></span>
+                    <!-- Appearance page -->
+                    <div class="settings-page" data-page="appearance">
+                        <div class="settings-section">
+                            <div class="settings-label">حالت نمایش</div>
+                            <div class="segmented" id="themeSegmented">
+                                <button class="segmented-btn" data-value="light"><i class="ph-fill ph-sun"></i> روشن</button>
+                                <button class="segmented-btn" data-value="dark"><i class="ph-fill ph-moon-stars"></i> تاریک</button>
+                                <button class="segmented-btn" data-value="auto"><i class="lucide-icon" data-lucide="contrast"></i> خودکار</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-label">اندازه‌ی متن گفتگو</div>
+                            <div class="segmented" id="fontSegmented">
+                                <button class="segmented-btn" data-value="small">کوچک</button>
+                                <button class="segmented-btn" data-value="normal">معمولی</button>
+                                <button class="segmented-btn" data-value="large">بزرگ</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chat tools page -->
+                    <div class="settings-page" data-page="chat-tools">
+                        <div class="settings-section">
+                            <div class="settings-label">ابزار گفتگو</div>
+                            <div class="chat-empty-tools">
+                                <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="lucide-icon" data-lucide="file-down"></i> خروجی Markdown</button>
+                                <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="lucide-icon" data-lucide="copy"></i> خروجی متن</button>
+                                <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="lucide-icon" data-lucide="trash-2"></i> پاک کردن گفتگو</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Support page -->
+                    <div class="settings-page" data-page="support">
+                        <div class="settings-section">
+                            <div class="settings-label">گزارش مشکل</div>
+                            <textarea id="bugReportText" class="settings-input-text" rows="3" style="width:100%; resize:vertical; font-family:inherit;" placeholder="چه مشکلی دیدی؟ هرچی دقیق‌تر بنویسی بهتره..."></textarea>
+                            <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+                                <button class="mini-tool" type="button" id="bugReportSendBtn" onclick="sendBugReport()"><i class="ph-bold ph-bug"></i> ارسال گزارش</button>
+                                <span id="bugReportStatus" style="font-size:0.82em; color:var(--text-muted, #94a3b8);"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
+
+    <script>
+        const SETTINGS_PAGE_TITLES = {
+            'general': { icon: 'settings', label: 'عمومی' },
+            'appearance': { icon: 'palette', label: 'ظاهر' },
+            'chat-tools': { icon: 'message-square', label: 'ابزار گفتگو' },
+            'support': { icon: 'life-buoy', label: 'پشتیبانی' }
+        };
+        function switchSettingsPage(page, navEl) {
+            document.querySelectorAll('.settings-nav-item').forEach(el => el.classList.remove('active'));
+            navEl.classList.add('active');
+            document.querySelectorAll('.settings-page').forEach(el => el.classList.remove('active'));
+            const target = document.querySelector(`.settings-page[data-page="${page}"]`);
+            if (target) target.classList.add('active');
+            const meta = SETTINGS_PAGE_TITLES[page];
+            const titleEl = document.getElementById('settingsPageTitle');
+            if (meta && titleEl) {
+                titleEl.innerHTML = `<i class="lucide-icon" data-lucide="${meta.icon}"></i> ${meta.label}`;
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
+            const body = document.querySelector('.settings-body');
+            if (body) body.scrollTop = 0;
+        }
+    </script>
 
 <script>
     // =====================================================
@@ -4339,6 +4475,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
 
                 loadingDiv.innerHTML = finalHtml;
+                loadingDiv.classList.remove('msg-content-in');
+                void loadingDiv.offsetWidth; // restart animation
+                loadingDiv.classList.add('msg-content-in');
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
                 removePushedUserTurnIfUnanswered();
