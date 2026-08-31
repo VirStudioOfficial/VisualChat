@@ -2460,55 +2460,27 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let googleTokenRefreshPromise = null;
 
     async function getFreshGoogleIdToken() {
-        console.log('[DEBUG] getFreshGoogleIdToken() called', new Error().stack);
         const token = localStorage.getItem('vc_google_id_token');
         const issuedAt = Number(localStorage.getItem('vc_google_id_token_issued_at') || 0);
         if (token && (Date.now() - issuedAt) < GOOGLE_TOKEN_MAX_AGE_MS) {
-            console.log('[DEBUG] getFreshGoogleIdToken() using cached token, age(ms)=', Date.now() - issuedAt);
             return token;
         }
-        console.log('[DEBUG] getFreshGoogleIdToken() token stale/missing - WILL CALL google.accounts.id.prompt()');
-        if (googleTokenRefreshPromise) return googleTokenRefreshPromise;
-        googleTokenRefreshPromise = new Promise((resolve) => {
-            if (!window.google || !google.accounts || !google.accounts.id) {
-                resolve(token || null); // بهترین کاری که از دستمون برمیاد - همون قدیمی رو امتحان کن
-                return;
-            }
-            // callback موقتی: یه بار برای گرفتن توکن تازه صدا زده می‌شه،
-            // بدون این‌که روی رفتار عادی لاگین (handleCredentialResponse)
-            // اثر بذاره - چون google.accounts.id فقط یه callback global داره،
-            // این‌جا موقتاً عوضش می‌کنیم و بعد برمی‌گردونیم.
-            let settled = false;
-            const timeoutId = setTimeout(() => { if (!settled) { settled = true; resolve(token || null); } }, 4000);
-            try {
-                google.accounts.id.initialize({
-                    client_id: document.querySelector('#g_id_onload')?.dataset?.client_id || undefined,
-                    callback: (resp) => {
-                        if (settled) return;
-                        settled = true;
-                        clearTimeout(timeoutId);
-                        try {
-                            localStorage.setItem('vc_google_id_token', resp.credential);
-                            localStorage.setItem('vc_google_id_token_issued_at', String(Date.now()));
-                        } catch (_) {}
-                        resolve(resp.credential);
-                    }
-                });
-                google.accounts.id.prompt((notification) => {
-                    // اگه One Tap نمی‌تونه بی‌صدا نمایش داده بشه (مثلاً کاربر
-                    // قبلاً بسته بودتش)، همون توکن قدیمی رو برمی‌گردونیم -
-                    // بهتر از هیچیه، و اگه واقعاً منقضی شده باشه سرور خودش
-                    // 401 برمی‌گردونه و کاربر می‌فهمه باید دوباره لاگین کنه.
-                    if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {
-                        if (!settled) { settled = true; clearTimeout(timeoutId); resolve(token || null); }
-                    }
-                });
-            } catch (_) {
-                if (!settled) { settled = true; clearTimeout(timeoutId); resolve(token || null); }
-            }
-        }).finally(() => { googleTokenRefreshPromise = null; });
-        return googleTokenRefreshPromise;
+        // FIX (پاپ‌آپ انتخاب حساب گوگل هر یکی‌دو دقیقه وسط استفاده‌ی عادی):
+        // این تابع قبلاً وقتی توکن نزدیک انقضا بود، google.accounts.id.prompt()
+        // را صدا می‌زد تا "بی‌صدا" توکن تازه بگیرد. اما prompt() یک API
+        // داخلی گوگل است که خودش تصمیم می‌گیرد UI نشان بدهد یا نه - وقتی
+        // کاربر چند حساب گوگل روی مرورگرش لاگین دارد، گوگل اغلب به‌جای
+        // silent refresh واقعی، همان پنجره‌ی انتخاب حساب را نشان می‌داد.
+        // چون این تابع از authFetch صدا زده می‌شود و authFetch هم با هر
+        // ذخیره‌ی پیام (syncChatToServer) اجرا می‌شود، این یعنی تقریباً هر
+        // پیامی که کاربر می‌فرستاد، احتمال نمایش این پاپ‌آپ را داشت.
+        // راه‌حل: دیگر هیچ‌وقت prompt() را برای رفرش پس‌زمینه صدا نمی‌زنیم.
+        // همان توکن قدیمی (حتی اگر کمی گذشته باشد) را برمی‌گردانیم؛ اگر
+        // واقعاً منقضی شده باشد، سرور خودش با 401 جواب می‌دهد و تنها در آن
+        // لحظه (نه هر چند دقیقه) کاربر باید صریحاً دوباره وارد شود.
+        return token || null;
     }
+
 
     async function authFetch(url, options = {}) {
         const token = await getFreshGoogleIdToken();
