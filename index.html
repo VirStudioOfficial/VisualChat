@@ -950,44 +950,53 @@
         .action-btn:hover:not(:disabled) { filter: brightness(1.1); }
         .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
 
+        /* REDESIGN v2 (مطابق نمونه‌ی درخواستی): فایل‌های غیرتصویری به‌صورت
+           چیپ بزرگ‌تر با آیکون دایره‌ای توپر و دو خط متن (اسم + نوع فایل)
+           نمایش داده می‌شوند؛ عکس‌ها یک thumbnail مربعیِ جدا و بزرگ‌تر با
+           گوشه‌ی گرد هستند - دقیقاً همان الگوی آشنای ChatGPT. */
         .file-preview-bar {
             display: none;
-            flex-wrap: nowrap;
-            gap: 8px;
-            padding: 8px 4px;
-            overflow-x: auto;
-            scrollbar-width: none;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 10px;
+            padding: 10px 10px 0 10px;
         }
-        .file-preview-bar::-webkit-scrollbar { display: none; }
 
         .file-preview {
             display: none;
             align-items: center;
-            gap: 9px;
-            padding: 7px 10px 7px 8px;
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 12px;
-            width: 190px;
-            min-width: 190px;
-            max-width: 190px;
+            gap: 10px;
+            padding: 8px 14px 8px 10px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            max-width: 240px;
             flex-shrink: 0;
             position: relative;
-            transition: border-color 0.15s;
+            transition: background 0.15s;
         }
-        .file-preview:hover { border-color: var(--accent-2); }
+        .file-preview:hover { background: rgba(255,255,255,0.1); }
+        .file-preview.is-image {
+            padding: 0;
+            border: none;
+            background: transparent;
+            border-radius: 12px;
+        }
         .file-preview .fp-icon-wrap {
-            width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+            width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
-            background: var(--accent-grad); color: #fff; font-size: 1rem;
+            background: rgba(255,255,255,0.12); color: var(--text-main); font-size: 1rem;
             overflow: hidden;
         }
-        .file-preview img.fp-thumb { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; display: block; }
-        .file-preview .fp-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .file-preview .fp-name { font-size: 0.78rem; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .file-preview .fp-icon-wrap .fp-type-icon { width: 18px; height: 18px; }
+        .file-preview.is-image .fp-icon-wrap { display: none; }
+        .file-preview img.fp-thumb { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; display: block; }
+        .file-preview .fp-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; max-width: 150px; }
+        .file-preview.is-image .fp-text { display: none; }
+        .file-preview .fp-name { font-size: 0.82rem; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .file-preview span { font-size: 0.8rem; color: var(--text-muted); }
         .file-preview .file-status {
-            font-size: 0.66rem;
+            font-size: 0.72rem;
             color: var(--text-muted);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
@@ -1000,9 +1009,10 @@
             background: var(--bg-sidebar); border: 1px solid var(--border-soft);
             display: flex; align-items: center; justify-content: center;
             font-size: 0.7rem; cursor: pointer; color: var(--text-main);
-            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            opacity: 0; transition: opacity 0.15s;
         }
-        .file-preview .fp-remove:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+        .file-preview:hover .fp-remove { opacity: 1; }
 
         .settings-overlay {
             display: none;
@@ -3521,11 +3531,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
         bar.style.display = 'flex';
         bar.innerHTML = codeFilesMemory.map(f => `
-            <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;cursor:pointer;" onclick="openTextFileEditor('${f.name.replace(/'/g, "\\'")}')">
-                <i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}
-                <button class="icon-btn" type="button" style="width:16px;height:16px;font-size:0.75rem;" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="lucide-icon" data-lucide="x"></i></button>
+            <span class="file-preview" style="display:inline-flex;position:relative;" onclick="openTextFileEditor('${f.name.replace(/'/g, "\\'")}')">
+                <button class="fp-remove" type="button" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="lucide-icon" data-lucide="x"></i></button>
+                <span class="fp-icon-wrap"><i class="lucide-icon fp-type-icon" data-lucide="file-code-2"></i></span>
+                <span class="fp-text">
+                    <span class="fp-name">${escapeHtml(f.name)}</span>
+                    <span class="file-status">${getFileTypeLabel(f.name)}</span>
+                </span>
             </span>
         `).join('');
+        if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (_) {} }
     }
 
     // FEATURE (auto-convert long text to file): کلیک روی چیپِ فایل متنی
@@ -3612,6 +3627,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (['js', 'ts', 'py', 'html', 'css', 'json', 'jsx', 'tsx', 'java', 'c', 'cpp', 'php'].includes(ext)) return 'file-code';
         return 'file';
     }
+    function getFileTypeLabel(name) {
+        const ext = (name || '').split('.').pop()?.toUpperCase() || '';
+        const map = { PDF: 'PDF', DOC: 'Word', DOCX: 'Word', XLS: 'Excel', XLSX: 'Excel', PPT: 'PowerPoint', PPTX: 'PowerPoint', TXT: 'متن', HTML: 'File', CSS: 'File', JS: 'File', JSON: 'File', PY: 'File', MP4: 'ویدیو', WEBM: 'ویدیو', MOV: 'ویدیو' };
+        return map[ext] || (ext ? ext : 'فایل');
+    }
+
     function addFilePreviewItem(name) {
         const id = 'fp' + (++__filePreviewSeq);
         const list = document.getElementById('filePreviewList');
@@ -3628,7 +3649,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             </div>
             <div class="fp-text">
                 <span class="fp-name">${escapeHtml(name || 'فایل بدون‌نام')}</span>
-                <span class="file-status loading fp-status">در حال پردازش...</span>
+                <span class="file-status loading fp-status">${getFileTypeLabel(name)}</span>
             </div>
         `;
         list.appendChild(row);
@@ -3640,6 +3661,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const row = document.getElementById(id);
         if (!row) return;
         const statusEl = row.querySelector('.fp-status');
+        // FIX (ظاهر مطابق نمونه‌ی ChatGPT): وقتی status «تصویر آماده» است،
+        // یعنی این پیش‌نمایش یک عکس واقعی است، نه یک فایل عمومی. در آن
+        // حالت متن دو-خطی (اسم/نوع) را مخفی می‌کنیم و فقط thumbnail بزرگ
+        // مربعی نمایش داده می‌شود - دقیقاً مثل تصاویری که کاربر در چت
+        // ChatGPT ضمیمه می‌کند. برای بقیه‌ی فایل‌ها (PDF, HTML, ویدیو و…)
+        // همان چیپ دو-خطی با آیکون دایره‌ای می‌ماند.
+        if (statusClass === 'success' && /تصویر/.test(status || '')) {
+            row.classList.add('is-image');
+        }
         if (statusEl && status !== undefined) {
             statusEl.textContent = status;
             statusEl.className = 'file-status fp-status ' + (statusClass || '');
