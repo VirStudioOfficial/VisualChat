@@ -89,7 +89,7 @@
             --accent-grad: linear-gradient(135deg, #6366f1, #a855f7);
             --danger: #f87171;
             --text-main: #f4f6fb;
-            --text-muted: #8a8a8a;
+            --text-muted: #a3a3a3;
             --border: #262626;
             --border-soft: rgba(255,255,255,0.08);
             --shadow-a: rgba(0,0,0,0.3);
@@ -115,7 +115,7 @@
             --bg-card-hover: #e8e8e8;
             --bg-input: #f2f2f2;
             --text-main: #0d0d0d;
-            --text-muted: #6b6b6b;
+            --text-muted: #595959;
             --border: #e5e5e5;
             --code-bg: #f2f2f2;
             --code-head-bg: rgba(0,0,0,0.04);
@@ -942,29 +942,59 @@
         .action-btn:hover:not(:disabled) { filter: brightness(1.1); }
         .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
 
+        .file-preview-bar {
+            display: none;
+            flex-wrap: nowrap;
+            gap: 8px;
+            padding: 8px 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .file-preview-bar::-webkit-scrollbar { display: none; }
+
         .file-preview {
             display: none;
             align-items: center;
-            gap: 10px;
-            padding: 6px 12px;
+            gap: 9px;
+            padding: 7px 10px 7px 8px;
             background-color: var(--bg-card);
             border: 1px solid var(--border-soft);
-            border-radius: 10px;
-            margin-bottom: 8px;
-            width: fit-content;
-            max-width: 100%;
+            border-radius: 12px;
+            width: 190px;
+            min-width: 190px;
+            max-width: 190px;
+            flex-shrink: 0;
+            position: relative;
+            transition: border-color 0.15s;
         }
-        .file-preview img { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
+        .file-preview:hover { border-color: var(--accent-2); }
+        .file-preview .fp-icon-wrap {
+            width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--accent-grad); color: #fff; font-size: 1rem;
+            overflow: hidden;
+        }
+        .file-preview img.fp-thumb { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; display: block; }
+        .file-preview .fp-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .file-preview .fp-name { font-size: 0.78rem; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .file-preview span { font-size: 0.8rem; color: var(--text-muted); }
         .file-preview .file-status {
-            font-size: 0.7rem;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-weight: 600;
+            font-size: 0.66rem;
+            color: var(--text-muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .file-preview .file-status.loading { background: var(--warning); color: #000; }
-        .file-preview .file-status.success { background: var(--success); color: #000; }
-        .file-preview .file-status.error { background: var(--danger); color: #fff; }
+        .file-preview .file-status.loading { color: var(--warning); }
+        .file-preview .file-status.success { color: var(--success); }
+        .file-preview .file-status.error { color: var(--danger); }
+        .file-preview .fp-remove {
+            position: absolute; top: -6px; left: -6px;
+            width: 20px; height: 20px; border-radius: 50%;
+            background: var(--bg-sidebar); border: 1px solid var(--border-soft);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.7rem; cursor: pointer; color: var(--text-main);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        }
+        .file-preview .fp-remove:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
 
         .settings-overlay {
             display: none;
@@ -1404,6 +1434,36 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .history-search-input { display:none; min-width:0; flex:1; height:36px; padding:0 11px; border:1px solid var(--border-soft); outline:none; background:var(--bg-input); color:var(--text-main); border-radius:10px; font-family:inherit; font-size:.78rem; }
         .history-tools.active .history-search-input { display:block; animation:fadeIn .16s ease; }
         .history-empty { color:var(--text-muted); font-size:.75rem; text-align:center; padding:18px 8px; line-height:1.7; }
+
+        /* ===== Multi-select bulk delete for chat history ===== */
+        .history-select-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
+        .history-select-toggle:hover, .history-select-toggle.active { color:var(--text-main); border-color:color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .history-select-toggle.active { background: var(--accent-grad); color:#fff; border-color:transparent; }
+        .history-list.select-mode .history-item { padding-right: 40px; position: relative; }
+        .history-item-checkbox {
+            display: none;
+            position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+            width: 18px; height: 18px; border-radius: 5px;
+            border: 1.5px solid var(--border-soft); background: var(--bg-input);
+            cursor: pointer; flex-shrink: 0; align-items: center; justify-content: center;
+        }
+        .history-list.select-mode .history-item-checkbox { display: flex; }
+        .history-item-checkbox.checked { background: var(--accent-grad); border-color: transparent; }
+        .history-item-checkbox i { font-size: 0.7rem; color: #fff; display: none; }
+        .history-item-checkbox.checked i { display: block; }
+        .history-list.select-mode .history-item-menu-btn { display: none; }
+        .history-bulk-bar {
+            display: none;
+            align-items: center; justify-content: space-between; gap: 8px;
+            padding: 9px 10px; margin-top: 8px;
+            background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 12px;
+        }
+        .history-bulk-bar.active { display: flex; animation: fadeIn 0.16s ease; }
+        .history-bulk-count { font-size: 0.78rem; color: var(--text-main); font-weight: 600; }
+        .history-bulk-actions { display: flex; gap: 6px; }
+        .history-bulk-btn { border: 1px solid var(--border-soft); background: var(--bg-input); color: var(--text-main); border-radius: 8px; padding: 6px 10px; font-size: 0.74rem; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+        .history-bulk-btn.danger { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+        .history-bulk-btn:hover { filter: brightness(1.15); }
         .sidebar.collapsed { width:0; min-width:0; padding-left:0; padding-right:0; border:0; overflow:hidden; }
         .sidebar > * { transition: opacity 0.2s ease; }
         .sidebar.collapsed > * { opacity:0; pointer-events:none; }
@@ -1642,6 +1702,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="history-tools">
             <button class="history-search-toggle" type="button" onclick="toggleHistorySearch()" title="جستجو بین گفتگوها"><i class="lucide-icon" data-lucide="search"></i></button>
             <input id="historySearchInput" class="history-search-input" type="search" placeholder="جستجو بین گفتگوها..." oninput="filterHistory(this.value)" autocomplete="off">
+            <button class="history-select-toggle" id="historySelectToggle" type="button" onclick="toggleHistorySelectMode()" title="انتخاب چندتایی برای حذف"><i class="lucide-icon" data-lucide="list-checks"></i></button>
+        </div>
+        <div class="history-bulk-bar" id="historyBulkBar">
+            <span class="history-bulk-count" id="historyBulkCount">۰ انتخاب شده</span>
+            <div class="history-bulk-actions">
+                <button class="history-bulk-btn" type="button" onclick="selectAllHistoryItems()"><i class="lucide-icon" data-lucide="check-check"></i> همه</button>
+                <button class="history-bulk-btn danger" type="button" onclick="deleteSelectedHistoryItems()"><i class="lucide-icon" data-lucide="trash-2"></i> حذف</button>
+            </div>
         </div>
         <div class="history-list" id="historyList"></div>
         <div class="history-empty" id="historyEmpty" style="display:none;">گفتگویی با این عنوان پیدا نشد.</div>
@@ -1710,7 +1778,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            <div id="filePreviewList" style="display:none; flex-direction:column; gap:6px; padding:6px 4px;"></div>
+            <div id="filePreviewList" class="file-preview-bar"></div>
             <div id="codeFilesBar" style="display:none; flex-wrap:wrap; gap:6px; padding:6px 4px;"></div>
 
             <div class="command-menu" id="commandMenu">
@@ -1933,6 +2001,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             statusEl.textContent = 'ارسال شد، ممنون از گزارشت 🙏';
             textEl.value = '';
             fetchNotifs();
+            // FIX: خواندن بلافاصله بعد از نوشتن روی Vercel Blob می‌تواند چند
+            // لحظه طول بکشد تا نوشته‌ی تازه واقعاً در خواندن‌ها دیده شود
+            // (نگاه کن به توضیح readReports در api/bugreports.js). یک تلاش
+            // دوم با کمی تاخیر، مطمئن می‌شود گزارش تازه واقعاً و پایدار روی
+            // پنل بنشیند، نه فقط با یک خواندن زودهنگام که ممکن است هنوز آن
+            // را نداشته باشد.
+            setTimeout(fetchNotifs, 2500);
         } catch (err) {
             statusEl.style.color = '#f87171';
             statusEl.textContent = 'ارسال نشد، دوباره امتحان کن';
@@ -2180,7 +2255,29 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 // چیزی که کاربر گزارش داد. سرور از قبل این فیلتر را انجام
                 // داده، پس اینجا فقط باید آرایه را مستقیم بپذیریم.
                 const allBugs = Array.isArray(bugData) ? bugData : (Array.isArray(bugData.items) ? bugData.items : []);
-                myBugReports = allBugs;
+                // FIX (گزارش یهو از پنل اعلان‌ها پاک می‌شد): بلافاصله بعد از
+                // ارسال گزارش، sendBugReport() همین fetchNotifs را دوباره صدا
+                // می‌زند تا لیست تازه شود. اما طبق مستندات خودِ Vercel Blob
+                // (نگاه کن به کامنت‌های readReports در api/bugreports.js) حتی
+                // با useCache:false ممکن است تا چند لحظه بعد از نوشتن، خواندن
+                // بعدی هنوز نسخه‌ی قدیمی/ناقص را برگرداند. قبلاً اینجا با
+                // "myBugReports = allBugs" کل لیست قبلی به‌طور کامل جایگزین
+                // می‌شد؛ اگر همین یک fetch به‌خاطر آن تاخیر کوتاه، گزارش
+                // تازه‌ارسال‌شده را هنوز نداشت، آن گزارش از روی صفحه محو
+                // می‌شد تا فچ بعدی (که ممکن بود دیر اتفاق بیفتد، چون فقط روی
+                // لود صفحه/باز کردن پنل صدا زده می‌شد نه به‌صورت دوره‌ای).
+                // راه‌حل: هیچ‌وقت اجازه نده یک نتیجه‌ی جدید با تعداد آیتم
+                // کمتر از چیزی که همین الان روی صفحه است جایگزین شود - فقط
+                // وقتی نتیجه‌ی تازه واقعاً همه‌ی آیتم‌های فعلی را هم دارد
+                // (یعنی کامل و به‌روز است، نه یک خواندن ناقصِ در حال گذار)
+                // آن را می‌پذیریم.
+                const currentIds = new Set(myBugReports.map(b => String(b.id || b._id || b.createdAt || b.message)));
+                const newIds = new Set(allBugs.map(b => String(b.id || b._id || b.createdAt || b.message)));
+                const isStaleOrPartial = myBugReports.length > 0 &&
+                    ![...currentIds].every(id => newIds.has(id));
+                if (!isStaleOrPartial) {
+                    myBugReports = allBugs;
+                }
             }
 
             checkBugStatusChanges();
@@ -2204,6 +2301,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function initNotifSystem() {
         fetchNotifs();
+        // FIX (وضعیت گزارش‌ها فقط با رفرش صفحه/باز کردن پنل به‌روز می‌شد):
+        // قبلاً هیچ polling دوره‌ای نبود، پس اگر ادمین وضعیت یک گزارش را
+        // عوض می‌کرد، کاربر تا وقتی خودش صفحه را رفرش نمی‌کرد یا پنل را
+        // نمی‌بست و دوباره باز نمی‌کرد، متوجه نمی‌شد. هر ۴۵ ثانیه یک‌بار
+        // به‌روزرسانی خاموش (بدون تغییر ظاهری اگر چیزی عوض نشده باشد).
+        clearInterval(window.__notifPollInterval);
+        window.__notifPollInterval = setInterval(fetchNotifs, 45000);
         document.addEventListener('click', (e) => {
             const wrap = document.getElementById('notifWrap');
             const panel = document.getElementById('notifPanel');
@@ -2321,8 +2425,89 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             picture: responsePayload.picture
         };
         localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
+        // FEATURE (sync گفتگوها بین دستگاه‌ها): خودِ id_token خام گوگل رو
+        // (نه فقط اطلاعات دیکدشده‌ش رو) نگه می‌داریم، چون سرور (api/chats.js)
+        // برای هر درخواست باید این توکن رو مستقیم با گوگل تأیید کنه تا
+        // owner_email قابل‌اعتماد باشه - یک ایمیل ساده که کلاینت بگه «من
+        // این کاربرم» به‌تنهایی قابل‌اعتماد نیست. این توکن معمولاً حدود
+        // ۱ ساعت اعتبار داره؛ اعتبارسنجی و رفرش خودکارش تابع
+        // getFreshGoogleIdToken پایین‌تر انجام می‌ده.
+        try {
+            localStorage.setItem('vc_google_id_token', response.credential);
+            localStorage.setItem('vc_google_id_token_issued_at', String(Date.now()));
+        } catch (_) {}
         document.getElementById('authOverlay').classList.remove('active');
         initUserData();
+    }
+
+    // ===== توکن گوگل برای احراز هویت با سرور (sync گفتگوها) =====
+    // id_token گوگل عمر کوتاهی داره (تقریباً ۱ ساعت)، پس نمی‌شه همون یکی
+    // که موقع لاگین گرفتیم رو برای همیشه استفاده کرد. این تابع اگه توکن
+    // ذخیره‌شده هنوز به‌اندازه‌ی کافی تازه باشه همونو برمی‌گردونه، وگرنه
+    // بی‌صدا (بدون نمایش پنجره‌ی لاگین به کاربر) از گوگل یه توکن تازه
+    // می‌گیره - همون قابلیت "One Tap silent re-auth" که Google Identity
+    // Services به‌صورت پیش‌فرض پشتیبانی می‌کنه چون کاربر قبلاً یک‌بار
+    // اجازه داده.
+    const GOOGLE_TOKEN_MAX_AGE_MS = 50 * 60 * 1000; // 50 دقیقه - کمی قبل از انقضای واقعی (۶۰ دقیقه) رفرش می‌کنیم
+    let googleTokenRefreshPromise = null;
+
+    async function getFreshGoogleIdToken() {
+        const token = localStorage.getItem('vc_google_id_token');
+        const issuedAt = Number(localStorage.getItem('vc_google_id_token_issued_at') || 0);
+        if (token && (Date.now() - issuedAt) < GOOGLE_TOKEN_MAX_AGE_MS) {
+            return token;
+        }
+        if (googleTokenRefreshPromise) return googleTokenRefreshPromise;
+        googleTokenRefreshPromise = new Promise((resolve) => {
+            if (!window.google || !google.accounts || !google.accounts.id) {
+                resolve(token || null); // بهترین کاری که از دستمون برمیاد - همون قدیمی رو امتحان کن
+                return;
+            }
+            // callback موقتی: یه بار برای گرفتن توکن تازه صدا زده می‌شه،
+            // بدون این‌که روی رفتار عادی لاگین (handleCredentialResponse)
+            // اثر بذاره - چون google.accounts.id فقط یه callback global داره،
+            // این‌جا موقتاً عوضش می‌کنیم و بعد برمی‌گردونیم.
+            let settled = false;
+            const timeoutId = setTimeout(() => { if (!settled) { settled = true; resolve(token || null); } }, 4000);
+            try {
+                google.accounts.id.initialize({
+                    client_id: document.querySelector('#g_id_onload')?.dataset?.client_id || undefined,
+                    callback: (resp) => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timeoutId);
+                        try {
+                            localStorage.setItem('vc_google_id_token', resp.credential);
+                            localStorage.setItem('vc_google_id_token_issued_at', String(Date.now()));
+                        } catch (_) {}
+                        resolve(resp.credential);
+                    }
+                });
+                google.accounts.id.prompt((notification) => {
+                    // اگه One Tap نمی‌تونه بی‌صدا نمایش داده بشه (مثلاً کاربر
+                    // قبلاً بسته بودتش)، همون توکن قدیمی رو برمی‌گردونیم -
+                    // بهتر از هیچیه، و اگه واقعاً منقضی شده باشه سرور خودش
+                    // 401 برمی‌گردونه و کاربر می‌فهمه باید دوباره لاگین کنه.
+                    if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {
+                        if (!settled) { settled = true; clearTimeout(timeoutId); resolve(token || null); }
+                    }
+                });
+            } catch (_) {
+                if (!settled) { settled = true; clearTimeout(timeoutId); resolve(token || null); }
+            }
+        }).finally(() => { googleTokenRefreshPromise = null; });
+        return googleTokenRefreshPromise;
+    }
+
+    async function authFetch(url, options = {}) {
+        const token = await getFreshGoogleIdToken();
+        return fetch(url, {
+            ...options,
+            headers: {
+                ...(options.headers || {}),
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            }
+        });
     }
 
     function parseJwt(token) {
@@ -2361,6 +2546,103 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function getChatOwnerKey() {
         return currentUser?.email ? String(currentUser.email).toLowerCase() : 'guest';
+    }
+
+    // ===== Sync گفتگوها/فایل‌ها با سرور (Supabase پشت api/chats.js) =====
+    // این بخش کل نکته‌ی رفع باگ «لاگین با همون اکانت گوگل روی دستگاه دیگه
+    // یعنی گفتگوها نیستن» هست: قبلاً IndexedDB تنها منبع واقعی بود و هیچ‌جا
+    // آپلود نمی‌شد. حالا IndexedDB به‌عنوان یک کش محلی (برای باز شدن سریع و
+    // کارکردن آفلاین) باقی می‌مونه، ولی سرور منبع اصلی برای sync بین
+    // دستگاه‌هاست: هر ذخیره هم به IndexedDB هم به سرور می‌ره (fire-and-
+    // forget، بدون بلاک کردن UI)، و هر بار initUserData (لاگین/رفرش صفحه)
+    // اول تلاش می‌کنه از سرور بکشه، بعد با IndexedDB merge می‌کنه.
+    const CHATS_API_URL = 'https://notify-admin-iota.vercel.app/api/chats';
+
+    async function syncChatToServer(chatId) {
+        if (!currentUser?.email) return; // مهمان (guest) چیزی برای sync کردن نداره - جایی برای لاگین نیست
+        const chat = chats[chatId];
+        if (!chat) return;
+        try {
+            await authFetch(`${CHATS_API_URL}?chatId=${encodeURIComponent(chatId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: chat.title || 'گفتگوی جدید',
+                    html: chat.html || '',
+                    pinned: !!chat.pinned,
+                    updatedAt: chat.updatedAt || Date.now(),
+                    history: chatHistoryData[chatId] || [],
+                    files: chatFileArchive[chatId] || []
+                })
+            });
+        } catch (e) {
+            // شکست بی‌صدا - نسخه‌ی محلی (IndexedDB) هنوز درست کار می‌کنه؛
+            // sync فقط یک لایه‌ی اضافه‌ست، نباید جلوی کارکردن آفلاین رو بگیره.
+            console.error('syncChatToServer failed:', e?.message || e);
+        }
+    }
+
+    async function deleteChatFromServer(chatIds) {
+        if (!currentUser?.email) return;
+        const ids = Array.isArray(chatIds) ? chatIds : [chatIds];
+        if (!ids.length) return;
+        try {
+            await authFetch(`${CHATS_API_URL}?ids=${ids.map(id => encodeURIComponent(id)).join(',')}`, { method: 'DELETE' });
+        } catch (e) {
+            console.error('deleteChatFromServer failed:', e?.message || e);
+        }
+    }
+
+    // موقع لاگین/رفرش صفحه: لیست چت‌های سرور رو می‌گیریم و با نسخه‌ی محلی
+    // مقایسه می‌کنیم - هر چتی که سمت سرور جدیدتره (updated_at بزرگ‌تر) یا
+    // اصلاً محلی نداریمش، کامل (html+history+files) از سرور کشیده می‌شه.
+    // این دقیقاً چیزیه که وقتی روی دستگاه دوم لاگین می‌کنی لازم داری.
+    async function pullChatsFromServer() {
+        if (!currentUser?.email) return;
+        try {
+            const listRes = await authFetch(CHATS_API_URL);
+            if (!listRes.ok) return;
+            const { items } = await listRes.json();
+            if (!Array.isArray(items) || !items.length) return;
+
+            const owner = getChatOwnerKey();
+            for (const remote of items) {
+                const localChat = chats[remote.chat_id];
+                const remoteIsNewer = !localChat || (remote.updated_at || 0) > (localChat.updatedAt || 0);
+                if (!remoteIsNewer) continue;
+
+                const fullRes = await authFetch(`${CHATS_API_URL}?chatId=${encodeURIComponent(remote.chat_id)}`);
+                if (!fullRes.ok) continue;
+                const full = await fullRes.json();
+
+                chats[remote.chat_id] = {
+                    title: full.chat.title || 'گفتگوی جدید',
+                    html: full.chat.html || '',
+                    pinned: !!full.chat.pinned,
+                    updatedAt: full.chat.updated_at || Date.now()
+                };
+                chatHistoryData[remote.chat_id] = full.history || [];
+                chatFileArchive[remote.chat_id] = full.files || [];
+
+                // توی IndexedDB محلی هم بنویسیم تا دفعه‌ی بعد بدون نیاز به
+                // اینترنت هم همین چت در دسترس باشه (کش آفلاین).
+                try {
+                    await idbPut(CHAT_STORE, {
+                        id: `${owner}:${remote.chat_id}`, owner, chatId: String(remote.chat_id),
+                        title: chats[remote.chat_id].title, html: chats[remote.chat_id].html,
+                        updatedAt: chats[remote.chat_id].updatedAt, pinned: chats[remote.chat_id].pinned
+                    });
+                    await idbPut(HISTORY_STORE, {
+                        id: `${owner}:${remote.chat_id}`, owner, chatId: String(remote.chat_id),
+                        history: chatHistoryData[remote.chat_id]
+                    });
+                } catch (e) {
+                    console.error('caching pulled chat into IndexedDB failed:', e);
+                }
+            }
+        } catch (e) {
+            console.error('pullChatsFromServer failed:', e?.message || e);
+        }
     }
 
     function openChatDB() {
@@ -2508,6 +2790,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             console.error('IndexedDB chat save failed:', e);
             if (typeof showToast === 'function') showToast('ذخیره‌ی گفتگو با مشکل روبه‌رو شد؛ اطلاعات فعلی در صفحه باقی مانده است.', 'error', 5000);
         });
+        // sync سمت سرور جدا و بدون بلاک کردن ذخیره‌ی محلی انجام می‌شه - اگه
+        // اینترنت نباشه یا سرور مشکل داشته باشه، ذخیره‌ی محلی (بالا) هنوز
+        // موفق می‌شه و کاربر چیزی رو از دست نمی‌ده؛ فقط sync بین دستگاه‌ها
+        // تا اتصال بعدی عقب می‌افته.
+        syncChatToServer(chatId);
     }
 
     async function initUserData() {
@@ -2522,8 +2809,22 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             try { chats = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch (_) { chats = {}; }
             try { chatHistoryData = JSON.parse(localStorage.getItem(historyKey) || '{}') || {}; } catch (_) { chatHistoryData = {}; }
         }
+        // اول همون چیزی که محلی داریم رو نشون بده (سریع، حتی آفلاین)، بعد
+        // در پس‌زمینه با سرور sync کن - این دقیقاً چیزیه که مشکل «لاگین روی
+        // دستگاه جدید یعنی گفتگویی نیست» رو حل می‌کنه: چون این‌جا سرور رو
+        // هم می‌پرسیم، نه فقط IndexedDB خالیِ همین دستگاه رو.
         renderHistoryList();
         if (chats[currentChatId]) loadChat(currentChatId, true);
+        try {
+            await pullChatsFromServer();
+            renderHistoryList();
+            // اگه چتی که همین الان بازه از سرور آپدیت شد (مثلاً روی یه
+            // دستگاه دیگه پیام جدیدی بهش اضافه شده بود)، محتوای تازه رو
+            // نشون بده - نه نسخه‌ی قدیمی‌ای که قبل از pull لود شده بود.
+            if (chats[currentChatId]) loadChat(currentChatId, true);
+        } catch (e) {
+            console.error('pullChatsFromServer in initUserData failed:', e);
+        }
     }
 
 
@@ -3219,6 +3520,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // این‌طوری وقتی چند فایل با هم انتخاب میشن، هر کدوم ردیف/وضعیت جدای خودشو
     // داره و پردازش موازی یکی، وضعیت بقیه رو خراب نمی‌کنه.
     let __filePreviewSeq = 0;
+    function getFileTypeIcon(name) {
+        const ext = String(name || '').split('.').pop().toLowerCase();
+        if (['pdf'].includes(ext)) return 'file-text';
+        if (['doc', 'docx'].includes(ext)) return 'file-text';
+        if (['xls', 'xlsx', 'csv'].includes(ext)) return 'file-spreadsheet';
+        if (['zip', 'rar', '7z'].includes(ext)) return 'file-archive';
+        if (['mp4', 'webm', 'mov', 'mkv'].includes(ext)) return 'file-video';
+        if (['mp3', 'wav', 'ogg'].includes(ext)) return 'file-audio';
+        if (['js', 'ts', 'py', 'html', 'css', 'json', 'jsx', 'tsx', 'java', 'c', 'cpp', 'php'].includes(ext)) return 'file-code';
+        return 'file';
+    }
     function addFilePreviewItem(name) {
         const id = 'fp' + (++__filePreviewSeq);
         const list = document.getElementById('filePreviewList');
@@ -3228,12 +3540,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         row.style.display = 'flex';
         row.id = id;
         row.innerHTML = `
-            <img class="fp-thumb" src="" alt="" style="display:none;">
-            <span class="fp-name">${escapeHtml(name || 'فایل بدون‌نام')}</span>
-            <span class="file-status loading fp-status">در حال پردازش...</span>
-            <button class="icon-btn" type="button" onclick="removeFileItem('${id}')" style="width:24px; height:24px; font-size:0.9rem;"><i class="lucide-icon" data-lucide="x"></i></button>
+            <button class="fp-remove" type="button" onclick="removeFileItem('${id}')" title="حذف"><i class="lucide-icon" data-lucide="x"></i></button>
+            <div class="fp-icon-wrap">
+                <img class="fp-thumb" src="" alt="" style="display:none;">
+                <i class="lucide-icon fp-type-icon" data-lucide="${getFileTypeIcon(name)}"></i>
+            </div>
+            <div class="fp-text">
+                <span class="fp-name">${escapeHtml(name || 'فایل بدون‌نام')}</span>
+                <span class="file-status loading fp-status">در حال پردازش...</span>
+            </div>
         `;
         list.appendChild(row);
+        if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (_) {} }
         return id;
     }
 
@@ -3247,7 +3565,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
         if (thumbSrc) {
             const img = row.querySelector('.fp-thumb');
+            const typeIcon = row.querySelector('.fp-type-icon');
             if (img) { img.src = thumbSrc; img.style.display = 'block'; }
+            if (typeIcon) { typeIcon.style.display = 'none'; }
         }
     }
 
@@ -3350,8 +3670,22 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return entries;
     }
 
+    const MAX_ATTACHED_FILES = 10;
+
     async function processIncomingFile(file) {
         if (isGenerating || !file) return;
+
+        // FEATURE (سقف تعداد فایل هر ارسال): کاربر نباید بتواند بیشتر از
+        // MAX_ATTACHED_FILES فایل هم‌زمان (چه با انتخاب دستی، چه drag&drop،
+        // چه paste - هر سه مسیر از همین یک تابع رد می‌شوند) به یک پیام ضمیمه
+        // کند. هم فایل‌های تازه انتخاب‌شده (selectedFilesData) و هم فایل‌های
+        // متنی از قبل در حافظه‌ی همین چت (codeFilesMemory) در این سقف حساب
+        // می‌شوند، چون هر دو با هم در همان درخواست به مدل فرستاده می‌شوند.
+        const currentFileCount = selectedFilesData.length + (Array.isArray(codeFilesMemory) ? codeFilesMemory.length : 0);
+        if (currentFileCount >= MAX_ATTACHED_FILES) {
+            showToast(`حداکثر ${MAX_ATTACHED_FILES} فایل در هر ارسال مجاز است.`, 'warning');
+            return;
+        }
 
         const previewId = addFilePreviewItem(file.name);
         filesProcessingCount++;
@@ -5224,30 +5558,126 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // re-reading and re-parsing the whole (potentially large) JSON blob back
     // out of localStorage — that reload is only needed when `chats` might be
     // stale (initial load / login), see renderHistory() below.
+    // ===== انتخاب چندتایی گفتگوها برای حذف دسته‌جمعی =====
+    let historySelectMode = false;
+    let selectedHistoryIds = new Set();
+
+    function toggleHistorySelectMode() {
+        historySelectMode = !historySelectMode;
+        selectedHistoryIds.clear();
+        const btn = document.getElementById('historySelectToggle');
+        const list = document.getElementById('historyList');
+        if (btn) btn.classList.toggle('active', historySelectMode);
+        if (list) list.classList.toggle('select-mode', historySelectMode);
+        updateHistoryBulkBar();
+        renderHistoryList();
+    }
+
+    function toggleHistoryItemSelected(chatId) {
+        if (selectedHistoryIds.has(chatId)) selectedHistoryIds.delete(chatId);
+        else selectedHistoryIds.add(chatId);
+        updateHistoryBulkBar();
+        renderHistoryList();
+    }
+
+    function selectAllHistoryItems() {
+        const list = document.getElementById('historyList');
+        // فقط همون آیتم‌هایی که الان (با فیلتر جستجوی فعلی) روی صفحه دیده
+        // می‌شن انتخاب می‌شن، نه لزوماً کل چت‌ها - اگر کاربر جستجو کرده،
+        // «انتخاب همه» باید فقط نتایج همون جستجو رو بگیره.
+        list?.querySelectorAll('.history-item[data-chat-id]').forEach(el => {
+            selectedHistoryIds.add(el.dataset.chatId);
+        });
+        updateHistoryBulkBar();
+        renderHistoryList();
+    }
+
+    function updateHistoryBulkBar() {
+        const bar = document.getElementById('historyBulkBar');
+        const count = document.getElementById('historyBulkCount');
+        if (!bar || !count) return;
+        bar.classList.toggle('active', historySelectMode);
+        count.textContent = `${selectedHistoryIds.size} انتخاب شده`;
+    }
+
+    async function deleteSelectedHistoryItems() {
+        if (!selectedHistoryIds.size) {
+            showToast('اول حداقل یه گفتگو رو انتخاب کن.', 'warning');
+            return;
+        }
+        const ok = await showConfirm(`${selectedHistoryIds.size} گفتگوی انتخاب‌شده پاک بشه؟ این کار قابل بازگشت نیست.`);
+        if (!ok) return;
+
+        const owner = getChatOwnerKey();
+        const idsToDelete = [...selectedHistoryIds];
+        let deletedCurrentChat = false;
+
+        for (const chatId of idsToDelete) {
+            if (chatId == currentChatId) deletedCurrentChat = true;
+            delete chats[chatId];
+            delete chatHistoryData[chatId];
+            delete chatFileArchive[chatId];
+            try {
+                await Promise.all([
+                    idbDelete(CHAT_STORE, `${owner}:${chatId}`),
+                    idbDelete(HISTORY_STORE, `${owner}:${chatId}`),
+                    idbDelete(FILES_STORE, `${owner}:${chatId}`)
+                ]);
+            } catch (e) {
+                console.error('IndexedDB bulk chat delete failed:', e);
+            }
+        }
+
+        selectedHistoryIds.clear();
+        historySelectMode = false;
+        const btn = document.getElementById('historySelectToggle');
+        const list = document.getElementById('historyList');
+        if (btn) btn.classList.remove('active');
+        if (list) list.classList.remove('select-mode');
+        updateHistoryBulkBar();
+        deleteChatFromServer(idsToDelete); // یه درخواست واحد برای حذف دسته‌جمعی از سرور
+
+        if (deletedCurrentChat) {
+            startNewChat();
+        } else {
+            renderHistoryList();
+        }
+        showToast(`${idsToDelete.length} گفتگو حذف شد`, 'success');
+    }
+
     function renderHistoryList() {
         const list = document.getElementById("historyList");
         const query = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
         list.innerHTML = "";
         let visible = 0;
-        // Pinned chats first (most-recently-created pinned chat on top),
-        // then the rest in the existing most-recent-first order.
-        const ids = Object.keys(chats).reverse();
-        const pinnedIds = ids.filter(id => chats[id].pinned);
-        const restIds = ids.filter(id => !chats[id].pinned);
+        // Pinned chats first (most-recently-updated pinned chat on top),
+        // then the rest sorted by updatedAt (most-recent-first) - this is
+        // also what makes opening an old chat bump it back to the top of
+        // its section, not just sending a new message in it.
+        const ids = Object.keys(chats);
+        const byRecency = (a, b) => (chats[b]?.updatedAt || Number(b) || 0) - (chats[a]?.updatedAt || Number(a) || 0);
+        const pinnedIds = ids.filter(id => chats[id].pinned).sort(byRecency);
+        const restIds = ids.filter(id => !chats[id].pinned).sort(byRecency);
         [...pinnedIds, ...restIds].forEach(id => {
             const title = chats[id].title || 'گفتگوی جدید';
             if (query && !title.toLowerCase().includes(query)) return;
             visible++;
             const item = document.createElement("div");
             item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
+            item.dataset.chatId = id;
+            const isChecked = selectedHistoryIds.has(id);
             item.innerHTML = `
+                <div class="history-item-checkbox ${isChecked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleHistoryItemSelected('${id}')"><i class="lucide-icon" data-lucide="check"></i></div>
                 ${chats[id].pinned ? '<i class="lucide-icon" data-lucide="pin" style="color:var(--accent-2);"></i>' : '<i class="lucide-icon" data-lucide="message-circle"></i>'}
                 <span>${escapeHtml(title)}</span>
                 <button class="icon-btn history-item-menu-btn" type="button" title="گزینه‌ها" onclick="event.stopPropagation(); toggleHistoryItemMenu('${id}', this)">
                     <i class="lucide-icon" data-lucide="more-vertical"></i>
                 </button>
             `;
-            item.onclick = () => { if (!isGenerating) loadChat(id); };
+            item.onclick = () => {
+                if (historySelectMode) { toggleHistoryItemSelected(id); return; }
+                if (!isGenerating) loadChat(id);
+            };
             list.appendChild(item);
         });
         const empty = document.getElementById('historyEmpty');
@@ -5331,6 +5761,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         } catch (e) {
             console.error('IndexedDB chat delete failed:', e);
         }
+        deleteChatFromServer(chatId);
         if (wasCurrent) {
             startNewChat();
         } else {
@@ -5393,6 +5824,17 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         clearCodeFilesMemory();
         lastCodeFilesForEdit = [];
         lastFailedRequest = null;
+        // FEATURE (باز کردن یه چت قدیمی باید اون رو راحت‌ترین چت برای دسترسی
+        // بعدی کنه): قبلاً updatedAt فقط موقع ارسال پیام جدید آپدیت می‌شد، نه
+        // موقع صرفاً باز کردن/خوندن یه چت قدیمی - پس چتی که همین الان بازش
+        // کردی، توی لیست همون‌جای قبلی‌ش (پایین‌تر) می‌موند. حالا با هر بار
+        // باز کردن، updatedAt رو هم به همین لحظه به‌روز می‌کنیم تا چت باز‌شده
+        // بره بالای لیست - مگر این‌که پین‌شده باشه که ترتیب پین‌ها اولویت داره،
+        // یا از قبل همین چت بالای لیست غیرپین‌ها بوده (کار اضافه نکنیم).
+        if (!isInitialLoad) {
+            chats[id].updatedAt = Date.now();
+            queueChatSave(id);
+        }
         const chatBox = document.getElementById("chatBox");
         document.getElementById("homeScreen").style.display = 'none';
         chatBox.style.display = 'flex';
@@ -5436,6 +5878,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         } catch (e) {
             console.error('IndexedDB chat delete failed:', e);
         }
+        deleteChatFromServer(id);
         startNewChat();
         closeSettings();
         showToast('گفتگو حذف شد', 'success');
