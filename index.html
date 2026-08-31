@@ -587,7 +587,6 @@
 
         /* سلکتور مدل کنار نوار پیام (به سبک کلود) */
         .composer-model-selector {
-            order: 5;
             margin-right: 2px;
             flex-shrink: 0;
         }
@@ -631,7 +630,7 @@
         }
 
         .home-text { display: flex; flex-direction: column; gap: 10px; align-items: center; }
-        .home-title { font-size: 1.6rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; line-height: 1.4; max-width: 480px; }
+        .home-title { font-size: 1.5rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; line-height: 1.4; max-width: 460px; }
         .home-subtitle { font-size: 0.92rem; color: var(--text-muted); line-height: 1.6; }
 
         .suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 520px; }
@@ -812,10 +811,10 @@
             background-color: var(--bg-input);
             border: 1px solid var(--border-soft);
             border-radius: 22px;
-            padding: 6px 12px;
+            padding: 6px 10px;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
             box-shadow: 0 6px 24px var(--shadow-a);
             transition: border-color 0.2s, box-shadow 0.2s;
         }
@@ -823,6 +822,17 @@
             border-color: color-mix(in srgb, var(--accent-1) 55%, transparent);
             box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-1) 12%, transparent), 0 6px 24px var(--shadow-a);
         }
+
+        /* REDESIGN (چیدمان جمع‌وجورتر نوار ورودی): ترتیب بصری در RTL از
+           راست به چپ اینه: دکمه‌ی ارسال، textarea، دکمه‌ی تفکر، سلکتور
+           مدل، و در انتها (سمت چپِ چپ) دکمه‌ی افزودن فایل. از order به‌جای
+           جابه‌جایی HTML استفاده شده تا هیچ منطق JS‌ای که به id/ساختار
+           فعلی وابسته است به‌هم نریزد. */
+        #actionBtn { order: 1; }
+        textarea#userInput { order: 2; }
+        #thinkModeBtn { order: 3; }
+        .composer-model-selector { order: 4; }
+        #attachBtn { order: 5; }
 
         textarea#userInput {
             flex: 1;
@@ -874,8 +884,8 @@
             color: var(--text-muted);
             font-size: 1.05rem;
             cursor: pointer;
-            width: 36px;
-            height: 36px;
+            width: 34px;
+            height: 34px;
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -885,6 +895,76 @@
         }
         .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); }
         .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* ===== دکمه‌ی حالت تفکر (Think) ===== */
+        .think-btn-wrap { position: relative; flex-shrink: 0; }
+        .think-btn {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            height: 34px;
+            padding: 0 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border-soft);
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 0.76rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .think-btn i { font-size: 0.95rem; }
+        .think-btn:hover { color: var(--text-main); background-color: var(--border-soft); }
+        .think-btn.think-on {
+            color: var(--accent-2);
+            border-color: color-mix(in srgb, var(--accent-2) 45%, transparent);
+            background-color: color-mix(in srgb, var(--accent-2) 12%, transparent);
+        }
+        @media (max-width: 900px) {
+            .think-btn .think-label { display: none; }
+            .think-btn { padding: 0; width: 34px; justify-content: center; }
+        }
+        .think-panel {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 10px);
+            right: 0;
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            padding: 8px;
+            min-width: 190px;
+            box-shadow: 0 12px 40px var(--shadow-b);
+            z-index: 100;
+            animation: dropUp 0.18s ease;
+        }
+        .think-panel.active { display: block; }
+        .think-panel-title {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            padding: 4px 8px 6px;
+            font-weight: 600;
+        }
+        .think-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            transition: all 0.15s;
+        }
+        .think-option:hover { background: var(--bg-card); color: var(--text-main); }
+        .think-option.active { background: var(--bg-card); color: var(--text-main); }
+        .think-option .item-check { color: var(--accent-2); opacity: 0; }
+        .think-option.active .item-check { opacity: 1; }
+        @media (max-width: 900px) {
+            .think-panel { right: auto; left: 0; }
+        }
 
         .icon-btn.search-active {
             color: var(--accent-2) !important;
@@ -1785,14 +1865,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="home-screen" id="homeScreen">
             <div class="home-mark"><i class="ph-fill ph-sparkle"></i></div>
             <div class="home-text">
-                <h1 class="home-title" id="welcomeHomeTitle">سلام! بریم یه چیز باحال بسازیم؟</h1>
-                <p class="home-subtitle">سؤال بپرس، ایده بساز، کد بنویس یا یه فایل بنداز اینجا؛ از همون‌جا ادامه می‌دیم.</p>
+                <h1 class="home-title" id="welcomeHomeTitle">سلام! امروز چیکار کنیم؟</h1>
             </div>
             <div class="suggestion-chips">
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده خفن برای ویدیو بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">این متن رو ساده و باحال توضیح بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">برای این پروژه کد بنویس</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه چیز جدید و جالب پیدا کن</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده خفن بده</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">ساده توضیح بده</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">کد بنویس</div>
             </div>
         </div>
 
@@ -1821,6 +1899,32 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
                     <i class="lucide-icon" data-lucide="plus"></i>
                 </button>
+
+                <div class="think-btn-wrap" id="thinkModeBtn">
+                    <button class="think-btn" id="thinkToggleBtn" type="button" onclick="toggleThinkPanel(event)" title="حالت تفکر">
+                        <i class="lucide-icon" data-lucide="brain"></i>
+                        <span class="think-label" id="thinkBtnLabel">تفکر</span>
+                    </button>
+                    <div class="think-panel" id="thinkPanel">
+                        <div class="think-panel-title">سطح تفکر مدل</div>
+                        <div class="think-option" data-level="off" onclick="setThinkLevel('off')">
+                            <span>خاموش</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="think-option" data-level="low" onclick="setThinkLevel('low')">
+                            <span>کم</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="think-option" data-level="medium" onclick="setThinkLevel('medium')">
+                            <span>متوسط</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="think-option" data-level="high" onclick="setThinkLevel('high')">
+                            <span>زیاد</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="model-selector composer-model-selector" id="modelSelector" onclick="toggleModelDropdown()">
                     <span class="model-name" id="modelDisplayName">Virtual Bot 1.5</span>
@@ -2072,6 +2176,50 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             dropdown.classList.remove('active');
         }
     });
+
+    // =====================================================
+    // حالت تفکر (Think mode) - به‌صورت پیش‌فرض خاموش برای همه‌ی مدل‌ها.
+    // انتخاب کاربر (خاموش/کم/متوسط/زیاد) در localStorage ذخیره می‌شود و
+    // به‌عنوان thinkLevel همراه هر درخواست به بک‌اند فرستاده می‌شود (فقط
+    // وقتی چیزی غیر از 'off' باشد - نگاه کن به fetch('/api/chat') و
+    // THINK_LEVEL_MAP در chat.js).
+    // =====================================================
+    let currentThinkLevel = localStorage.getItem('virtual_think_level') || 'off';
+    const THINK_LEVEL_LABELS = { off: 'خاموش', low: 'کم', medium: 'متوسط', high: 'زیاد' };
+
+    function renderThinkUI() {
+        const btn = document.getElementById('thinkToggleBtn');
+        const label = document.getElementById('thinkBtnLabel');
+        if (!btn || !label) return;
+        const isOn = currentThinkLevel !== 'off';
+        btn.classList.toggle('think-on', isOn);
+        label.textContent = isOn ? `تفکر: ${THINK_LEVEL_LABELS[currentThinkLevel]}` : 'تفکر';
+        document.querySelectorAll('.think-option').forEach(opt => {
+            opt.classList.toggle('active', opt.dataset.level === currentThinkLevel);
+        });
+    }
+
+    function toggleThinkPanel(e) {
+        if (e) e.stopPropagation();
+        document.getElementById('thinkPanel').classList.toggle('active');
+    }
+
+    function setThinkLevel(level) {
+        currentThinkLevel = level;
+        localStorage.setItem('virtual_think_level', level);
+        renderThinkUI();
+        document.getElementById('thinkPanel').classList.remove('active');
+    }
+
+    document.addEventListener('click', function(e) {
+        const wrap = document.getElementById('thinkModeBtn');
+        const panel = document.getElementById('thinkPanel');
+        if (wrap && panel && !wrap.contains(e.target)) {
+            panel.classList.remove('active');
+        }
+    });
+
+    renderThinkUI();
 
     // =====================================================
     // بقیه کدها (همه قابلیت‌ها)
@@ -4700,6 +4848,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     archivedFiles: recentArchivedFiles(currentChatId)
                         .filter(f => !mergedTextFiles.some(mf => mf.name === f.name)),
                     webSearch: isSearchEnabled,
+                    thinkLevel: currentThinkLevel,
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
                     styleHint: virtualPersona,
