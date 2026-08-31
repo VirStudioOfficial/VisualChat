@@ -1701,7 +1701,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         </div>
 
         <div class="user-profile" id="userProfile">
-            <span style="font-size:0.8rem; color:var(--text-muted);">در حال ورود...</span>
+            <div class="user-info"><div class="user-name" style="font-size:0.8rem; color:var(--text-muted);">مهمان</div></div>
+            <div class="user-actions">
+                <button class="icon-btn" onclick="document.getElementById('authOverlay').classList.add('active')" title="ورود با گوگل (اختیاری - برای هم‌گام‌سازی بین دستگاه‌ها)"><i class="lucide-icon" data-lucide="log-in"></i></button>
+            </div>
         </div>
 
         <button class="new-chat-btn" id="newChatBtn" onclick="startNewChat()">
