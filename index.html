@@ -2474,23 +2474,76 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // چون این تابع از authFetch صدا زده می‌شود و authFetch هم با هر
         // ذخیره‌ی پیام (syncChatToServer) اجرا می‌شود، این یعنی تقریباً هر
         // پیامی که کاربر می‌فرستاد، احتمال نمایش این پاپ‌آپ را داشت.
-        // راه‌حل: دیگر هیچ‌وقت prompt() را برای رفرش پس‌زمینه صدا نمی‌زنیم.
-        // همان توکن قدیمی (حتی اگر کمی گذشته باشد) را برمی‌گردانیم؛ اگر
-        // واقعاً منقضی شده باشد، سرور خودش با 401 جواب می‌دهد و تنها در آن
-        // لحظه (نه هر چند دقیقه) کاربر باید صریحاً دوباره وارد شود.
+        // راه‌حل: دیگر هیچ‌وقت اینجا prompt() را برای رفرش معمولی صدا
+        // نمی‌زنیم؛ همان توکن قدیمی را برمی‌گردانیم. اگر واقعاً منقضی شده
+        // باشد، سرور با 401 جواب می‌دهد و authFetch (پایین‌تر) فقط در آن
+        // لحظه‌ی نادر یک تلاش کنترل‌شده برای گرفتن توکن تازه انجام می‌دهد.
         return token || null;
+    }
+
+    // تلاش صریح و یک‌باره برای گرفتن توکن تازه از گوگل - فقط زمانی صدا زده
+    // می‌شود که سرور واقعاً 401 داده باشد (یعنی توکن قطعاً منقضی شده)، نه
+    // به‌عنوان رفرش پیش‌گیرانه‌ی معمول. اگر کاربر session فعال گوگل داشته
+    // باشد این معمولاً بی‌صدا انجام می‌شود؛ در غیر این صورت ممکن است گوگل
+    // پنجره‌ی انتخاب حساب را نشان دهد - که چون فقط در همین لحظه‌ی نادر
+    // (واقعاً منقضی شدن، نه هر چند دقیقه) اتفاق می‌افتد، منطقی و قابل قبول
+    // است.
+    async function forceRefreshGoogleIdToken() {
+        if (googleTokenRefreshPromise) return googleTokenRefreshPromise;
+        googleTokenRefreshPromise = new Promise((resolve) => {
+            if (!window.google || !google.accounts || !google.accounts.id) {
+                resolve(null);
+                return;
+            }
+            let settled = false;
+            const timeoutId = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, 4000);
+            try {
+                google.accounts.id.initialize({
+                    client_id: document.querySelector('#g_id_onload')?.dataset?.client_id || undefined,
+                    callback: (resp) => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timeoutId);
+                        try {
+                            localStorage.setItem('vc_google_id_token', resp.credential);
+                            localStorage.setItem('vc_google_id_token_issued_at', String(Date.now()));
+                        } catch (_) {}
+                        resolve(resp.credential);
+                    }
+                });
+                google.accounts.id.prompt((notification) => {
+                    if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {
+                        if (!settled) { settled = true; clearTimeout(timeoutId); resolve(null); }
+                    }
+                });
+            } catch (_) {
+                if (!settled) { settled = true; clearTimeout(timeoutId); resolve(null); }
+            }
+        }).finally(() => { googleTokenRefreshPromise = null; });
+        return googleTokenRefreshPromise;
     }
 
 
     async function authFetch(url, options = {}) {
         const token = await getFreshGoogleIdToken();
-        return fetch(url, {
+        const doFetch = (t) => fetch(url, {
             ...options,
             headers: {
                 ...(options.headers || {}),
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                ...(t ? { 'Authorization': `Bearer ${t}` } : {})
             }
         });
+        const res = await doFetch(token);
+        // FIX: قبلاً وقتی توکن واقعاً منقضی می‌شد، درخواست فقط 401 می‌گرفت
+        // و بی‌صدا شکست می‌خورد (کاربر هیچ نشانه‌ای نمی‌دید که چرا sync کار
+        // نمی‌کند). حالا فقط همین‌جا - دقیقاً وقتی سرور تأیید کرده که توکن
+        // منقضی است، نه به‌صورت پیش‌گیرانه - یک تلاش برای گرفتن توکن تازه
+        // انجام می‌دهیم و درخواست را یک بار دیگر تکرار می‌کنیم.
+        if (res.status === 401) {
+            const freshToken = await forceRefreshGoogleIdToken();
+            if (freshToken) return doFetch(freshToken);
+        }
+        return res;
     }
 
     function parseJwt(token) {
