@@ -2460,11 +2460,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let googleTokenRefreshPromise = null;
 
     async function getFreshGoogleIdToken() {
+        console.log('[DEBUG] getFreshGoogleIdToken() called', new Error().stack);
         const token = localStorage.getItem('vc_google_id_token');
         const issuedAt = Number(localStorage.getItem('vc_google_id_token_issued_at') || 0);
         if (token && (Date.now() - issuedAt) < GOOGLE_TOKEN_MAX_AGE_MS) {
+            console.log('[DEBUG] getFreshGoogleIdToken() using cached token, age(ms)=', Date.now() - issuedAt);
             return token;
         }
+        console.log('[DEBUG] getFreshGoogleIdToken() token stale/missing - WILL CALL google.accounts.id.prompt()');
         if (googleTokenRefreshPromise) return googleTokenRefreshPromise;
         googleTokenRefreshPromise = new Promise((resolve) => {
             if (!window.google || !google.accounts || !google.accounts.id) {
@@ -5692,8 +5695,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 </button>
             `;
             item.onclick = () => {
+                console.log('[DEBUG] history item clicked, id=', id, 'typeof id=', typeof id, 'historySelectMode=', historySelectMode, 'isGenerating=', isGenerating, 'currentChatId(before)=', currentChatId);
                 if (historySelectMode) { toggleHistoryItemSelected(id); return; }
                 if (!isGenerating) loadChat(id);
+                console.log('[DEBUG] currentChatId(after)=', currentChatId);
             };
             list.appendChild(item);
         });
@@ -5832,8 +5837,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
 
     function loadChat(id, isInitialLoad = false) {
+        console.log('[DEBUG] loadChat() called with id=', id, 'isInitialLoad=', isInitialLoad, 'chats[id] exists?', !!chats[id]);
         if (isGenerating) stopGeneration();
-        if (!chats[id]) return;
+        if (!chats[id]) { console.log('[DEBUG] loadChat() ABORTED - chats[id] is falsy'); return; }
         currentChatId = id;
         try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
         isFirstMessage = false;
