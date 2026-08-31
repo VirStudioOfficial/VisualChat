@@ -86,7 +86,7 @@
             --bg-input: #171717;
             --accent-1: #6366f1;
             --accent-2: #a855f7;
-            --accent-grad: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+            --accent-grad: linear-gradient(135deg, #6366f1, #a855f7);
             --danger: #f87171;
             --text-main: #f4f6fb;
             --text-muted: #8a8a8a;
@@ -2442,7 +2442,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
             root.style.setProperty('--accent-1', '#6366f1');
             root.style.setProperty('--accent-2', '#a855f7');
-            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, var(--accent-1), var(--accent-2))');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6366f1, #a855f7)');
             root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%), radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%)');
             return;
         }
@@ -2463,7 +2463,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
             root.style.setProperty('--accent-1', '#6366f1');
             root.style.setProperty('--accent-2', '#a855f7');
-            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, var(--accent-1), var(--accent-2))');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6366f1, #a855f7)');
             root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%), radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%)');
             return;
         }
@@ -2472,7 +2472,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const c2 = s.c2 || defaultSettings.c2;
         root.style.setProperty('--accent-1', c1);
         root.style.setProperty('--accent-2', c2);
-        root.style.setProperty('--accent-grad', 'linear-gradient(135deg, var(--accent-1), var(--accent-2))');
+        root.style.setProperty('--accent-grad', `linear-gradient(135deg, ${c1}, ${c2})`);
         root.style.setProperty('--bg-main', mixHex(light ? '#f6f7fb' : '#0a0c12', c1, light ? 0.055 : 0.16));
         root.style.setProperty('--bg-sidebar', mixHex(light ? '#ffffff' : '#10131c', c1, light ? 0.045 : 0.18));
         root.style.setProperty('--bg-card', mixHex(light ? '#f0f2f8' : '#161a24', c2, light ? 0.05 : 0.13));
