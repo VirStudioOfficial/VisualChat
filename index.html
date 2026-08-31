@@ -2390,14 +2390,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         updateUserUI();
     }
 
-    const defaultSettings = { theme: 'auto', c1: '#6b7078', c2: '#b6bac1', fontSize: 'normal', uiPalette: 'charcoal' };
+    const defaultSettings = { theme: 'auto', c1: '#6366f1', c2: '#a855f7', fontSize: 'normal', uiPalette: 'flat' };
 
     function getSettings() {
         try {
             const stored = { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') };
-            stored.uiPalette = 'charcoal';
-            stored.c1 = '#6b7078';
-            stored.c2 = '#b6bac1';
             return stored;
         }
         catch (e) { return { ...defaultSettings }; }
@@ -2419,49 +2416,55 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function applyWholeUiPalette(s, resolvedTheme) {
         const root = document.documentElement;
-        const isCharcoal = s.uiPalette === 'charcoal';
+        const isFlat = s.uiPalette === 'flat' || !s.uiPalette;
         const light = resolvedTheme === 'light';
 
-        if (isCharcoal && light) {
-            root.style.setProperty('--bg-main', '#f4f4f6');
-            root.style.setProperty('--bg-sidebar', '#ffffff');
-            root.style.setProperty('--bg-card', '#eceef1');
-            root.style.setProperty('--bg-card-hover', '#e2e4e8');
-            root.style.setProperty('--bg-input', '#ffffff');
-            root.style.setProperty('--border', '#dcdee2');
-            root.style.setProperty('--border-soft', 'rgba(0,0,0,0.07)');
-            root.style.setProperty('--text-main', '#1d1f24');
-            root.style.setProperty('--text-muted', '#63666e');
-            root.style.setProperty('--code-bg', '#eceef1');
+        // FIX (FOUC): این تابع قبلاً یک حالت "charcoal" اجباری داشت که دقیقاً
+        // همان پالت خاکستری/بنفش قدیمی را بعد از اجرای اسکریپت اولیه‌ی
+        // head دوباره روی صفحه سوار می‌کرد و باعث می‌شد یک لحظه مشکی خالص
+        // دیده شود و بلافاصله برگردد به رنگ‌های قدیمی. حالا این تابع همان
+        // پالت صاف مشکی/سفید را اعمال می‌کند - دقیقاً هماهنگ با مقادیر
+        // پیش‌فرض :root در CSS و با اسکریپت applyFlatPalette در <head>.
+        if (isFlat && light) {
+            root.style.setProperty('--bg-main', '#ffffff');
+            root.style.setProperty('--bg-sidebar', '#f9f9f9');
+            root.style.setProperty('--bg-card', '#f2f2f2');
+            root.style.setProperty('--bg-card-hover', '#e8e8e8');
+            root.style.setProperty('--bg-input', '#f2f2f2');
+            root.style.setProperty('--border', '#e5e5e5');
+            root.style.setProperty('--border-soft', 'rgba(15,23,42,0.08)');
+            root.style.setProperty('--text-main', '#0d0d0d');
+            root.style.setProperty('--text-muted', '#6b6b6b');
+            root.style.setProperty('--code-bg', '#f2f2f2');
             root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
-            root.style.setProperty('--code-text', '#1d1f24');
-            root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.08)');
-            root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.16)');
-            root.style.setProperty('--accent-1', '#6b7078');
-            root.style.setProperty('--accent-2', '#3a3c42');
-            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #b6bac1, #6b7078 52%, #3a3c42)');
-            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.10), transparent 45%), radial-gradient(circle at -10% 110%, rgba(58,60,66,0.06), transparent 40%)');
+            root.style.setProperty('--code-text', '#0d0d0d');
+            root.style.setProperty('--shadow-a', 'rgba(30,41,59,0.08)');
+            root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
+            root.style.setProperty('--accent-1', '#6366f1');
+            root.style.setProperty('--accent-2', '#a855f7');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, var(--accent-1), var(--accent-2))');
+            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%), radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%)');
             return;
         }
-        if (isCharcoal) {
-            root.style.setProperty('--bg-main', '#1d1f24');
-            root.style.setProperty('--bg-sidebar', '#24262c');
-            root.style.setProperty('--bg-card', '#2b2e35');
-            root.style.setProperty('--bg-card-hover', '#343740');
-            root.style.setProperty('--bg-input', '#292c33');
-            root.style.setProperty('--border', '#3a3d45');
+        if (isFlat) {
+            root.style.setProperty('--bg-main', '#000000');
+            root.style.setProperty('--bg-sidebar', '#0a0a0a');
+            root.style.setProperty('--bg-card', '#171717');
+            root.style.setProperty('--bg-card-hover', '#212121');
+            root.style.setProperty('--bg-input', '#171717');
+            root.style.setProperty('--border', '#262626');
             root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
-            root.style.setProperty('--text-main', '#f1f3f5');
-            root.style.setProperty('--text-muted', '#a7abb3');
-            root.style.setProperty('--code-bg', '#1a1c21');
-            root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.045)');
-            root.style.setProperty('--code-text', '#eef0f2');
-            root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.32)');
-            root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.58)');
-            root.style.setProperty('--accent-1', '#6b7078');
-            root.style.setProperty('--accent-2', '#b6bac1');
-            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6b7078, #2b2e35 48%, #b6bac1)');
-            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.22), transparent 45%), radial-gradient(circle at -10% 110%, rgba(182,186,193,0.12), transparent 40%)');
+            root.style.setProperty('--text-main', '#f4f6fb');
+            root.style.setProperty('--text-muted', '#8a8a8a');
+            root.style.setProperty('--code-bg', '#0d0d0d');
+            root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.04)');
+            root.style.setProperty('--code-text', '#f4f6fb');
+            root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.3)');
+            root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
+            root.style.setProperty('--accent-1', '#6366f1');
+            root.style.setProperty('--accent-2', '#a855f7');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, var(--accent-1), var(--accent-2))');
+            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%), radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%)');
             return;
         }
 
