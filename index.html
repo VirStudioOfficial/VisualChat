@@ -15,88 +15,51 @@
                     : mode;
                 document.documentElement.setAttribute('data-theme', resolved);
 
-                var c1 = '#6b7078';
-                var c2 = '#b6bac1';
-                var isCharcoal = true;
+                // FEATURE (clean flat black/white UI): پیش‌تر این اسکریپت هر بار
+                // یک پالت خاکستری/رنگی سفارشی (isCharcoal) را روی متغیرهای
+                // :root سوار می‌کرد و همیشه ظاهر واقعی صفحه را بازنویسی می‌کرد -
+                // برای همین حتی با تغییر CSS اصلی هم رنگ واقعا مشکی خالص
+                // نمی‌شد. الان فقط یک پالت ساده و صاف (مشکی در دارک، سفید در
+                // لایت) اعمال می‌شود، هماهنگ با مقادیر پیش‌فرض :root در CSS.
                 var root = document.documentElement;
 
-                function hexToRgb(hex) {
-                    var value = String(hex || '').replace('#', '');
-                    if (value.length === 3) value = value.split('').map(function (x) { return x + x; }).join('');
-                    var n = parseInt(value, 16);
-                    return {
-                        r: (n >> 16) & 255,
-                        g: (n >> 8) & 255,
-                        b: n & 255
-                    };
-                }
-
-                function mixHex(a, b, amount) {
-                    var x = hexToRgb(a), y = hexToRgb(b);
-                    var mix = function (p, q) { return Math.round(p + (q - p) * amount); };
-                    return '#' + [mix(x.r, y.r), mix(x.g, y.g), mix(x.b, y.b)]
-                        .map(function (v) { return v.toString(16).padStart(2, '0'); }).join('');
-                }
-
-                function applyWholeUiPalette() {
-                    root.style.setProperty('--accent-1', c1);
-                    root.style.setProperty('--accent-2', c2);
-
-                    if (isCharcoal && resolved === 'light') {
-                        root.style.setProperty('--bg-main', '#f4f4f6');
-                        root.style.setProperty('--bg-sidebar', '#ffffff');
-                        root.style.setProperty('--bg-card', '#eceef1');
-                        root.style.setProperty('--bg-card-hover', '#e2e4e8');
-                        root.style.setProperty('--bg-input', '#ffffff');
-                        root.style.setProperty('--border', '#dcdee2');
-                        root.style.setProperty('--border-soft', 'rgba(0,0,0,0.07)');
-                        root.style.setProperty('--text-main', '#1d1f24');
-                        root.style.setProperty('--text-muted', '#63666e');
-                        root.style.setProperty('--code-bg', '#eceef1');
+                function applyFlatPalette() {
+                    if (resolved === 'light') {
+                        root.style.setProperty('--bg-main', '#ffffff');
+                        root.style.setProperty('--bg-sidebar', '#f9f9f9');
+                        root.style.setProperty('--bg-card', '#f2f2f2');
+                        root.style.setProperty('--bg-card-hover', '#e8e8e8');
+                        root.style.setProperty('--bg-input', '#f2f2f2');
+                        root.style.setProperty('--border', '#e5e5e5');
+                        root.style.setProperty('--border-soft', 'rgba(15,23,42,0.08)');
+                        root.style.setProperty('--text-main', '#0d0d0d');
+                        root.style.setProperty('--text-muted', '#6b6b6b');
+                        root.style.setProperty('--code-bg', '#f2f2f2');
                         root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
-                        root.style.setProperty('--code-text', '#1d1f24');
-                        root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.08)');
-                        root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.16)');
-                        root.style.setProperty('--accent-1', '#6b7078');
-                        root.style.setProperty('--accent-2', '#3a3c42');
-                        root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #b6bac1, #6b7078 52%, #3a3c42)');
-                        document.documentElement.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.10), transparent 45%), radial-gradient(circle at -10% 110%, rgba(58,60,66,0.06), transparent 40%)');
-                    } else if (isCharcoal) {
-                        root.style.setProperty('--bg-main', '#1d1f24');
-                        root.style.setProperty('--bg-sidebar', '#24262c');
-                        root.style.setProperty('--bg-card', '#2b2e35');
-                        root.style.setProperty('--bg-card-hover', '#343740');
-                        root.style.setProperty('--bg-input', '#292c33');
-                        root.style.setProperty('--border', '#3a3d45');
-                        root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
-                        root.style.setProperty('--text-main', '#f1f3f5');
-                        root.style.setProperty('--text-muted', '#a7abb3');
-                        root.style.setProperty('--code-bg', '#1a1c21');
-                        root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.045)');
-                        root.style.setProperty('--code-text', '#eef0f2');
-                        root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.32)');
-                        root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.58)');
-                        root.style.setProperty('--accent-1', '#6b7078');
-                        root.style.setProperty('--accent-2', '#b6bac1');
-                        root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6b7078, #2b2e35 48%, #b6bac1)');
-                        document.documentElement.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(107,112,120,0.22), transparent 45%), radial-gradient(circle at -10% 110%, rgba(182,186,193,0.12), transparent 40%)');
+                        root.style.setProperty('--code-text', '#0d0d0d');
+                        root.style.setProperty('--shadow-a', 'rgba(30,41,59,0.08)');
+                        root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
+                        root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%), radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%)');
                     } else {
-                        var darkBase = '#0a0c12';
-                        var lightBase = '#f6f7fb';
-                        var base = resolved === 'light' ? lightBase : darkBase;
-                        root.style.setProperty('--bg-main', mixHex(base, c1, resolved === 'light' ? 0.055 : 0.16));
-                        root.style.setProperty('--bg-sidebar', mixHex(resolved === 'light' ? '#ffffff' : '#10131c', c1, resolved === 'light' ? 0.045 : 0.18));
-                        root.style.setProperty('--bg-card', mixHex(resolved === 'light' ? '#f0f2f8' : '#161a24', c2, resolved === 'light' ? 0.05 : 0.13));
-                        root.style.setProperty('--bg-card-hover', mixHex(resolved === 'light' ? '#e6e9f3' : '#1c2130', c1, resolved === 'light' ? 0.06 : 0.18));
-                        root.style.setProperty('--bg-input', mixHex(resolved === 'light' ? '#ffffff' : '#191e29', c1, resolved === 'light' ? 0.035 : 0.15));
-                        root.style.setProperty('--border', mixHex(resolved === 'light' ? '#e2e5ef' : '#232838', c1, resolved === 'light' ? 0.10 : 0.18));
-                        root.style.setProperty('--app-bg-image',
-                            'radial-gradient(circle at 85% -10%, ' + c1 + '33, transparent 45%), radial-gradient(circle at -10% 110%, ' + c2 + '26, transparent 40%)'
-                        );
+                        root.style.setProperty('--bg-main', '#000000');
+                        root.style.setProperty('--bg-sidebar', '#0a0a0a');
+                        root.style.setProperty('--bg-card', '#171717');
+                        root.style.setProperty('--bg-card-hover', '#212121');
+                        root.style.setProperty('--bg-input', '#171717');
+                        root.style.setProperty('--border', '#262626');
+                        root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
+                        root.style.setProperty('--text-main', '#f4f6fb');
+                        root.style.setProperty('--text-muted', '#8a8a8a');
+                        root.style.setProperty('--code-bg', '#0d0d0d');
+                        root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.04)');
+                        root.style.setProperty('--code-text', '#f4f6fb');
+                        root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.3)');
+                        root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
+                        root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%), radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%)');
                     }
                 }
 
-                applyWholeUiPalette();
+                applyFlatPalette();
                 if (saved.fontSize) {
                     var sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
                     document.documentElement.style.setProperty('--msg-font-size', sizes[saved.fontSize] || sizes.normal);
@@ -116,48 +79,53 @@
         .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.1; }
         [class*="ph-"] { vertical-align: -0.09em; }
         :root {
-            --bg-main: #090d16;
-            --bg-sidebar: #0f1523;
-            --bg-card: #161f33;
-            --bg-card-hover: #1e2a44;
-            --bg-input: #121929;
+            --bg-main: #000000;
+            --bg-sidebar: #0a0a0a;
+            --bg-card: #171717;
+            --bg-card-hover: #212121;
+            --bg-input: #171717;
             --accent-1: #6366f1;
             --accent-2: #a855f7;
             --accent-grad: linear-gradient(135deg, var(--accent-1), var(--accent-2));
             --danger: #f87171;
             --text-main: #f4f6fb;
-            --text-muted: #838da3;
-            --border: #232838;
-            --border-soft: rgba(255,255,255,0.06);
+            --text-muted: #8a8a8a;
+            --border: #262626;
+            --border-soft: rgba(255,255,255,0.08);
             --shadow-a: rgba(0,0,0,0.3);
             --shadow-b: rgba(0,0,0,0.55);
             --msg-font-size: 0.92rem;
             --success: #34d399;
             --warning: #fbbf24;
-            --code-bg: #0b0f18;
+            --code-bg: #0d0d0d;
             --code-head-bg: rgba(255,255,255,0.04);
-            --code-head-bg-solid: #1c212e;
+            --code-head-bg-solid: #1c1c1c;
             --code-text: #f4f6fb;
+            /* پس‌زمینه صاف و مشکی خالص - بدون گرادیان رنگی؛ فقط یک درخشش
+               بسیار محو و خنثی (نه رنگی) که فقط عمق کمی به صفحه می‌دهد. */
             --app-bg-image:
-                radial-gradient(circle at 85% -10%, color-mix(in srgb, var(--accent-1) 16%, transparent), transparent 45%),
-                radial-gradient(circle at -10% 110%, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent 40%);
+                radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%);
         }
 
         :root[data-theme="light"] {
-            --bg-main: #f6f7fb;
-            --bg-sidebar: #ffffff;
-            --bg-card: #f0f2f8;
-            --bg-card-hover: #e6e9f3;
-            --bg-input: #ffffff;
-            --text-main: #1a1d29;
-            --text-muted: #6b7280;
-            --border: #e2e5ef;
-            --code-bg: #1e2530;
-            --code-head-bg: rgba(255,255,255,0.05);
-            --code-text: #e8eaf0;
+            --bg-main: #ffffff;
+            --bg-sidebar: #f9f9f9;
+            --bg-card: #f2f2f2;
+            --bg-card-hover: #e8e8e8;
+            --bg-input: #f2f2f2;
+            --text-main: #0d0d0d;
+            --text-muted: #6b6b6b;
+            --border: #e5e5e5;
+            --code-bg: #f2f2f2;
+            --code-head-bg: rgba(0,0,0,0.04);
+            --code-text: #0d0d0d;
             --border-soft: rgba(15,23,42,0.08);
-            --shadow-a: rgba(30,41,59,0.10);
-            --shadow-b: rgba(30,41,59,0.16);
+            --shadow-a: rgba(30,41,59,0.08);
+            --shadow-b: rgba(30,41,59,0.14);
+            --app-bg-image:
+                radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%);
         }
 
         :root[data-theme="light"] body {
@@ -200,7 +168,7 @@
         body {
             display: flex;
             position: relative;
-            background: linear-gradient(135deg, #090d16, #111827, #1e1b4b);
+            background: var(--bg-main);
             background-image: var(--app-bg-image);
         }
 
@@ -456,6 +424,10 @@
             gap: 4px;
             scrollbar-width: none; /* Firefox */
             -ms-overflow-style: none; /* IE and Edge */
+            /* FEATURE: fade mask روی لبه بالا/پایین لیست قابل‌اسکرول - به‌جای
+               بریدگی تیز محتوا، به‌آرومی محو می‌شه (مثل اکثر اپ‌های چت). */
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
         }
         .history-list::-webkit-scrollbar {
             display: none; /* Chrome, Safari, Opera */
@@ -670,11 +642,14 @@
             overflow-y: auto;
             display: none;
             flex-direction: column;
-            gap: 18px;
+            gap: 30px;
             scroll-behavior: smooth;
             --chat-box-pad-top: 22px;
             scrollbar-width: none; /* Firefox */
             -ms-overflow-style: none; /* IE and Edge */
+            /* FEATURE: همون fade mask روی لبه بالا/پایین ناحیه پیام‌ها */
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
         }
         .chat-box::-webkit-scrollbar {
             display: none; /* Chrome, Safari, Opera */
@@ -697,9 +672,9 @@
 
         .message.user {
             background-color: var(--bg-card);
-            border: 1px solid var(--border-soft);
+            border: none;
             color: var(--text-main);
-            border-bottom-right-radius: 4px;
+            border-radius: 20px;
         }
 
         .message.bot {
@@ -1009,6 +984,8 @@
             overflow-y: auto;
             scrollbar-width: none; /* Firefox */
             -ms-overflow-style: none; /* IE and Edge */
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
         }
         .settings-modal::-webkit-scrollbar {
             display: none; /* Chrome, Safari, Opera */
@@ -1193,8 +1170,8 @@
             letter-spacing: 0.005em;
         }
         .message.user {
-            background: linear-gradient(135deg, color-mix(in srgb, var(--accent-1) 14%, transparent), color-mix(in srgb, var(--accent-2) 7%, transparent));
-            border-radius: 18px 18px 4px 18px;
+            background: var(--bg-card);
+            border-radius: 20px;
             padding: 14px 18px;
         }
         .message.bot {
@@ -1310,6 +1287,21 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .message.bot h2,.message.bot h3,.message.bot h4{margin:1.15rem 0 .55rem}.message.bot h2:first-child,.message.bot h3:first-child,.message.bot h4:first-child{margin-top:0}
 .message.bot ul,.message.bot ol{margin:.45rem 0 .9rem}.message.bot li{margin:.28rem 0}
 .message.bot blockquote{margin:.8rem 0;padding:.55rem .85rem;border-right:3px solid var(--accent-2);background:var(--surface-2);border-radius:10px;color:var(--text-muted)}
+.message.bot em{font-style:italic}
+.message.bot del{opacity:.65;text-decoration:line-through}
+.message.bot a.msg-link{color:var(--accent-1);text-decoration:underline;text-underline-offset:2px;word-break:break-all}
+.message.bot a.msg-link:hover{opacity:.82}
+.entity-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 8px;border-radius:999px;background:var(--bg-card);border:1px solid var(--border-soft);font-size:.85em;font-weight:600;color:var(--text-main);vertical-align:middle}
+.entity-chip i{font-size:.9em;color:var(--accent-1)}
+/* FEATURE: لیست تودرتو - هر سطح تورفتگی بیشتر یعنی یک <ul>/<ol> داخل <li> والدش */
+.message.bot li>ul,.message.bot li>ol{margin:.28rem 0 .28rem .1rem}
+/* FEATURE: جدول مارک‌داون */
+.msg-table-wrap{overflow-x:auto;margin:.8rem 0;border:1px solid var(--border-soft);border-radius:12px}
+.msg-table{width:100%;border-collapse:collapse;font-size:.86em}
+.msg-table th,.msg-table td{padding:9px 14px;text-align:right;border-bottom:1px solid var(--border-soft)}
+.msg-table thead th{background:var(--bg-card);color:var(--text-main);font-weight:700;white-space:nowrap}
+.msg-table tbody tr:last-child td{border-bottom:none}
+.msg-table tbody tr:hover{background:var(--bg-card-hover)}
 .message-actions{display:flex;gap:4px;opacity:0;transform:translateY(-2px);transition:.18s;min-height:26px;padding:0 4px;direction:rtl}
 .message-wrapper:hover .message-actions,.message-wrapper:focus-within .message-actions{opacity:1;transform:none}
 .msg-action{width:28px;height:28px;border:1px solid var(--border-soft);border-radius:8px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);display:inline-flex;align-items:center;justify-content:center;font-size:.72rem}
@@ -3560,21 +3552,131 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         clearCodeFilesMemory();
     }
 
-    const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. لحن تو طبیعی، گرم، باهوش و خودمانی است؛ مثل یک رفیق باحال و حرفه‌ای صحبت کن، نه مثل متن خشک کتاب یا پاسخ اداری.
+    // NOTE: kept in sync with the persona set server-side in chat.js's
+    // systemText and with upgradedPersona above - three copies existed
+    // before with drifting/conflicting tone instructions.
+    const virtualPersona = `تو Virtual Bot 1.5 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. یک دستیار هوش مصنوعی گرم، صمیمی، طبیعی و جذاب هستی؛ گفتگو باید شبیه صحبت با یک دوست باهوش و خوش‌برخورد باشد، نه یک متن خشک و رسمی.
 
 قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot 1.5 هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن و هیچ نامی مثل «اکبر» نساز؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
 
-سبک پاسخ: جواب را اول مستقیم شروع کن. برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. هر پاراگراف را بیش از حد کش نده. اگر موضوع چند بخش دارد، آن را بخش‌بندی کن. از تکرار بی‌دلیل مقدمه‌هایی مثل «حتماً، با کمال میل» خودداری کن. اگر کاربر شوخی کرد، شوخی را بگیر و طبیعی جواب بده. هرگز از ایموجی 🤖 استفاده نکن. هر وقت به کاربر سلام می‌کنی یا به سلام او پاسخ می‌دهی، حتماً یک ایموجی گرم مثل 😊 یا 👋 همراه پاسخت بیاور؛ در غیر این صورت از ایموجی کم و به‌جا استفاده کن.
+لحن: لحن کاربر را تشخیص بده و متناسب با آن پاسخ بده - رسمی بود محترمانه باش، دوستانه بود صمیمی و خودمانی باش، شوخی کرد در حد مناسب همراهی کن، ناراحت/نگران بود آرام و همدلانه باش و شوخی نکن. پاسخ را با واکنش مناسب به حرف کاربر شروع کن، بعد سراغ اصل مطلب برو. از اصطلاحات محاوره‌ای فارسی طبیعی استفاده کن، زیاده‌روی نکن.
 
-دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار، وضعیت بازار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن و تاریخ/منبع را در صورت امکان روشن کن. قیمت و مشخصات را حدس نزن. اگر مطمئن نیستی، صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. اگر HTML می‌نویسی، در بلوک کد html کامل و قابل اجرا ارائه کن. هدف این است که جواب‌ها هم مفید و حرفه‌ای باشند و هم شخصیت داشته باشند.`
+سبک پاسخ: برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. سؤال ساده را کوتاه جواب بده. از تکرار بی‌دلیل مقدمه‌های کلیشه‌ای مثل «حتماً، با کمال میل» خودداری کن. ایموجی را متناسب با فضا و به‌اندازه استفاده کن (نه در هر جمله)، هرگز از ایموجی 🤖 استفاده نکن؛ هنگام سلام یک ایموجی گرم مثل 😊 یا 👋 بیاور.
+
+دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن. قیمت و مشخصات را حدس نزن؛ اگر مطمئن نیستی صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. هدف این است که جواب‌ها هم مفید و دقیق باشند و هم شخصیت گرم و طبیعی داشته باشند.`
 
     function ensureVirtualPersona() {
         if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
         if (chatHistoryData[currentChatId].some(item => item.__virtualPersona)) return;
         chatHistoryData[currentChatId].unshift(
             { role: 'user', text: virtualPersona, __virtualPersona: true },
-            { role: 'model', text: 'متوجه شدم؛ از این به بعد با شخصیت طبیعی، خودمانی و خوانا پاسخ می‌دهم.', __virtualPersona: true }
+            { role: 'model', text: 'متوجه شدم؛ از این به بعد با شخصیت گرم، طبیعی و خودمانی پاسخ می‌دهم.', __virtualPersona: true }
         );
+    }
+
+    // ===== FEATURE: خلاصه‌ی چت‌های اخیر (برای تشخیص لحن/سبک کاربر از پیام اول) =====
+    // هدف: بدون کند کردن ارسال پیام، یک خلاصه‌ی کوتاه از ۵ گفتگوی اخیر کاربر
+    // در localStorage نگه داریم و همراه هر درخواست به بک‌اند بفرستیم تا مدل
+    // از همون اول بفهمه کاربر چطور صحبت می‌کنه، شوخه یا جدی، دنبال چیه.
+    //
+    // نحوه کار (بدون افت سرعت):
+    // ۱. هیچ‌وقت جلوی ارسال پیام رو نمی‌گیره - همیشه از یک مقدار کش‌شده در
+    //    localStorage خونده می‌شه که ساختنش هیچ هزینه‌ای به درخواست فعلی نمی‌زنه.
+    // ۲. ساخت/به‌روزرسانی خلاصه به‌صورت async و در پس‌زمینه انجام می‌شه: یک
+    //    درخواست سبک و غیر-استریم به همون /api/chat می‌زنیم، نتیجه رو کش
+    //    می‌کنیم، و کار کاربر (تایپ/دریافت پاسخ فعلی) اصلاً منتظرش نمی‌مونه.
+    // ۳. فقط وقتی که چت‌ها واقعاً عوض شده باشن (بر اساس تعداد پیام‌ها) دوباره
+    //    خلاصه می‌سازیم، نه هر بار.
+    const RECENT_SUMMARY_KEY = 'virtual_recent_chats_summary';
+    const RECENT_SUMMARY_MAX_CHATS = 5;
+    const RECENT_SUMMARY_MAX_MSGS_PER_CHAT = 6;
+
+    function getRecentChatsSummaryCache() {
+        try { return JSON.parse(localStorage.getItem(RECENT_SUMMARY_KEY) || 'null'); } catch (_) { return null; }
+    }
+
+    function setRecentChatsSummaryCache(entry) {
+        try { localStorage.setItem(RECENT_SUMMARY_KEY, JSON.stringify(entry)); } catch (_) {}
+    }
+
+    // یک امضای سبک از وضعیت فعلی چت‌ها می‌سازه (شناسه + تعداد پیام هرکدام)
+    // تا بفهمیم از دفعه‌ی قبل چیزی عوض شده یا نه - بدون نیاز به مقایسه‌ی متن کامل.
+    function buildRecentChatsFingerprint() {
+        const ids = Object.keys(chats || {})
+            .filter(id => id !== String(currentChatId))
+            .sort((a, b) => (chats[b]?.updatedAt || 0) - (chats[a]?.updatedAt || 0))
+            .slice(0, RECENT_SUMMARY_MAX_CHATS);
+        return ids.map(id => `${id}:${(chatHistoryData[id] || []).length}`).join('|');
+    }
+
+    // متن خام چند پیام آخر ۵ چت اخیر رو (کوتاه‌شده) برای درخواست خلاصه‌سازی آماده می‌کنه.
+    function collectRecentChatsRawText() {
+        const ids = Object.keys(chats || {})
+            .filter(id => id !== String(currentChatId))
+            .sort((a, b) => (chats[b]?.updatedAt || 0) - (chats[a]?.updatedAt || 0))
+            .slice(0, RECENT_SUMMARY_MAX_CHATS);
+        if (!ids.length) return '';
+        return ids.map(id => {
+            const title = chats[id]?.title || 'گفتگو';
+            const msgs = (chatHistoryData[id] || [])
+                .filter(m => !m.__virtualPersona && m.text)
+                .slice(-RECENT_SUMMARY_MAX_MSGS_PER_CHAT)
+                .map(m => `${m.role === 'user' ? 'کاربر' : 'ربات'}: ${String(m.text).slice(0, 200)}`)
+                .join('\n');
+            return `### ${title}\n${msgs}`;
+        }).join('\n\n');
+    }
+
+    let recentChatsSummaryInFlight = false;
+
+    // خلاصه رو در پس‌زمینه (بدون بلاک کردن ارسال پیام فعلی) به‌روز می‌کنه.
+    // fire-and-forget است؛ عمداً await نمی‌شود جایی که صدا زده می‌شود.
+    async function refreshRecentChatsSummaryInBackground() {
+        if (recentChatsSummaryInFlight) return;
+        const fingerprint = buildRecentChatsFingerprint();
+        if (!fingerprint) return;
+        const cached = getRecentChatsSummaryCache();
+        if (cached && cached.fingerprint === fingerprint) return; // چیزی عوض نشده
+
+        const rawText = collectRecentChatsRawText();
+        if (!rawText.trim()) return;
+
+        recentChatsSummaryInFlight = true;
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userName: uName,
+                    text: `در حد ۲ تا ۳ جمله‌ی کوتاه فارسی خلاصه کن که این کاربر معمولاً چطور صحبت می‌کند (رسمی/شوخ/خودمانی)، بیشتر دنبال چه موضوعاتی است و چه سبک پاسخی را دوست دارد. فقط خلاصه را بنویس، بدون مقدمه:\n\n${rawText}`,
+                    rawText: '',
+                    file: null,
+                    files: [],
+                    archivedFileNames: [],
+                    archivedFiles: [],
+                    webSearch: false,
+                    history: [],
+                    model: 'gemini-3.5-flash-lite',
+                    stream: false
+                })
+            });
+            if (!res.ok) return;
+            const data = await res.json().catch(() => null);
+            const summaryText = (data?.text || data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+            if (summaryText) {
+                setRecentChatsSummaryCache({ fingerprint, summary: summaryText, updatedAt: Date.now() });
+            }
+        } catch (_) {
+            // شکست بی‌سروصدا - خلاصه صرفاً یک کمک جانبی است، نه چیزی که باید
+            // جلوی ارسال پیام اصلی را بگیرد یا خطا نشان دهد.
+        } finally {
+            recentChatsSummaryInFlight = false;
+        }
+    }
+
+    function getCachedRecentChatsSummaryText() {
+        const cached = getRecentChatsSummaryCache();
+        return cached?.summary || '';
     }
 
     function updateScrollLatestButton() {
@@ -3908,10 +4010,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
                     styleHint: virtualPersona,
+                    // FEATURE (recent-chats summary): همیشه از نسخه‌ی کش‌شده
+                    // خونده می‌شه - هیچ‌وقت منتظر ساخته‌شدنش نمی‌مونیم تا
+                    // سرعت ارسال پیام فعلی افت نکنه. به‌روزرسانی خودش جدا و
+                    // در پس‌زمینه (بعد از پایان همین درخواست) انجام می‌شود.
+                    recentChatsSummary: getCachedRecentChatsSummaryText(),
                     stream: true
                 }),
                 signal: currentAbortController.signal
             });
+
+            // خلاصه‌ی چت‌های اخیر رو در پس‌زمینه به‌روز می‌کنیم - fire-and-forget،
+            // بعد از شروع درخواست اصلی، تا هیچ تاخیری به پاسخ فعلی اضافه نشه.
+            refreshRecentChatsSummaryInBackground();
 
             if (requestId !== activeRequestId) return;
 
@@ -4178,8 +4289,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     function formatInline(value) {
         return value
             .replace(/`([^`]+)`/g, '<code>$1</code>')
+            // لینک مارک‌داون [متن](URL) -> لینک واقعی قابل کلیک، باز شونده در تب جدید
+            .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="msg-link">$1</a>')
+            // URL خام هم به لینک تبدیل شود (وقتی داخل [] () نیامده)
+            .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="msg-link">$2</a>')
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-            .replace(/__([^_]+)__/g, '<strong>$1</strong>');
+            .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+            // FEATURE: کارت/چیپ Entity - نحو ویژه {{entity:نام}} یک بج کوچک
+            // با آیکون پازل رندر می‌کند (برای اشاره به یک مفهوم/محصول/شخص مهم).
+            .replace(/\{\{entity:([^}]+)\}\}/g, '<span class="entity-chip"><i class="lucide-icon" data-lucide="puzzle"></i>$1</span>')
+            // ایتالیک: تک‌ستاره/تک‌آندرلاین (بعد از بولد پردازش می‌شود که با ** تداخل نکند)
+            .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
+            .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>')
+            // خط‌خورده: ~~متن~~
+            .replace(/~~([^~]+)~~/g, '<del>$1</del>');
     }
 
     function sanitizeVirtualIdentity(text) {
@@ -4975,6 +5098,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             console.error('History load failed:', e);
         }
         renderHistoryList();
+        // خلاصه‌ی چت‌های اخیر رو از همین ابتدا (بدون بلاک کردن UI) در پس‌زمینه
+        // آماده می‌کنیم تا اولین پیام کاربر در این سشن هم لحن درست رو ببینه.
+        refreshRecentChatsSummaryInBackground();
     }
 
     function toggleHistorySearch() {
@@ -5066,7 +5192,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
 
     // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
-    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار فارسی‌زبان طبیعی، دقیق و حرفه‌ای. اول درست بفهم کاربر چه می‌خواهد، بعد مستقیم جواب بده. خشک و اداری نباش، اما بی‌دلیل هم ایموجی و هیجان اضافه نکن. مهم: هیچ واقعیت، قابلیت، منبع، نتیجه، لینک، اجرای کد یا کاری را که مطمئن نیستی انجام شده، نساز و ادعا نکن. اگر اطلاعات کافی نیست، صادقانه بگو یا فقط همان سؤال کوتاهی را بپرس که واقعاً لازم است. پاسخ‌های بلند را با تیتر کوتاه، پاراگراف‌های 2 تا 5 جمله‌ای، فاصله مناسب و لیست‌های واقعی بخش‌بندی کن؛ هر جمله را خط جدید نبر. برای سؤال ساده کوتاه جواب بده. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. اگر HTML کامل می‌دهی، آن را در یک بلوک html کامل، تمیز و با ایندنت درست و منظم بده؛ تگ‌ها را به‌ترتیب و خوانا بنویس، نه فشرده و درهم. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
+    // NOTE: kept in sync with the persona set server-side in chat.js's
+    // systemText - this frontend-injected version used to be more formal/
+    // dry ("بی‌دلیل هیجان اضافه نکن") and was fighting the real persona.
+    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار هوش مصنوعی گرم، صمیمی، طبیعی و جذاب. گفتگو باید شبیه صحبت با یک دوست باهوش و خوش‌برخورد باشد، نه یک متن خشک و رسمی. لحن کاربر را تشخیص بده و متناسب با آن پاسخ بده: رسمی بود محترمانه باش، دوستانه بود صمیمی باش، شوخی کرد در حد مناسب همراهی کن، ناراحت/نگران بود آرام و همدلانه باش و شوخی نکن. از اصطلاحات محاوره‌ای فارسی طبیعی استفاده کن، زیاده‌روی نکن. پاسخ را با واکنش مناسب به حرف کاربر شروع کن و بعد سراغ اصل مطلب برو. ایموجی را متناسب با فضا و به‌اندازه استفاده کن (نه در هر جمله)، هرگز 🤖 استفاده نکن. از شوخی تکراری یا کلیشه‌ای (مثل «حتماً! با کمال میل!») خودداری کن. سؤال ساده را کوتاه جواب بده؛ موضوع پیچیده را کامل و مرحله‌به‌مرحله توضیح بده. در سؤال فنی همچنان صمیمی بمان ولی دقت فنی را فدای شوخی نکن. هیچ واقعیت، قابلیت، منبع، نتیجه، لینک یا کاری را که مطمئن نیستی انجام شده، نساز. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
     try { window.virtualPersona = upgradedPersona; } catch (_) {}
 
     function addMessageActions(wrapper, sender) {
@@ -5223,6 +5352,32 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         h.unshift({role:'user',text:upgradedPersona,__virtualPersona:true},{role:'model',text:'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.',__virtualPersona:true});
     };
 
+    // FEATURE: تبدیل یک آرایه‌ی تخت از آیتم‌های لیست (هرکدام با depth) به
+    // HTML لیست تودرتوی واقعی. الگوریتم stack-based ساده: هر بار depth بالا
+    // می‌رود یک <ul>/<ol> تودرتو باز می‌شود، هر بار پایین می‌آید بسته می‌شود.
+    function renderNestedList(items){
+        if(!items.length) return '';
+        let html='';
+        const stack=[]; // {type, depth}
+        for(const item of items){
+            while(stack.length && stack[stack.length-1].depth > item.depth){
+                html+=`</li></${stack.pop().type}>`;
+            }
+            if(!stack.length || stack[stack.length-1].depth < item.depth){
+                html+=`<${item.type}>`;
+                stack.push({type:item.type, depth:item.depth});
+            } else if(stack[stack.length-1].type!==item.type && stack[stack.length-1].depth===item.depth){
+                html+=`</li></${stack.pop().type}><${item.type}>`;
+                stack.push({type:item.type, depth:item.depth});
+            } else {
+                html+='</li>';
+            }
+            html+=`<li>${formatInline(item.text)}`;
+        }
+        while(stack.length){ html+=`</li></${stack.pop().type}>`; }
+        return html;
+    }
+
     // More reliable formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit.
     formatReply = function(text){
         const rawParts=String(text ?? '').split(/```/);
@@ -5269,18 +5424,53 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 </div>`;
             }
             const escapedPart=escapeHtml(rawPart);
-            const lines=escapedPart.split('\n');let out=[],para=[],list=null,items=[];
+            const lines=escapedPart.split('\n');let out=[],para=[],list=null,items=[],tableRows=null;
             const flushP=()=>{if(para.length){out.push(`<p>${formatInline(para.join(' '))}</p>`);para=[]}};
-            const flushL=()=>{if(items.length){const tag=list==='ol'?'ol':'ul';out.push(`<${tag}>${items.map(x=>`<li>${formatInline(x)}</li>`).join('')}</${tag}>`);items=[];list=null}};
-            for(const raw of lines){const line=raw.trim();if(!line){flushP();flushL();continue}
+            // FEATURE: پشتیبانی از لیست تودرتو - سطح تورفتگی از تعداد
+            // فاصله/تب ابتدای خط تشخیص داده می‌شود و به‌صورت <ul>/<ol> تودرتو
+            // رندر می‌شود، به‌جای یک لیست تخت.
+            const flushL=()=>{
+                if(!items.length) return;
+                out.push(renderNestedList(items));
+                items=[];list=null;
+            };
+            const flushTable=()=>{
+                if(!tableRows||!tableRows.length) return;
+                const [headerRow,...bodyRows]=tableRows;
+                const thead=`<thead><tr>${headerRow.map(c=>`<th>${formatInline(c)}</th>`).join('')}</tr></thead>`;
+                const tbody=bodyRows.length?`<tbody>${bodyRows.map(r=>`<tr>${r.map(c=>`<td>${formatInline(c)}</td>`).join('')}</tr>`).join('')}</tbody>`:'';
+                out.push(`<div class="msg-table-wrap"><table class="msg-table">${thead}${tbody}</table></div>`);
+                tableRows=null;
+            };
+            const parseTableRow=(line)=>line.replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+            const isTableSeparator=(line)=>/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(line);
+            for(const raw of lines){
+                const rawTrimmed=raw.replace(/&nbsp;/g,' ');
+                const line=rawTrimmed.trim();
+                const indentMatch=raw.match(/^(\s*)/);
+                const indent=indentMatch?indentMatch[1].replace(/\t/g,'  ').length:0;
+                if(!line){flushP();flushL();flushTable();continue}
+                // FEATURE: جدول مارک‌داون | ستون | ستون |  با ردیف جداکننده |---|---|
+                const isTableLine=/^\|.*\|$/.test(line)||(line.includes('|')&&!/^[-*•]\s|^\d+[.)]\s/.test(line));
+                if(isTableLine&&!tableRows){
+                    // شروع احتمالی جدول: فقط اگر خط بعدی جداکننده باشد قبول می‌کنیم
+                    const nextIdx=lines.indexOf(raw)+1;
+                    const nextLine=(lines[nextIdx]||'').trim();
+                    if(isTableSeparator(nextLine)){flushP();flushL();tableRows=[parseTableRow(line)];continue}
+                }
+                if(tableRows){
+                    if(isTableSeparator(line)) continue; // ردیف جداکننده را رد کن
+                    if(isTableLine){tableRows.push(parseTableRow(line));continue}
+                    flushTable();
+                }
                 const head=line.match(/^(#{1,3})\s+(.+)$/), bullet=line.match(/^[-*•]\s+(.+)$/), ordered=line.match(/^\d+[.)]\s+(.+)$/), quote=line.match(/^&gt;\s*(.+)$/), hr=/^[-*_]{3,}$/.test(line);
                 if(head){flushP();flushL();const lv=Math.min(4,head[1].length+1);out.push(`<h${lv}>${formatInline(head[2])}</h${lv}>`)}
                 else if(quote){flushP();flushL();out.push(`<blockquote>${formatInline(quote[1])}</blockquote>`)}
                 else if(hr){flushP();flushL();out.push('<hr>')}
-                else if(bullet){flushP();if(list&&list!=='ul')flushL();list='ul';items.push(bullet[1])}
-                else if(ordered){flushP();if(list&&list!=='ol')flushL();list='ol';items.push(ordered[1])}
+                else if(bullet){flushP();list='ul';items.push({type:'ul',depth:Math.floor(indent/2),text:bullet[1]})}
+                else if(ordered){flushP();list='ol';items.push({type:'ol',depth:Math.floor(indent/2),text:ordered[1]})}
                 else {flushL();para.push(line)}
-            } flushP();flushL();return out.join('');
+            } flushP();flushL();flushTable();return out.join('');
         }).join('');return rendered||'<p>پاسخی دریافت نشد.</p>';
     };
 
