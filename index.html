@@ -2544,20 +2544,29 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             if (freshToken) {
                 const retryRes = await doFetch(freshToken);
                 if (retryRes.status !== 401) return retryRes;
+                // سرور با توکنِ *واقعاً تازه* هم 401 داد → توکن قطعاً رد شده.
+                try {
+                    localStorage.removeItem('vc_google_id_token');
+                    localStorage.removeItem('vc_google_id_token_issued_at');
+                    localStorage.removeItem('virtual_chat_user');
+                } catch (_) {}
+                const overlay = document.getElementById('authOverlay');
+                if (overlay) overlay.classList.add('active');
+                return retryRes;
             }
-            // FIX (کاربران موبایل/اندروید بدون دسترسی به Console): اگر بعد از
-            // تلاش برای رفرش هم سرور همچنان 401 بدهد، یعنی توکن ذخیره‌شده
-            // قطعاً خراب/نامعتبر است (نه صرفاً نزدیک به انقضا). قبلاً اینجا
-            // درخواست فقط بی‌صدا شکست می‌خورد و کاربر تا ابد گیر می‌کرد چون
-            // راهی برای پاک کردن دستی localStorage نداشت. حالا به‌صورت خودکار
-            // توکن خراب را پاک می‌کنیم و کاربر را به صفحه‌ی لاگین برمی‌گردانیم.
-            try {
-                localStorage.removeItem('vc_google_id_token');
-                localStorage.removeItem('vc_google_id_token_issued_at');
-                localStorage.removeItem('virtual_chat_user');
-            } catch (_) {}
-            const overlay = document.getElementById('authOverlay');
-            if (overlay) overlay.classList.add('active');
+            // FIX 2: forceRefreshGoogleIdToken چیزی برنگرداند (freshToken === null).
+            // این می‌تواند یعنی «توکن واقعاً خراب است» یا صرفاً یعنی «خودِ فرآیند
+            // رفرش با VPN/FedCM/کندی شبکه گیر کرد» - و این دو حالت را نباید یکسان
+            // درمان کرد. اگر اصلاً token ای برای این درخواست نداشتیم (کاربر از قبل
+            // لاگین نبود)، پاک کردن بی‌ضرر است. اما اگر token داشتیم و فقط رفرشش
+            // fail شد، توکن قدیمی ممکن است هنوز از نظر گوگل معتبر باشد؛ پاک کردنش
+            // با VPN باعث می‌شد یک session سالم به‌اشتباه از بین برود. پس در این
+            // حالت فقط اورلی لاگین را نشان می‌دهیم (برای کاربرانی که واقعاً باید
+            // وارد شوند) بدون آنکه چیزی از localStorage پاک شود.
+            if (!token) {
+                const overlay = document.getElementById('authOverlay');
+                if (overlay) overlay.classList.add('active');
+            }
         }
         return res;
     }
@@ -2582,7 +2591,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             overlay.classList.remove('active');
             initUserData();
         } else {
-            overlay.classList.add('active');
+            // FIX (پروژه دونفره، sync گفتگو با گوگل فعلاً نیازی نیست): قبلاً
+            // اینجا همیشه overlay لاگین گوگل را فعال (اجباری) می‌کرد، یعنی
+            // بدون لاگین گوگل اصلاً نمی‌شد از سایت استفاده کرد. این باعث شده
+            // بود هر مشکل گوگل (VPN، FedCM، expire شدن توکن) کل سایت را از کار
+            // بیندازد. حالا حالت مهمان (guest) پیش‌فرض است و سایت بدون هیچ
+            // وابستگی به گوگل باز می‌شود؛ لاگین صرفاً برای کسی که واقعاً
+            // sync بین دستگاه‌ها می‌خواهد، از طریق UI اکانت در دسترس می‌ماند.
+            overlay.classList.remove('active');
+            initUserData(); // چت‌های محلیِ مهمان را از IndexedDB لود می‌کند؛ pullChatsFromServer خودش برای مهمان (بدون email) کاری انجام نمی‌دهد
         }
     }
 
