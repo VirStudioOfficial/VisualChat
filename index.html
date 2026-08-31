@@ -1419,6 +1419,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             justify-content: center;
         }
         #promptOverlay.active { display: flex; }
+        #textFileEditorOverlay {
+            position: fixed; inset: 0;
+            background: rgba(10, 12, 18, 0.6);
+            backdrop-filter: blur(6px);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #textFileEditorOverlay.active { display: flex; }
         .prompt-input {
             width: 100%; box-sizing: border-box; padding: 10px 12px;
             margin-bottom: 16px; border-radius: 10px;
@@ -1499,6 +1509,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="confirm-actions">
                 <button type="button" class="confirm-cancel" id="promptCancelBtn">انصراف</button>
                 <button type="button" class="confirm-ok" id="promptOkBtn">ذخیره</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="textFileEditorOverlay">
+        <div class="confirm-card" style="width:min(680px, 92vw); max-width:680px;">
+            <p id="textFileEditorTitle" style="margin-bottom:10px;">ویرایش فایل متنی</p>
+            <textarea id="textFileEditorArea" class="prompt-input" autocomplete="off" spellcheck="false"
+                style="width:100%; min-height:50vh; max-height:65vh; resize:vertical; font-family:Consolas, monospace; font-size:0.85rem; line-height:1.6; direction:ltr; text-align:left; white-space:pre; overflow:auto; padding:10px;"></textarea>
+            <div class="confirm-actions">
+                <button type="button" class="confirm-cancel" id="textFileEditorCancelBtn">انصراف</button>
+                <button type="button" class="confirm-ok" id="textFileEditorSaveBtn">ذخیره</button>
             </div>
         </div>
     </div>
@@ -1835,6 +1857,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     let selectedFilesData = [];
     let lastCodeFilesForEdit = [];
     let codeFilesMemory = []; // [{name, content}] — فایل‌های کد ضمیمه‌شده که تا وقتی کاربر پاکشون نکنه تو مکالمه می‌مونن
+    let pastedTextFileCounter = 0; // برای نام‌گذاری فایل‌های خودکار (متن-پیوست-۱.txt, ۲.txt, ...)
     let isFirstMessage = true;
     let isGenerating = false;
     let isSearchEnabled = true; // سرچ خودکاره؛ تصمیم نهایی رو shouldSearchWeb() و بک‌اند می‌گیرن
@@ -2111,12 +2134,37 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     };
 
     function autoResizeTextarea(textarea) {
+        checkAutoConvertLongText(textarea);
         textarea.style.height = 'auto';
         textarea.style.height = Math.min(textarea.scrollHeight, 180) + 'px';
         // Keep the caret's line in view: once the box hits its max height
         // and becomes internally scrollable, always snap to the bottom so
         // the line currently being typed never gets pushed out of sight.
         textarea.scrollTop = textarea.scrollHeight;
+    }
+
+    // FEATURE (auto-convert long text to file): وقتی متن نوار چت بیش از ۵۰
+    // خط بشه (چه با تایپ، چه با پیست کردن)، به‌جای این‌که نوار چت رو پر و
+    // دیرحرکت کنه، خودکار به یک "فایل متنی" مثل بقیه‌ی فایل‌های کد تبدیل
+    // می‌شود و به codeFilesMemory اضافه می‌شود - دقیقاً همون مربعی که بالای
+    // نوار چت برای فایل‌های آپلودی نشون داده می‌شه. نوار چت خودش خالی می‌شه
+    // تا کاربر بتونه پیام کوتاه دیگه‌ای هم کنارش بنویسه؛ هر دو با هم به مدل
+    // ارسال می‌شن (رفتار موجود codeFilesMemory دقیقاً همینه).
+    const LONG_TEXT_LINE_THRESHOLD = 50;
+    function checkAutoConvertLongText(textarea) {
+        const value = textarea.value;
+        if (!value) return;
+        const lineCount = value.split('\n').length;
+        if (lineCount <= LONG_TEXT_LINE_THRESHOLD) return;
+
+        pastedTextFileCounter += 1;
+        const name = `متن-پیوست-${pastedTextFileCounter}.txt`;
+        codeFilesMemory.push({ name, content: value, mode: 'text' });
+        renderCodeFilesBar();
+
+        textarea.value = '';
+        textarea.style.height = 'auto';
+        showToast('متن طولانی به یک فایل تبدیل شد — روش کلیک کن تا ویرایشش کنی.', 'info');
     }
 
     function extractNameFromEmail(email, googleName = '') {
@@ -2392,10 +2440,31 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     const defaultSettings = { theme: 'auto', c1: '#6366f1', c2: '#a855f7', fontSize: 'normal', uiPalette: 'flat' };
 
+    // FIX (stale palette stuck forever): کاربرهایی که قبل از این آپدیت از
+    // اپ استفاده کرده بودند، تنظیمات قدیمی (uiPalette: 'charcoal' و رنگ‌های
+    // خاکستری/بنفش c1/c2) را از قبل در localStorage ذخیره داشتند. چون
+    // getSettings() همیشه {...defaultSettings, ...stored} می‌کرد، مقدار
+    // ذخیره‌شده‌ی قدیمی همیشه روی دیفالت جدید غالب می‌شد - و هر بار که
+    // saveSettings() یا تغییر تم/فونت obscurely دوباره همان مقدار قدیمی را
+    // در localStorage می‌نوشت، این مشکل هرگز خودش را پاک نمی‌کرد؛ فقط با
+    // پاک کردن دستی کش/localStorage از بین می‌رفت. حالا یک migration
+    // یک‌باره: اگر مقدار ذخیره‌شده هنوز به پالت منسوخ 'charcoal' اشاره
+    // می‌کند، همان‌جا آن را به پالت جدید مهاجرت می‌دهیم و بلافاصله در
+    // localStorage می‌نویسیم - برای همه‌ی کاربرها، بدون نیاز به پاک کردن کش.
+    function migrateStaleSettings(stored) {
+        if (stored.uiPalette === 'charcoal') {
+            stored.uiPalette = 'flat';
+            delete stored.c1;
+            delete stored.c2;
+            try { localStorage.setItem('virtual_settings', JSON.stringify(stored)); } catch (e) {}
+        }
+        return stored;
+    }
+
     function getSettings() {
         try {
             const stored = { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') };
-            return stored;
+            return migrateStaleSettings(stored);
         }
         catch (e) { return { ...defaultSettings }; }
     }
@@ -2934,11 +3003,51 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
         bar.style.display = 'flex';
         bar.innerHTML = codeFilesMemory.map(f => `
-            <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;">
+            <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;cursor:pointer;" onclick="openTextFileEditor('${f.name.replace(/'/g, "\\'")}')">
                 <i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}
-                <button class="icon-btn" type="button" style="width:16px;height:16px;font-size:0.75rem;" onclick="removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="lucide-icon" data-lucide="x"></i></button>
+                <button class="icon-btn" type="button" style="width:16px;height:16px;font-size:0.75rem;" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="lucide-icon" data-lucide="x"></i></button>
             </span>
         `).join('');
+    }
+
+    // FEATURE (auto-convert long text to file): کلیک روی چیپِ فایل متنی
+    // (چه فایل واقعی آپلودشده، چه متن طولانی‌ای که خودکار تبدیل شده) یک
+    // مودال ادیتور ساده باز می‌کند تا کاربر بتواند محتوا را بدون محدودیت
+    // ۵۰ خط ویرایش کند - همون الگوی showPrompt ولی با textarea بزرگ.
+    function openTextFileEditor(name) {
+        const file = codeFilesMemory.find(f => f.name === name);
+        if (!file) return;
+
+        const overlay = document.getElementById('textFileEditorOverlay');
+        const titleEl = document.getElementById('textFileEditorTitle');
+        const area = document.getElementById('textFileEditorArea');
+        const saveBtn = document.getElementById('textFileEditorSaveBtn');
+        const cancelBtn = document.getElementById('textFileEditorCancelBtn');
+        if (!overlay || !titleEl || !area || !saveBtn || !cancelBtn) return;
+
+        titleEl.textContent = `ویرایش «${name}»`;
+        area.value = file.content;
+        overlay.classList.add('active');
+        setTimeout(() => area.focus(), 30);
+
+        const cleanup = () => {
+            overlay.classList.remove('active');
+            saveBtn.removeEventListener('click', onSave);
+            cancelBtn.removeEventListener('click', onCancel);
+            overlay.removeEventListener('click', onOverlayClick);
+        };
+        const onSave = () => {
+            const idx = codeFilesMemory.findIndex(f => f.name === name);
+            if (idx >= 0) codeFilesMemory[idx] = { ...codeFilesMemory[idx], content: area.value };
+            renderCodeFilesBar();
+            cleanup();
+        };
+        const onCancel = () => cleanup();
+        const onOverlayClick = (e) => { if (e.target === overlay) cleanup(); };
+
+        saveBtn.addEventListener('click', onSave);
+        cancelBtn.addEventListener('click', onCancel);
+        overlay.addEventListener('click', onOverlayClick);
     }
 
     function removeCodeFile(name) {
@@ -3232,10 +3341,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.size > MAX_DIRECT_SIZE ? 'video/webm' : (file.type || guessMimeType(file.name)), base64: videoBase64 });
                 updateFilePreviewItem(previewId, { status: 'ویدیو آماده', statusClass: 'success' });
             } else if (isCodeOrTextFile(file)) {
-                const MAX_TEXT_SIZE = 300 * 1024;
+                const MAX_TEXT_SIZE = 650 * 1024;
                 if (file.size > MAX_TEXT_SIZE) {
-                    updateFilePreviewItem(previewId, { status: 'فایل خیلی بزرگ است (حداکثر ۳۰۰ کیلوبایت)', statusClass: 'error' });
-                    showToast('فایل خیلی بزرگه — حداکثر ۳۰۰ کیلوبایت برای فایل متنی/کد.', 'warning');
+                    updateFilePreviewItem(previewId, { status: 'فایل خیلی بزرگ است (حداکثر ۶۵۰ کیلوبایت)', statusClass: 'error' });
+                    showToast('فایل خیلی بزرگه — حداکثر ۶۵۰ کیلوبایت برای فایل متنی/کد.', 'warning');
                 } else {
                     const text = await new Promise((resolve, reject) => {
                         const reader = new FileReader();
