@@ -4,7 +4,7 @@
 |--------------------------------------------------------------------------
 | Think mode levels
 |--------------------------------------------------------------------------
-| Maps the client's "حالت تفکر" selector (off/low/medium/high) to Gemini's
+| Maps the client's "Ø­Ø§Ù„Øª ØªÙÚ©Ø±" selector (off/low/medium/high) to Gemini's
 | thinkingLevel values. 'off' (or anything unrecognized) falls back to the
 | existing per-model default in runAgentLoop - Think mode is opt-in.
 */
@@ -29,7 +29,7 @@ const THINKING_MODEL_DEFAULTS = {
 |--------------------------------------------------------------------------
 | Every log line is one JSON object so it's easy to grep/parse in Vercel
 | logs. Never pass raw API keys, full file base64, or full user history to
-| this — only short, safe summaries.
+| this â€” only short, safe summaries.
 */
 const log = {
     _base(level, event, meta) {
@@ -94,7 +94,7 @@ function classifyGeminiError(error) {
             category: 'empty_response',
             retryable: false,
             keySpecific: false,
-            message: 'مدل بعد از اجرای ابزار پاسخ قابل‌استفاده‌ای برنگرداند. دوباره امتحان کن.',
+            message: 'Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø¬Ø±Ø§ÛŒ Ø§Ø¨Ø²Ø§Ø± Ù¾Ø§Ø³Ø® Ù‚Ø§Ø¨Ù„â€ŒØ§Ø³ØªÙØ§Ø¯Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ù†Ú¯Ø±Ø¯Ø§Ù†Ø¯. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
             status,
             providerCode,
             rawMessage
@@ -106,7 +106,7 @@ function classifyGeminiError(error) {
             category: 'timeout',
             retryable: true,
             keySpecific: false,
-            message: 'پاسخ سرویس بیش از زمان مجاز طول کشید. دوباره امتحان کن.',
+            message: 'Ù¾Ø§Ø³Ø® Ø³Ø±ÙˆÛŒØ³ Ø¨ÛŒØ´ Ø§Ø² Ø²Ù…Ø§Ù† Ù…Ø¬Ø§Ø² Ø·ÙˆÙ„ Ú©Ø´ÛŒØ¯. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
             status,
             providerCode,
             rawMessage
@@ -134,7 +134,7 @@ function classifyGeminiError(error) {
                 category: 'quota_exhausted',
                 retryable: true,
                 keySpecific: true,
-                message: 'سهمیه Free Tier این کلید تمام شده؛ کلید بعدی بررسی می‌شود.',
+                message: 'Ø³Ù‡Ù…ÛŒÙ‡ Free Tier Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ ØªÙ…Ø§Ù… Ø´Ø¯Ù‡Ø› Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
                 status: status || 429,
                 providerCode,
                 rawMessage,
@@ -146,7 +146,7 @@ function classifyGeminiError(error) {
             category: 'rate_limit',
             retryable: true,
             keySpecific: true,
-            message: 'این کلید به محدودیت سرعت درخواست رسیده است؛ کلید بعدی بررسی می‌شود.',
+            message: 'Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ Ø¨Ù‡ Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ø³Ø±Ø¹Øª Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø³ÛŒØ¯Ù‡ Ø§Ø³ØªØ› Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
             status: status || 429,
             providerCode,
             rawMessage,
@@ -159,7 +159,7 @@ function classifyGeminiError(error) {
             category: 'invalid_api_key',
             retryable: true,
             keySpecific: true,
-            message: 'این کلید API معتبر نیست یا احراز هویت آن رد شده است. کلید بعدی بررسی می‌شود.',
+            message: 'Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ API Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª ÛŒØ§ Ø§Ø­Ø±Ø§Ø² Ù‡ÙˆÛŒØª Ø¢Ù† Ø±Ø¯ Ø´Ø¯Ù‡ Ø§Ø³Øª. Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
             status: status || 401,
             providerCode,
             rawMessage
@@ -171,7 +171,7 @@ function classifyGeminiError(error) {
             category: 'permission_denied',
             retryable: true,
             keySpecific: true,
-            message: 'دسترسی این کلید به سرویس یا مدل رد شده است. کلید بعدی بررسی می‌شود.',
+            message: 'Ø¯Ø³ØªØ±Ø³ÛŒ Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ Ø¨Ù‡ Ø³Ø±ÙˆÛŒØ³ ÛŒØ§ Ù…Ø¯Ù„ Ø±Ø¯ Ø´Ø¯Ù‡ Ø§Ø³Øª. Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
             status: status || 403,
             providerCode,
             rawMessage
@@ -183,7 +183,7 @@ function classifyGeminiError(error) {
             category: 'model_not_found',
             retryable: true,
             keySpecific: false,
-            message: 'مدل در سرویس پیدا نشد یا در دسترس این مسیر نیست.',
+            message: 'Ù…Ø¯Ù„ Ø¯Ø± Ø³Ø±ÙˆÛŒØ³ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ ÛŒØ§ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ø§ÛŒÙ† Ù…Ø³ÛŒØ± Ù†ÛŒØ³Øª.',
             status: status || 404,
             providerCode,
             rawMessage
@@ -195,7 +195,7 @@ function classifyGeminiError(error) {
             category: 'invalid_request',
             retryable: false,
             keySpecific: false,
-            message: 'درخواست ارسالی نامعتبر بود. احتمالاً یکی از ورودی‌ها یا تنظیمات درخواست مشکل دارد.',
+            message: 'Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø§Ø±Ø³Ø§Ù„ÛŒ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø¨ÙˆØ¯. Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ ÛŒÚ©ÛŒ Ø§Ø² ÙˆØ±ÙˆØ¯ÛŒâ€ŒÙ‡Ø§ ÛŒØ§ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù…Ø´Ú©Ù„ Ø¯Ø§Ø±Ø¯.',
             status: status || 400,
             providerCode,
             rawMessage
@@ -207,7 +207,7 @@ function classifyGeminiError(error) {
             category: 'request_too_large',
             retryable: false,
             keySpecific: false,
-            message: 'حجم درخواست یا فایل‌ها بیش از حد مجاز است.',
+            message: 'Ø­Ø¬Ù… Ø¯Ø±Ø®ÙˆØ§Ø³Øª ÛŒØ§ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ù…Ø¬Ø§Ø² Ø§Ø³Øª.',
             status: status || 413,
             providerCode,
             rawMessage
@@ -219,7 +219,7 @@ function classifyGeminiError(error) {
             category: 'provider_unavailable',
             retryable: true,
             keySpecific: false,
-            message: 'سرویس هوش مصنوعی موقتاً در دسترس نیست. دوباره امتحان می‌کنیم.',
+            message: 'Ø³Ø±ÙˆÛŒØ³ Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ù…ÙˆÙ‚ØªØ§Ù‹ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù†ÛŒØ³Øª. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ….',
             status,
             providerCode,
             rawMessage
@@ -231,7 +231,7 @@ function classifyGeminiError(error) {
             category: 'network_error',
             retryable: true,
             keySpecific: false,
-            message: 'ارتباط Virtual Bot با سرویس هوش مصنوعی قطع شد. اتصال را بررسی کن و دوباره امتحان کن.',
+            message: 'Ø§Ø±ØªØ¨Ø§Ø· Virtual Bot Ø¨Ø§ Ø³Ø±ÙˆÛŒØ³ Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ù‚Ø·Ø¹ Ø´Ø¯. Ø§ØªØµØ§Ù„ Ø±Ø§ Ø¨Ø±Ø±Ø³ÛŒ Ú©Ù† Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
             status,
             providerCode,
             rawMessage
@@ -242,7 +242,7 @@ function classifyGeminiError(error) {
         category: 'unknown_error',
         retryable: true,
         keySpecific: false,
-        message: 'یک خطای ناشناخته هنگام پردازش درخواست رخ داد.',
+        message: 'ÛŒÚ© Ø®Ø·Ø§ÛŒ Ù†Ø§Ø´Ù†Ø§Ø®ØªÙ‡ Ù‡Ù†Ú¯Ø§Ù… Ù¾Ø±Ø¯Ø§Ø²Ø´ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø® Ø¯Ø§Ø¯.',
         status,
         providerCode,
         rawMessage
@@ -519,9 +519,9 @@ function summarizeOldTurns(oldTurns) {
     if (!topics.length) return null;
 
     return (
-        `[خلاصه‌ی مکالمه‌ی قبلی - برای صرفه‌جویی در حجم، پیام‌های قدیمی‌تر خلاصه شدند]\n` +
-        `موضوعاتی که قبلاً مطرح شده: ` +
-        topics.map(t => `«${t}»`).join('، ')
+        `[Ø®Ù„Ø§ØµÙ‡â€ŒÛŒ Ù…Ú©Ø§Ù„Ù…Ù‡â€ŒÛŒ Ù‚Ø¨Ù„ÛŒ - Ø¨Ø±Ø§ÛŒ ØµØ±ÙÙ‡â€ŒØ¬ÙˆÛŒÛŒ Ø¯Ø± Ø­Ø¬Ù…ØŒ Ù¾ÛŒØ§Ù…â€ŒÙ‡Ø§ÛŒ Ù‚Ø¯ÛŒÙ…ÛŒâ€ŒØªØ± Ø®Ù„Ø§ØµÙ‡ Ø´Ø¯Ù†Ø¯]\n` +
+        `Ù…ÙˆØ¶ÙˆØ¹Ø§ØªÛŒ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ù…Ø·Ø±Ø­ Ø´Ø¯Ù‡: ` +
+        topics.map(t => `Â«${t}Â»`).join('ØŒ ')
     );
 }
 
@@ -543,7 +543,7 @@ function trimHistoryForContext(history) {
         if (summaryText) {
             working = [
                 { role: 'user', text: summaryText },
-                { role: 'model', text: 'باشه، زمینه‌ی قبلی رو در نظر می‌گیرم.' },
+                { role: 'model', text: 'Ø¨Ø§Ø´Ù‡ØŒ Ø²Ù…ÛŒÙ†Ù‡â€ŒÛŒ Ù‚Ø¨Ù„ÛŒ Ø±Ùˆ Ø¯Ø± Ù†Ø¸Ø± Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ù….' },
                 ...working
             ];
         }
@@ -566,7 +566,7 @@ function trimHistoryForContext(history) {
 // English, or just not on the list) silently never triggered a search even
 // when it clearly needed one. The model itself now decides, per-turn and
 // based on actual understanding of the question, whether to call the
-// web_search tool — including calling it more than once if the first
+// web_search tool â€” including calling it more than once if the first
 // result isn't enough. Kept as a no-op stub (unused) instead of deleting
 // outright, in case any other code path still references it.
 function shouldSearchWeb() {
@@ -577,11 +577,11 @@ function shouldSearchWeb() {
 // chunks when the user explicitly asks for live/searchable information.
 // This does NOT decide whether Gemini should search; Gemini still makes that
 // decision with the real web_search tool. It only prevents a friendly
-// preamble such as "سلام ..." from leaking before that tool call.
+// preamble such as "Ø³Ù„Ø§Ù… ..." from leaking before that tool call.
 function looksLikeWebSearchIntent(text) {
     const s = String(text || '').toLowerCase();
     if (!s.trim()) return false;
-    return /(?:سرچ|جستجو|گوگل|وب|اینترنت|قیمت(?:\s|‌)*(?:الان|امروز|فعلی|جدید|لحظه)|الان چنده|چنده|چقدر(?:ه|ه؟)|چقدره|قیمتش|قیمتش چنده|هزینه|هزینش|آخرین|امروز|امشب|اخبار|خبرهای|آب[\u200c ]?وهوا|هوا(?:ی|\s)|نرخ|ارز|دلار|یورو|طلا|سهام|موجودی|قیمت فعلی|current|latest|today|right now|now|search|google|look up|news|weather|price|stock|exchange rate|availability)/i.test(s);
+    return /(?:Ø³Ø±Ú†|Ø¬Ø³ØªØ¬Ùˆ|Ú¯ÙˆÚ¯Ù„|ÙˆØ¨|Ø§ÛŒÙ†ØªØ±Ù†Øª|Ù‚ÛŒÙ…Øª(?:\s|â€Œ)*(?:Ø§Ù„Ø§Ù†|Ø§Ù…Ø±ÙˆØ²|ÙØ¹Ù„ÛŒ|Ø¬Ø¯ÛŒØ¯|Ù„Ø­Ø¸Ù‡)|Ø§Ù„Ø§Ù† Ú†Ù†Ø¯Ù‡|Ú†Ù†Ø¯Ù‡|Ú†Ù‚Ø¯Ø±(?:Ù‡|Ù‡ØŸ)|Ú†Ù‚Ø¯Ø±Ù‡|Ù‚ÛŒÙ…ØªØ´|Ù‚ÛŒÙ…ØªØ´ Ú†Ù†Ø¯Ù‡|Ù‡Ø²ÛŒÙ†Ù‡|Ù‡Ø²ÛŒÙ†Ø´|Ø¢Ø®Ø±ÛŒÙ†|Ø§Ù…Ø±ÙˆØ²|Ø§Ù…Ø´Ø¨|Ø§Ø®Ø¨Ø§Ø±|Ø®Ø¨Ø±Ù‡Ø§ÛŒ|Ø¢Ø¨[\u200c ]?ÙˆÙ‡ÙˆØ§|Ù‡ÙˆØ§(?:ÛŒ|\s)|Ù†Ø±Ø®|Ø§Ø±Ø²|Ø¯Ù„Ø§Ø±|ÛŒÙˆØ±Ùˆ|Ø·Ù„Ø§|Ø³Ù‡Ø§Ù…|Ù…ÙˆØ¬ÙˆØ¯ÛŒ|Ù‚ÛŒÙ…Øª ÙØ¹Ù„ÛŒ|current|latest|today|right now|now|search|google|look up|news|weather|price|stock|exchange rate|availability)/i.test(s);
 }
 
 
@@ -596,19 +596,19 @@ async function generateChatTitle(userText, botText, geminiKeys) {
     if (!userText || !geminiKeys || geminiKeys.length === 0) return fallback;
 
     const titlePrompt = `
-یک عنوان بسیار کوتاه (حداکثر ۴ تا ۶ کلمه، به فارسی) برای این گفتگو بساز که
-موضوع اصلی را نشان بدهد — نه یک جمله کامل، فقط یک عنوان مثل تیتر.
+ÛŒÚ© Ø¹Ù†ÙˆØ§Ù† Ø¨Ø³ÛŒØ§Ø± Ú©ÙˆØªØ§Ù‡ (Ø­Ø¯Ø§Ú©Ø«Ø± Û´ ØªØ§ Û¶ Ú©Ù„Ù…Ù‡ØŒ Ø¨Ù‡ ÙØ§Ø±Ø³ÛŒ) Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ø¨Ø³Ø§Ø² Ú©Ù‡
+Ù…ÙˆØ¶ÙˆØ¹ Ø§ØµÙ„ÛŒ Ø±Ø§ Ù†Ø´Ø§Ù† Ø¨Ø¯Ù‡Ø¯ â€” Ù†Ù‡ ÛŒÚ© Ø¬Ù…Ù„Ù‡ Ú©Ø§Ù…Ù„ØŒ ÙÙ‚Ø· ÛŒÚ© Ø¹Ù†ÙˆØ§Ù† Ù…Ø«Ù„ ØªÛŒØªØ±.
 
-قوانین:
-- فقط خودِ عنوان را برگردان، بدون گیومه، بدون توضیح، بدون نقطه در انتها.
-- از کلمات عمومی مثل «سلام» یا «گفتگو» به‌تنهایی استفاده نکن؛ موضوع واقعی را بگیر.
-- اگر پیام کاربر فقط سلام و احوال‌پرسی است و موضوع مشخصی ندارد، عنوانی مثل
-  «گفتگوی عمومی» برگردان.
+Ù‚ÙˆØ§Ù†ÛŒÙ†:
+- ÙÙ‚Ø· Ø®ÙˆØ¯Ù Ø¹Ù†ÙˆØ§Ù† Ø±Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†ØŒ Ø¨Ø¯ÙˆÙ† Ú¯ÛŒÙˆÙ…Ù‡ØŒ Ø¨Ø¯ÙˆÙ† ØªÙˆØ¶ÛŒØ­ØŒ Ø¨Ø¯ÙˆÙ† Ù†Ù‚Ø·Ù‡ Ø¯Ø± Ø§Ù†ØªÙ‡Ø§.
+- Ø§Ø² Ú©Ù„Ù…Ø§Øª Ø¹Ù…ÙˆÙ…ÛŒ Ù…Ø«Ù„ Â«Ø³Ù„Ø§Ù…Â» ÛŒØ§ Â«Ú¯ÙØªÚ¯ÙˆÂ» Ø¨Ù‡â€ŒØªÙ†Ù‡Ø§ÛŒÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†Ø› Ù…ÙˆØ¶ÙˆØ¹ ÙˆØ§Ù‚Ø¹ÛŒ Ø±Ø§ Ø¨Ú¯ÛŒØ±.
+- Ø§Ú¯Ø± Ù¾ÛŒØ§Ù… Ú©Ø§Ø±Ø¨Ø± ÙÙ‚Ø· Ø³Ù„Ø§Ù… Ùˆ Ø§Ø­ÙˆØ§Ù„â€ŒÙ¾Ø±Ø³ÛŒ Ø§Ø³Øª Ùˆ Ù…ÙˆØ¶ÙˆØ¹ Ù…Ø´Ø®ØµÛŒ Ù†Ø¯Ø§Ø±Ø¯ØŒ Ø¹Ù†ÙˆØ§Ù†ÛŒ Ù…Ø«Ù„
+  Â«Ú¯ÙØªÚ¯ÙˆÛŒ Ø¹Ù…ÙˆÙ…ÛŒÂ» Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†.
 
-پیام کاربر:
+Ù¾ÛŒØ§Ù… Ú©Ø§Ø±Ø¨Ø±:
 ${String(userText).slice(0, 500)}
 
-پاسخ ربات (اگر موجود بود):
+Ù¾Ø§Ø³Ø® Ø±Ø¨Ø§Øª (Ø§Ú¯Ø± Ù…ÙˆØ¬ÙˆØ¯ Ø¨ÙˆØ¯):
 ${String(botText || '').slice(0, 500)}
 `;
 
@@ -648,8 +648,8 @@ ${String(botText || '').slice(0, 500)}
             const data = await response.json();
             let title = data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('').trim();
             if (title) {
-                title = title.replace(/^["'«»]+|["'«»]+$/g, '').replace(/\.$/, '').trim();
-                if (title.length > 40) title = title.slice(0, 40).trim() + '…';
+                title = title.replace(/^["'Â«Â»]+|["'Â«Â»]+$/g, '').replace(/\.$/, '').trim();
+                if (title.length > 40) title = title.slice(0, 40).trim() + 'â€¦';
                 log.info('chat.title_generated', {});
                 return title;
             }
@@ -679,7 +679,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
         return {
             ok: false,
             code: 'search_not_configured',
-            message: 'سرویس جستجو پیکربندی نشده است.'
+            message: 'Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù¾ÛŒÚ©Ø±Ø¨Ù†Ø¯ÛŒ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.'
         };
     }
 
@@ -756,7 +756,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
             if (status === 401 || status === 403) {
                 return fail(
                     'search_invalid_key',
-                    'کلید سرویس جستجو معتبر نیست یا دسترسی آن رد شده است.',
+                    'Ú©Ù„ÛŒØ¯ Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª ÛŒØ§ Ø¯Ø³ØªØ±Ø³ÛŒ Ø¢Ù† Ø±Ø¯ Ø´Ø¯Ù‡ Ø§Ø³Øª.',
                     status,
                     false
                 );
@@ -765,7 +765,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
             if (status === 429) {
                 return fail(
                     'search_rate_limit',
-                    'سرویس جستجو به محدودیت درخواست رسیده است. این جستجو فقط یک‌بار تلاش شد تا درخواست‌های اضافی ایجاد نشود.',
+                    'Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ø¨Ù‡ Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø³ÛŒØ¯Ù‡ Ø§Ø³Øª. Ø§ÛŒÙ† Ø¬Ø³ØªØ¬Ùˆ ÙÙ‚Ø· ÛŒÚ©â€ŒØ¨Ø§Ø± ØªÙ„Ø§Ø´ Ø´Ø¯ ØªØ§ Ø¯Ø±Ø®ÙˆØ§Ø³Øªâ€ŒÙ‡Ø§ÛŒ Ø§Ø¶Ø§ÙÛŒ Ø§ÛŒØ¬Ø§Ø¯ Ù†Ø´ÙˆØ¯.',
                     status,
                     true
                 );
@@ -774,7 +774,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
             if (status >= 500) {
                 return fail(
                     'search_provider_error',
-                    'خود سرویس جستجو موقتاً با خطای سرور مواجه شد.',
+                    'Ø®ÙˆØ¯ Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù…ÙˆÙ‚ØªØ§Ù‹ Ø¨Ø§ Ø®Ø·Ø§ÛŒ Ø³Ø±ÙˆØ± Ù…ÙˆØ§Ø¬Ù‡ Ø´Ø¯.',
                     status,
                     true
                 );
@@ -782,7 +782,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 
             return fail(
                 'search_http_error',
-                `سرویس جستجو درخواست را رد کرد (${status}).`,
+                `Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø§ Ø±Ø¯ Ú©Ø±Ø¯ (${status}).`,
                 status,
                 false
             );
@@ -794,7 +794,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
             markKeyResult(currentKey, true);
             return fail(
                 'search_no_results',
-                'جستجو انجام شد اما نتیجه‌ای برای این عبارت پیدا نشد.',
+                'Ø¬Ø³ØªØ¬Ùˆ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯ Ø§Ù…Ø§ Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø¹Ø¨Ø§Ø±Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.',
                 200,
                 false
             );
@@ -805,9 +805,9 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
         const formatted = data.results
             .map(
                 r =>
-                    `عنوان: ${r.title || 'بدون عنوان'}\n` +
-                    `منبع: ${r.url || 'نامشخص'}\n` +
-                    `محتوا: ${String(r.content || '').slice(0, 1800)}`
+                    `Ø¹Ù†ÙˆØ§Ù†: ${r.title || 'Ø¨Ø¯ÙˆÙ† Ø¹Ù†ÙˆØ§Ù†'}\n` +
+                    `Ù…Ù†Ø¨Ø¹: ${r.url || 'Ù†Ø§Ù…Ø´Ø®Øµ'}\n` +
+                    `Ù…Ø­ØªÙˆØ§: ${String(r.content || '').slice(0, 1800)}`
             )
             .join('\n\n---\n\n');
 
@@ -833,7 +833,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
         if (error?.name === 'AbortError') {
             return fail(
                 'search_timeout',
-                'جستجوی وب در زمان تعیین‌شده پاسخ نداد.',
+                'Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ø¯Ø± Ø²Ù…Ø§Ù† ØªØ¹ÛŒÛŒÙ†â€ŒØ´Ø¯Ù‡ Ù¾Ø§Ø³Ø® Ù†Ø¯Ø§Ø¯.',
                 408,
                 true
             );
@@ -846,7 +846,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 
         return fail(
             'search_network_error',
-            'ارتباط با سرویس جستجوی وب برقرار نشد.',
+            'Ø§Ø±ØªØ¨Ø§Ø· Ø¨Ø§ Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ø¨Ø±Ù‚Ø±Ø§Ø± Ù†Ø´Ø¯.',
             null,
             true
         );
@@ -867,7 +867,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 |
 | Each tool call is narrated to the client as a lightweight {step: ...}
 | SSE event *before* the tool result comes back, so a slow web search
-| doesn't look like a silent hang - the user sees "دارم توی وب سرچ می‌کنم…"
+| doesn't look like a silent hang - the user sees "Ø¯Ø§Ø±Ù… ØªÙˆÛŒ ÙˆØ¨ Ø³Ø±Ú† Ù…ÛŒâ€ŒÚ©Ù†Ù…â€¦"
 | immediately, the same way a person narrates what they're doing.
 */
 
@@ -884,18 +884,18 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 function looksLikeFileEditIntent(text) {
     const t = String(text || '').trim().toLowerCase();
     if (!t) return false;
-    return /(?:ویرایش|ادیت|تغییر بده|تغییرش بده|اضافه کن|اضافه‌|حذف کن|پاک کن|اصلاح کن|درست کن|پیاده کن|پیاده‌|بروزرسانی کن|آپدیت کن|به‌روز کن|جایگزین کن|بازنویسی کن|اضافه کردن|حذف کردن|تغییر دادن|اصلاح کردن|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor)/i.test(t);
+    return /(?:ÙˆÛŒØ±Ø§ÛŒØ´|Ø§Ø¯ÛŒØª|ØªØºÛŒÛŒØ± Ø¨Ø¯Ù‡|ØªØºÛŒÛŒØ±Ø´ Ø¨Ø¯Ù‡|Ø§Ø¶Ø§ÙÙ‡ Ú©Ù†|Ø§Ø¶Ø§ÙÙ‡â€Œ|Ø­Ø°Ù Ú©Ù†|Ù¾Ø§Ú© Ú©Ù†|Ø§ØµÙ„Ø§Ø­ Ú©Ù†|Ø¯Ø±Ø³Øª Ú©Ù†|Ù¾ÛŒØ§Ø¯Ù‡ Ú©Ù†|Ù¾ÛŒØ§Ø¯Ù‡â€Œ|Ø¨Ø±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ú©Ù†|Ø¢Ù¾Ø¯ÛŒØª Ú©Ù†|Ø¨Ù‡â€ŒØ±ÙˆØ² Ú©Ù†|Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ú©Ù†|Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ù†|Ø§Ø¶Ø§ÙÙ‡ Ú©Ø±Ø¯Ù†|Ø­Ø°Ù Ú©Ø±Ø¯Ù†|ØªØºÛŒÛŒØ± Ø¯Ø§Ø¯Ù†|Ø§ØµÙ„Ø§Ø­ Ú©Ø±Ø¯Ù†|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor)/i.test(t);
 }
 
 /*
 |--------------------------------------------------------------------------
 | Versioned output filename
 |--------------------------------------------------------------------------
-| اگه اسم فایل به عدد ختم بشه (index58 -> index59) عدد یکی زیاد می‌شه.
-| اگه نه، برچسب _edited اضافه می‌شه (chat.js -> chat_edited.js)، و اگه از
-| قبل _edited داشت شماره‌دار می‌شه (_edited -> _edited2 -> _edited3 ...).
-| این جلوی اون مشکل "اسم خروجی با اسم ورودی یکیه و معلوم نیست کدوم ویرایش‌شده"
-| رو می‌گیره.
+| Ø§Ú¯Ù‡ Ø§Ø³Ù… ÙØ§ÛŒÙ„ Ø¨Ù‡ Ø¹Ø¯Ø¯ Ø®ØªÙ… Ø¨Ø´Ù‡ (index58 -> index59) Ø¹Ø¯Ø¯ ÛŒÚ©ÛŒ Ø²ÛŒØ§Ø¯ Ù…ÛŒâ€ŒØ´Ù‡.
+| Ø§Ú¯Ù‡ Ù†Ù‡ØŒ Ø¨Ø±Ú†Ø³Ø¨ _edited Ø§Ø¶Ø§ÙÙ‡ Ù…ÛŒâ€ŒØ´Ù‡ (chat.js -> chat_edited.js)ØŒ Ùˆ Ø§Ú¯Ù‡ Ø§Ø²
+| Ù‚Ø¨Ù„ _edited Ø¯Ø§Ø´Øª Ø´Ù…Ø§Ø±Ù‡â€ŒØ¯Ø§Ø± Ù…ÛŒâ€ŒØ´Ù‡ (_edited -> _edited2 -> _edited3 ...).
+| Ø§ÛŒÙ† Ø¬Ù„ÙˆÛŒ Ø§ÙˆÙ† Ù…Ø´Ú©Ù„ "Ø§Ø³Ù… Ø®Ø±ÙˆØ¬ÛŒ Ø¨Ø§ Ø§Ø³Ù… ÙˆØ±ÙˆØ¯ÛŒ ÛŒÚ©ÛŒÙ‡ Ùˆ Ù…Ø¹Ù„ÙˆÙ… Ù†ÛŒØ³Øª Ú©Ø¯ÙˆÙ… ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡"
+| Ø±Ùˆ Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ù‡.
 */
 function nextEditedFileName(originalName) {
     const name = String(originalName || '').trim();
@@ -928,10 +928,10 @@ function nextEditedFileName(originalName) {
 |--------------------------------------------------------------------------
 | Transactional patch engine
 |--------------------------------------------------------------------------
-| apply_patch tool اینو صدا می‌زنه. هر patch باید دقیقاً یک‌بار در فایل
-| پیدا بشه؛ اگه نشد یا مبهم بود، یه گزارش دقیق (نزدیک‌ترین context) برمی‌گرده
-| که مدل با اون old رو اصلاح کنه و دوباره صدا بزنه - هیچ حدس/fuzzy-match ی
-| در کار نیست.
+| apply_patch tool Ø§ÛŒÙ†Ùˆ ØµØ¯Ø§ Ù…ÛŒâ€ŒØ²Ù†Ù‡. Ù‡Ø± patch Ø¨Ø§ÛŒØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„
+| Ù¾ÛŒØ¯Ø§ Ø¨Ø´Ù‡Ø› Ø§Ú¯Ù‡ Ù†Ø´Ø¯ ÛŒØ§ Ù…Ø¨Ù‡Ù… Ø¨ÙˆØ¯ØŒ ÛŒÙ‡ Ú¯Ø²Ø§Ø±Ø´ Ø¯Ù‚ÛŒÙ‚ (Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context) Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ù‡
+| Ú©Ù‡ Ù…Ø¯Ù„ Ø¨Ø§ Ø§ÙˆÙ† old Ø±Ùˆ Ø§ØµÙ„Ø§Ø­ Ú©Ù†Ù‡ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†Ù‡ - Ù‡ÛŒÚ† Ø­Ø¯Ø³/fuzzy-match ÛŒ
+| Ø¯Ø± Ú©Ø§Ø± Ù†ÛŒØ³Øª.
 */
 /*
 |==========================================================================
@@ -939,36 +939,36 @@ function nextEditedFileName(originalName) {
 | apply_patch entirely for text files)
 |==========================================================================
 |
-| چرا این بازنویسی لازم بود:
-| معماری قبلی (inspect_file + get_file_chunk با startLine/endLine دلخواه +
-| apply_patch با old/new متنی یا خط‌محور) سه دسته باگ جدا تولید می‌کرد که هر
-| بار یکی رفع می‌شد و بعدی سر بر می‌آورد:
-|   ۱) overlap جزئی بین دو خواندن (نه subset دقیق، نه کاملاً قبل از قبلی)
-|      هیچ‌جا تشخیص داده نمی‌شد -> مدل بخشی را دوباره می‌خواند.
-|   ۲) state پیشرفت (کدام خط‌ها خوانده/ویرایش شده) داخل runAgentLoop تعریف
-|      می‌شد -> با هر retry (کلید/مدل بعدی روی همان درخواست HTTP) از صفر
-|      ساخته می‌شد و مدل کاملاً فراموش می‌کرد کجا بوده.
-|   ۳) apply_patch با تطبیق متنی (old/new) در فایل‌های بزرگ شکننده بود: اگر
-|      مدل حتی یک کاراکتر (فاصله/کوتیشن) را از حافظه بازسازی می‌کرد، کل
-|      patch رد می‌شد.
+| Ú†Ø±Ø§ Ø§ÛŒÙ† Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù„Ø§Ø²Ù… Ø¨ÙˆØ¯:
+| Ù…Ø¹Ù…Ø§Ø±ÛŒ Ù‚Ø¨Ù„ÛŒ (inspect_file + get_file_chunk Ø¨Ø§ startLine/endLine Ø¯Ù„Ø®ÙˆØ§Ù‡ +
+| apply_patch Ø¨Ø§ old/new Ù…ØªÙ†ÛŒ ÛŒØ§ Ø®Ø·â€ŒÙ…Ø­ÙˆØ±) Ø³Ù‡ Ø¯Ø³ØªÙ‡ Ø¨Ø§Ú¯ Ø¬Ø¯Ø§ ØªÙˆÙ„ÛŒØ¯ Ù…ÛŒâ€ŒÚ©Ø±Ø¯ Ú©Ù‡ Ù‡Ø±
+| Ø¨Ø§Ø± ÛŒÚ©ÛŒ Ø±ÙØ¹ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ø¨Ø¹Ø¯ÛŒ Ø³Ø± Ø¨Ø± Ù…ÛŒâ€ŒØ¢ÙˆØ±Ø¯:
+|   Û±) overlap Ø¬Ø²Ø¦ÛŒ Ø¨ÛŒÙ† Ø¯Ùˆ Ø®ÙˆØ§Ù†Ø¯Ù† (Ù†Ù‡ subset Ø¯Ù‚ÛŒÙ‚ØŒ Ù†Ù‡ Ú©Ø§Ù…Ù„Ø§Ù‹ Ù‚Ø¨Ù„ Ø§Ø² Ù‚Ø¨Ù„ÛŒ)
+|      Ù‡ÛŒÚ†â€ŒØ¬Ø§ ØªØ´Ø®ÛŒØµ Ø¯Ø§Ø¯Ù‡ Ù†Ù…ÛŒâ€ŒØ´Ø¯ -> Ù…Ø¯Ù„ Ø¨Ø®Ø´ÛŒ Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…ÛŒâ€ŒØ®ÙˆØ§Ù†Ø¯.
+|   Û²) state Ù¾ÛŒØ´Ø±ÙØª (Ú©Ø¯Ø§Ù… Ø®Ø·â€ŒÙ‡Ø§ Ø®ÙˆØ§Ù†Ø¯Ù‡/ÙˆÛŒØ±Ø§ÛŒØ´ Ø´Ø¯Ù‡) Ø¯Ø§Ø®Ù„ runAgentLoop ØªØ¹Ø±ÛŒÙ
+|      Ù…ÛŒâ€ŒØ´Ø¯ -> Ø¨Ø§ Ù‡Ø± retry (Ú©Ù„ÛŒØ¯/Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ÛŒ Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† Ø¯Ø±Ø®ÙˆØ§Ø³Øª HTTP) Ø§Ø² ØµÙØ±
+|      Ø³Ø§Ø®ØªÙ‡ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ù…Ø¯Ù„ Ú©Ø§Ù…Ù„Ø§Ù‹ ÙØ±Ø§Ù…ÙˆØ´ Ù…ÛŒâ€ŒÚ©Ø±Ø¯ Ú©Ø¬Ø§ Ø¨ÙˆØ¯Ù‡.
+|   Û³) apply_patch Ø¨Ø§ ØªØ·Ø¨ÛŒÙ‚ Ù…ØªÙ†ÛŒ (old/new) Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¨Ø²Ø±Ú¯ Ø´Ú©Ù†Ù†Ø¯Ù‡ Ø¨ÙˆØ¯: Ø§Ú¯Ø±
+|      Ù…Ø¯Ù„ Ø­ØªÛŒ ÛŒÚ© Ú©Ø§Ø±Ø§Ú©ØªØ± (ÙØ§ØµÙ„Ù‡/Ú©ÙˆØªÛŒØ´Ù†) Ø±Ø§ Ø§Ø² Ø­Ø§ÙØ¸Ù‡ Ø¨Ø§Ø²Ø³Ø§Ø²ÛŒ Ù…ÛŒâ€ŒÚ©Ø±Ø¯ØŒ Ú©Ù„
+|      patch Ø±Ø¯ Ù…ÛŒâ€ŒØ´Ø¯.
 |
-| راه‌حل: به‌جای محدوده‌ی خط دلخواه، فایل به بلوک‌های شماره‌دار و
-| ثابت (توسط کد، نه مدل) تقسیم می‌شود. مدل فقط با شماره‌ی بلوک کار می‌کند -
-| نه محاسبه‌ی خط، نه تطبیق متنی. state پیشرفت (کدام بلوک خوانده/ویرایش شده،
-| آیا verify نهایی بعد از آخرین ویرایش انجام و پاس شده) در یک آبجکت واحد
-| (BlockFileState) نگه داشته می‌شود که خودِ caller (سطح HTTP request، نه
-| runAgentLoop) می‌سازد و بین همه‌ی retryهای همان درخواست مشترک است - دقیقاً
-| مثل sharedRequestState برای inspect/chunk قبلی، اما این بار state واحد و
-| کامل شامل خودِ محتوای فایل هم هست، نه پخش در چند Set/Map جدا.
+| Ø±Ø§Ù‡â€ŒØ­Ù„: Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø¯Ù„Ø®ÙˆØ§Ù‡ØŒ ÙØ§ÛŒÙ„ Ø¨Ù‡ Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ Ø´Ù…Ø§Ø±Ù‡â€ŒØ¯Ø§Ø± Ùˆ
+| Ø«Ø§Ø¨Øª (ØªÙˆØ³Ø· Ú©Ø¯ØŒ Ù†Ù‡ Ù…Ø¯Ù„) ØªÙ‚Ø³ÛŒÙ… Ù…ÛŒâ€ŒØ´ÙˆØ¯. Ù…Ø¯Ù„ ÙÙ‚Ø· Ø¨Ø§ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ø¨Ù„ÙˆÚ© Ú©Ø§Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯ -
+| Ù†Ù‡ Ù…Ø­Ø§Ø³Ø¨Ù‡â€ŒÛŒ Ø®Ø·ØŒ Ù†Ù‡ ØªØ·Ø¨ÛŒÙ‚ Ù…ØªÙ†ÛŒ. state Ù¾ÛŒØ´Ø±ÙØª (Ú©Ø¯Ø§Ù… Ø¨Ù„ÙˆÚ© Ø®ÙˆØ§Ù†Ø¯Ù‡/ÙˆÛŒØ±Ø§ÛŒØ´ Ø´Ø¯Ù‡ØŒ
+| Ø¢ÛŒØ§ verify Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ø®Ø±ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ùˆ Ù¾Ø§Ø³ Ø´Ø¯Ù‡) Ø¯Ø± ÛŒÚ© Ø¢Ø¨Ø¬Ú©Øª ÙˆØ§Ø­Ø¯
+| (BlockFileState) Ù†Ú¯Ù‡ Ø¯Ø§Ø´ØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú©Ù‡ Ø®ÙˆØ¯Ù caller (Ø³Ø·Ø­ HTTP requestØŒ Ù†Ù‡
+| runAgentLoop) Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ Ùˆ Ø¨ÛŒÙ† Ù‡Ù…Ù‡â€ŒÛŒ retryÙ‡Ø§ÛŒ Ù‡Ù…Ø§Ù† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù…Ø´ØªØ±Ú© Ø§Ø³Øª - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹
+| Ù…Ø«Ù„ sharedRequestState Ø¨Ø±Ø§ÛŒ inspect/chunk Ù‚Ø¨Ù„ÛŒØŒ Ø§Ù…Ø§ Ø§ÛŒÙ† Ø¨Ø§Ø± state ÙˆØ§Ø­Ø¯ Ùˆ
+| Ú©Ø§Ù…Ù„ Ø´Ø§Ù…Ù„ Ø®ÙˆØ¯Ù Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ù‡Ù… Ù‡Ø³ØªØŒ Ù†Ù‡ Ù¾Ø®Ø´ Ø¯Ø± Ú†Ù†Ø¯ Set/Map Ø¬Ø¯Ø§.
 |
-| قوانین کلیدی:
-|   - بلوک‌بندی قطعی و تکرارپذیر است: همان فایل همیشه همان بلوک‌ها را می‌دهد.
-|   - write_block کل یک بلوک را با محتوای جدید جایگزین می‌کند (نه diff) -
-|     مقاوم در برابر خطای کوچک متنی، چون کل بلوک بازنویسی می‌شود نه بخشی از آن.
-|   - بعد از هر write_block، پرچم "verified" ریست می‌شود؛ مدل تا verify_file
-|     را دوباره صدا نزند و پاس نشود، اجازه‌ی جواب نهایی (بدون ابزار) را
-|     نمی‌گیرد - این را runAgentLoop در پایان هر round اجرا می‌کند، نه یک
-|     قانون صرفاً در system prompt که قابل نادیده گرفتن باشد.
+| Ù‚ÙˆØ§Ù†ÛŒÙ† Ú©Ù„ÛŒØ¯ÛŒ:
+|   - Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒ Ù‚Ø·Ø¹ÛŒ Ùˆ ØªÚ©Ø±Ø§Ø±Ù¾Ø°ÛŒØ± Ø§Ø³Øª: Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ Ù‡Ù…ÛŒØ´Ù‡ Ù‡Ù…Ø§Ù† Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ Ø±Ø§ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯.
+|   - write_block Ú©Ù„ ÛŒÚ© Ø¨Ù„ÙˆÚ© Ø±Ø§ Ø¨Ø§ Ù…Ø­ØªÙˆØ§ÛŒ Ø¬Ø¯ÛŒØ¯ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒÚ©Ù†Ø¯ (Ù†Ù‡ diff) -
+|     Ù…Ù‚Ø§ÙˆÙ… Ø¯Ø± Ø¨Ø±Ø§Ø¨Ø± Ø®Ø·Ø§ÛŒ Ú©ÙˆÚ†Ú© Ù…ØªÙ†ÛŒØŒ Ú†ÙˆÙ† Ú©Ù„ Ø¨Ù„ÙˆÚ© Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ù†Ù‡ Ø¨Ø®Ø´ÛŒ Ø§Ø² Ø¢Ù†.
+|   - Ø¨Ø¹Ø¯ Ø§Ø² Ù‡Ø± write_blockØŒ Ù¾Ø±Ú†Ù… "verified" Ø±ÛŒØ³Øª Ù…ÛŒâ€ŒØ´ÙˆØ¯Ø› Ù…Ø¯Ù„ ØªØ§ verify_file
+|     Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ù†Ø²Ù†Ø¯ Ùˆ Ù¾Ø§Ø³ Ù†Ø´ÙˆØ¯ØŒ Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ Ø¬ÙˆØ§Ø¨ Ù†Ù‡Ø§ÛŒÛŒ (Ø¨Ø¯ÙˆÙ† Ø§Ø¨Ø²Ø§Ø±) Ø±Ø§
+|     Ù†Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ - Ø§ÛŒÙ† Ø±Ø§ runAgentLoop Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† Ù‡Ø± round Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ù†Ù‡ ÛŒÚ©
+|     Ù‚Ø§Ù†ÙˆÙ† ØµØ±ÙØ§Ù‹ Ø¯Ø± system prompt Ú©Ù‡ Ù‚Ø§Ø¨Ù„ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† Ø¨Ø§Ø´Ø¯.
 |
 |==========================================================================
 */
@@ -981,7 +981,7 @@ function nextEditedFileName(originalName) {
 // block it touches, so the fewer/larger the blocks, the fewer
 // round-trips a normal edit needs, and the less real wall-clock time the
 // whole request burns before Vercel's hard timeout kills the connection
-// with no response at all (see the "پاسخی دریافت نشد" case). Doubled
+// with no response at all (see the "Ù¾Ø§Ø³Ø®ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯" case). Doubled
 // from 250 -> 500: a typical single-section edit still fits inside one
 // or two blocks (unchanged behavior), but a 5000-line file now maps to
 // roughly half as many total blocks, which also roughly halves the
@@ -991,21 +991,21 @@ function nextEditedFileName(originalName) {
 // ==========================================================================
 // REWRITE (block architecture -> SEARCH/REPLACE with fallback, Aider-style)
 // ==========================================================================
-// جایگزین کامل بلوک‌بندی: مدل مستقیماً یک قطعه‌ی متن دقیق موجود (search) و
-// متن جایگزین (replace) می‌دهد. به‌جای شماره‌ی بلوک ثابت (که با هر ویرایش
-// دوباره محاسبه می‌شد و مدل باید دائم نقشه‌ی جدید را دنبال می‌کرد)، خودِ
-// محتوا معیار است. ۴ لایه‌ی fallback به ترتیب امتحان می‌شود:
-//   ۱) تطبیق دقیق (exact substring)
-//   ۲) تطبیق با انعطاف فاصله/تب/whitespace (خطوط normalize شده مقایسه می‌شوند)
-//   ۳) تطبیق fuzzy خط‌به‌خط (نادیده گرفتن فاصله‌ی ابتدا/انتهای خط)
-//   ۴) شکست: گزارش دقیق با نزدیک‌ترین context ها برگردانده می‌شود تا مدل
-//      search را اصلاح کند و دوباره صدا بزند - هیچ حدسی به‌جای مدل زده نمی‌شود.
-// اگر search بیش از یک‌بار در فایل پیدا شود (ابهام)، رد می‌شود مگر
-// occurrence مشخص شده باشد.
+// Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ú©Ø§Ù…Ù„ Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒ: Ù…Ø¯Ù„ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ ÛŒÚ© Ù‚Ø·Ø¹Ù‡â€ŒÛŒ Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ (search) Ùˆ
+// Ù…ØªÙ† Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† (replace) Ù…ÛŒâ€ŒØ¯Ù‡Ø¯. Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ø¨Ù„ÙˆÚ© Ø«Ø§Ø¨Øª (Ú©Ù‡ Ø¨Ø§ Ù‡Ø± ÙˆÛŒØ±Ø§ÛŒØ´
+// Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ù…Ø¯Ù„ Ø¨Ø§ÛŒØ¯ Ø¯Ø§Ø¦Ù… Ù†Ù‚Ø´Ù‡â€ŒÛŒ Ø¬Ø¯ÛŒØ¯ Ø±Ø§ Ø¯Ù†Ø¨Ø§Ù„ Ù…ÛŒâ€ŒÚ©Ø±Ø¯)ØŒ Ø®ÙˆØ¯Ù
+// Ù…Ø­ØªÙˆØ§ Ù…Ø¹ÛŒØ§Ø± Ø§Ø³Øª. Û´ Ù„Ø§ÛŒÙ‡â€ŒÛŒ fallback Ø¨Ù‡ ØªØ±ØªÛŒØ¨ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒØ´ÙˆØ¯:
+//   Û±) ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚ (exact substring)
+//   Û²) ØªØ·Ø¨ÛŒÙ‚ Ø¨Ø§ Ø§Ù†Ø¹Ø·Ø§Ù ÙØ§ØµÙ„Ù‡/ØªØ¨/whitespace (Ø®Ø·ÙˆØ· normalize Ø´Ø¯Ù‡ Ù…Ù‚Ø§ÛŒØ³Ù‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯)
+//   Û³) ØªØ·Ø¨ÛŒÙ‚ fuzzy Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø· (Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† ÙØ§ØµÙ„Ù‡â€ŒÛŒ Ø§Ø¨ØªØ¯Ø§/Ø§Ù†ØªÙ‡Ø§ÛŒ Ø®Ø·)
+//   Û´) Ø´Ú©Ø³Øª: Ú¯Ø²Ø§Ø±Ø´ Ø¯Ù‚ÛŒÙ‚ Ø¨Ø§ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context Ù‡Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§ Ù…Ø¯Ù„
+//      search Ø±Ø§ Ø§ØµÙ„Ø§Ø­ Ú©Ù†Ø¯ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†Ø¯ - Ù‡ÛŒÚ† Ø­Ø¯Ø³ÛŒ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ù…Ø¯Ù„ Ø²Ø¯Ù‡ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+// Ø§Ú¯Ø± search Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´ÙˆØ¯ (Ø§Ø¨Ù‡Ø§Ù…)ØŒ Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ù…Ú¯Ø±
+// occurrence Ù…Ø´Ø®Øµ Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.
 
-// \r تنها (بدون \n بعدش) می‌تواند از برش نادرست متن توسط مدل ایجاد شود؛ اگر
-// نرمال‌سازی شود، \r\n\r واقعی خراب نمی‌شود چون ابتدا \r\n کامل تبدیل و حذف
-// می‌شود و فقط \r باقی‌مانده (تنها) در پایان تبدیل می‌شود.
+// \r ØªÙ†Ù‡Ø§ (Ø¨Ø¯ÙˆÙ† \n Ø¨Ø¹Ø¯Ø´) Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø§Ø² Ø¨Ø±Ø´ Ù†Ø§Ø¯Ø±Ø³Øª Ù…ØªÙ† ØªÙˆØ³Ø· Ù…Ø¯Ù„ Ø§ÛŒØ¬Ø§Ø¯ Ø´ÙˆØ¯Ø› Ø§Ú¯Ø±
+// Ù†Ø±Ù…Ø§Ù„â€ŒØ³Ø§Ø²ÛŒ Ø´ÙˆØ¯ØŒ \r\n\r ÙˆØ§Ù‚Ø¹ÛŒ Ø®Ø±Ø§Ø¨ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú†ÙˆÙ† Ø§Ø¨ØªØ¯Ø§ \r\n Ú©Ø§Ù…Ù„ ØªØ¨Ø¯ÛŒÙ„ Ùˆ Ø­Ø°Ù
+// Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ ÙÙ‚Ø· \r Ø¨Ø§Ù‚ÛŒâ€ŒÙ…Ø§Ù†Ø¯Ù‡ (ØªÙ†Ù‡Ø§) Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† ØªØ¨Ø¯ÛŒÙ„ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
 function normalizeLineEndings(text) {
     return String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
@@ -1014,7 +1014,7 @@ function normalizeForFuzzyMatch(line) {
     return line.trim().replace(/\s+/g, ' ');
 }
 
-// لایه‌ی ۱: تطبیق دقیق substring.
+// Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û±: ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚ substring.
 function findExactMatches(content, search) {
     const indices = [];
     let from = 0;
@@ -1027,10 +1027,10 @@ function findExactMatches(content, search) {
     return indices;
 }
 
-// لایه‌ی ۲: تطبیق با نادیده گرفتن تفاوت‌های whitespace (هر دو طرف
-// normalizeLineEndings شده و خط‌به‌خط با فاصله‌ی یکسان‌شده مقایسه می‌شوند).
-// چون طول ممکن است عوض شود (تعداد فاصله‌ها فرق دارد)، به‌جای indexOf ساده،
-// یک تطبیق خط‌به‌خط روی آرایه‌ی خطوط انجام می‌شود و بازه‌ی خط برگردانده می‌شود.
+// Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û²: ØªØ·Ø¨ÛŒÙ‚ Ø¨Ø§ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† ØªÙØ§ÙˆØªâ€ŒÙ‡Ø§ÛŒ whitespace (Ù‡Ø± Ø¯Ùˆ Ø·Ø±Ù
+// normalizeLineEndings Ø´Ø¯Ù‡ Ùˆ Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø· Ø¨Ø§ ÙØ§ØµÙ„Ù‡â€ŒÛŒ ÛŒÚ©Ø³Ø§Ù†â€ŒØ´Ø¯Ù‡ Ù…Ù‚Ø§ÛŒØ³Ù‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯).
+// Ú†ÙˆÙ† Ø·ÙˆÙ„ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¹ÙˆØ¶ Ø´ÙˆØ¯ (ØªØ¹Ø¯Ø§Ø¯ ÙØ§ØµÙ„Ù‡â€ŒÙ‡Ø§ ÙØ±Ù‚ Ø¯Ø§Ø±Ø¯)ØŒ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ indexOf Ø³Ø§Ø¯Ù‡ØŒ
+// ÛŒÚ© ØªØ·Ø¨ÛŒÙ‚ Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø· Ø±ÙˆÛŒ Ø¢Ø±Ø§ÛŒÙ‡â€ŒÛŒ Ø®Ø·ÙˆØ· Ø§Ù†Ø¬Ø§Ù… Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø· Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
 function findWhitespaceFlexibleMatch(contentLines, searchLines) {
     if (searchLines.length === 0) return null;
     const normSearch = searchLines.map(normalizeForFuzzyMatch);
@@ -1045,10 +1045,10 @@ function findWhitespaceFlexibleMatch(contentLines, searchLines) {
     return matches;
 }
 
-// لایه‌ی ۳: fuzzy - فقط خطوط غیرخالی search باید به ترتیب (با اجازه‌ی
-// چسبیدگی نه‌چندان‌سخت‌گیرانه) در محتوا پیدا شوند؛ خطوط خالی داخل search
-// نادیده گرفته می‌شوند. این آخرین لایه قبل از شکست کامل است و فقط زمانی
-// استفاده می‌شود که لایه‌ی ۱ و ۲ هر دو صفر تطبیق داشته باشند.
+// Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û³: fuzzy - ÙÙ‚Ø· Ø®Ø·ÙˆØ· ØºÛŒØ±Ø®Ø§Ù„ÛŒ search Ø¨Ø§ÛŒØ¯ Ø¨Ù‡ ØªØ±ØªÛŒØ¨ (Ø¨Ø§ Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ
+// Ú†Ø³Ø¨ÛŒØ¯Ú¯ÛŒ Ù†Ù‡â€ŒÚ†Ù†Ø¯Ø§Ù†â€ŒØ³Ø®Øªâ€ŒÚ¯ÛŒØ±Ø§Ù†Ù‡) Ø¯Ø± Ù…Ø­ØªÙˆØ§ Ù¾ÛŒØ¯Ø§ Ø´ÙˆÙ†Ø¯Ø› Ø®Ø·ÙˆØ· Ø®Ø§Ù„ÛŒ Ø¯Ø§Ø®Ù„ search
+// Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯. Ø§ÛŒÙ† Ø¢Ø®Ø±ÛŒÙ† Ù„Ø§ÛŒÙ‡ Ù‚Ø¨Ù„ Ø§Ø² Ø´Ú©Ø³Øª Ú©Ø§Ù…Ù„ Ø§Ø³Øª Ùˆ ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ
+// Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú©Ù‡ Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û± Ùˆ Û² Ù‡Ø± Ø¯Ùˆ ØµÙØ± ØªØ·Ø¨ÛŒÙ‚ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ù†Ø¯.
 function findFuzzyMatch(contentLines, searchLines) {
     const meaningfulSearch = searchLines.map(normalizeForFuzzyMatch).filter(Boolean);
     if (meaningfulSearch.length === 0) return null;
@@ -1066,8 +1066,8 @@ function findFuzzyMatch(contentLines, searchLines) {
     return matches;
 }
 
-// گزارش شکست: نزدیک‌ترین context ها را (بر اساس اولین خط غیرخالی search)
-// پیدا می‌کند تا مدل بتواند search را دقیق‌تر کپی کند.
+// Ú¯Ø²Ø§Ø±Ø´ Ø´Ú©Ø³Øª: Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context Ù‡Ø§ Ø±Ø§ (Ø¨Ø± Ø§Ø³Ø§Ø³ Ø§ÙˆÙ„ÛŒÙ† Ø®Ø· ØºÛŒØ±Ø®Ø§Ù„ÛŒ search)
+// Ù¾ÛŒØ¯Ø§ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ ØªØ§ Ù…Ø¯Ù„ Ø¨ØªÙˆØ§Ù†Ø¯ search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± Ú©Ù¾ÛŒ Ú©Ù†Ø¯.
 function buildEditFailureReport(content, search, reasonText) {
     const searchLines = search.split('\n');
     const firstMeaningfulLine = (searchLines.find(l => l.trim()) || '').trim();
@@ -1090,17 +1090,17 @@ function buildEditFailureReport(content, search, reasonText) {
         reason: reasonText,
         candidatesFound: candidates.length,
         candidates: candidates.slice(0, 5),
-        hint: 'search را دقیقاً از یکی از این context ها کپی کن (کاراکتر به کاراکتر، شامل فاصله‌گذاری و تورفتگی) تا یکتا و کامل تطبیق پیدا شود، سپس دوباره apply_edit را صدا بزن. اگر مطمئن نیستی محتوای دقیق کجاست، ابتدا با read_file_section بخشی از فایل را ببین.'
+        hint: 'search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø§Ø² ÛŒÚ©ÛŒ Ø§Ø² Ø§ÛŒÙ† context Ù‡Ø§ Ú©Ù¾ÛŒ Ú©Ù† (Ú©Ø§Ø±Ø§Ú©ØªØ± Ø¨Ù‡ Ú©Ø§Ø±Ø§Ú©ØªØ±ØŒ Ø´Ø§Ù…Ù„ ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ Ùˆ ØªÙˆØ±ÙØªÚ¯ÛŒ) ØªØ§ ÛŒÚ©ØªØ§ Ùˆ Ú©Ø§Ù…Ù„ ØªØ·Ø¨ÛŒÙ‚ Ù¾ÛŒØ¯Ø§ Ø´ÙˆØ¯ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ apply_edit Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. Ø§Ú¯Ø± Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒ Ù…Ø­ØªÙˆØ§ÛŒ Ø¯Ù‚ÛŒÙ‚ Ú©Ø¬Ø§Ø³ØªØŒ Ø§Ø¨ØªØ¯Ø§ Ø¨Ø§ read_file_section Ø¨Ø®Ø´ÛŒ Ø§Ø² ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨Ø¨ÛŒÙ†.'
     };
 }
 
-// موتور اصلی: content کامل + search + replace می‌گیرد، هر ۴ لایه را به
-// ترتیب امتحان می‌کند و یا content جدید را برمی‌گرداند یا خطای دقیق.
-// occurrence (اختیاری، ۱-پایه) برای زمانی است که search عمداً چندبار در
-// فایل تکرار شده و مدل مشخص کرده کدام نمونه مدنظرش است.
+// Ù…ÙˆØªÙˆØ± Ø§ØµÙ„ÛŒ: content Ú©Ø§Ù…Ù„ + search + replace Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ØŒ Ù‡Ø± Û´ Ù„Ø§ÛŒÙ‡ Ø±Ø§ Ø¨Ù‡
+// ØªØ±ØªÛŒØ¨ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ùˆ ÛŒØ§ content Ø¬Ø¯ÛŒØ¯ Ø±Ø§ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ ÛŒØ§ Ø®Ø·Ø§ÛŒ Ø¯Ù‚ÛŒÙ‚.
+// occurrence (Ø§Ø®ØªÛŒØ§Ø±ÛŒØŒ Û±-Ù¾Ø§ÛŒÙ‡) Ø¨Ø±Ø§ÛŒ Ø²Ù…Ø§Ù†ÛŒ Ø§Ø³Øª Ú©Ù‡ search Ø¹Ù…Ø¯Ø§Ù‹ Ú†Ù†Ø¯Ø¨Ø§Ø± Ø¯Ø±
+// ÙØ§ÛŒÙ„ ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ùˆ Ù…Ø¯Ù„ Ù…Ø´Ø®Øµ Ú©Ø±Ø¯Ù‡ Ú©Ø¯Ø§Ù… Ù†Ù…ÙˆÙ†Ù‡ Ù…Ø¯Ù†Ø¸Ø±Ø´ Ø§Ø³Øª.
 function applySearchReplace(content, search, replace, occurrence) {
     if (!search || typeof search !== 'string') {
-        return { success: false, reason: 'not_found', report: buildEditFailureReport(content, search || '', 'search خالی یا نامعتبر بود.') };
+        return { success: false, reason: 'not_found', report: buildEditFailureReport(content, search || '', 'search Ø®Ø§Ù„ÛŒ ÛŒØ§ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø¨ÙˆØ¯.') };
     }
 
     const originalHadCRLF = /\r\n/.test(content);
@@ -1114,7 +1114,7 @@ function applySearchReplace(content, search, replace, occurrence) {
         return result;
     };
 
-    // لایه ۱: تطبیق دقیق
+    // Ù„Ø§ÛŒÙ‡ Û±: ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚
     const exactMatches = findExactMatches(normContent, normSearch);
     if (exactMatches.length === 1) {
         return { success: true, content: applyAt(exactMatches[0], exactMatches[0] + normSearch.length), layer: 'exact' };
@@ -1128,18 +1128,18 @@ function applySearchReplace(content, search, replace, occurrence) {
             success: false,
             reason: 'ambiguous',
             report: {
-                reason: `این search دقیقاً ${exactMatches.length} بار در فایل پیدا شد - باید یکتا باشد یا occurrence مشخص شود.`,
+                reason: `Ø§ÛŒÙ† search Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ ${exactMatches.length} Ø¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ø¨Ø§ÛŒØ¯ ÛŒÚ©ØªØ§ Ø¨Ø§Ø´Ø¯ ÛŒØ§ occurrence Ù…Ø´Ø®Øµ Ø´ÙˆØ¯.`,
                 candidatesFound: exactMatches.length,
                 candidates: exactMatches.slice(0, 5).map(idx => ({
                     lineNumber: normContent.slice(0, idx).split('\n').length,
                     context: normContent.slice(Math.max(0, idx - 60), idx + normSearch.length + 60)
                 })),
-                hint: 'یا search را با چند خط اطراف بیشتر یکتا کن، یا occurrence (شماره‌ی نمونه‌ی موردنظر، از ۱ شروع) را در فراخوانی apply_edit مشخص کن.'
+                hint: 'ÛŒØ§ search Ø±Ø§ Ø¨Ø§ Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù Ø¨ÛŒØ´ØªØ± ÛŒÚ©ØªØ§ Ú©Ù†ØŒ ÛŒØ§ occurrence (Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ù†Ù…ÙˆÙ†Ù‡â€ŒÛŒ Ù…ÙˆØ±Ø¯Ù†Ø¸Ø±ØŒ Ø§Ø² Û± Ø´Ø±ÙˆØ¹) Ø±Ø§ Ø¯Ø± ÙØ±Ø§Ø®ÙˆØ§Ù†ÛŒ apply_edit Ù…Ø´Ø®Øµ Ú©Ù†.'
             }
         };
     }
 
-    // لایه ۲: whitespace-flexible خط‌به‌خط
+    // Ù„Ø§ÛŒÙ‡ Û²: whitespace-flexible Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø·
     const contentLines = normContent.split('\n');
     const searchLines = normSearch.split('\n');
     const wsMatches = findWhitespaceFlexibleMatch(contentLines, searchLines);
@@ -1155,18 +1155,18 @@ function applySearchReplace(content, search, replace, occurrence) {
             success: false,
             reason: 'ambiguous',
             report: {
-                reason: `این search (با نادیده گرفتن فاصله‌گذاری) ${wsMatches.length} بار پیدا شد - باید یکتا باشد یا occurrence مشخص شود.`,
+                reason: `Ø§ÛŒÙ† search (Ø¨Ø§ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ) ${wsMatches.length} Ø¨Ø§Ø± Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ø¨Ø§ÛŒØ¯ ÛŒÚ©ØªØ§ Ø¨Ø§Ø´Ø¯ ÛŒØ§ occurrence Ù…Ø´Ø®Øµ Ø´ÙˆØ¯.`,
                 candidatesFound: wsMatches.length,
                 candidates: wsMatches.slice(0, 5).map(lineIdx => ({
                     lineNumber: lineIdx + 1,
                     context: contentLines.slice(Math.max(0, lineIdx - 3), lineIdx + searchLines.length + 3).join('\n')
                 })),
-                hint: 'search را با فاصله‌گذاری دقیق‌تر بده یا occurrence مشخص کن.'
+                hint: 'search Ø±Ø§ Ø¨Ø§ ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± Ø¨Ø¯Ù‡ ÛŒØ§ occurrence Ù…Ø´Ø®Øµ Ú©Ù†.'
             }
         };
     }
 
-    // لایه ۳: fuzzy (نادیده گرفتن خطوط خالی داخل search + فاصله‌ی اطراف)
+    // Ù„Ø§ÛŒÙ‡ Û³: fuzzy (Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† Ø®Ø·ÙˆØ· Ø®Ø§Ù„ÛŒ Ø¯Ø§Ø®Ù„ search + ÙØ§ØµÙ„Ù‡â€ŒÛŒ Ø§Ø·Ø±Ø§Ù)
     const fuzzyMatches = findFuzzyMatch(contentLines, searchLines);
     if (fuzzyMatches && fuzzyMatches.length === 1) {
         const lineIdx = fuzzyMatches[0];
@@ -1179,21 +1179,21 @@ function applySearchReplace(content, search, replace, occurrence) {
         return {
             success: false,
             reason: 'ambiguous',
-            report: buildEditFailureReport(normContent, normSearch, `این search حتی به‌صورت fuzzy هم ${fuzzyMatches.length} بار مشابه پیدا شد - مبهم است.`)
+            report: buildEditFailureReport(normContent, normSearch, `Ø§ÛŒÙ† search Ø­ØªÛŒ Ø¨Ù‡â€ŒØµÙˆØ±Øª fuzzy Ù‡Ù… ${fuzzyMatches.length} Ø¨Ø§Ø± Ù…Ø´Ø§Ø¨Ù‡ Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ù…Ø¨Ù‡Ù… Ø§Ø³Øª.`)
         };
     }
 
-    // لایه ۴: شکست کامل
+    // Ù„Ø§ÛŒÙ‡ Û´: Ø´Ú©Ø³Øª Ú©Ø§Ù…Ù„
     return {
         success: false,
         reason: 'not_found',
-        report: buildEditFailureReport(normContent, normSearch, 'این متن (search) دقیقاً یا حتی به‌صورت fuzzy در فایل پیدا نشد.')
+        report: buildEditFailureReport(normContent, normSearch, 'Ø§ÛŒÙ† Ù…ØªÙ† (search) Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ ÛŒØ§ Ø­ØªÛŒ Ø¨Ù‡â€ŒØµÙˆØ±Øª fuzzy Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.')
     };
 }
 
-// یک FileEditState برای یک فایل می‌سازد - جایگزین ساده‌ی BlockFileState.
-// فقط محتوای فعلی + تاریخچه‌ی ادیت‌ها را نگه می‌دارد؛ هیچ شماره‌بندی بلوکی
-// در کار نیست، پس نیازی به recompute بعد از هر تغییر طول هم نیست.
+// ÛŒÚ© FileEditState Ø¨Ø±Ø§ÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ - Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ø³Ø§Ø¯Ù‡â€ŒÛŒ BlockFileState.
+// ÙÙ‚Ø· Ù…Ø­ØªÙˆØ§ÛŒ ÙØ¹Ù„ÛŒ + ØªØ§Ø±ÛŒØ®Ú†Ù‡â€ŒÛŒ Ø§Ø¯ÛŒØªâ€ŒÙ‡Ø§ Ø±Ø§ Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±Ø¯Ø› Ù‡ÛŒÚ† Ø´Ù…Ø§Ø±Ù‡â€ŒØ¨Ù†Ø¯ÛŒ Ø¨Ù„ÙˆÚ©ÛŒ
+// Ø¯Ø± Ú©Ø§Ø± Ù†ÛŒØ³ØªØŒ Ù¾Ø³ Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ recompute Ø¨Ø¹Ø¯ Ø§Ø² Ù‡Ø± ØªØºÛŒÛŒØ± Ø·ÙˆÙ„ Ù‡Ù… Ù†ÛŒØ³Øª.
 function createFileEditState(file) {
     return {
         name: file.name,
@@ -1204,23 +1204,23 @@ function createFileEditState(file) {
     };
 }
 
-const FILE_BLOCK_TARGET_LINES = 500; // اندازه‌ی هدف هر بلوک - نه سقف سخت، نزدیک‌ترین مرز منطقی (خط خالی/section) به این عدد انتخاب می‌شود
+const FILE_BLOCK_TARGET_LINES = 500; // Ø§Ù†Ø¯Ø§Ø²Ù‡â€ŒÛŒ Ù‡Ø¯Ù Ù‡Ø± Ø¨Ù„ÙˆÚ© - Ù†Ù‡ Ø³Ù‚Ù Ø³Ø®ØªØŒ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† Ù…Ø±Ø² Ù…Ù†Ø·Ù‚ÛŒ (Ø®Ø· Ø®Ø§Ù„ÛŒ/section) Ø¨Ù‡ Ø§ÛŒÙ† Ø¹Ø¯Ø¯ Ø§Ù†ØªØ®Ø§Ø¨ Ù…ÛŒâ€ŒØ´ÙˆØ¯
 
-// یک فایل را به بلوک‌های ثابت تقسیم می‌کند. مرز هر بلوک تا حد امکان روی یک
-// خط خالی یا مرز section (از analyzeFileStructure) قرار می‌گیرد تا وسط یک
-// تابع/تگ قطع نشود؛ اما این فقط برای خوانایی preview است - چون write_block
-// همیشه کل بلوک را عوض می‌کند نه یک semantic unit را، قطع شدن وسط تابع هیچ
-// مشکل صحتی ایجاد نمی‌کند.
-// محاسبه‌ی عمق تودرتویی تگ‌های XML/HTML در انتهای هر خط، برای فایل‌های
-// html/svg/xml. این فقط یک شمارنده‌ی ساده‌ی باز/بسته (بدون پارس واقعی) است -
-// کافی است تا بفهمیم مرز بین دو خط "داخل یک تگ باز" است یا نه. تگ‌های
-// self-closing (<path .../>) و void element های HTML (br, img, ...) عمق را
-// تغییر نمی‌دهند. کامنت‌های XML/HTML (<!-- ... -->) نادیده گرفته می‌شوند تا
-// تگ داخل کامنت باعث اشتباه شمارش نشود.
+// ÛŒÚ© ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨Ù‡ Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ Ø«Ø§Ø¨Øª ØªÙ‚Ø³ÛŒÙ… Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ù…Ø±Ø² Ù‡Ø± Ø¨Ù„ÙˆÚ© ØªØ§ Ø­Ø¯ Ø§Ù…Ú©Ø§Ù† Ø±ÙˆÛŒ ÛŒÚ©
+// Ø®Ø· Ø®Ø§Ù„ÛŒ ÛŒØ§ Ù…Ø±Ø² section (Ø§Ø² analyzeFileStructure) Ù‚Ø±Ø§Ø± Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ ØªØ§ ÙˆØ³Ø· ÛŒÚ©
+// ØªØ§Ø¨Ø¹/ØªÚ¯ Ù‚Ø·Ø¹ Ù†Ø´ÙˆØ¯Ø› Ø§Ù…Ø§ Ø§ÛŒÙ† ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø®ÙˆØ§Ù†Ø§ÛŒÛŒ preview Ø§Ø³Øª - Ú†ÙˆÙ† write_block
+// Ù‡Ù…ÛŒØ´Ù‡ Ú©Ù„ Ø¨Ù„ÙˆÚ© Ø±Ø§ Ø¹ÙˆØ¶ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ù†Ù‡ ÛŒÚ© semantic unit Ø±Ø§ØŒ Ù‚Ø·Ø¹ Ø´Ø¯Ù† ÙˆØ³Ø· ØªØ§Ø¨Ø¹ Ù‡ÛŒÚ†
+// Ù…Ø´Ú©Ù„ ØµØ­ØªÛŒ Ø§ÛŒØ¬Ø§Ø¯ Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
+// Ù…Ø­Ø§Ø³Ø¨Ù‡â€ŒÛŒ Ø¹Ù…Ù‚ ØªÙˆØ¯Ø±ØªÙˆÛŒÛŒ ØªÚ¯â€ŒÙ‡Ø§ÛŒ XML/HTML Ø¯Ø± Ø§Ù†ØªÙ‡Ø§ÛŒ Ù‡Ø± Ø®Ø·ØŒ Ø¨Ø±Ø§ÛŒ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ
+// html/svg/xml. Ø§ÛŒÙ† ÙÙ‚Ø· ÛŒÚ© Ø´Ù…Ø§Ø±Ù†Ø¯Ù‡â€ŒÛŒ Ø³Ø§Ø¯Ù‡â€ŒÛŒ Ø¨Ø§Ø²/Ø¨Ø³ØªÙ‡ (Ø¨Ø¯ÙˆÙ† Ù¾Ø§Ø±Ø³ ÙˆØ§Ù‚Ø¹ÛŒ) Ø§Ø³Øª -
+// Ú©Ø§ÙÛŒ Ø§Ø³Øª ØªØ§ Ø¨ÙÙ‡Ù…ÛŒÙ… Ù…Ø±Ø² Ø¨ÛŒÙ† Ø¯Ùˆ Ø®Ø· "Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ Ø¨Ø§Ø²" Ø§Ø³Øª ÛŒØ§ Ù†Ù‡. ØªÚ¯â€ŒÙ‡Ø§ÛŒ
+// self-closing (<path .../>) Ùˆ void element Ù‡Ø§ÛŒ HTML (br, img, ...) Ø¹Ù…Ù‚ Ø±Ø§
+// ØªØºÛŒÛŒØ± Ù†Ù…ÛŒâ€ŒØ¯Ù‡Ù†Ø¯. Ú©Ø§Ù…Ù†Øªâ€ŒÙ‡Ø§ÛŒ XML/HTML (<!-- ... -->) Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ ØªØ§
+// ØªÚ¯ Ø¯Ø§Ø®Ù„ Ú©Ø§Ù…Ù†Øª Ø¨Ø§Ø¹Ø« Ø§Ø´ØªØ¨Ø§Ù‡ Ø´Ù…Ø§Ø±Ø´ Ù†Ø´ÙˆØ¯.
 const VOID_HTML_TAGS = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
 function computeTagDepthPerLine(content) {
     const lines = String(content || '').split(/\r?\n/);
-    const depths = new Array(lines.length + 1).fill(0); // depths[i] = عمق بعد از پایان خط i (1-indexed)
+    const depths = new Array(lines.length + 1).fill(0); // depths[i] = Ø¹Ù…Ù‚ Ø¨Ø¹Ø¯ Ø§Ø² Ù¾Ø§ÛŒØ§Ù† Ø®Ø· i (1-indexed)
     let depth = 0;
     let insideComment = false;
     const tagRe = /<!--|-->|<\/?([a-zA-Z][a-zA-Z0-9:-]*)[^>]*?(\/?)>/g;
@@ -1253,7 +1253,7 @@ function computeFileBlocks(content, fileName) {
     const blocks = [];
 
     if (totalLines === 0) {
-        return [{ number: 1, startLine: 1, endLine: 0, preview: '(فایل خالی است)' }];
+        return [{ number: 1, startLine: 1, endLine: 0, preview: '(ÙØ§ÛŒÙ„ Ø®Ø§Ù„ÛŒ Ø§Ø³Øª)' }];
     }
 
     let analysis = null;
@@ -1268,12 +1268,12 @@ function computeFileBlocks(content, fileName) {
             .forEach(item => { if (item && Number.isFinite(item.line)) preferredBoundaries.add(item.line); });
     }
 
-    // FIX (بلوک وسط <g>/<svg>... قطع می‌شد): برای html/svg/xml، مرز بلوک
-    // هرگز نباید جایی باشد که عمق تگ باز است - یعنی هنوز داخل یک تگ نبسته
-    // هستیم. بدون این چک، preferredBoundaries فقط تگ‌های شناخته‌شده‌ی محدود
-    // (div/section/...) را می‌دید و <g>/<path>/عناصر SVG را اصلاً نمی‌شناخت،
-    // پس یک خط خالیِ تصادفیِ وسط <g> به‌عنوان مرز انتخاب می‌شد و write_block
-    // روی یک تگ نصفه رد می‌شد.
+    // FIX (Ø¨Ù„ÙˆÚ© ÙˆØ³Ø· <g>/<svg>... Ù‚Ø·Ø¹ Ù…ÛŒâ€ŒØ´Ø¯): Ø¨Ø±Ø§ÛŒ html/svg/xmlØŒ Ù…Ø±Ø² Ø¨Ù„ÙˆÚ©
+    // Ù‡Ø±Ú¯Ø² Ù†Ø¨Ø§ÛŒØ¯ Ø¬Ø§ÛŒÛŒ Ø¨Ø§Ø´Ø¯ Ú©Ù‡ Ø¹Ù…Ù‚ ØªÚ¯ Ø¨Ø§Ø² Ø§Ø³Øª - ÛŒØ¹Ù†ÛŒ Ù‡Ù†ÙˆØ² Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ Ù†Ø¨Ø³ØªÙ‡
+    // Ù‡Ø³ØªÛŒÙ…. Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ† Ú†Ú©ØŒ preferredBoundaries ÙÙ‚Ø· ØªÚ¯â€ŒÙ‡Ø§ÛŒ Ø´Ù†Ø§Ø®ØªÙ‡â€ŒØ´Ø¯Ù‡â€ŒÛŒ Ù…Ø­Ø¯ÙˆØ¯
+    // (div/section/...) Ø±Ø§ Ù…ÛŒâ€ŒØ¯ÛŒØ¯ Ùˆ <g>/<path>/Ø¹Ù†Ø§ØµØ± SVG Ø±Ø§ Ø§ØµÙ„Ø§Ù‹ Ù†Ù…ÛŒâ€ŒØ´Ù†Ø§Ø®ØªØŒ
+    // Ù¾Ø³ ÛŒÚ© Ø®Ø· Ø®Ø§Ù„ÛŒÙ ØªØµØ§Ø¯ÙÛŒÙ ÙˆØ³Ø· <g> Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† Ù…Ø±Ø² Ø§Ù†ØªØ®Ø§Ø¨ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ write_block
+    // Ø±ÙˆÛŒ ÛŒÚ© ØªÚ¯ Ù†ØµÙÙ‡ Ø±Ø¯ Ù…ÛŒâ€ŒØ´Ø¯.
     const lowerName = String(fileName || '').toLowerCase();
     const isMarkup = /\.(html?|htm|svg|xml)$/.test(lowerName) || /<svg[\s>]/i.test(content.slice(0, 2000));
     const tagDepths = isMarkup ? computeTagDepthPerLine(content) : null;
@@ -1288,10 +1288,10 @@ function computeFileBlocks(content, fileName) {
             const searchWindow = 40;
             let bestEnd = null;
             for (let candidate = idealEnd; candidate > Math.max(cursor, idealEnd - searchWindow); candidate--) {
-                // اگر داخل یک تگ باز هستیم (عمق > ۰ در انتهای این خط)، این
-                // نقطه هرگز مرز معتبر نیست - حتی اگر preferredBoundaries یا
-                // خط خالی باشد، چون قطع کردن اینجا یک تگ باز را نصفه رها
-                // می‌کند.
+                // Ø§Ú¯Ø± Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ Ø¨Ø§Ø² Ù‡Ø³ØªÛŒÙ… (Ø¹Ù…Ù‚ > Û° Ø¯Ø± Ø§Ù†ØªÙ‡Ø§ÛŒ Ø§ÛŒÙ† Ø®Ø·)ØŒ Ø§ÛŒÙ†
+                // Ù†Ù‚Ø·Ù‡ Ù‡Ø±Ú¯Ø² Ù…Ø±Ø² Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª - Ø­ØªÛŒ Ø§Ú¯Ø± preferredBoundaries ÛŒØ§
+                // Ø®Ø· Ø®Ø§Ù„ÛŒ Ø¨Ø§Ø´Ø¯ØŒ Ú†ÙˆÙ† Ù‚Ø·Ø¹ Ú©Ø±Ø¯Ù† Ø§ÛŒÙ†Ø¬Ø§ ÛŒÚ© ØªÚ¯ Ø¨Ø§Ø² Ø±Ø§ Ù†ØµÙÙ‡ Ø±Ù‡Ø§
+                // Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
                 if (tagDepths && tagDepths[candidate] > 0) continue;
 
                 const lineText = lines[candidate - 1];
@@ -1302,10 +1302,10 @@ function computeFileBlocks(content, fileName) {
                     break;
                 }
             }
-            // اگر هیچ مرز "ایده‌آل" با عمق صفر پیدا نشد، حداقل نزدیک‌ترین
-            // نقطه‌ی عمق-صفر را در کل بازه‌ی مجاز پیدا کن (نه فقط پنجره‌ی
-            // ۴۰ خطی) تا مطمئن شویم بلوک هرگز وسط تگ باز قطع نمی‌شود، حتی
-            // اگر تگ خیلی طولانی (چند صد خط) باشد.
+            // Ø§Ú¯Ø± Ù‡ÛŒÚ† Ù…Ø±Ø² "Ø§ÛŒØ¯Ù‡â€ŒØ¢Ù„" Ø¨Ø§ Ø¹Ù…Ù‚ ØµÙØ± Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ØŒ Ø­Ø¯Ø§Ù‚Ù„ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ†
+            // Ù†Ù‚Ø·Ù‡â€ŒÛŒ Ø¹Ù…Ù‚-ØµÙØ± Ø±Ø§ Ø¯Ø± Ú©Ù„ Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ù…Ø¬Ø§Ø² Ù¾ÛŒØ¯Ø§ Ú©Ù† (Ù†Ù‡ ÙÙ‚Ø· Ù¾Ù†Ø¬Ø±Ù‡â€ŒÛŒ
+            // Û´Û° Ø®Ø·ÛŒ) ØªØ§ Ù…Ø·Ù…Ø¦Ù† Ø´ÙˆÛŒÙ… Ø¨Ù„ÙˆÚ© Ù‡Ø±Ú¯Ø² ÙˆØ³Ø· ØªÚ¯ Ø¨Ø§Ø² Ù‚Ø·Ø¹ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ø­ØªÛŒ
+            // Ø§Ú¯Ø± ØªÚ¯ Ø®ÛŒÙ„ÛŒ Ø·ÙˆÙ„Ø§Ù†ÛŒ (Ú†Ù†Ø¯ ØµØ¯ Ø®Ø·) Ø¨Ø§Ø´Ø¯.
             if (!bestEnd && tagDepths) {
                 for (let candidate = idealEnd; candidate >= cursor; candidate--) {
                     if (tagDepths[candidate] === 0) { bestEnd = candidate; break; }
@@ -1333,9 +1333,9 @@ function computeFileBlocks(content, fileName) {
     return blocks;
 }
 
-// یک BlockFileState برای یک فایل می‌سازد. باید توسط caller (سطح HTTP
-// request) ساخته شود و بین همه‌ی retryهای همان درخواست به runAgentLoop
-// پاس داده شود - دقیقاً مثل sharedRequestState.
+// ÛŒÚ© BlockFileState Ø¨Ø±Ø§ÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯. Ø¨Ø§ÛŒØ¯ ØªÙˆØ³Ø· caller (Ø³Ø·Ø­ HTTP
+// request) Ø³Ø§Ø®ØªÙ‡ Ø´ÙˆØ¯ Ùˆ Ø¨ÛŒÙ† Ù‡Ù…Ù‡â€ŒÛŒ retryÙ‡Ø§ÛŒ Ù‡Ù…Ø§Ù† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø¨Ù‡ runAgentLoop
+// Ù¾Ø§Ø³ Ø¯Ø§Ø¯Ù‡ Ø´ÙˆØ¯ - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ sharedRequestState.
 function createBlockFileState(file) {
     const lines = String(file.content || '').split(/\r?\n/);
     return {
@@ -1349,9 +1349,9 @@ function createBlockFileState(file) {
     };
 }
 
-// بلوک‌بندی را بعد از تغییر طول فایل دوباره محاسبه می‌کند. چون write_block
-// می‌تواند طول بلوک نوشته‌شده را عوض کند، شماره‌ی بلوک‌های بعدی باید با
-// خطوط جدید همخوانی داشته باشد. بازسازی از صفر ارزان و بدون edge-case است.
+// Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒ Ø±Ø§ Ø¨Ø¹Ø¯ Ø§Ø² ØªØºÛŒÛŒØ± Ø·ÙˆÙ„ ÙØ§ÛŒÙ„ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ú†ÙˆÙ† write_block
+// Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø·ÙˆÙ„ Ø¨Ù„ÙˆÚ© Ù†ÙˆØ´ØªÙ‡â€ŒØ´Ø¯Ù‡ Ø±Ø§ Ø¹ÙˆØ¶ Ú©Ù†Ø¯ØŒ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø§ÛŒØ¯ Ø¨Ø§
+// Ø®Ø·ÙˆØ· Ø¬Ø¯ÛŒØ¯ Ù‡Ù…Ø®ÙˆØ§Ù†ÛŒ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯. Ø¨Ø§Ø²Ø³Ø§Ø²ÛŒ Ø§Ø² ØµÙØ± Ø§Ø±Ø²Ø§Ù† Ùˆ Ø¨Ø¯ÙˆÙ† edge-case Ø§Ø³Øª.
 function recomputeBlocksAfterEdit(state) {
     const content = state.lines.join('\n');
     state.blocks = computeFileBlocks(content, state.name);
@@ -1415,7 +1415,7 @@ function buildPatchFailureReport(content, oldStr, reasonText) {
         reason: reasonText,
         candidatesFound: candidates.length,
         candidates: candidates.slice(0, 5),
-        hint: 'old را دقیقاً از یکی از این context ها کپی کن (کاراکتر به کاراکتر، شامل فاصله‌گذاری) تا یکتا شود، سپس دوباره apply_patch را صدا بزن.'
+        hint: 'old Ø±Ø§ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø§Ø² ÛŒÚ©ÛŒ Ø§Ø² Ø§ÛŒÙ† context Ù‡Ø§ Ú©Ù¾ÛŒ Ú©Ù† (Ú©Ø§Ø±Ø§Ú©ØªØ± Ø¨Ù‡ Ú©Ø§Ø±Ø§Ú©ØªØ±ØŒ Ø´Ø§Ù…Ù„ ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ) ØªØ§ ÛŒÚ©ØªØ§ Ø´ÙˆØ¯ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ apply_patch Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.'
     };
 }
 
@@ -1523,7 +1523,7 @@ function analyzeFileStructure(content, fileName = 'file', query = '') {
 }
 
 function formatFileStructureForModel(analysis) {
-    const pick = (arr, key = 'name') => arr.slice(0, 60).map(x => key === 'text' ? x.text : `${x[key] || ''}${x.line ? ` (خط ${x.line})` : ''}`).filter(Boolean);
+    const pick = (arr, key = 'name') => arr.slice(0, 60).map(x => key === 'text' ? x.text : `${x[key] || ''}${x.line ? ` (Ø®Ø· ${x.line})` : ''}`).filter(Boolean);
     return {
         file: analysis.file,
         language: analysis.language,
@@ -1547,23 +1547,23 @@ const GEMINI_TOOLS = [
             {
                 name: 'web_search',
                 description:
-                    'جستجوی واقعی و زنده در وب برای اطلاعات به‌روز، قیمت، اخبار، رویدادها یا هر ' +
-                    'چیزی که ممکن است بعد از زمان آموزش مدل تغییر کرده باشد یا مدل به آن مطمئن نیست. ' +
-                    'برای اکثر سؤال‌ها (حتی سؤال‌های ساده‌ی «قیمت الان چنده») یک‌بار صدا زدن این ابزار ' +
-                    'با یک query خوب کافی است و باید با همان نتایج جواب نهایی داده شود. صدا زدن دوباره ' +
-                    'فقط در موارد نادر و واقعی مجاز است: وقتی نتیجه‌ی جستجوی اول کاملاً بی‌ربط/ناقص بود، ' +
-                    'یا سؤال چند بخش کاملاً جدا از هم دارد که هرکدام موضوع متفاوتی است. هرگز برای «دقیق‌تر ' +
-                    'کردن» یک جستجوی قبلاً موفق دوباره سرچ نزن.',
+                    'Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ø²Ù†Ø¯Ù‡ Ø¯Ø± ÙˆØ¨ Ø¨Ø±Ø§ÛŒ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø¨Ù‡â€ŒØ±ÙˆØ²ØŒ Ù‚ÛŒÙ…ØªØŒ Ø§Ø®Ø¨Ø§Ø±ØŒ Ø±ÙˆÛŒØ¯Ø§Ø¯Ù‡Ø§ ÛŒØ§ Ù‡Ø± ' +
+                    'Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¨Ø¹Ø¯ Ø§Ø² Ø²Ù…Ø§Ù† Ø¢Ù…ÙˆØ²Ø´ Ù…Ø¯Ù„ ØªØºÛŒÛŒØ± Ú©Ø±Ø¯Ù‡ Ø¨Ø§Ø´Ø¯ ÛŒØ§ Ù…Ø¯Ù„ Ø¨Ù‡ Ø¢Ù† Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³Øª. ' +
+                    'Ø¨Ø±Ø§ÛŒ Ø§Ú©Ø«Ø± Ø³Ø¤Ø§Ù„â€ŒÙ‡Ø§ (Ø­ØªÛŒ Ø³Ø¤Ø§Ù„â€ŒÙ‡Ø§ÛŒ Ø³Ø§Ø¯Ù‡â€ŒÛŒ Â«Ù‚ÛŒÙ…Øª Ø§Ù„Ø§Ù† Ú†Ù†Ø¯Ù‡Â») ÛŒÚ©â€ŒØ¨Ø§Ø± ØµØ¯Ø§ Ø²Ø¯Ù† Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± ' +
+                    'Ø¨Ø§ ÛŒÚ© query Ø®ÙˆØ¨ Ú©Ø§ÙÛŒ Ø§Ø³Øª Ùˆ Ø¨Ø§ÛŒØ¯ Ø¨Ø§ Ù‡Ù…Ø§Ù† Ù†ØªØ§ÛŒØ¬ Ø¬ÙˆØ§Ø¨ Ù†Ù‡Ø§ÛŒÛŒ Ø¯Ø§Ø¯Ù‡ Ø´ÙˆØ¯. ØµØ¯Ø§ Ø²Ø¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡ ' +
+                    'ÙÙ‚Ø· Ø¯Ø± Ù…ÙˆØ§Ø±Ø¯ Ù†Ø§Ø¯Ø± Ùˆ ÙˆØ§Ù‚Ø¹ÛŒ Ù…Ø¬Ø§Ø² Ø§Ø³Øª: ÙˆÙ‚ØªÛŒ Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø¬Ø³ØªØ¬ÙˆÛŒ Ø§ÙˆÙ„ Ú©Ø§Ù…Ù„Ø§Ù‹ Ø¨ÛŒâ€ŒØ±Ø¨Ø·/Ù†Ø§Ù‚Øµ Ø¨ÙˆØ¯ØŒ ' +
+                    'ÛŒØ§ Ø³Ø¤Ø§Ù„ Ú†Ù†Ø¯ Ø¨Ø®Ø´ Ú©Ø§Ù…Ù„Ø§Ù‹ Ø¬Ø¯Ø§ Ø§Ø² Ù‡Ù… Ø¯Ø§Ø±Ø¯ Ú©Ù‡ Ù‡Ø±Ú©Ø¯Ø§Ù… Ù…ÙˆØ¶ÙˆØ¹ Ù…ØªÙØ§ÙˆØªÛŒ Ø§Ø³Øª. Ù‡Ø±Ú¯Ø² Ø¨Ø±Ø§ÛŒ Â«Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± ' +
+                    'Ú©Ø±Ø¯Ù†Â» ÛŒÚ© Ø¬Ø³ØªØ¬ÙˆÛŒ Ù‚Ø¨Ù„Ø§Ù‹ Ù…ÙˆÙÙ‚ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø³Ø±Ú† Ù†Ø²Ù†.',
                 parameters: {
                     type: 'object',
                     properties: {
                         query: {
                             type: 'string',
-                            description: 'عبارت جستجو - کوتاه، دقیق و مرتبط با چیزی که لازم داری بدانی.'
+                            description: 'Ø¹Ø¨Ø§Ø±Øª Ø¬Ø³ØªØ¬Ùˆ - Ú©ÙˆØªØ§Ù‡ØŒ Ø¯Ù‚ÛŒÙ‚ Ùˆ Ù…Ø±ØªØ¨Ø· Ø¨Ø§ Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù„Ø§Ø²Ù… Ø¯Ø§Ø±ÛŒ Ø¨Ø¯Ø§Ù†ÛŒ.'
                         },
                         reason: {
                             type: 'string',
-                            description: 'یک جمله‌ی کوتاه فارسی که به کاربر نشان داده می‌شود و توضیح می‌دهد چرا داری این را سرچ می‌کنی (مثلاً "دارم آخرین قیمت طلا رو بررسی می‌کنم").'
+                            description: 'ÛŒÚ© Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ú©ÙˆØªØ§Ù‡ ÙØ§Ø±Ø³ÛŒ Ú©Ù‡ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù†Ø´Ø§Ù† Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ ØªÙˆØ¶ÛŒØ­ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ Ú†Ø±Ø§ Ø¯Ø§Ø±ÛŒ Ø§ÛŒÙ† Ø±Ø§ Ø³Ø±Ú† Ù…ÛŒâ€ŒÚ©Ù†ÛŒ (Ù…Ø«Ù„Ø§Ù‹ "Ø¯Ø§Ø±Ù… Ø¢Ø®Ø±ÛŒÙ† Ù‚ÛŒÙ…Øª Ø·Ù„Ø§ Ø±Ùˆ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ù…").'
                         }
                     },
                     required: ['query', 'reason']
@@ -1583,20 +1583,20 @@ const GEMINI_TOOLS = [
                 // "remember" old files when it genuinely needs them.
                 name: 'get_archived_file',
                 description:
-                    'محتوای یکی از فایل‌های قبلاً ارسال‌شده در همین گفتگو را برمی‌گرداند. این ابزار را ' +
-                    'فقط زمانی صدا بزن که کاربر واقعاً به محتوای یک فایل قبلی نیاز دارد یا به آن ارجاع ' +
-                    'می‌دهد (مثلاً «همون فایلی که قبلاً فرستادم رو ویرایش کن» یا «توی اون فایل دنبال X ' +
-                    'بگرد») - نه صرفاً وقتی اسم فایل یک‌بار در گفتگو ذکر شده. اسم فایل‌های موجود در آرشیو ' +
-                    'این گفتگو در پرامپت سیستم به تو داده شده است. اگر هدف کاربر ویرایش این فایل است، ' +
-                    'این ابزار خودش فایل را برای ویرایش فعال می‌کند و محتوای کامل آن را در نتیجه برمی‌گرداند - ' +
-                    'بعد از آن دقیقاً طبق همان قوانین ویرایش فایل (apply_edit با search/replace) که برای ' +
-                    'فایل‌های تازه‌ضمیمه‌شده داری عمل کن.',
+                    'Ù…Ø­ØªÙˆØ§ÛŒ ÛŒÚ©ÛŒ Ø§Ø² ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù‚Ø¨Ù„Ø§Ù‹ Ø§Ø±Ø³Ø§Ù„â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ø±Ø§ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ ' +
+                    'ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ ØµØ¯Ø§ Ø¨Ø²Ù† Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ù…Ø­ØªÙˆØ§ÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ù‚Ø¨Ù„ÛŒ Ù†ÛŒØ§Ø² Ø¯Ø§Ø±Ø¯ ÛŒØ§ Ø¨Ù‡ Ø¢Ù† Ø§Ø±Ø¬Ø§Ø¹ ' +
+                    'Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ (Ù…Ø«Ù„Ø§Ù‹ Â«Ù‡Ù…ÙˆÙ† ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ ÙØ±Ø³ØªØ§Ø¯Ù… Ø±Ùˆ ÙˆÛŒØ±Ø§ÛŒØ´ Ú©Ù†Â» ÛŒØ§ Â«ØªÙˆÛŒ Ø§ÙˆÙ† ÙØ§ÛŒÙ„ Ø¯Ù†Ø¨Ø§Ù„ X ' +
+                    'Ø¨Ú¯Ø±Ø¯Â») - Ù†Ù‡ ØµØ±ÙØ§Ù‹ ÙˆÙ‚ØªÛŒ Ø§Ø³Ù… ÙØ§ÛŒÙ„ ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± Ú¯ÙØªÚ¯Ùˆ Ø°Ú©Ø± Ø´Ø¯Ù‡. Ø§Ø³Ù… ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± Ø¢Ø±Ø´ÛŒÙˆ ' +
+                    'Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ø¯Ø± Ù¾Ø±Ø§Ù…Ù¾Øª Ø³ÛŒØ³ØªÙ… Ø¨Ù‡ ØªÙˆ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡ Ø§Ø³Øª. Ø§Ú¯Ø± Ù‡Ø¯Ù Ú©Ø§Ø±Ø¨Ø± ÙˆÛŒØ±Ø§ÛŒØ´ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø§Ø³ØªØŒ ' +
+                    'Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø®ÙˆØ¯Ø´ ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ¹Ø§Ù„ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ùˆ Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ø¢Ù† Ø±Ø§ Ø¯Ø± Ù†ØªÛŒØ¬Ù‡ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ - ' +
+                    'Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ù† Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø·Ø¨Ù‚ Ù‡Ù…Ø§Ù† Ù‚ÙˆØ§Ù†ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ (apply_edit Ø¨Ø§ search/replace) Ú©Ù‡ Ø¨Ø±Ø§ÛŒ ' +
+                    'ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ØªØ§Ø²Ù‡â€ŒØ¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ Ø¯Ø§Ø±ÛŒ Ø¹Ù…Ù„ Ú©Ù†.',
                 parameters: {
                     type: 'object',
                     properties: {
                         name: {
                             type: 'string',
-                            description: 'نام دقیق فایلی که محتوایش لازم است (باید دقیقاً با یکی از نام‌های آرشیو مطابقت داشته باشد).'
+                            description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ Ù…Ø­ØªÙˆØ§ÛŒØ´ Ù„Ø§Ø²Ù… Ø§Ø³Øª (Ø¨Ø§ÛŒØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø¨Ø§ ÛŒÚ©ÛŒ Ø§Ø² Ù†Ø§Ù…â€ŒÙ‡Ø§ÛŒ Ø¢Ø±Ø´ÛŒÙˆ Ù…Ø·Ø§Ø¨Ù‚Øª Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯).'
                         }
                     },
                     required: ['name']
@@ -1605,95 +1605,95 @@ const GEMINI_TOOLS = [
             {
                 name: 'ask_user',
                 description:
-                    'وقتی درخواست کاربر شامل یک تغییر اساسی/غیرقابل‌برگشت است (مثلاً بازنویسی کامل ' +
-                    'یک فایل، حذف بخش بزرگی از کد یا داده، یا تصمیمی که چند راه‌حل معقول و متفاوت دارد)، ' +
-                    'قبل از انجام کار این ابزار را صدا بزن و از کاربر تأیید یا انتخاب بخواه. برای سؤالات ' +
-                    'ساده یا کارهای کم‌ریسک از این ابزار استفاده نکن - فقط برای تصمیم‌های واقعاً مهم.',
+                    'ÙˆÙ‚ØªÛŒ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ú©Ø§Ø±Ø¨Ø± Ø´Ø§Ù…Ù„ ÛŒÚ© ØªØºÛŒÛŒØ± Ø§Ø³Ø§Ø³ÛŒ/ØºÛŒØ±Ù‚Ø§Ø¨Ù„â€ŒØ¨Ø±Ú¯Ø´Øª Ø§Ø³Øª (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ø§Ù…Ù„ ' +
+                    'ÛŒÚ© ÙØ§ÛŒÙ„ØŒ Ø­Ø°Ù Ø¨Ø®Ø´ Ø¨Ø²Ø±Ú¯ÛŒ Ø§Ø² Ú©Ø¯ ÛŒØ§ Ø¯Ø§Ø¯Ù‡ØŒ ÛŒØ§ ØªØµÙ…ÛŒÙ…ÛŒ Ú©Ù‡ Ú†Ù†Ø¯ Ø±Ø§Ù‡â€ŒØ­Ù„ Ù…Ø¹Ù‚ÙˆÙ„ Ùˆ Ù…ØªÙØ§ÙˆØª Ø¯Ø§Ø±Ø¯)ØŒ ' +
+                    'Ù‚Ø¨Ù„ Ø§Ø² Ø§Ù†Ø¬Ø§Ù… Ú©Ø§Ø± Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù† Ùˆ Ø§Ø² Ú©Ø§Ø±Ø¨Ø± ØªØ£ÛŒÛŒØ¯ ÛŒØ§ Ø§Ù†ØªØ®Ø§Ø¨ Ø¨Ø®ÙˆØ§Ù‡. Ø¨Ø±Ø§ÛŒ Ø³Ø¤Ø§Ù„Ø§Øª ' +
+                    'Ø³Ø§Ø¯Ù‡ ÛŒØ§ Ú©Ø§Ø±Ù‡Ø§ÛŒ Ú©Ù…â€ŒØ±ÛŒØ³Ú© Ø§Ø² Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù† - ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ØªØµÙ…ÛŒÙ…â€ŒÙ‡Ø§ÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù…Ù‡Ù….',
                 parameters: {
                     type: 'object',
                     properties: {
                         question: {
                             type: 'string',
-                            description: 'سؤال دقیق و کوتاه که از کاربر باید پرسیده شود.'
+                            description: 'Ø³Ø¤Ø§Ù„ Ø¯Ù‚ÛŒÙ‚ Ùˆ Ú©ÙˆØªØ§Ù‡ Ú©Ù‡ Ø§Ø² Ú©Ø§Ø±Ø¨Ø± Ø¨Ø§ÛŒØ¯ Ù¾Ø±Ø³ÛŒØ¯Ù‡ Ø´ÙˆØ¯.'
                         }
                     },
                     required: ['question']
                 }
             },
             {
-                // اگر فایل خیلی بزرگ باشد و مدل قبل از نوشتن search نیاز به
-                // دیدن دقیق یک بخش خاص داشته باشد (مثلاً برای کپی دقیق
-                // تورفتگی/فاصله‌گذاری)، این ابزار یک بازه‌ی خط مشخص را
-                // برمی‌گرداند. اکثر ویرایش‌ها به این ابزار نیاز ندارند چون
-                // محتوای کامل فایل و تحلیل ساختار آن از قبل در دسترس مدل است.
+                // Ø§Ú¯Ø± ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø¨Ø§Ø´Ø¯ Ùˆ Ù…Ø¯Ù„ Ù‚Ø¨Ù„ Ø§Ø² Ù†ÙˆØ´ØªÙ† search Ù†ÛŒØ§Ø² Ø¨Ù‡
+                // Ø¯ÛŒØ¯Ù† Ø¯Ù‚ÛŒÙ‚ ÛŒÚ© Ø¨Ø®Ø´ Ø®Ø§Øµ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯ (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø±Ø§ÛŒ Ú©Ù¾ÛŒ Ø¯Ù‚ÛŒÙ‚
+                // ØªÙˆØ±ÙØªÚ¯ÛŒ/ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ)ØŒ Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± ÛŒÚ© Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø· Ù…Ø´Ø®Øµ Ø±Ø§
+                // Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. Ø§Ú©Ø«Ø± ÙˆÛŒØ±Ø§ÛŒØ´â€ŒÙ‡Ø§ Ø¨Ù‡ Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ù†ÛŒØ§Ø² Ù†Ø¯Ø§Ø±Ù†Ø¯ Ú†ÙˆÙ†
+                // Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ùˆ ØªØ­Ù„ÛŒÙ„ Ø³Ø§Ø®ØªØ§Ø± Ø¢Ù† Ø§Ø² Ù‚Ø¨Ù„ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù…Ø¯Ù„ Ø§Ø³Øª.
                 name: 'read_file_section',
                 description:
-                    'بخشی از محتوای فایل را بین دو شماره خط مشخص برمی‌گرداند. فقط زمانی از این استفاده ' +
-                    'کن که برای نوشتن یک search دقیق (کاراکتر‌به‌کاراکتر) نیاز به دیدن دوباره‌ی متن ' +
-                    'واقعی یک بخش خاص داری - مثلاً برای اطمینان از فاصله‌گذاری/تورفتگی دقیق. اکثر ' +
-                    'ویرایش‌ها به این ابزار نیاز ندارند چون محتوای کامل فایل از قبل در پیام اولیه به تو داده شده.',
+                    'Ø¨Ø®Ø´ÛŒ Ø§Ø² Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨ÛŒÙ† Ø¯Ùˆ Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ù…Ø´Ø®Øµ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ Ø§Ø² Ø§ÛŒÙ† Ø§Ø³ØªÙØ§Ø¯Ù‡ ' +
+                    'Ú©Ù† Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ù†ÙˆØ´ØªÙ† ÛŒÚ© search Ø¯Ù‚ÛŒÙ‚ (Ú©Ø§Ø±Ø§Ú©ØªØ±â€ŒØ¨Ù‡â€ŒÚ©Ø§Ø±Ø§Ú©ØªØ±) Ù†ÛŒØ§Ø² Ø¨Ù‡ Ø¯ÛŒØ¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡â€ŒÛŒ Ù…ØªÙ† ' +
+                    'ÙˆØ§Ù‚Ø¹ÛŒ ÛŒÚ© Ø¨Ø®Ø´ Ø®Ø§Øµ Ø¯Ø§Ø±ÛŒ - Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø±Ø§ÛŒ Ø§Ø·Ù…ÛŒÙ†Ø§Ù† Ø§Ø² ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ/ØªÙˆØ±ÙØªÚ¯ÛŒ Ø¯Ù‚ÛŒÙ‚. Ø§Ú©Ø«Ø± ' +
+                    'ÙˆÛŒØ±Ø§ÛŒØ´â€ŒÙ‡Ø§ Ø¨Ù‡ Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ù†ÛŒØ§Ø² Ù†Ø¯Ø§Ø±Ù†Ø¯ Ú†ÙˆÙ† Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ø§Ø² Ù‚Ø¨Ù„ Ø¯Ø± Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ÛŒÙ‡ Ø¨Ù‡ ØªÙˆ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        file: { type: 'string', description: 'نام دقیق فایل هدف.' },
-                        startLine: { type: 'number', description: 'شماره خط شروع (از ۱).' },
-                        endLine: { type: 'number', description: 'شماره خط پایان (شامل خودش).' }
+                        file: { type: 'string', description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ Ù‡Ø¯Ù.' },
+                        startLine: { type: 'number', description: 'Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ø´Ø±ÙˆØ¹ (Ø§Ø² Û±).' },
+                        endLine: { type: 'number', description: 'Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ù¾Ø§ÛŒØ§Ù† (Ø´Ø§Ù…Ù„ Ø®ÙˆØ¯Ø´).' }
                     },
                     required: ['file', 'startLine', 'endLine']
                 }
             },
             {
-                // جایگزین کامل write_block/apply_patch قدیمی: مدل مستقیماً
-                // یک قطعه‌ی دقیق متن موجود (search) و متن جایگزین (replace)
-                // می‌دهد - دقیقاً مثل SEARCH/REPLACE در Aider. موتور ۴ لایه
-                // fallback (تطبیق دقیق → whitespace-flexible → fuzzy → گزارش
-                // خطای دقیق) را امتحان می‌کند. قبل از پذیرفتن، فایل کامل
-                // (بعد از اعمال تغییر) از validatePatchedContent رد می‌شود.
+                // Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ú©Ø§Ù…Ù„ write_block/apply_patch Ù‚Ø¯ÛŒÙ…ÛŒ: Ù…Ø¯Ù„ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹
+                // ÛŒÚ© Ù‚Ø·Ø¹Ù‡â€ŒÛŒ Ø¯Ù‚ÛŒÙ‚ Ù…ØªÙ† Ù…ÙˆØ¬ÙˆØ¯ (search) Ùˆ Ù…ØªÙ† Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† (replace)
+                // Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ SEARCH/REPLACE Ø¯Ø± Aider. Ù…ÙˆØªÙˆØ± Û´ Ù„Ø§ÛŒÙ‡
+                // fallback (ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚ â†’ whitespace-flexible â†’ fuzzy â†’ Ú¯Ø²Ø§Ø±Ø´
+                // Ø®Ø·Ø§ÛŒ Ø¯Ù‚ÛŒÙ‚) Ø±Ø§ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ù‚Ø¨Ù„ Ø§Ø² Ù¾Ø°ÛŒØ±ÙØªÙ†ØŒ ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„
+                // (Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ±) Ø§Ø² validatePatchedContent Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
                 name: 'apply_edit',
                 description:
-                    'یک قطعه‌ی متن دقیق موجود در فایل (search) را با متن جدید (replace) جایگزین می‌کند. ' +
-                    'search باید دقیقاً همان متنی باشد که الان در فایل هست (از محتوای کامل فایل که در ' +
-                    'پیام اولیه داری کپی کن) - شامل چند خط اطراف تغییر برای یکتا بودن، نه فقط یک خط ' +
-                    'کوتاه که ممکن است چندبار در فایل تکرار شده باشد. replace باید متن نهایی همان بخش ' +
-                    'باشد (خطوطی که باید بمانند را هم اگر داخل بازه‌ی search هستند دوباره در replace ' +
-                    'بنویس). این ابزار خودش کمی انعطاف در فاصله‌گذاری/تورفتگی دارد و اگر search دقیق ' +
-                    'پیدا نشود چند لایه تطبیق نرم‌تر را هم امتحان می‌کند، اما اگر باز هم شکست خورد یا ' +
-                    'مبهم بود (بیش از یک‌بار در فایل پیدا شد)، یک گزارش دقیق با نزدیک‌ترین context های ' +
-                    'واقعی فایل برمی‌گرداند - search را دقیقاً از همان context کپی کن و دوباره صدا بزن. ' +
-                    'برای حذف یک بخش، replace را رشته‌ی خالی بده. این ابزار خودش بعد از نوشتن، فایل ' +
-                    'کامل را اعتبارسنجی می‌کند و نتیجه را در فیلد valid برمی‌گرداند - اگر این آخرین ' +
-                    'تغییری بود که نیاز داشتی و valid:true برگشت، دیگر نیازی به verify_file جداگانه ' +
-                    'نیست و می‌توانی مستقیم پاسخ نهایی را بدهی.',
+                    'ÛŒÚ© Ù‚Ø·Ø¹Ù‡â€ŒÛŒ Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± ÙØ§ÛŒÙ„ (search) Ø±Ø§ Ø¨Ø§ Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯ (replace) Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒÚ©Ù†Ø¯. ' +
+                    'search Ø¨Ø§ÛŒØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù‡Ù…Ø§Ù† Ù…ØªÙ†ÛŒ Ø¨Ø§Ø´Ø¯ Ú©Ù‡ Ø§Ù„Ø§Ù† Ø¯Ø± ÙØ§ÛŒÙ„ Ù‡Ø³Øª (Ø§Ø² Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ú©Ù‡ Ø¯Ø± ' +
+                    'Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ÛŒÙ‡ Ø¯Ø§Ø±ÛŒ Ú©Ù¾ÛŒ Ú©Ù†) - Ø´Ø§Ù…Ù„ Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù ØªØºÛŒÛŒØ± Ø¨Ø±Ø§ÛŒ ÛŒÚ©ØªØ§ Ø¨ÙˆØ¯Ù†ØŒ Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ© Ø®Ø· ' +
+                    'Ú©ÙˆØªØ§Ù‡ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ú†Ù†Ø¯Ø¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯. replace Ø¨Ø§ÛŒØ¯ Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ Ù‡Ù…Ø§Ù† Ø¨Ø®Ø´ ' +
+                    'Ø¨Ø§Ø´Ø¯ (Ø®Ø·ÙˆØ·ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ø¨Ù…Ø§Ù†Ù†Ø¯ Ø±Ø§ Ù‡Ù… Ø§Ú¯Ø± Ø¯Ø§Ø®Ù„ Ø¨Ø§Ø²Ù‡â€ŒÛŒ search Ù‡Ø³ØªÙ†Ø¯ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¯Ø± replace ' +
+                    'Ø¨Ù†ÙˆÛŒØ³). Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø®ÙˆØ¯Ø´ Ú©Ù…ÛŒ Ø§Ù†Ø¹Ø·Ø§Ù Ø¯Ø± ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ/ØªÙˆØ±ÙØªÚ¯ÛŒ Ø¯Ø§Ø±Ø¯ Ùˆ Ø§Ú¯Ø± search Ø¯Ù‚ÛŒÙ‚ ' +
+                    'Ù¾ÛŒØ¯Ø§ Ù†Ø´ÙˆØ¯ Ú†Ù†Ø¯ Ù„Ø§ÛŒÙ‡ ØªØ·Ø¨ÛŒÙ‚ Ù†Ø±Ù…â€ŒØªØ± Ø±Ø§ Ù‡Ù… Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ø§Ù…Ø§ Ø§Ú¯Ø± Ø¨Ø§Ø² Ù‡Ù… Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯ ÛŒØ§ ' +
+                    'Ù…Ø¨Ù‡Ù… Ø¨ÙˆØ¯ (Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´Ø¯)ØŒ ÛŒÚ© Ú¯Ø²Ø§Ø±Ø´ Ø¯Ù‚ÛŒÙ‚ Ø¨Ø§ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context Ù‡Ø§ÛŒ ' +
+                    'ÙˆØ§Ù‚Ø¹ÛŒ ÙØ§ÛŒÙ„ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ - search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø§Ø² Ù‡Ù…Ø§Ù† context Ú©Ù¾ÛŒ Ú©Ù† Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†. ' +
+                    'Ø¨Ø±Ø§ÛŒ Ø­Ø°Ù ÛŒÚ© Ø¨Ø®Ø´ØŒ replace Ø±Ø§ Ø±Ø´ØªÙ‡â€ŒÛŒ Ø®Ø§Ù„ÛŒ Ø¨Ø¯Ù‡. Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø®ÙˆØ¯Ø´ Ø¨Ø¹Ø¯ Ø§Ø² Ù†ÙˆØ´ØªÙ†ØŒ ÙØ§ÛŒÙ„ ' +
+                    'Ú©Ø§Ù…Ù„ Ø±Ø§ Ø§Ø¹ØªØ¨Ø§Ø±Ø³Ù†Ø¬ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ùˆ Ù†ØªÛŒØ¬Ù‡ Ø±Ø§ Ø¯Ø± ÙÛŒÙ„Ø¯ valid Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ - Ø§Ú¯Ø± Ø§ÛŒÙ† Ø¢Ø®Ø±ÛŒÙ† ' +
+                    'ØªØºÛŒÛŒØ±ÛŒ Ø¨ÙˆØ¯ Ú©Ù‡ Ù†ÛŒØ§Ø² Ø¯Ø§Ø´ØªÛŒ Ùˆ valid:true Ø¨Ø±Ú¯Ø´ØªØŒ Ø¯ÛŒÚ¯Ø± Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ verify_file Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ ' +
+                    'Ù†ÛŒØ³Øª Ùˆ Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ø¯Ù‡ÛŒ.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        file: { type: 'string', description: 'نام دقیق فایل هدف.' },
-                        search: { type: 'string', description: 'متن دقیق موجود در فایل که باید جایگزین شود (چند خط برای یکتا بودن).' },
-                        replace: { type: 'string', description: 'متن جدیدی که باید جایگزین search شود (برای حذف، رشته‌ی خالی).' },
-                        occurrence: { type: 'number', description: 'اختیاری - اگر search بیش از یک‌بار در فایل تکرار شده و عمداً همه یکسان‌اند، شماره‌ی نمونه‌ی موردنظر (از ۱ شروع) را بده.' }
+                        file: { type: 'string', description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ Ù‡Ø¯Ù.' },
+                        search: { type: 'string', description: 'Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± ÙØ§ÛŒÙ„ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ø´ÙˆØ¯ (Ú†Ù†Ø¯ Ø®Ø· Ø¨Ø±Ø§ÛŒ ÛŒÚ©ØªØ§ Ø¨ÙˆØ¯Ù†).' },
+                        replace: { type: 'string', description: 'Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† search Ø´ÙˆØ¯ (Ø¨Ø±Ø§ÛŒ Ø­Ø°ÙØŒ Ø±Ø´ØªÙ‡â€ŒÛŒ Ø®Ø§Ù„ÛŒ).' },
+                        occurrence: { type: 'number', description: 'Ø§Ø®ØªÛŒØ§Ø±ÛŒ - Ø§Ú¯Ø± search Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ùˆ Ø¹Ù…Ø¯Ø§Ù‹ Ù‡Ù…Ù‡ ÛŒÚ©Ø³Ø§Ù†â€ŒØ§Ù†Ø¯ØŒ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ù†Ù…ÙˆÙ†Ù‡â€ŒÛŒ Ù…ÙˆØ±Ø¯Ù†Ø¸Ø± (Ø§Ø² Û± Ø´Ø±ÙˆØ¹) Ø±Ø§ Ø¨Ø¯Ù‡.' }
                     },
                     required: ['file', 'search', 'replace']
                 }
             },
             {
-                // بررسی نهایی اجباری: فایل کامل (با تمام بلوک‌های ویرایش‌شده)
-                // را دوباره می‌سازد و از همان چک ساختاری validatePatchedContent
-                // (بالانس تگ/براکت، سنتکس JS) رد می‌کند. runAgentLoop مدل را
-                // مجبور می‌کند این را بعد از آخرین write_block صدا بزند و
-                // پاس کند، قبل از این‌که جواب نهایی (بدون tool call) پذیرفته
-                // شود.
+                // Ø¨Ø±Ø±Ø³ÛŒ Ù†Ù‡Ø§ÛŒÛŒ Ø§Ø¬Ø¨Ø§Ø±ÛŒ: ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ (Ø¨Ø§ ØªÙ…Ø§Ù… Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡)
+                // Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ Ùˆ Ø§Ø² Ù‡Ù…Ø§Ù† Ú†Ú© Ø³Ø§Ø®ØªØ§Ø±ÛŒ validatePatchedContent
+                // (Ø¨Ø§Ù„Ø§Ù†Ø³ ØªÚ¯/Ø¨Ø±Ø§Ú©ØªØŒ Ø³Ù†ØªÚ©Ø³ JS) Ø±Ø¯ Ù…ÛŒâ€ŒÚ©Ù†Ø¯. runAgentLoop Ù…Ø¯Ù„ Ø±Ø§
+                // Ù…Ø¬Ø¨ÙˆØ± Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ø§ÛŒÙ† Ø±Ø§ Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ø®Ø±ÛŒÙ† write_block ØµØ¯Ø§ Ø¨Ø²Ù†Ø¯ Ùˆ
+                // Ù¾Ø§Ø³ Ú©Ù†Ø¯ØŒ Ù‚Ø¨Ù„ Ø§Ø² Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¬ÙˆØ§Ø¨ Ù†Ù‡Ø§ÛŒÛŒ (Ø¨Ø¯ÙˆÙ† tool call) Ù¾Ø°ÛŒØ±ÙØªÙ‡
+                // Ø´ÙˆØ¯.
                 name: 'verify_file',
                 description:
-                    'فایل کامل را (با تمام ویرایش‌های اعمال‌شده تا این لحظه) از نظر ساختاری/سنتکسی ' +
-                    'بررسی می‌کند. باید حتماً بعد از آخرین apply_edit و قبل از تحویل نهایی صدا زده ' +
-                    'شود. اگر مشکل پیدا کند، با apply_edit دیگری بخش مشکل‌دار را اصلاح کن، سپس دوباره ' +
-                    'verify_file را صدا بزن.',
+                    'ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø±Ø§ (Ø¨Ø§ ØªÙ…Ø§Ù… ÙˆÛŒØ±Ø§ÛŒØ´â€ŒÙ‡Ø§ÛŒ Ø§Ø¹Ù…Ø§Ù„â€ŒØ´Ø¯Ù‡ ØªØ§ Ø§ÛŒÙ† Ù„Ø­Ø¸Ù‡) Ø§Ø² Ù†Ø¸Ø± Ø³Ø§Ø®ØªØ§Ø±ÛŒ/Ø³Ù†ØªÚ©Ø³ÛŒ ' +
+                    'Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ø¨Ø§ÛŒØ¯ Ø­ØªÙ…Ø§Ù‹ Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ø®Ø±ÛŒÙ† apply_edit Ùˆ Ù‚Ø¨Ù„ Ø§Ø² ØªØ­ÙˆÛŒÙ„ Ù†Ù‡Ø§ÛŒÛŒ ØµØ¯Ø§ Ø²Ø¯Ù‡ ' +
+                    'Ø´ÙˆØ¯. Ø§Ú¯Ø± Ù…Ø´Ú©Ù„ Ù¾ÛŒØ¯Ø§ Ú©Ù†Ø¯ØŒ Ø¨Ø§ apply_edit Ø¯ÛŒÚ¯Ø±ÛŒ Ø¨Ø®Ø´ Ù…Ø´Ú©Ù„â€ŒØ¯Ø§Ø± Ø±Ø§ Ø§ØµÙ„Ø§Ø­ Ú©Ù†ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ' +
+                    'verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.',
                 parameters: {
                     type: 'object',
                     properties: {
                         file: {
                             type: 'string',
-                            description: 'نام دقیق فایلی که باید نهایی‌سازی و بررسی شود.'
+                            description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ù†Ù‡Ø§ÛŒÛŒâ€ŒØ³Ø§Ø²ÛŒ Ùˆ Ø¨Ø±Ø±Ø³ÛŒ Ø´ÙˆØ¯.'
                         }
                     },
                     required: ['file']
@@ -1724,24 +1724,24 @@ const GEMINI_TOOLS_NO_SEARCH = [
 // "reason" text (only web_search asks for one).
 function describeToolCall(name, args) {
     if (name === 'web_search') {
-        return (args && args.reason) || `دارم درباره‌ی «${(args && args.query) || ''}» توی وب سرچ می‌کنم...`;
+        return (args && args.reason) || `Ø¯Ø§Ø±Ù… Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Â«${(args && args.query) || ''}Â» ØªÙˆÛŒ ÙˆØ¨ Ø³Ø±Ú† Ù…ÛŒâ€ŒÚ©Ù†Ù…...`;
     }
     if (name === 'ask_user') {
-        return 'قبل از ادامه، یه سؤال دارم...';
+        return 'Ù‚Ø¨Ù„ Ø§Ø² Ø§Ø¯Ø§Ù…Ù‡ØŒ ÛŒÙ‡ Ø³Ø¤Ø§Ù„ Ø¯Ø§Ø±Ù…...';
     }
     if (name === 'read_file_section') {
-        return `در حال خواندن بخشی از فایل «${(args && args.file) || ''}»...`;
+        return `Ø¯Ø± Ø­Ø§Ù„ Ø®ÙˆØ§Ù†Ø¯Ù† Ø¨Ø®Ø´ÛŒ Ø§Ø² ÙØ§ÛŒÙ„ Â«${(args && args.file) || ''}Â»...`;
     }
     if (name === 'apply_edit') {
-        return `در حال اعمال تغییرات روی فایل «${(args && args.file) || ''}»...`;
+        return `Ø¯Ø± Ø­Ø§Ù„ Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ±Ø§Øª Ø±ÙˆÛŒ ÙØ§ÛŒÙ„ Â«${(args && args.file) || ''}Â»...`;
     }
     if (name === 'verify_file') {
-        return `در حال بررسی نهایی فایل «${(args && args.file) || ''}»...`;
+        return `Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ Ù†Ù‡Ø§ÛŒÛŒ ÙØ§ÛŒÙ„ Â«${(args && args.file) || ''}Â»...`;
     }
     if (name === 'get_archived_file') {
-        return `دارم فایل «${(args && args.name) || ''}» رو از آرشیو این گفتگو می‌خونم...`;
+        return `Ø¯Ø§Ø±Ù… ÙØ§ÛŒÙ„ Â«${(args && args.name) || ''}Â» Ø±Ùˆ Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù…ÛŒâ€ŒØ®ÙˆÙ†Ù…...`;
     }
-    return 'در حال انجام یک مرحله...';
+    return 'Ø¯Ø± Ø­Ø§Ù„ Ø§Ù†Ø¬Ø§Ù… ÛŒÚ© Ù…Ø±Ø­Ù„Ù‡...';
 }
 
 function getFileLanguageFromName(fileName) {
@@ -1765,21 +1765,21 @@ function validatePatchedContent(content, fileName) {
             new Function(content);
             return { valid: true };
         } catch (error) {
-            return { valid: false, reason: `سنتکس جاوااسکریپت بعد از این تغییر نامعتبر می‌شود: ${error?.message || error}` };
+            return { valid: false, reason: `Ø³Ù†ØªÚ©Ø³ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ø¨Ø¹Ø¯ Ø§Ø² Ø§ÛŒÙ† ØªØºÛŒÛŒØ± Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ù…ÛŒâ€ŒØ´ÙˆØ¯: ${error?.message || error}` };
         }
     }
     if (language === 'html') {
-        // FIX (باگ ریشه‌ای: </g> در وسط یک regex جاوااسکریپت مثل
-        // .replace(/</g, '&lt;') به‌عنوان تگ HTML بسته‌ی نامتناظر رد
-        // می‌شد): تگ‌ماچینگ زیر یک regex ساده روی کل متن است و نمی‌داند کجا
-        // داخل <script>/<style> است - یعنی هر کاراکتر < داخل جاوااسکریپت
-        // (چه در regex literal، چه در رشته، چه در کامنت) را با یک تگ HTML
-        // واقعی اشتباه می‌گیرد. راه‌حل: قبل از تگ‌ماچینگ، محتوای داخل هر
-        // <script>...</script> و <style>...</style> (خودِ تگ باز/بسته حفظ
-        // می‌شود، فقط محتوای داخلی خنثی/جایگزین می‌شود) با فاصله‌ی هم‌طول
-        // (برای حفظ شماره خط در پیام خطا) خنثی می‌شود، و جاوااسکریپت داخل هر
-        // <script> جدا و مستقل با validatePatchedContent نوع javascript
-        // (new Function) بررسی می‌شود - نه با پارسر تگ HTML.
+        // FIX (Ø¨Ø§Ú¯ Ø±ÛŒØ´Ù‡â€ŒØ§ÛŒ: </g> Ø¯Ø± ÙˆØ³Ø· ÛŒÚ© regex Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ù…Ø«Ù„
+        // .replace(/</g, '&lt;') Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† ØªÚ¯ HTML Ø¨Ø³ØªÙ‡â€ŒÛŒ Ù†Ø§Ù…ØªÙ†Ø§Ø¸Ø± Ø±Ø¯
+        // Ù…ÛŒâ€ŒØ´Ø¯): ØªÚ¯â€ŒÙ…Ø§Ú†ÛŒÙ†Ú¯ Ø²ÛŒØ± ÛŒÚ© regex Ø³Ø§Ø¯Ù‡ Ø±ÙˆÛŒ Ú©Ù„ Ù…ØªÙ† Ø§Ø³Øª Ùˆ Ù†Ù…ÛŒâ€ŒØ¯Ø§Ù†Ø¯ Ú©Ø¬Ø§
+        // Ø¯Ø§Ø®Ù„ <script>/<style> Ø§Ø³Øª - ÛŒØ¹Ù†ÛŒ Ù‡Ø± Ú©Ø§Ø±Ø§Ú©ØªØ± < Ø¯Ø§Ø®Ù„ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª
+        // (Ú†Ù‡ Ø¯Ø± regex literalØŒ Ú†Ù‡ Ø¯Ø± Ø±Ø´ØªÙ‡ØŒ Ú†Ù‡ Ø¯Ø± Ú©Ø§Ù…Ù†Øª) Ø±Ø§ Ø¨Ø§ ÛŒÚ© ØªÚ¯ HTML
+        // ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ø´ØªØ¨Ø§Ù‡ Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯. Ø±Ø§Ù‡â€ŒØ­Ù„: Ù‚Ø¨Ù„ Ø§Ø² ØªÚ¯â€ŒÙ…Ø§Ú†ÛŒÙ†Ú¯ØŒ Ù…Ø­ØªÙˆØ§ÛŒ Ø¯Ø§Ø®Ù„ Ù‡Ø±
+        // <script>...</script> Ùˆ <style>...</style> (Ø®ÙˆØ¯Ù ØªÚ¯ Ø¨Ø§Ø²/Ø¨Ø³ØªÙ‡ Ø­ÙØ¸
+        // Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ ÙÙ‚Ø· Ù…Ø­ØªÙˆØ§ÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø®Ù†Ø«ÛŒ/Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒØ´ÙˆØ¯) Ø¨Ø§ ÙØ§ØµÙ„Ù‡â€ŒÛŒ Ù‡Ù…â€ŒØ·ÙˆÙ„
+        // (Ø¨Ø±Ø§ÛŒ Ø­ÙØ¸ Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ø¯Ø± Ù¾ÛŒØ§Ù… Ø®Ø·Ø§) Ø®Ù†Ø«ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ùˆ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ø¯Ø§Ø®Ù„ Ù‡Ø±
+        // <script> Ø¬Ø¯Ø§ Ùˆ Ù…Ø³ØªÙ‚Ù„ Ø¨Ø§ validatePatchedContent Ù†ÙˆØ¹ javascript
+        // (new Function) Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯ - Ù†Ù‡ Ø¨Ø§ Ù¾Ø§Ø±Ø³Ø± ØªÚ¯ HTML.
         let scriptJsErrors = [];
         const neutralizedContent = content.replace(
             /<(script)\b([^>]*)>([\s\S]*?)<\/script>/gi,
@@ -1793,9 +1793,9 @@ function validatePatchedContent(content, fileName) {
                         scriptJsErrors.push(error?.message || String(error));
                     }
                 }
-                // خنثی‌سازی: هر کاراکتر غیرخط‌جدید با فاصله جایگزین می‌شود تا
-                // طول/شماره‌خط عوض نشود ولی هیچ < یا > داخلش برای پارسر HTML
-                // باقی نماند.
+                // Ø®Ù†Ø«ÛŒâ€ŒØ³Ø§Ø²ÛŒ: Ù‡Ø± Ú©Ø§Ø±Ø§Ú©ØªØ± ØºÛŒØ±Ø®Ø·â€ŒØ¬Ø¯ÛŒØ¯ Ø¨Ø§ ÙØ§ØµÙ„Ù‡ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§
+                // Ø·ÙˆÙ„/Ø´Ù…Ø§Ø±Ù‡â€ŒØ®Ø· Ø¹ÙˆØ¶ Ù†Ø´ÙˆØ¯ ÙˆÙ„ÛŒ Ù‡ÛŒÚ† < ÛŒØ§ > Ø¯Ø§Ø®Ù„Ø´ Ø¨Ø±Ø§ÛŒ Ù¾Ø§Ø±Ø³Ø± HTML
+                // Ø¨Ø§Ù‚ÛŒ Ù†Ù…Ø§Ù†Ø¯.
                 const blanked = inner.replace(/[^\n]/g, ' ');
                 return `<${tagName}${attrs}>${blanked}</script>`;
             }
@@ -1807,7 +1807,7 @@ function validatePatchedContent(content, fileName) {
             }
         );
         if (scriptJsErrors.length > 0) {
-            return { valid: false, reason: `سنتکس جاوااسکریپت داخل یک تگ <script> نامعتبر است: ${scriptJsErrors[0]}` };
+            return { valid: false, reason: `Ø³Ù†ØªÚ©Ø³ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ <script> Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø§Ø³Øª: ${scriptJsErrors[0]}` };
         }
 
         // Balance-check void-aware tag nesting rather than full DOM
@@ -1839,14 +1839,14 @@ function validatePatchedContent(content, fileName) {
             if (isClosing) {
                 const idx = stack.lastIndexOf(tag);
                 if (idx === -1) {
-                    return { valid: false, reason: `تگ بسته‌ی «</${tag}>» بدون تگ باز متناظر پیدا شد - احتمالاً محدوده‌ی خط اشتباه بوده.` };
+                    return { valid: false, reason: `ØªÚ¯ Ø¨Ø³ØªÙ‡â€ŒÛŒ Â«</${tag}>Â» Ø¨Ø¯ÙˆÙ† ØªÚ¯ Ø¨Ø§Ø² Ù…ØªÙ†Ø§Ø¸Ø± Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨ÙˆØ¯Ù‡.` };
                 }
                 // Anything between idx and the top of the stack must be
                 // implicitly-closable, or this is a real unclosed tag.
                 const skipped = stack.slice(idx + 1);
                 const realGap = skipped.find(t => !implicitlyClosableTags.has(t));
                 if (realGap) {
-                    return { valid: false, reason: `تگ «<${realGap}>» قبل از «</${tag}>» بسته نشده - احتمالاً محدوده‌ی خط اشتباه بوده.` };
+                    return { valid: false, reason: `ØªÚ¯ Â«<${realGap}>Â» Ù‚Ø¨Ù„ Ø§Ø² Â«</${tag}>Â» Ø¨Ø³ØªÙ‡ Ù†Ø´Ø¯Ù‡ - Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨ÙˆØ¯Ù‡.` };
                 }
                 stack.length = idx;
             } else if (!isSelfClosing) {
@@ -1855,7 +1855,7 @@ function validatePatchedContent(content, fileName) {
         }
         const remaining = stack.filter(t => !implicitlyClosableTags.has(t));
         if (remaining.length > 0) {
-            return { valid: false, reason: `تگ(های) باز بدون بسته شدن باقی مانده: ${[...new Set(remaining)].slice(0, 5).join(', ')} - احتمالاً محدوده‌ی خط اشتباه بوده.` };
+            return { valid: false, reason: `ØªÚ¯(Ù‡Ø§ÛŒ) Ø¨Ø§Ø² Ø¨Ø¯ÙˆÙ† Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù† Ø¨Ø§Ù‚ÛŒ Ù…Ø§Ù†Ø¯Ù‡: ${[...new Set(remaining)].slice(0, 5).join(', ')} - Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨ÙˆØ¯Ù‡.` };
         }
         return { valid: true };
     }
@@ -1868,23 +1868,23 @@ async function executeToolCall(name, args, ctx) {
         const archive = (ctx && Array.isArray(ctx.archivedFiles)) ? ctx.archivedFiles : [];
         const found = archive.find(f => f && f.name === fileName);
         if (!found) {
-            return { error: `فایلی با نام «${fileName}» در آرشیو این گفتگو پیدا نشد.` };
+            return { error: `ÙØ§ÛŒÙ„ÛŒ Ø¨Ø§ Ù†Ø§Ù… Â«${fileName}Â» Ø¯Ø± Ø¢Ø±Ø´ÛŒÙˆ Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
         }
 
-        // FIX (مدل به‌جای فایل تازه‌ی ضمیمه‌شده، نسخه‌ی قدیمی از آرشیو را
-        // ویرایش می‌کرد): تا پیش از این، جلوگیری از این اشتباه فقط یک جمله
-        // در system prompt بود ("اگر کاربر همین پیام فایلی ضمیمه کرده،
-        // get_archived_file را صدا نزن") - یک دستور صرفاً متنی که مدل به
-        // راحتی نادیده می‌گرفت (دقیقاً همین اتفاق برای کاربر افتاد: فایل
-        // ۵۰۰۰+ خطیِ تازه ضمیمه شده بود، ولی مدل رفت سراغ get_archived_file
-        // و یک نسخه‌ی قدیمی‌تر و هم‌نام از آرشیو (که کاربر قبلاً در همین
-        // گفتگو فرستاده بود) را پیدا کرد و آن را ویرایش کرد - نتیجه یک فایل
-        // اشتباه اما "معتبر" بود که با موفقیت به کاربر تحویل داده شد.
-        // این‌جا یک قفل فنی واقعی می‌گذاریم: اگر در همین پیام حداقل یک فایل
-        // تازه‌ی متنی (ctx.textFiles) ضمیمه شده، فراخوانی get_archived_file
-        // را کلاً رد می‌کنیم و به مدل می‌گوییم از همان فایل تازه استفاده
-        // کند - مهم نیست چه اسمی خواسته، چون هیچ سناریوی درستی وجود ندارد
-        // که با فایل تازه در دست، رفتن سراغ آرشیو صحیح باشد.
+        // FIX (Ù…Ø¯Ù„ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡â€ŒÛŒ Ø¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ØŒ Ù†Ø³Ø®Ù‡â€ŒÛŒ Ù‚Ø¯ÛŒÙ…ÛŒ Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ Ø±Ø§
+        // ÙˆÛŒØ±Ø§ÛŒØ´ Ù…ÛŒâ€ŒÚ©Ø±Ø¯): ØªØ§ Ù¾ÛŒØ´ Ø§Ø² Ø§ÛŒÙ†ØŒ Ø¬Ù„ÙˆÚ¯ÛŒØ±ÛŒ Ø§Ø² Ø§ÛŒÙ† Ø§Ø´ØªØ¨Ø§Ù‡ ÙÙ‚Ø· ÛŒÚ© Ø¬Ù…Ù„Ù‡
+        // Ø¯Ø± system prompt Ø¨ÙˆØ¯ ("Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÙØ§ÛŒÙ„ÛŒ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ØŒ
+        // get_archived_file Ø±Ø§ ØµØ¯Ø§ Ù†Ø²Ù†") - ÛŒÚ© Ø¯Ø³ØªÙˆØ± ØµØ±ÙØ§Ù‹ Ù…ØªÙ†ÛŒ Ú©Ù‡ Ù…Ø¯Ù„ Ø¨Ù‡
+        // Ø±Ø§Ø­ØªÛŒ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ù…ÛŒâ€ŒÚ¯Ø±ÙØª (Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù‡Ù…ÛŒÙ† Ø§ØªÙØ§Ù‚ Ø¨Ø±Ø§ÛŒ Ú©Ø§Ø±Ø¨Ø± Ø§ÙØªØ§Ø¯: ÙØ§ÛŒÙ„
+        // ÛµÛ°Û°Û°+ Ø®Ø·ÛŒÙ ØªØ§Ø²Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ Ø¨ÙˆØ¯ØŒ ÙˆÙ„ÛŒ Ù…Ø¯Ù„ Ø±ÙØª Ø³Ø±Ø§Øº get_archived_file
+        // Ùˆ ÛŒÚ© Ù†Ø³Ø®Ù‡â€ŒÛŒ Ù‚Ø¯ÛŒÙ…ÛŒâ€ŒØªØ± Ùˆ Ù‡Ù…â€ŒÙ†Ø§Ù… Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ (Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù‚Ø¨Ù„Ø§Ù‹ Ø¯Ø± Ù‡Ù…ÛŒÙ†
+        // Ú¯ÙØªÚ¯Ùˆ ÙØ±Ø³ØªØ§Ø¯Ù‡ Ø¨ÙˆØ¯) Ø±Ø§ Ù¾ÛŒØ¯Ø§ Ú©Ø±Ø¯ Ùˆ Ø¢Ù† Ø±Ø§ ÙˆÛŒØ±Ø§ÛŒØ´ Ú©Ø±Ø¯ - Ù†ØªÛŒØ¬Ù‡ ÛŒÚ© ÙØ§ÛŒÙ„
+        // Ø§Ø´ØªØ¨Ø§Ù‡ Ø§Ù…Ø§ "Ù…Ø¹ØªØ¨Ø±" Ø¨ÙˆØ¯ Ú©Ù‡ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªØ­ÙˆÛŒÙ„ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯.
+        // Ø§ÛŒÙ†â€ŒØ¬Ø§ ÛŒÚ© Ù‚ÙÙ„ ÙÙ†ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ù…ÛŒâ€ŒÚ¯Ø°Ø§Ø±ÛŒÙ…: Ø§Ú¯Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© ÙØ§ÛŒÙ„
+        // ØªØ§Ø²Ù‡â€ŒÛŒ Ù…ØªÙ†ÛŒ (ctx.textFiles) Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ØŒ ÙØ±Ø§Ø®ÙˆØ§Ù†ÛŒ get_archived_file
+        // Ø±Ø§ Ú©Ù„Ø§Ù‹ Ø±Ø¯ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… Ùˆ Ø¨Ù‡ Ù…Ø¯Ù„ Ù…ÛŒâ€ŒÚ¯ÙˆÛŒÛŒÙ… Ø§Ø² Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ Ø§Ø³ØªÙØ§Ø¯Ù‡
+        // Ú©Ù†Ø¯ - Ù…Ù‡Ù… Ù†ÛŒØ³Øª Ú†Ù‡ Ø§Ø³Ù…ÛŒ Ø®ÙˆØ§Ø³ØªÙ‡ØŒ Ú†ÙˆÙ† Ù‡ÛŒÚ† Ø³Ù†Ø§Ø±ÛŒÙˆÛŒ Ø¯Ø±Ø³ØªÛŒ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯
+        // Ú©Ù‡ Ø¨Ø§ ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ Ø¯Ø± Ø¯Ø³ØªØŒ Ø±ÙØªÙ† Ø³Ø±Ø§Øº Ø¢Ø±Ø´ÛŒÙˆ ØµØ­ÛŒØ­ Ø¨Ø§Ø´Ø¯.
         const freshTextFiles = (ctx && ctx.originalFreshFileNames instanceof Set) ? [...ctx.originalFreshFileNames] : [];
         if (freshTextFiles.length > 0) {
             log.warn('agent.tool.get_archived_file.blocked_fresh_attachment_present', {
@@ -1892,7 +1892,7 @@ async function executeToolCall(name, args, ctx) {
                 freshFileNames: freshTextFiles
             });
             return {
-                error: `درخواست رد شد: کاربر در همین پیام فایل «${freshTextFiles.join('، ')}» را تازه ضمیمه کرده - این همان فایلی است که باید ویرایش شود، نه «${fileName}» از آرشیو. get_archived_file را دیگر صدا نزن؛ مستقیماً با apply_edit روی همان فایل تازه (که در بخش فایل‌های فعلی موجود است) کار کن.`
+                error: `Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø¯ Ø´Ø¯: Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÙØ§ÛŒÙ„ Â«${freshTextFiles.join('ØŒ ')}Â» Ø±Ø§ ØªØ§Ø²Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ - Ø§ÛŒÙ† Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ÛŒ Ø§Ø³Øª Ú©Ù‡ Ø¨Ø§ÛŒØ¯ ÙˆÛŒØ±Ø§ÛŒØ´ Ø´ÙˆØ¯ØŒ Ù†Ù‡ Â«${fileName}Â» Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ. get_archived_file Ø±Ø§ Ø¯ÛŒÚ¯Ø± ØµØ¯Ø§ Ù†Ø²Ù†Ø› Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ø¨Ø§ apply_edit Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ (Ú©Ù‡ Ø¯Ø± Ø¨Ø®Ø´ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ù…ÙˆØ¬ÙˆØ¯ Ø§Ø³Øª) Ú©Ø§Ø± Ú©Ù†.`
             };
         }
 
@@ -1946,7 +1946,7 @@ async function executeToolCall(name, args, ctx) {
                 name: found.name,
                 promotedToBlockEditing: true,
                 content: state ? state.content : (found.content || ''),
-                note: 'این فایل آرشیوشده حالا برای ویرایش فعال شده - محتوای کامل آن (بدون برش) بالا برگردانده شد، دقیقاً مثل فایلی که تازه ضمیمه شده باشد. اگر کاربر خواسته این فایل ویرایش شود، طبق قوانین ویرایش فایل (apply_edit با search/replace → در صورت لزوم verify_file) پیش برو. اگر فقط برای مطالعه/پاسخ به سؤال لازمش داشتی (نه ویرایش)، همین محتوا را بخوان.'
+                note: 'Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¢Ø±Ø´ÛŒÙˆØ´Ø¯Ù‡ Ø­Ø§Ù„Ø§ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ¹Ø§Ù„ Ø´Ø¯Ù‡ - Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ø¢Ù† (Ø¨Ø¯ÙˆÙ† Ø¨Ø±Ø´) Ø¨Ø§Ù„Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ø´Ø¯ØŒ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ ØªØ§Ø²Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯. Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø®ÙˆØ§Ø³ØªÙ‡ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´ Ø´ÙˆØ¯ØŒ Ø·Ø¨Ù‚ Ù‚ÙˆØ§Ù†ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ (apply_edit Ø¨Ø§ search/replace â†’ Ø¯Ø± ØµÙˆØ±Øª Ù„Ø²ÙˆÙ… verify_file) Ù¾ÛŒØ´ Ø¨Ø±Ùˆ. Ø§Ú¯Ø± ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ù…Ø·Ø§Ù„Ø¹Ù‡/Ù¾Ø§Ø³Ø® Ø¨Ù‡ Ø³Ø¤Ø§Ù„ Ù„Ø§Ø²Ù…Ø´ Ø¯Ø§Ø´ØªÛŒ (Ù†Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´)ØŒ Ù‡Ù…ÛŒÙ† Ù…Ø­ØªÙˆØ§ Ø±Ø§ Ø¨Ø®ÙˆØ§Ù†.'
             };
         }
 
@@ -1965,7 +1965,7 @@ async function executeToolCall(name, args, ctx) {
         let structureNote = '';
         try {
             const analysis = analyzeFileStructure(content, found.name || fileName, '');
-            structureNote = `\n\n[تحلیل ساختار این فایل آرشیوشده - قبل از تولید file-edit از آن استفاده کن]\n${formatFileStructureForModel(analysis)}\n`;
+            structureNote = `\n\n[ØªØ­Ù„ÛŒÙ„ Ø³Ø§Ø®ØªØ§Ø± Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¢Ø±Ø´ÛŒÙˆØ´Ø¯Ù‡ - Ù‚Ø¨Ù„ Ø§Ø² ØªÙˆÙ„ÛŒØ¯ file-edit Ø§Ø² Ø¢Ù† Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†]\n${formatFileStructureForModel(analysis)}\n`;
         } catch (error) {
             log.warn('file.structure.archived_preanalysis_failed', {
                 message: error?.message || String(error)
@@ -1976,7 +1976,7 @@ async function executeToolCall(name, args, ctx) {
             name: found.name,
             content,
             ...(truncated ? {
-                note: 'این فایل خیلی بزرگ بود و فقط بخش ابتدایی آن (۷۰ هزار کاراکتر اول) بازگردانده شد. اگر بخش دیگری لازم است، به کاربر بگو که فایل کامل در دسترس نیست و باید بخش خاصی از آن را دوباره بفرستد.'
+                note: 'Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø¨ÙˆØ¯ Ùˆ ÙÙ‚Ø· Ø¨Ø®Ø´ Ø§Ø¨ØªØ¯Ø§ÛŒÛŒ Ø¢Ù† (Û·Û° Ù‡Ø²Ø§Ø± Ú©Ø§Ø±Ø§Ú©ØªØ± Ø§ÙˆÙ„) Ø¨Ø§Ø²Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ø´Ø¯. Ø§Ú¯Ø± Ø¨Ø®Ø´ Ø¯ÛŒÚ¯Ø±ÛŒ Ù„Ø§Ø²Ù… Ø§Ø³ØªØŒ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¨Ú¯Ùˆ Ú©Ù‡ ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù†ÛŒØ³Øª Ùˆ Ø¨Ø§ÛŒØ¯ Ø¨Ø®Ø´ Ø®Ø§ØµÛŒ Ø§Ø² Ø¢Ù† Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¨ÙØ±Ø³ØªØ¯.'
             } : {}),
             ...(structureNote ? { structure: structureNote } : {})
         };
@@ -1989,14 +1989,14 @@ async function executeToolCall(name, args, ctx) {
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
-            return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+            return { error: `ÙØ§ÛŒÙ„ Â«${fileName}Â» Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
         }
         const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
         if (!state) {
-            return { error: `وضعیت ویرایش برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
+            return { error: `ÙˆØ¶Ø¹ÛŒØª ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø±Ø§ÛŒ Â«${fileName}Â» Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ - Ø§ÛŒÙ† Ù†Ø¨Ø§ÛŒØ¯ Ø±Ø® Ø¯Ù‡Ø¯.` };
         }
         if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
-            return { error: 'startLine/endLine نامعتبر است.' };
+            return { error: 'startLine/endLine Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø§Ø³Øª.' };
         }
         const lines = state.content.split(/\r?\n/);
         const clampedEnd = Math.min(endLine, lines.length);
@@ -2013,11 +2013,11 @@ async function executeToolCall(name, args, ctx) {
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
-            return { success: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+            return { success: false, error: `ÙØ§ÛŒÙ„ Â«${fileName}Â» Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
         }
         const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
         if (!state) {
-            return { success: false, error: `وضعیت ویرایش برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
+            return { success: false, error: `ÙˆØ¶Ø¹ÛŒØª ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø±Ø§ÛŒ Â«${fileName}Â» Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ - Ø§ÛŒÙ† Ù†Ø¨Ø§ÛŒØ¯ Ø±Ø® Ø¯Ù‡Ø¯.` };
         }
 
         const editResult = applySearchReplace(state.content, search, replace, Number.isFinite(occurrence) ? occurrence : undefined);
@@ -2028,7 +2028,7 @@ async function executeToolCall(name, args, ctx) {
             });
             return {
                 success: false,
-                error: editResult.reason === 'ambiguous' ? 'این search بیش از یک‌بار در فایل پیدا شد - مبهم است.' : 'این search در فایل پیدا نشد.',
+                error: editResult.reason === 'ambiguous' ? 'Ø§ÛŒÙ† search Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ù…Ø¨Ù‡Ù… Ø§Ø³Øª.' : 'Ø§ÛŒÙ† search Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.',
                 ...editResult.report
             };
         }
@@ -2039,11 +2039,11 @@ async function executeToolCall(name, args, ctx) {
                 name: state.name,
                 reason: validation.reason
             });
-            // FIX (ادعای دروغین موفقیت): این رد شدن را ثبت کن تا اگر مدل
-            // بعداً - بدون هیچ apply_edit موفقی روی این فایل - متن نهایی
-            // را طوری بنویسد که انگار ویرایش انجام شده، بتوانیم این
-            // ناسازگاری را در پایان runAgentLoop تشخیص دهیم و جلوی رفتن
-            // پاسخ گمراه‌کننده به کاربر را بگیریم.
+            // FIX (Ø§Ø¯Ø¹Ø§ÛŒ Ø¯Ø±ÙˆØºÛŒÙ† Ù…ÙˆÙÙ‚ÛŒØª): Ø§ÛŒÙ† Ø±Ø¯ Ø´Ø¯Ù† Ø±Ø§ Ø«Ø¨Øª Ú©Ù† ØªØ§ Ø§Ú¯Ø± Ù…Ø¯Ù„
+            // Ø¨Ø¹Ø¯Ø§Ù‹ - Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† apply_edit Ù…ÙˆÙÙ‚ÛŒ Ø±ÙˆÛŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ - Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ
+            // Ø±Ø§ Ø·ÙˆØ±ÛŒ Ø¨Ù†ÙˆÛŒØ³Ø¯ Ú©Ù‡ Ø§Ù†Ú¯Ø§Ø± ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ØŒ Ø¨ØªÙˆØ§Ù†ÛŒÙ… Ø§ÛŒÙ†
+            // Ù†Ø§Ø³Ø§Ø²Ú¯Ø§Ø±ÛŒ Ø±Ø§ Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† runAgentLoop ØªØ´Ø®ÛŒØµ Ø¯Ù‡ÛŒÙ… Ùˆ Ø¬Ù„ÙˆÛŒ Ø±ÙØªÙ†
+            // Ù¾Ø§Ø³Ø® Ú¯Ù…Ø±Ø§Ù‡â€ŒÚ©Ù†Ù†Ø¯Ù‡ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ Ø¨Ú¯ÛŒØ±ÛŒÙ….
             if (ctx && ctx.rejectedWriteBlocksByFile) {
                 const key = state.name;
                 const prev = ctx.rejectedWriteBlocksByFile.get(key) || { count: 0, lastReason: null };
@@ -2054,7 +2054,7 @@ async function executeToolCall(name, args, ctx) {
             }
             return {
                 success: false,
-                error: `این تغییر رد شد چون فایل را نامعتبر می‌کند: ${validation.reason} search/replace را اصلاح کن و دوباره apply_edit را صدا بزن.`
+                error: `Ø§ÛŒÙ† ØªØºÛŒÛŒØ± Ø±Ø¯ Ø´Ø¯ Ú†ÙˆÙ† ÙØ§ÛŒÙ„ Ø±Ø§ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯: ${validation.reason} search/replace Ø±Ø§ Ø§ØµÙ„Ø§Ø­ Ú©Ù† Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ apply_edit Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.`
             };
         }
 
@@ -2083,7 +2083,7 @@ async function executeToolCall(name, args, ctx) {
             valid: true,
             file: state.name,
             editedName: found._editedName,
-            note: 'تغییر با موفقیت اعمال و بررسی ساختاری شد (فایل کامل با این تغییر معتبر است). اگر بخش دیگری هم نیاز به تغییر دارد، apply_edit بعدی را صدا بزن. اگر این آخرین تغییر بود، می‌توانی مستقیماً پاسخ نهایی را بدهی - نیازی به صدا زدن verify_file جداگانه بعد از یک apply_edit موفق نیست، چون این نتیجه (valid:true) از قبل معادل آن است.'
+            note: 'ØªØºÛŒÛŒØ± Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø§Ø¹Ù…Ø§Ù„ Ùˆ Ø¨Ø±Ø±Ø³ÛŒ Ø³Ø§Ø®ØªØ§Ø±ÛŒ Ø´Ø¯ (ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø¨Ø§ Ø§ÛŒÙ† ØªØºÛŒÛŒØ± Ù…Ø¹ØªØ¨Ø± Ø§Ø³Øª). Ø§Ú¯Ø± Ø¨Ø®Ø´ Ø¯ÛŒÚ¯Ø±ÛŒ Ù‡Ù… Ù†ÛŒØ§Ø² Ø¨Ù‡ ØªØºÛŒÛŒØ± Ø¯Ø§Ø±Ø¯ØŒ apply_edit Ø¨Ø¹Ø¯ÛŒ Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. Ø§Ú¯Ø± Ø§ÛŒÙ† Ø¢Ø®Ø±ÛŒÙ† ØªØºÛŒÛŒØ± Ø¨ÙˆØ¯ØŒ Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ø¯Ù‡ÛŒ - Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ ØµØ¯Ø§ Ø²Ø¯Ù† verify_file Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ø¨Ø¹Ø¯ Ø§Ø² ÛŒÚ© apply_edit Ù…ÙˆÙÙ‚ Ù†ÛŒØ³ØªØŒ Ú†ÙˆÙ† Ø§ÛŒÙ† Ù†ØªÛŒØ¬Ù‡ (valid:true) Ø§Ø² Ù‚Ø¨Ù„ Ù…Ø¹Ø§Ø¯Ù„ Ø¢Ù† Ø§Ø³Øª.'
         };
     }
 
@@ -2092,11 +2092,11 @@ async function executeToolCall(name, args, ctx) {
         const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
         const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
         if (!found) {
-            return { valid: false, error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+            return { valid: false, error: `ÙØ§ÛŒÙ„ Â«${fileName}Â» Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
         }
         const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
         if (!state) {
-            return { valid: false, error: `وضعیت ویرایش برای «${fileName}» پیدا نشد - این نباید رخ دهد.` };
+            return { valid: false, error: `ÙˆØ¶Ø¹ÛŒØª ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø±Ø§ÛŒ Â«${fileName}Â» Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ - Ø§ÛŒÙ† Ù†Ø¨Ø§ÛŒØ¯ Ø±Ø® Ø¯Ù‡Ø¯.` };
         }
 
         const validation = validatePatchedContent(state.content, state.name);
@@ -2112,7 +2112,7 @@ async function executeToolCall(name, args, ctx) {
         if (!validation.valid) {
             return {
                 valid: false,
-                error: `فایل نهایی مشکل ساختاری دارد: ${validation.reason} با apply_edit دیگری اصلاح کن، سپس دوباره verify_file را صدا بزن. تا این verify پاس نشود، نمی‌توانی پاسخ نهایی بدهی.`
+                error: `ÙØ§ÛŒÙ„ Ù†Ù‡Ø§ÛŒÛŒ Ù…Ø´Ú©Ù„ Ø³Ø§Ø®ØªØ§Ø±ÛŒ Ø¯Ø§Ø±Ø¯: ${validation.reason} Ø¨Ø§ apply_edit Ø¯ÛŒÚ¯Ø±ÛŒ Ø§ØµÙ„Ø§Ø­ Ú©Ù†ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. ØªØ§ Ø§ÛŒÙ† verify Ù¾Ø§Ø³ Ù†Ø´ÙˆØ¯ØŒ Ù†Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø¯Ù‡ÛŒ.`
             };
         }
         return {
@@ -2120,14 +2120,14 @@ async function executeToolCall(name, args, ctx) {
             file: state.name,
             editedName: found._editedName || state.name,
             editCount: state.editCount,
-            note: 'فایل بررسی شد و مشکل ساختاری ندارد. حالا می‌توانی پاسخ نهایی بدهی.'
+            note: 'ÙØ§ÛŒÙ„ Ø¨Ø±Ø±Ø³ÛŒ Ø´Ø¯ Ùˆ Ù…Ø´Ú©Ù„ Ø³Ø§Ø®ØªØ§Ø±ÛŒ Ù†Ø¯Ø§Ø±Ø¯. Ø­Ø§Ù„Ø§ Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø¯Ù‡ÛŒ.'
         };
     }
 
 
     if (name === 'web_search') {
         const query = (args && args.query) || '';
-        if (!query) return { error: 'query خالی بود.' };
+        if (!query) return { error: 'query Ø®Ø§Ù„ÛŒ Ø¨ÙˆØ¯.' };
 
         log.info('agent.tool.web_search', { queryPreview: query.slice(0, 100) });
 
@@ -2140,8 +2140,8 @@ async function executeToolCall(name, args, ctx) {
         if (!search?.ok) {
             return {
                 result:
-                    `[جستجوی وب ناموفق بود | ${search?.code || 'search_error'}] ` +
-                    `${search?.message || 'سرویس جستجو نتوانست نتیجه‌ای برگرداند.'}`,
+                    `[Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯ | ${search?.code || 'search_error'}] ` +
+                    `${search?.message || 'Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù†ØªÙˆØ§Ù†Ø³Øª Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯.'}`,
                 searchError: {
                     code: search?.code || 'search_error',
                     status: search?.status ?? null,
@@ -2162,10 +2162,10 @@ async function executeToolCall(name, args, ctx) {
         // early: the question is streamed to the client as the final
         // reply (clearly marked), and the user's next message continues
         // the conversation normally via existing history.
-        return { askUser: (args && args.question) || 'می‌خوای همین‌طور ادامه بدم؟' };
+        return { askUser: (args && args.question) || 'Ù…ÛŒâ€ŒØ®ÙˆØ§ÛŒ Ù‡Ù…ÛŒÙ†â€ŒØ·ÙˆØ± Ø§Ø¯Ø§Ù…Ù‡ Ø¨Ø¯Ù…ØŸ' };
     }
 
-    return { error: `ابزار ناشناخته: ${name}` };
+    return { error: `Ø§Ø¨Ø²Ø§Ø± Ù†Ø§Ø´Ù†Ø§Ø®ØªÙ‡: ${name}` };
 }
 
 // Runs the model <-> tool loop. Each round now calls Gemini's real
@@ -2179,20 +2179,20 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, sharedRequestState, thinkLevel }) {
-    // FIX (تشخیص فایل تازه‌ی ضمیمه‌شده در برابر فایل promote-شده از آرشیو):
-    // textFiles یک آرایه‌ی mutable است که get_archived_file هم به آن
-    // فایل‌های آرشیوی را push می‌کند (ببین «promoted.push» در آن هندلر).
-    // برای این‌که بعداً بتوانیم فرق بگذاریم «کاربر همین پیام واقعاً چیزی
-    // ضمیمه کرده بود» از «این فایل بعداً توسط خودِ get_archived_file به
-    // textFiles اضافه شد»، نام فایل‌های تازه‌ی *واقعی* (قبل از هر promote)
-    // را همین ابتدا، قبل از هر تغییر، اسنپ‌شات می‌گیریم.
+    // FIX (ØªØ´Ø®ÛŒØµ ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡â€ŒÛŒ Ø¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ø¨Ø±Ø§Ø¨Ø± ÙØ§ÛŒÙ„ promote-Ø´Ø¯Ù‡ Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ):
+    // textFiles ÛŒÚ© Ø¢Ø±Ø§ÛŒÙ‡â€ŒÛŒ mutable Ø§Ø³Øª Ú©Ù‡ get_archived_file Ù‡Ù… Ø¨Ù‡ Ø¢Ù†
+    // ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¢Ø±Ø´ÛŒÙˆÛŒ Ø±Ø§ push Ù…ÛŒâ€ŒÚ©Ù†Ø¯ (Ø¨Ø¨ÛŒÙ† Â«promoted.pushÂ» Ø¯Ø± Ø¢Ù† Ù‡Ù†Ø¯Ù„Ø±).
+    // Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¨Ø¹Ø¯Ø§Ù‹ Ø¨ØªÙˆØ§Ù†ÛŒÙ… ÙØ±Ù‚ Ø¨Ú¯Ø°Ø§Ø±ÛŒÙ… Â«Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ú†ÛŒØ²ÛŒ
+    // Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ Ø¨ÙˆØ¯Â» Ø§Ø² Â«Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¨Ø¹Ø¯Ø§Ù‹ ØªÙˆØ³Ø· Ø®ÙˆØ¯Ù get_archived_file Ø¨Ù‡
+    // textFiles Ø§Ø¶Ø§ÙÙ‡ Ø´Ø¯Â»ØŒ Ù†Ø§Ù… ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ØªØ§Ø²Ù‡â€ŒÛŒ *ÙˆØ§Ù‚Ø¹ÛŒ* (Ù‚Ø¨Ù„ Ø§Ø² Ù‡Ø± promote)
+    // Ø±Ø§ Ù‡Ù…ÛŒÙ† Ø§Ø¨ØªØ¯Ø§ØŒ Ù‚Ø¨Ù„ Ø§Ø² Ù‡Ø± ØªØºÛŒÛŒØ±ØŒ Ø§Ø³Ù†Ù¾â€ŒØ´Ø§Øª Ù…ÛŒâ€ŒÚ¯ÛŒØ±ÛŒÙ….
     const originalFreshFileNames = new Set((Array.isArray(textFiles) ? textFiles : []).map(f => f && f.name).filter(Boolean));
-    // FIX (فایل‌های ۵۰۰۰+ خطی): با MAX_CHUNK_REQUEST_LINES=900، یک فایل
-    // ۵۰۰۰ خطی حداقل به ۶-۷ بار get_file_chunk نیاز دارد اگر مدل مجبور
-    // شود همه‌ی فایل را پیمایش کند، به‌علاوه‌ی inspect_file و apply_patch و
-    // پاسخ نهایی. سقف قبلی (۷) عملاً همان لحظه که مدل به دومین/سومین
-    // get_file_chunk می‌رسید تمام می‌شد. بالا بردنش برای این پروفایل کاری
-    // ضروری است - نه یک "مقدار امن دلخواه"، بلکه حداقل فضای واقعی لازم.
+    // FIX (ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÛµÛ°Û°Û°+ Ø®Ø·ÛŒ): Ø¨Ø§ MAX_CHUNK_REQUEST_LINES=900ØŒ ÛŒÚ© ÙØ§ÛŒÙ„
+    // ÛµÛ°Û°Û° Ø®Ø·ÛŒ Ø­Ø¯Ø§Ù‚Ù„ Ø¨Ù‡ Û¶-Û· Ø¨Ø§Ø± get_file_chunk Ù†ÛŒØ§Ø² Ø¯Ø§Ø±Ø¯ Ø§Ú¯Ø± Ù…Ø¯Ù„ Ù…Ø¬Ø¨ÙˆØ±
+    // Ø´ÙˆØ¯ Ù‡Ù…Ù‡â€ŒÛŒ ÙØ§ÛŒÙ„ Ø±Ø§ Ù¾ÛŒÙ…Ø§ÛŒØ´ Ú©Ù†Ø¯ØŒ Ø¨Ù‡â€ŒØ¹Ù„Ø§ÙˆÙ‡â€ŒÛŒ inspect_file Ùˆ apply_patch Ùˆ
+    // Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ. Ø³Ù‚Ù Ù‚Ø¨Ù„ÛŒ (Û·) Ø¹Ù…Ù„Ø§Ù‹ Ù‡Ù…Ø§Ù† Ù„Ø­Ø¸Ù‡ Ú©Ù‡ Ù…Ø¯Ù„ Ø¨Ù‡ Ø¯ÙˆÙ…ÛŒÙ†/Ø³ÙˆÙ…ÛŒÙ†
+    // get_file_chunk Ù…ÛŒâ€ŒØ±Ø³ÛŒØ¯ ØªÙ…Ø§Ù… Ù…ÛŒâ€ŒØ´Ø¯. Ø¨Ø§Ù„Ø§ Ø¨Ø±Ø¯Ù†Ø´ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ù¾Ø±ÙˆÙØ§ÛŒÙ„ Ú©Ø§Ø±ÛŒ
+    // Ø¶Ø±ÙˆØ±ÛŒ Ø§Ø³Øª - Ù†Ù‡ ÛŒÚ© "Ù…Ù‚Ø¯Ø§Ø± Ø§Ù…Ù† Ø¯Ù„Ø®ÙˆØ§Ù‡"ØŒ Ø¨Ù„Ú©Ù‡ Ø­Ø¯Ø§Ù‚Ù„ ÙØ¶Ø§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ù„Ø§Ø²Ù….
     // FIX (worst-case stall math): with the block map given upfront in the
     // system prompt (no inspect_file round needed anymore), a realistic
     // file-edit turn is read_block + write_block per target block (rarely
@@ -2228,13 +2228,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // looping model).
     const MIN_TOOL_ROUNDS = 6;
     const MAX_TOOL_ROUNDS_CEILING = 40;
-    const ROUNDS_PER_EDITABLE_FILE = 6; // چند apply_edit + یک احتمال retry به‌ازای هر فایل قابل‌ویرایش
+    const ROUNDS_PER_EDITABLE_FILE = 6; // Ú†Ù†Ø¯ apply_edit + ÛŒÚ© Ø§Ø­ØªÙ…Ø§Ù„ retry Ø¨Ù‡â€ŒØ§Ø²Ø§ÛŒ Ù‡Ø± ÙØ§ÛŒÙ„ Ù‚Ø§Ø¨Ù„â€ŒÙˆÛŒØ±Ø§ÛŒØ´
     const FIXED_ROUND_OVERHEAD = 4; // initial orientation + final answer + margin
     let MAX_TOOL_ROUNDS;
     if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
-        // بدون بلوک‌بندی، بودجه دیگر به تعداد بلوک وابسته نیست - به تعداد
-        // فایل‌های قابل‌ویرایش این درخواست (چند apply_edit ممکن روی هرکدام)
-        // وابسته است.
+        // Ø¨Ø¯ÙˆÙ† Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒØŒ Ø¨ÙˆØ¯Ø¬Ù‡ Ø¯ÛŒÚ¯Ø± Ø¨Ù‡ ØªØ¹Ø¯Ø§Ø¯ Ø¨Ù„ÙˆÚ© ÙˆØ§Ø¨Ø³ØªÙ‡ Ù†ÛŒØ³Øª - Ø¨Ù‡ ØªØ¹Ø¯Ø§Ø¯
+        // ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù‚Ø§Ø¨Ù„â€ŒÙˆÛŒØ±Ø§ÛŒØ´ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª (Ú†Ù†Ø¯ apply_edit Ù…Ù…Ú©Ù† Ø±ÙˆÛŒ Ù‡Ø±Ú©Ø¯Ø§Ù…)
+        // ÙˆØ§Ø¨Ø³ØªÙ‡ Ø§Ø³Øª.
         const estimatedRounds = Math.ceil(textFiles.length * ROUNDS_PER_EDITABLE_FILE) + FIXED_ROUND_OVERHEAD;
         MAX_TOOL_ROUNDS = Math.min(MAX_TOOL_ROUNDS_CEILING, Math.max(MIN_TOOL_ROUNDS, estimatedRounds));
         log.info('agent.rounds.dynamic', {
@@ -2247,26 +2247,26 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         // large budget - keep the old modest fixed cap for those.
         MAX_TOOL_ROUNDS = MIN_TOOL_ROUNDS;
     }
-    // FIX (روند/tool call های چندمرحله‌ای که وسط کار throw می‌کردند از صفر
-    // شروع می‌شدند): قبلاً اینجا `[...contents]` یک کپی محلی می‌ساخت. تمام
-    // push های بعدی (نتیجه جستجو، نتیجه tool call، پاسخ مدل) فقط روی همین
-    // کپی اعمال می‌شدند. اگر throw وسط یکی از round ها اتفاق می‌افتاد (مثلاً
-    // خطای موقتی شبکه در round 5 از 10)، caller با catch شدن throw، همان
-    // `contents` اصلی و دست‌نخورده را برای attempt بعدی دوباره می‌فرستاد -
-    // یعنی همه‌ی پیشرفت آن ۵ round دور ریخته می‌شد.
-    // با mutate کردن مستقیم روی خودِ آرایه‌ی `contents` (که در جاوااسکریپت
-    // by-reference پاس داده می‌شود)، هر push روی همان آرایه‌ای اعمال می‌شود
-    // که caller (خط‌های runAgentLoop call site) نگه داشته. پس با throw شدن،
-    // caller همان contents را - حالا شامل تمام round های موفقِ قبل از خطا -
-    // به عنوان ورودی attempt بعدی پاس می‌دهد و ادامه از همان‌جا شروع می‌شود،
-    // نه از صفر.
+    // FIX (Ø±ÙˆÙ†Ø¯/tool call Ù‡Ø§ÛŒ Ú†Ù†Ø¯Ù…Ø±Ø­Ù„Ù‡â€ŒØ§ÛŒ Ú©Ù‡ ÙˆØ³Ø· Ú©Ø§Ø± throw Ù…ÛŒâ€ŒÚ©Ø±Ø¯Ù†Ø¯ Ø§Ø² ØµÙØ±
+    // Ø´Ø±ÙˆØ¹ Ù…ÛŒâ€ŒØ´Ø¯Ù†Ø¯): Ù‚Ø¨Ù„Ø§Ù‹ Ø§ÛŒÙ†Ø¬Ø§ `[...contents]` ÛŒÚ© Ú©Ù¾ÛŒ Ù…Ø­Ù„ÛŒ Ù…ÛŒâ€ŒØ³Ø§Ø®Øª. ØªÙ…Ø§Ù…
+    // push Ù‡Ø§ÛŒ Ø¨Ø¹Ø¯ÛŒ (Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆØŒ Ù†ØªÛŒØ¬Ù‡ tool callØŒ Ù¾Ø§Ø³Ø® Ù…Ø¯Ù„) ÙÙ‚Ø· Ø±ÙˆÛŒ Ù‡Ù…ÛŒÙ†
+    // Ú©Ù¾ÛŒ Ø§Ø¹Ù…Ø§Ù„ Ù…ÛŒâ€ŒØ´Ø¯Ù†Ø¯. Ø§Ú¯Ø± throw ÙˆØ³Ø· ÛŒÚ©ÛŒ Ø§Ø² round Ù‡Ø§ Ø§ØªÙØ§Ù‚ Ù…ÛŒâ€ŒØ§ÙØªØ§Ø¯ (Ù…Ø«Ù„Ø§Ù‹
+    // Ø®Ø·Ø§ÛŒ Ù…ÙˆÙ‚ØªÛŒ Ø´Ø¨Ú©Ù‡ Ø¯Ø± round 5 Ø§Ø² 10)ØŒ caller Ø¨Ø§ catch Ø´Ø¯Ù† throwØŒ Ù‡Ù…Ø§Ù†
+    // `contents` Ø§ØµÙ„ÛŒ Ùˆ Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡ Ø±Ø§ Ø¨Ø±Ø§ÛŒ attempt Ø¨Ø¹Ø¯ÛŒ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…ÛŒâ€ŒÙØ±Ø³ØªØ§Ø¯ -
+    // ÛŒØ¹Ù†ÛŒ Ù‡Ù…Ù‡â€ŒÛŒ Ù¾ÛŒØ´Ø±ÙØª Ø¢Ù† Ûµ round Ø¯ÙˆØ± Ø±ÛŒØ®ØªÙ‡ Ù…ÛŒâ€ŒØ´Ø¯.
+    // Ø¨Ø§ mutate Ú©Ø±Ø¯Ù† Ù…Ø³ØªÙ‚ÛŒÙ… Ø±ÙˆÛŒ Ø®ÙˆØ¯Ù Ø¢Ø±Ø§ÛŒÙ‡â€ŒÛŒ `contents` (Ú©Ù‡ Ø¯Ø± Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª
+    // by-reference Ù¾Ø§Ø³ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯)ØŒ Ù‡Ø± push Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† Ø¢Ø±Ø§ÛŒÙ‡â€ŒØ§ÛŒ Ø§Ø¹Ù…Ø§Ù„ Ù…ÛŒâ€ŒØ´ÙˆØ¯
+    // Ú©Ù‡ caller (Ø®Ø·â€ŒÙ‡Ø§ÛŒ runAgentLoop call site) Ù†Ú¯Ù‡ Ø¯Ø§Ø´ØªÙ‡. Ù¾Ø³ Ø¨Ø§ throw Ø´Ø¯Ù†ØŒ
+    // caller Ù‡Ù…Ø§Ù† contents Ø±Ø§ - Ø­Ø§Ù„Ø§ Ø´Ø§Ù…Ù„ ØªÙ…Ø§Ù… round Ù‡Ø§ÛŒ Ù…ÙˆÙÙ‚Ù Ù‚Ø¨Ù„ Ø§Ø² Ø®Ø·Ø§ -
+    // Ø¨Ù‡ Ø¹Ù†ÙˆØ§Ù† ÙˆØ±ÙˆØ¯ÛŒ attempt Ø¨Ø¹Ø¯ÛŒ Ù¾Ø§Ø³ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ Ùˆ Ø§Ø¯Ø§Ù…Ù‡ Ø§Ø² Ù‡Ù…Ø§Ù†â€ŒØ¬Ø§ Ø´Ø±ÙˆØ¹ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ
+    // Ù†Ù‡ Ø§Ø² ØµÙØ±.
     let workingContents = contents;
     // If the outer handler is retrying Gemini after a search already happened,
     // keep the first search result available to the replacement model without
     // exposing web_search (or any other tool) again. This preserves key/model
     // fallback while enforcing one logical search for the whole HTTP request.
     if (searchState?.used && searchState?.result?.result) {
-        systemText = `${systemText}\n\n[نتیجه جستجوی وب که قبلاً در همین درخواست انجام شده است — از جستجوی مجدد خودداری کن]:\n${searchState.result.result}`;
+        systemText = `${systemText}\n\n[Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ø¯Ø± Ù‡Ù…ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ Ø§Ø³Øª â€” Ø§Ø² Ø¬Ø³ØªØ¬ÙˆÛŒ Ù…Ø¬Ø¯Ø¯ Ø®ÙˆØ¯Ø¯Ø§Ø±ÛŒ Ú©Ù†]:\n${searchState.result.result}`;
     }
     let lastUsage = null;
     // Question-scoped search lock: after one web_search, no tool is exposed
@@ -2285,7 +2285,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const editStates = sharedRequestState?.editStates || new Map();
     if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
         try {
-            if (onStep) onStep('در حال بررسی فایل...', 'apply_edit');
+            if (onStep) onStep('Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ ÙØ§ÛŒÙ„...', 'apply_edit');
             const fileDumps = textFiles.map((f) => {
                 const key = f.name || 'file';
                 let state = editStates.get(key);
@@ -2295,13 +2295,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 }
                 return { file: state.name, totalLines: state.content.split(/\r?\n/).length, content: state.content };
             });
-            systemText += `\n\n[محتوای کامل فایل(های) قابل ویرایش - این محتوای واقعی فعلی است]\n${JSON.stringify(fileDumps, null, 2)}\n\n` +
-                'قوانین ویرایش فایل:\n' +
-                '۱. برای تغییر، apply_edit را با search (متن دقیق موجود در محتوای بالا) و replace (متن جدید) صدا بزن. search باید چند خط اطراف تغییر را هم شامل شود تا در کل فایل یکتا باشد.\n' +
-                '۲. هر apply_edit موفق خودش نتیجه‌ی اعتبارسنجی فایل کامل را در فیلد valid برمی‌گرداند. اگر آخرین تغییر لازم را زدی و valid:true گرفتی، مستقیم می‌توانی پاسخ نهایی را بدهی - نیازی به verify_file جداگانه نیست مگر بخواهی بدون تغییر جدید یک بار دیگر وضعیت فعلی را چک کنی.\n' +
-                '۳. اگر apply_edit به دلیل «پیدا نشدن» یا «ابهام» رد شد، از context هایی که در پاسخ خطا برمی‌گردد استفاده کن تا search را دقیق‌تر و یکتا کنی، سپس دوباره صدا بزن.\n' +
-                '۴. اگر فایل خیلی بزرگ است و برای نوشتن search دقیق نیاز به دیدن دوباره‌ی یک بخش خاص داری (نه محتوای بالا که ممکن است کوتاه‌شده باشد)، از read_file_section استفاده کن.\n' +
-                '۵. بعد از هر apply_edit موفق، محتوای فایل عوض شده - برای ویرایش بعدی روی همان فایل، search را از متن جدید (نه متن اولیه‌ی بالا) انتخاب کن، مگر بخش موردنظر دست‌نخورده مانده باشد.\n';
+            systemText += `\n\n[Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„(Ù‡Ø§ÛŒ) Ù‚Ø§Ø¨Ù„ ÙˆÛŒØ±Ø§ÛŒØ´ - Ø§ÛŒÙ† Ù…Ø­ØªÙˆØ§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ ÙØ¹Ù„ÛŒ Ø§Ø³Øª]\n${JSON.stringify(fileDumps, null, 2)}\n\n` +
+                'Ù‚ÙˆØ§Ù†ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„:\n' +
+                'Û±. Ø¨Ø±Ø§ÛŒ ØªØºÛŒÛŒØ±ØŒ apply_edit Ø±Ø§ Ø¨Ø§ search (Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± Ù…Ø­ØªÙˆØ§ÛŒ Ø¨Ø§Ù„Ø§) Ùˆ replace (Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯) ØµØ¯Ø§ Ø¨Ø²Ù†. search Ø¨Ø§ÛŒØ¯ Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù ØªØºÛŒÛŒØ± Ø±Ø§ Ù‡Ù… Ø´Ø§Ù…Ù„ Ø´ÙˆØ¯ ØªØ§ Ø¯Ø± Ú©Ù„ ÙØ§ÛŒÙ„ ÛŒÚ©ØªØ§ Ø¨Ø§Ø´Ø¯.\n' +
+                'Û². Ù‡Ø± apply_edit Ù…ÙˆÙÙ‚ Ø®ÙˆØ¯Ø´ Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø§Ø¹ØªØ¨Ø§Ø±Ø³Ù†Ø¬ÛŒ ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø±Ø§ Ø¯Ø± ÙÛŒÙ„Ø¯ valid Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. Ø§Ú¯Ø± Ø¢Ø®Ø±ÛŒÙ† ØªØºÛŒÛŒØ± Ù„Ø§Ø²Ù… Ø±Ø§ Ø²Ø¯ÛŒ Ùˆ valid:true Ú¯Ø±ÙØªÛŒØŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ø¯Ù‡ÛŒ - Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ verify_file Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ù†ÛŒØ³Øª Ù…Ú¯Ø± Ø¨Ø®ÙˆØ§Ù‡ÛŒ Ø¨Ø¯ÙˆÙ† ØªØºÛŒÛŒØ± Ø¬Ø¯ÛŒØ¯ ÛŒÚ© Ø¨Ø§Ø± Ø¯ÛŒÚ¯Ø± ÙˆØ¶Ø¹ÛŒØª ÙØ¹Ù„ÛŒ Ø±Ø§ Ú†Ú© Ú©Ù†ÛŒ.\n' +
+                'Û³. Ø§Ú¯Ø± apply_edit Ø¨Ù‡ Ø¯Ù„ÛŒÙ„ Â«Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯Ù†Â» ÛŒØ§ Â«Ø§Ø¨Ù‡Ø§Ù…Â» Ø±Ø¯ Ø´Ø¯ØŒ Ø§Ø² context Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ø¯Ø± Ù¾Ø§Ø³Ø® Ø®Ø·Ø§ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø¯ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù† ØªØ§ search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± Ùˆ ÛŒÚ©ØªØ§ Ú©Ù†ÛŒØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†.\n' +
+                'Û´. Ø§Ú¯Ø± ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø§Ø³Øª Ùˆ Ø¨Ø±Ø§ÛŒ Ù†ÙˆØ´ØªÙ† search Ø¯Ù‚ÛŒÙ‚ Ù†ÛŒØ§Ø² Ø¨Ù‡ Ø¯ÛŒØ¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡â€ŒÛŒ ÛŒÚ© Ø¨Ø®Ø´ Ø®Ø§Øµ Ø¯Ø§Ø±ÛŒ (Ù†Ù‡ Ù…Ø­ØªÙˆØ§ÛŒ Ø¨Ø§Ù„Ø§ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ú©ÙˆØªØ§Ù‡â€ŒØ´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯)ØŒ Ø§Ø² read_file_section Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†.\n' +
+                'Ûµ. Ø¨Ø¹Ø¯ Ø§Ø² Ù‡Ø± apply_edit Ù…ÙˆÙÙ‚ØŒ Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ø¹ÙˆØ¶ Ø´Ø¯Ù‡ - Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø¹Ø¯ÛŒ Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ØŒ search Ø±Ø§ Ø§Ø² Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯ (Ù†Ù‡ Ù…ØªÙ† Ø§ÙˆÙ„ÛŒÙ‡â€ŒÛŒ Ø¨Ø§Ù„Ø§) Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ØŒ Ù…Ú¯Ø± Ø¨Ø®Ø´ Ù…ÙˆØ±Ø¯Ù†Ø¸Ø± Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡ Ù…Ø§Ù†Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.\n';
             log.info('file.edit_state.mapped', {
                 files: fileDumps.length,
                 names: fileDumps.map(x => x.file),
@@ -2323,8 +2323,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // token, which routinely takes well past 60s for anything more than a
     // few seconds of footage - even after client-side compression. The old
     // fixed 60s per-round timeout aborted these requests before Gemini ever
-    // got a chance to respond, which is exactly the "پاسخ بیش از حد طول
-    // کشید" error being seen. Video attachments now get a longer per-round
+    // got a chance to respond, which is exactly the "Ù¾Ø§Ø³Ø® Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ø·ÙˆÙ„
+    // Ú©Ø´ÛŒØ¯" error being seen. Video attachments now get a longer per-round
     // budget; everything else (text/image/PDF-only turns, which really do
     // answer fast) keeps the original tight 60s so a genuinely stuck
     // request still fails fast instead of hanging the connection.
@@ -2342,15 +2342,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // them on what was never actually a quota problem, and only then
     // surfacing the generic "quota exhausted" message. Rounds that follow a
     // get_archived_file call now get the same longer budget as video.
-    // FIX (large-file chunk-edit flow, رفع واقعی برای فایل‌های ۵۰۰۰+ خط):
-    // منطق قبلی فقط به روندِ "بعد از" یک get_file_chunk/get_archived_file
-    // مهلت بیشتر می‌داد - یعنی خودِ روندی که برای اولین بار یک chunk بزرگ
-    // را می‌خواند و پردازش می‌کند (یا روند inspect_file روی یک فایل چند
-    // هزار خطی) همچنان با مهلت استاندارد ۶۰ ثانیه اجرا می‌شد و دقیقاً
-    // همین‌جا (خط ۱۱۰۰ تا ۱۸۹۰ که کاربر تست کرد) timeout می‌خورد. برای
-    // فایل‌های بزرگ، تقریباً هر round این جریان به همان اندازه سنگین است -
-    // پس به‌جای حدس زدن "کدام round سنگین‌تره"، وقتی fileEditIntent فعال
-    // است، همه‌ی round ها مهلت بلند می‌گیرند.
+    // FIX (large-file chunk-edit flow, Ø±ÙØ¹ ÙˆØ§Ù‚Ø¹ÛŒ Ø¨Ø±Ø§ÛŒ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÛµÛ°Û°Û°+ Ø®Ø·):
+    // Ù…Ù†Ø·Ù‚ Ù‚Ø¨Ù„ÛŒ ÙÙ‚Ø· Ø¨Ù‡ Ø±ÙˆÙ†Ø¯Ù "Ø¨Ø¹Ø¯ Ø§Ø²" ÛŒÚ© get_file_chunk/get_archived_file
+    // Ù…Ù‡Ù„Øª Ø¨ÛŒØ´ØªØ± Ù…ÛŒâ€ŒØ¯Ø§Ø¯ - ÛŒØ¹Ù†ÛŒ Ø®ÙˆØ¯Ù Ø±ÙˆÙ†Ø¯ÛŒ Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ø§ÙˆÙ„ÛŒÙ† Ø¨Ø§Ø± ÛŒÚ© chunk Ø¨Ø²Ø±Ú¯
+    // Ø±Ø§ Ù…ÛŒâ€ŒØ®ÙˆØ§Ù†Ø¯ Ùˆ Ù¾Ø±Ø¯Ø§Ø²Ø´ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ (ÛŒØ§ Ø±ÙˆÙ†Ø¯ inspect_file Ø±ÙˆÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ú†Ù†Ø¯
+    // Ù‡Ø²Ø§Ø± Ø®Ø·ÛŒ) Ù‡Ù…Ú†Ù†Ø§Ù† Ø¨Ø§ Ù…Ù‡Ù„Øª Ø§Ø³ØªØ§Ù†Ø¯Ø§Ø±Ø¯ Û¶Û° Ø«Ø§Ù†ÛŒÙ‡ Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹
+    // Ù‡Ù…ÛŒÙ†â€ŒØ¬Ø§ (Ø®Ø· Û±Û±Û°Û° ØªØ§ Û±Û¸Û¹Û° Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªØ³Øª Ú©Ø±Ø¯) timeout Ù…ÛŒâ€ŒØ®ÙˆØ±Ø¯. Ø¨Ø±Ø§ÛŒ
+    // ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¨Ø²Ø±Ú¯ØŒ ØªÙ‚Ø±ÛŒØ¨Ø§Ù‹ Ù‡Ø± round Ø§ÛŒÙ† Ø¬Ø±ÛŒØ§Ù† Ø¨Ù‡ Ù‡Ù…Ø§Ù† Ø§Ù†Ø¯Ø§Ø²Ù‡ Ø³Ù†Ú¯ÛŒÙ† Ø§Ø³Øª -
+    // Ù¾Ø³ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø­Ø¯Ø³ Ø²Ø¯Ù† "Ú©Ø¯Ø§Ù… round Ø³Ù†Ú¯ÛŒÙ†â€ŒØªØ±Ù‡"ØŒ ÙˆÙ‚ØªÛŒ fileEditIntent ÙØ¹Ø§Ù„
+    // Ø§Ø³ØªØŒ Ù‡Ù…Ù‡â€ŒÛŒ round Ù‡Ø§ Ù…Ù‡Ù„Øª Ø¨Ù„Ù†Ø¯ Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ù†Ø¯.
     // FIX (10+ minute stall before quota error): fileEditIntent alone was
     // added to this condition to fix one real timeout, but fileEditIntent
     // is now true for EVERY turn with an attached file (see the fix that
@@ -2374,21 +2374,21 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // the same "give the NEXT round more time" treatment archive reads do.
     let lastToolCallWasSectionRead = false;
 
-    // DIAGNOSTICS (ردِ کامل اجرای عامل): برای هر round، یک رکورد ساختاریافته
-    // نگه می‌داریم - نه فقط یک پیام خطای کلی در انتها. این آرایه همیشه (چه
-    // در موفقیت چه در خطا) برگردانده می‌شود تا بشود دقیقاً دید هر round
-    // چقدر طول کشید، کدام ابزار با چه آرگومانی صدا زده شد، هر ابزار چند بار
-    // تکرار شد، چند apply_patch موفق شد، و در نهایت با چه finishReason و
-    // چند کاراکتر متن متوقف شد.
+    // DIAGNOSTICS (Ø±Ø¯Ù Ú©Ø§Ù…Ù„ Ø§Ø¬Ø±Ø§ÛŒ Ø¹Ø§Ù…Ù„): Ø¨Ø±Ø§ÛŒ Ù‡Ø± roundØŒ ÛŒÚ© Ø±Ú©ÙˆØ±Ø¯ Ø³Ø§Ø®ØªØ§Ø±ÛŒØ§ÙØªÙ‡
+    // Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±ÛŒÙ… - Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ© Ù¾ÛŒØ§Ù… Ø®Ø·Ø§ÛŒ Ú©Ù„ÛŒ Ø¯Ø± Ø§Ù†ØªÙ‡Ø§. Ø§ÛŒÙ† Ø¢Ø±Ø§ÛŒÙ‡ Ù‡Ù…ÛŒØ´Ù‡ (Ú†Ù‡
+    // Ø¯Ø± Ù…ÙˆÙÙ‚ÛŒØª Ú†Ù‡ Ø¯Ø± Ø®Ø·Ø§) Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§ Ø¨Ø´ÙˆØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø¯ÛŒØ¯ Ù‡Ø± round
+    // Ú†Ù‚Ø¯Ø± Ø·ÙˆÙ„ Ú©Ø´ÛŒØ¯ØŒ Ú©Ø¯Ø§Ù… Ø§Ø¨Ø²Ø§Ø± Ø¨Ø§ Ú†Ù‡ Ø¢Ø±Ú¯ÙˆÙ…Ø§Ù†ÛŒ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø´Ø¯ØŒ Ù‡Ø± Ø§Ø¨Ø²Ø§Ø± Ú†Ù†Ø¯ Ø¨Ø§Ø±
+    // ØªÚ©Ø±Ø§Ø± Ø´Ø¯ØŒ Ú†Ù†Ø¯ apply_patch Ù…ÙˆÙÙ‚ Ø´Ø¯ØŒ Ùˆ Ø¯Ø± Ù†Ù‡Ø§ÛŒØª Ø¨Ø§ Ú†Ù‡ finishReason Ùˆ
+    // Ú†Ù†Ø¯ Ú©Ø§Ø±Ø§Ú©ØªØ± Ù…ØªÙ† Ù…ØªÙˆÙ‚Ù Ø´Ø¯.
     const roundTrace = [];
-    const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
+    const toolCallTally = {}; // name -> Ø´Ù…Ø§Ø±Ù†Ø¯Ù‡â€ŒÛŒ Ú©Ù„ Ø¯Ø± Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª
     const agentLoopStartedAt = Date.now();
-    // FIX (ادعای دروغین موفقیت بعد از write_block ردشده): وقتی write_block
-    // به دلیل نامعتبر شدن فایل رد می‌شود (validatePatchedContent) و مدل به
-    // جای اصلاح newContent، سراغ منابع دیگر می‌رود و در متن نهایی وانمود
-    // می‌کند ویرایش انجام شده، هیچ _patched ای روی فایل ثبت نشده - این
-    // Map برای هر فایل، تعداد write_block های ردشده و آخرین دلیل رد شدن را
-    // نگه می‌دارد تا در پایان بتوانیم این ناسازگاری را تشخیص دهیم.
+    // FIX (Ø§Ø¯Ø¹Ø§ÛŒ Ø¯Ø±ÙˆØºÛŒÙ† Ù…ÙˆÙÙ‚ÛŒØª Ø¨Ø¹Ø¯ Ø§Ø² write_block Ø±Ø¯Ø´Ø¯Ù‡): ÙˆÙ‚ØªÛŒ write_block
+    // Ø¨Ù‡ Ø¯Ù„ÛŒÙ„ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø´Ø¯Ù† ÙØ§ÛŒÙ„ Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆØ¯ (validatePatchedContent) Ùˆ Ù…Ø¯Ù„ Ø¨Ù‡
+    // Ø¬Ø§ÛŒ Ø§ØµÙ„Ø§Ø­ newContentØŒ Ø³Ø±Ø§Øº Ù…Ù†Ø§Ø¨Ø¹ Ø¯ÛŒÚ¯Ø± Ù…ÛŒâ€ŒØ±ÙˆØ¯ Ùˆ Ø¯Ø± Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ ÙˆØ§Ù†Ù…ÙˆØ¯
+    // Ù…ÛŒâ€ŒÚ©Ù†Ø¯ ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ØŒ Ù‡ÛŒÚ† _patched Ø§ÛŒ Ø±ÙˆÛŒ ÙØ§ÛŒÙ„ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ - Ø§ÛŒÙ†
+    // Map Ø¨Ø±Ø§ÛŒ Ù‡Ø± ÙØ§ÛŒÙ„ØŒ ØªØ¹Ø¯Ø§Ø¯ write_block Ù‡Ø§ÛŒ Ø±Ø¯Ø´Ø¯Ù‡ Ùˆ Ø¢Ø®Ø±ÛŒÙ† Ø¯Ù„ÛŒÙ„ Ø±Ø¯ Ø´Ø¯Ù† Ø±Ø§
+    // Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±Ø¯ ØªØ§ Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† Ø¨ØªÙˆØ§Ù†ÛŒÙ… Ø§ÛŒÙ† Ù†Ø§Ø³Ø§Ø²Ú¯Ø§Ø±ÛŒ Ø±Ø§ ØªØ´Ø®ÛŒØµ Ø¯Ù‡ÛŒÙ….
     const rejectedWriteBlocksByFile = new Map(); // fileName -> { count, lastReason }
 
     // NOTE (block-based rewrite): inspectedFilesThisRequest and
@@ -2403,7 +2403,6 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         lastToolCallWasSectionRead = false; // consumed for this round; re-armed below only if this round's own tool call is a section read
         const roundStartedAt = Date.now();
-        log.info('round.started', { model: currentModel, round: round + 1 });
         const roundEntry = {
             round: round + 1,
             toolCalls: [],       // [{ name, argsSummary, resultSummary }]
@@ -2433,20 +2432,20 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     body: JSON.stringify({
                         system_instruction: { parts: [{ text: systemText }] },
                         contents: workingContents,
-                        // FIX (کندی محسوس با مدل‌های غیر از flash-lite): تا
-                        // اینجا هیچ generationConfig/thinkingConfig ارسال
-                        // نمی‌شد، پس gemini-3.7-flash و gemini-3.1-pro-preview
-                        // با سطح تفکر پیش‌فرض خودشان (که برای این خانواده از
-                        // مدل‌ها معمولاً medium/high است) اجرا می‌شدند - یعنی
-                        // قبل از شروع استریم پاسخ، مدل مدت قابل‌توجهی صرف
-                        // «فکر کردن» داخلی می‌کرد. flash-lite این مشکل را
-                        // نداشت چون اصلاً از این خانواده‌ی thinking نیست.
-                        // یک سطح تفکر پایین (نه صفر، چون این مدل‌ها اصلاً
-                        // اجازه‌ی خاموش کامل تفکر را نمی‌دهند) تاخیر قبل از
-                        // شروع پاسخ را به‌شدت کم می‌کند بدون این‌که کیفیت
-                        // پاسخ‌های معمولی افت محسوسی داشته باشد.
+                        // FIX (Ú©Ù†Ø¯ÛŒ Ù…Ø­Ø³ÙˆØ³ Ø¨Ø§ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒ ØºÛŒØ± Ø§Ø² flash-lite): ØªØ§
+                        // Ø§ÛŒÙ†Ø¬Ø§ Ù‡ÛŒÚ† generationConfig/thinkingConfig Ø§Ø±Ø³Ø§Ù„
+                        // Ù†Ù…ÛŒâ€ŒØ´Ø¯ØŒ Ù¾Ø³ gemini-3.7-flash Ùˆ gemini-3.1-pro-preview
+                        // Ø¨Ø§ Ø³Ø·Ø­ ØªÙÚ©Ø± Ù¾ÛŒØ´â€ŒÙØ±Ø¶ Ø®ÙˆØ¯Ø´Ø§Ù† (Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø®Ø§Ù†ÙˆØ§Ø¯Ù‡ Ø§Ø²
+                        // Ù…Ø¯Ù„â€ŒÙ‡Ø§ Ù…Ø¹Ù…ÙˆÙ„Ø§Ù‹ medium/high Ø§Ø³Øª) Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´Ø¯Ù†Ø¯ - ÛŒØ¹Ù†ÛŒ
+                        // Ù‚Ø¨Ù„ Ø§Ø² Ø´Ø±ÙˆØ¹ Ø§Ø³ØªØ±ÛŒÙ… Ù¾Ø§Ø³Ø®ØŒ Ù…Ø¯Ù„ Ù…Ø¯Øª Ù‚Ø§Ø¨Ù„â€ŒØªÙˆØ¬Ù‡ÛŒ ØµØ±Ù
+                        // Â«ÙÚ©Ø± Ú©Ø±Ø¯Ù†Â» Ø¯Ø§Ø®Ù„ÛŒ Ù…ÛŒâ€ŒÚ©Ø±Ø¯. flash-lite Ø§ÛŒÙ† Ù…Ø´Ú©Ù„ Ø±Ø§
+                        // Ù†Ø¯Ø§Ø´Øª Ú†ÙˆÙ† Ø§ØµÙ„Ø§Ù‹ Ø§Ø² Ø§ÛŒÙ† Ø®Ø§Ù†ÙˆØ§Ø¯Ù‡â€ŒÛŒ thinking Ù†ÛŒØ³Øª.
+                        // ÛŒÚ© Ø³Ø·Ø­ ØªÙÚ©Ø± Ù¾Ø§ÛŒÛŒÙ† (Ù†Ù‡ ØµÙØ±ØŒ Ú†ÙˆÙ† Ø§ÛŒÙ† Ù…Ø¯Ù„â€ŒÙ‡Ø§ Ø§ØµÙ„Ø§Ù‹
+                        // Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø§Ù…ÙˆØ´ Ú©Ø§Ù…Ù„ ØªÙÚ©Ø± Ø±Ø§ Ù†Ù…ÛŒâ€ŒØ¯Ù‡Ù†Ø¯) ØªØ§Ø®ÛŒØ± Ù‚Ø¨Ù„ Ø§Ø²
+                        // Ø´Ø±ÙˆØ¹ Ù¾Ø§Ø³Ø® Ø±Ø§ Ø¨Ù‡â€ŒØ´Ø¯Øª Ú©Ù… Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ú©ÛŒÙÛŒØª
+                        // Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ÛŒ Ù…Ø¹Ù…ÙˆÙ„ÛŒ Ø§ÙØª Ù…Ø­Ø³ÙˆØ³ÛŒ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯.
                         // FEATURE (Think mode toggle): thinkLevel comes from
-                        // the client's "حالت تفکر" control (off by default -
+                        // the client's "Ø­Ø§Ù„Øª ØªÙÚ©Ø±" control (off by default -
                         // see index.html). 'off' keeps the original speed-fix
                         // behavior (minimal/low per model); when the user
                         // explicitly turns Think on and picks low/medium/high,
@@ -2522,22 +2521,22 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             try { onChunk(text); } catch (_) {}
         };
 
-        // FIX (کندی محسوس فقط روی مدل‌های thinking-capable با سوالات
-        // شبه‌سرچ): قبلاً pendingToolPreamble تا پایان کامل همان round
-        // (یعنی تا جایی که مشخص شود functionCall آمده یا نه) هیچ خروجی‌ای
-        // به کاربر نمی‌داد. برای مدل‌هایی که پیش از تصمیم‌گیری درباره‌ی
-        // tool call یک مرحله‌ی داخلی طولانی‌تر «فکر کردن» دارند (هر چیزی
-        // غیر از flash-lite)، این یعنی سکوت کامل تا پایان همان مرحله.
-        // این تایمر یک سقف زمانی کوتاه می‌گذارد: اگر تا PREAMBLE_HOLD_MS
-        // هنوز نه functionCall دیده شده نه round تمام شده، هر چه تا این
-        // لحظه بافر شده را همین الان flush می‌کنیم و از همان لحظه به بعد
-        // استریم را زنده (live) می‌کنیم - دقیقاً مثل حالتی که از اول
-        // sawFunctionCall نمی‌شد. منطق تشخیص سرچ/tool call دست‌نخورده
-        // می‌ماند: اگر functionCall واقعاً برسد، هنوز طبق همان مسیر قبلی
-        // discard می‌شود (چون preambleTimedOut فقط جلوی نگه‌داشتن بافر را
-        // می‌گیرد، نه منطق eventHasFunctionCall را). تنها ریسک این است که
-        // در موارد نادر یک preamble کوتاه («باشه بذار چک کنم...») قبل از
-        // نتیجه‌ی سرچ نشان داده شود - که خیلی بهتر از چند ثانیه سکوت است.
+        // FIX (Ú©Ù†Ø¯ÛŒ Ù…Ø­Ø³ÙˆØ³ ÙÙ‚Ø· Ø±ÙˆÛŒ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒ thinking-capable Ø¨Ø§ Ø³ÙˆØ§Ù„Ø§Øª
+        // Ø´Ø¨Ù‡â€ŒØ³Ø±Ú†): Ù‚Ø¨Ù„Ø§Ù‹ pendingToolPreamble ØªØ§ Ù¾Ø§ÛŒØ§Ù† Ú©Ø§Ù…Ù„ Ù‡Ù…Ø§Ù† round
+        // (ÛŒØ¹Ù†ÛŒ ØªØ§ Ø¬Ø§ÛŒÛŒ Ú©Ù‡ Ù…Ø´Ø®Øµ Ø´ÙˆØ¯ functionCall Ø¢Ù…Ø¯Ù‡ ÛŒØ§ Ù†Ù‡) Ù‡ÛŒÚ† Ø®Ø±ÙˆØ¬ÛŒâ€ŒØ§ÛŒ
+        // Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù†Ù…ÛŒâ€ŒØ¯Ø§Ø¯. Ø¨Ø±Ø§ÛŒ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒÛŒ Ú©Ù‡ Ù¾ÛŒØ´ Ø§Ø² ØªØµÙ…ÛŒÙ…â€ŒÚ¯ÛŒØ±ÛŒ Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ
+        // tool call ÛŒÚ© Ù…Ø±Ø­Ù„Ù‡â€ŒÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø·ÙˆÙ„Ø§Ù†ÛŒâ€ŒØªØ± Â«ÙÚ©Ø± Ú©Ø±Ø¯Ù†Â» Ø¯Ø§Ø±Ù†Ø¯ (Ù‡Ø± Ú†ÛŒØ²ÛŒ
+        // ØºÛŒØ± Ø§Ø² flash-lite)ØŒ Ø§ÛŒÙ† ÛŒØ¹Ù†ÛŒ Ø³Ú©ÙˆØª Ú©Ø§Ù…Ù„ ØªØ§ Ù¾Ø§ÛŒØ§Ù† Ù‡Ù…Ø§Ù† Ù…Ø±Ø­Ù„Ù‡.
+        // Ø§ÛŒÙ† ØªØ§ÛŒÙ…Ø± ÛŒÚ© Ø³Ù‚Ù Ø²Ù…Ø§Ù†ÛŒ Ú©ÙˆØªØ§Ù‡ Ù…ÛŒâ€ŒÚ¯Ø°Ø§Ø±Ø¯: Ø§Ú¯Ø± ØªØ§ PREAMBLE_HOLD_MS
+        // Ù‡Ù†ÙˆØ² Ù†Ù‡ functionCall Ø¯ÛŒØ¯Ù‡ Ø´Ø¯Ù‡ Ù†Ù‡ round ØªÙ…Ø§Ù… Ø´Ø¯Ù‡ØŒ Ù‡Ø± Ú†Ù‡ ØªØ§ Ø§ÛŒÙ†
+        // Ù„Ø­Ø¸Ù‡ Ø¨Ø§ÙØ± Ø´Ø¯Ù‡ Ø±Ø§ Ù‡Ù…ÛŒÙ† Ø§Ù„Ø§Ù† flush Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… Ùˆ Ø§Ø² Ù‡Ù…Ø§Ù† Ù„Ø­Ø¸Ù‡ Ø¨Ù‡ Ø¨Ø¹Ø¯
+        // Ø§Ø³ØªØ±ÛŒÙ… Ø±Ø§ Ø²Ù†Ø¯Ù‡ (live) Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ Ø­Ø§Ù„ØªÛŒ Ú©Ù‡ Ø§Ø² Ø§ÙˆÙ„
+        // sawFunctionCall Ù†Ù…ÛŒâ€ŒØ´Ø¯. Ù…Ù†Ø·Ù‚ ØªØ´Ø®ÛŒØµ Ø³Ø±Ú†/tool call Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡
+        // Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯: Ø§Ú¯Ø± functionCall ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ø±Ø³Ø¯ØŒ Ù‡Ù†ÙˆØ² Ø·Ø¨Ù‚ Ù‡Ù…Ø§Ù† Ù…Ø³ÛŒØ± Ù‚Ø¨Ù„ÛŒ
+        // discard Ù…ÛŒâ€ŒØ´ÙˆØ¯ (Ú†ÙˆÙ† preambleTimedOut ÙÙ‚Ø· Ø¬Ù„ÙˆÛŒ Ù†Ú¯Ù‡â€ŒØ¯Ø§Ø´ØªÙ† Ø¨Ø§ÙØ± Ø±Ø§
+        // Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ØŒ Ù†Ù‡ Ù…Ù†Ø·Ù‚ eventHasFunctionCall Ø±Ø§). ØªÙ†Ù‡Ø§ Ø±ÛŒØ³Ú© Ø§ÛŒÙ† Ø§Ø³Øª Ú©Ù‡
+        // Ø¯Ø± Ù…ÙˆØ§Ø±Ø¯ Ù†Ø§Ø¯Ø± ÛŒÚ© preamble Ú©ÙˆØªØ§Ù‡ (Â«Ø¨Ø§Ø´Ù‡ Ø¨Ø°Ø§Ø± Ú†Ú© Ú©Ù†Ù…...Â») Ù‚Ø¨Ù„ Ø§Ø²
+        // Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø³Ø±Ú† Ù†Ø´Ø§Ù† Ø¯Ø§Ø¯Ù‡ Ø´ÙˆØ¯ - Ú©Ù‡ Ø®ÛŒÙ„ÛŒ Ø¨Ù‡ØªØ± Ø§Ø² Ú†Ù†Ø¯ Ø«Ø§Ù†ÛŒÙ‡ Ø³Ú©ÙˆØª Ø§Ø³Øª.
         const PREAMBLE_HOLD_MS = 1500;
         let preambleTimedOut = false;
         let preambleHoldTimer = null;
@@ -2590,7 +2589,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 clearPreambleHoldTimer();
                 // Anything held so far was pre-tool narration. Do NOT flush it.
                 // (If preambleTimedOut already flushed some of it live, that
-                // small preamble is left as-is — the discard only applies to
+                // small preamble is left as-is â€” the discard only applies to
                 // whatever is still sitting in the buffer at this point.)
                 pendingToolPreamble = '';
             }
@@ -2675,8 +2674,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
-        // DIAGNOSTICS: ثبت وضعیت پایانی این round، صرف‌نظر از این‌که در
-        // نهایت پاسخ نهایی باشد یا برود سراغ round بعدی برای اجرای ابزار.
+        // DIAGNOSTICS: Ø«Ø¨Øª ÙˆØ¶Ø¹ÛŒØª Ù¾Ø§ÛŒØ§Ù†ÛŒ Ø§ÛŒÙ† roundØŒ ØµØ±Ùâ€ŒÙ†Ø¸Ø± Ø§Ø² Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¯Ø±
+        // Ù†Ù‡Ø§ÛŒØª Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø§Ø´Ø¯ ÛŒØ§ Ø¨Ø±ÙˆØ¯ Ø³Ø±Ø§Øº round Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø§ÛŒ Ø§Ø¬Ø±Ø§ÛŒ Ø§Ø¨Ø²Ø§Ø±.
         roundEntry.durationMs = Date.now() - roundStartedAt;
         roundEntry.finishReason = finishReason || 'NONE';
         roundEntry.textChars = textParts.reduce((sum, t) => sum + (t ? t.length : 0), 0);
@@ -2707,8 +2706,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     round
                 });
                 functionCalls.push({ name: 'verify_file', args: { file: unverified.name } });
-                // Keep any text the model produced this round (e.g. "الان
-                // فایل رو نهایی می‌کنم") - it will be followed by the
+                // Keep any text the model produced this round (e.g. "Ø§Ù„Ø§Ù†
+                // ÙØ§ÛŒÙ„ Ø±Ùˆ Ù†Ù‡Ø§ÛŒÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ù…") - it will be followed by the
                 // verify_file round's own text, both streamed normally.
             }
         }
@@ -2737,11 +2736,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // seemingly-successful empty finalText - the client then shows
             // the tool's "step" label for a moment, gets zero text chunks,
             // and finally falls into its generic retry-error path. That's
-            // exactly the "پیام یه لحظه میاد بعد غیب میشه" symptom. Detect
+            // exactly the "Ù¾ÛŒØ§Ù… ÛŒÙ‡ Ù„Ø­Ø¸Ù‡ Ù…ÛŒØ§Ø¯ Ø¨Ø¹Ø¯ ØºÛŒØ¨ Ù…ÛŒØ´Ù‡" symptom. Detect
             // that specific case and surface a real, explained error instead
             // of a silent empty success.
-            // BUGFIX (silent empty reply after a tool call, "پاسخی دریافت
-            // نشد"): the check below used to require finishReason to be
+            // BUGFIX (silent empty reply after a tool call, "Ù¾Ø§Ø³Ø®ÛŒ Ø¯Ø±ÛŒØ§ÙØª
+            // Ù†Ø´Ø¯"): the check below used to require finishReason to be
             // something abnormal (MAX_TOKENS, SAFETY, ...) before treating
             // an empty reply as an error. But Gemini can also finish with a
             // perfectly normal STOP right after a tool call (e.g. right
@@ -2749,7 +2748,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // final answer, no file-edit block, nothing. That used to be
             // returned as a "successful" empty finalText, which the client
             // then shows as a blank bubble and falls back to its own
-            // generic "پاسخی دریافت نشد" message with no real error to
+            // generic "Ù¾Ø§Ø³Ø®ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯" message with no real error to
             // retry against. Treat ANY empty reply after at least one tool
             // round (round > 0) as the same real, explained error,
             // regardless of finishReason, so the outer key/model retry
@@ -2782,15 +2781,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         editedName: f._editedName || f.name,
                         content: f.content || ''
                     }));
-                // DIAGNOSTICS: خلاصه‌ی قابل‌فهم برای انسان (فارسی) که مستقیم
-                // در "جزئیات بیشتر" کاربر نشان داده می‌شود - نه فقط دیتای خام
-                // برای لاگ سرور. summarizeAgentTrace هر دو را می‌سازد.
+                // DIAGNOSTICS: Ø®Ù„Ø§ØµÙ‡â€ŒÛŒ Ù‚Ø§Ø¨Ù„â€ŒÙÙ‡Ù… Ø¨Ø±Ø§ÛŒ Ø§Ù†Ø³Ø§Ù† (ÙØ§Ø±Ø³ÛŒ) Ú©Ù‡ Ù…Ø³ØªÙ‚ÛŒÙ…
+                // Ø¯Ø± "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ú©Ø§Ø±Ø¨Ø± Ù†Ø´Ø§Ù† Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ - Ù†Ù‡ ÙÙ‚Ø· Ø¯ÛŒØªØ§ÛŒ Ø®Ø§Ù…
+                // Ø¨Ø±Ø§ÛŒ Ù„Ø§Ú¯ Ø³Ø±ÙˆØ±. summarizeAgentTrace Ù‡Ø± Ø¯Ùˆ Ø±Ø§ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯.
                 const traceSummary = summarizeAgentTrace(roundTrace, toolCallTally, {
                     stoppedReason: 'silent_after_tool',
                     round
                 });
                 err.body = {
-                    message: 'مدل بعد از استفاده از ابزار جواب خالی برگردوند. لطفاً دوباره امتحان کن.',
+                    message: 'Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø³ØªÙØ§Ø¯Ù‡ Ø§Ø² Ø§Ø¨Ø²Ø§Ø± Ø¬ÙˆØ§Ø¨ Ø®Ø§Ù„ÛŒ Ø¨Ø±Ú¯Ø±Ø¯ÙˆÙ†Ø¯. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
                     type: 'empty_after_tool_call',
                     finishReason,
                     diagnostics: traceSummary,
@@ -2835,28 +2834,28 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     content: f.content || ''
                 }));
 
-            // FIX (ادعای دروغین موفقیت): اگر روی این درخواست حداقل یک
-            // write_block رد شده (فایل هیچ‌وقت واقعاً پچ نشده - نه در
-            // editedFiles و نه در partialFiles) و مدل با این حال دارد
-            // متنی می‌فرستد که به نظر ادعای انجام‌شدن ویرایش را دارد،
-            // این حالت را واقعی و صریح به کاربر/کلاینت اطلاع بده به‌جای
-            // رها کردن متن گمراه‌کننده‌ی مدل بدون هیچ نشانه‌ای. این فقط
-            // یک فلگ اطلاعاتی است - finalText مدل دست‌نخورده می‌ماند،
-            // چون ممکن است متن واقعاً درست باشد (مثلاً مدل صادقانه گفته
-            // "نتونستم ویرایش کنم")؛ اینجا فقط داده‌ی تشخیصی اضافه می‌شود
-            // تا کلاینت بتواند در صورت نیاز هشدار نشان دهد.
+            // FIX (Ø§Ø¯Ø¹Ø§ÛŒ Ø¯Ø±ÙˆØºÛŒÙ† Ù…ÙˆÙÙ‚ÛŒØª): Ø§Ú¯Ø± Ø±ÙˆÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ©
+            // write_block Ø±Ø¯ Ø´Ø¯Ù‡ (ÙØ§ÛŒÙ„ Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù¾Ú† Ù†Ø´Ø¯Ù‡ - Ù†Ù‡ Ø¯Ø±
+            // editedFiles Ùˆ Ù†Ù‡ Ø¯Ø± partialFiles) Ùˆ Ù…Ø¯Ù„ Ø¨Ø§ Ø§ÛŒÙ† Ø­Ø§Ù„ Ø¯Ø§Ø±Ø¯
+            // Ù…ØªÙ†ÛŒ Ù…ÛŒâ€ŒÙØ±Ø³ØªØ¯ Ú©Ù‡ Ø¨Ù‡ Ù†Ø¸Ø± Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ÙˆÛŒØ±Ø§ÛŒØ´ Ø±Ø§ Ø¯Ø§Ø±Ø¯ØŒ
+            // Ø§ÛŒÙ† Ø­Ø§Ù„Øª Ø±Ø§ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ ØµØ±ÛŒØ­ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø±/Ú©Ù„Ø§ÛŒÙ†Øª Ø§Ø·Ù„Ø§Ø¹ Ø¨Ø¯Ù‡ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ
+            // Ø±Ù‡Ø§ Ú©Ø±Ø¯Ù† Ù…ØªÙ† Ú¯Ù…Ø±Ø§Ù‡â€ŒÚ©Ù†Ù†Ø¯Ù‡â€ŒÛŒ Ù…Ø¯Ù„ Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† Ù†Ø´Ø§Ù†Ù‡â€ŒØ§ÛŒ. Ø§ÛŒÙ† ÙÙ‚Ø·
+            // ÛŒÚ© ÙÙ„Ú¯ Ø§Ø·Ù„Ø§Ø¹Ø§ØªÛŒ Ø§Ø³Øª - finalText Ù…Ø¯Ù„ Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡ Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯ØŒ
+            // Ú†ÙˆÙ† Ù…Ù…Ú©Ù† Ø§Ø³Øª Ù…ØªÙ† ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¯Ø±Ø³Øª Ø¨Ø§Ø´Ø¯ (Ù…Ø«Ù„Ø§Ù‹ Ù…Ø¯Ù„ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ú¯ÙØªÙ‡
+            // "Ù†ØªÙˆÙ†Ø³ØªÙ… ÙˆÛŒØ±Ø§ÛŒØ´ Ú©Ù†Ù…")Ø› Ø§ÛŒÙ†Ø¬Ø§ ÙÙ‚Ø· Ø¯Ø§Ø¯Ù‡â€ŒÛŒ ØªØ´Ø®ÛŒØµÛŒ Ø§Ø¶Ø§ÙÙ‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯
+            // ØªØ§ Ú©Ù„Ø§ÛŒÙ†Øª Ø¨ØªÙˆØ§Ù†Ø¯ Ø¯Ø± ØµÙˆØ±Øª Ù†ÛŒØ§Ø² Ù‡Ø´Ø¯Ø§Ø± Ù†Ø´Ø§Ù† Ø¯Ù‡Ø¯.
             //
-            // FIX ۲ (حالت بدتر: write_block اصلاً صدا زده نشده): حالت بالا
-            // فقط زمانی فعال می‌شد که write_block حداقل یک بار رد شده
-            // باشد. اما یک حالت بدتر هم وجود دارد - وقتی کاربر واقعاً یک
-            // فایل تازه برای ویرایش ضمیمه کرده (fileEditIntent === true،
-            // یعنی editStates ساخته شده) ولی مدل کلاً هیچ‌وقت apply_edit
-            // را روی هیچ بلوکی صدا نزده (نه موفق، نه رد شده) و مستقیم با
-            // متنی که به نظر ادعای انجام‌شدن تغییر دارد به پایان رسیده. این
-            // را هم با شمارش کل فراخوانی‌های write_block (از toolCallTally)
-            // تشخیص می‌دهیم: اگر بلوک‌استیت‌ای برای ویرایش وجود داشت اما
-            // write_block اصلاً صدا زده نشد و هیچ فایلی patch نشد، این هم
-            // همان کلاس مشکل است.
+            // FIX Û² (Ø­Ø§Ù„Øª Ø¨Ø¯ØªØ±: write_block Ø§ØµÙ„Ø§Ù‹ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ù†Ø´Ø¯Ù‡): Ø­Ø§Ù„Øª Ø¨Ø§Ù„Ø§
+            // ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ ÙØ¹Ø§Ù„ Ù…ÛŒâ€ŒØ´Ø¯ Ú©Ù‡ write_block Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ø¨Ø§Ø± Ø±Ø¯ Ø´Ø¯Ù‡
+            // Ø¨Ø§Ø´Ø¯. Ø§Ù…Ø§ ÛŒÚ© Ø­Ø§Ù„Øª Ø¨Ø¯ØªØ± Ù‡Ù… ÙˆØ¬ÙˆØ¯ Ø¯Ø§Ø±Ø¯ - ÙˆÙ‚ØªÛŒ Ú©Ø§Ø±Ø¨Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ ÛŒÚ©
+            // ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ (fileEditIntent === trueØŒ
+            // ÛŒØ¹Ù†ÛŒ editStates Ø³Ø§Ø®ØªÙ‡ Ø´Ø¯Ù‡) ÙˆÙ„ÛŒ Ù…Ø¯Ù„ Ú©Ù„Ø§Ù‹ Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª apply_edit
+            // Ø±Ø§ Ø±ÙˆÛŒ Ù‡ÛŒÚ† Ø¨Ù„ÙˆÚ©ÛŒ ØµØ¯Ø§ Ù†Ø²Ø¯Ù‡ (Ù†Ù‡ Ù…ÙˆÙÙ‚ØŒ Ù†Ù‡ Ø±Ø¯ Ø´Ø¯Ù‡) Ùˆ Ù…Ø³ØªÙ‚ÛŒÙ… Ø¨Ø§
+            // Ù…ØªÙ†ÛŒ Ú©Ù‡ Ø¨Ù‡ Ù†Ø¸Ø± Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ØªØºÛŒÛŒØ± Ø¯Ø§Ø±Ø¯ Ø¨Ù‡ Ù¾Ø§ÛŒØ§Ù† Ø±Ø³ÛŒØ¯Ù‡. Ø§ÛŒÙ†
+            // Ø±Ø§ Ù‡Ù… Ø¨Ø§ Ø´Ù…Ø§Ø±Ø´ Ú©Ù„ ÙØ±Ø§Ø®ÙˆØ§Ù†ÛŒâ€ŒÙ‡Ø§ÛŒ write_block (Ø§Ø² toolCallTally)
+            // ØªØ´Ø®ÛŒØµ Ù…ÛŒâ€ŒØ¯Ù‡ÛŒÙ…: Ø§Ú¯Ø± Ø¨Ù„ÙˆÚ©â€ŒØ§Ø³ØªÛŒØªâ€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙˆØ¬ÙˆØ¯ Ø¯Ø§Ø´Øª Ø§Ù…Ø§
+            // write_block Ø§ØµÙ„Ø§Ù‹ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ù†Ø´Ø¯ Ùˆ Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ÛŒ patch Ù†Ø´Ø¯ØŒ Ø§ÛŒÙ† Ù‡Ù…
+            // Ù‡Ù…Ø§Ù† Ú©Ù„Ø§Ø³ Ù…Ø´Ú©Ù„ Ø§Ø³Øª.
             const writeBlockCallCount = toolCallTally['write_block'] || 0;
             const hadEditableFiles = editStates && editStates.size > 0;
             let unresolvedEditFailure = null;
@@ -2864,12 +2863,12 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 const entries = [...rejectedWriteBlocksByFile.entries()];
                 unresolvedEditFailure = {
                     files: entries.map(([name, info]) => ({ name, rejectedAttempts: info.count, lastReason: info.lastReason })),
-                    note: 'مدل حداقل یک بار write_block روی این فایل(ها) را امتحان کرد و رد شد (فایل نامعتبر می‌شد)، و در نهایت بدون هیچ ویرایش موفقی به پایان رسید. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، آن ادعا مربوط به این فایل(ها) نیست - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
+                    note: 'Ù…Ø¯Ù„ Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ø¨Ø§Ø± write_block Ø±ÙˆÛŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„(Ù‡Ø§) Ø±Ø§ Ø§Ù…ØªØ­Ø§Ù† Ú©Ø±Ø¯ Ùˆ Ø±Ø¯ Ø´Ø¯ (ÙØ§ÛŒÙ„ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ù…ÛŒâ€ŒØ´Ø¯)ØŒ Ùˆ Ø¯Ø± Ù†Ù‡Ø§ÛŒØª Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† ÙˆÛŒØ±Ø§ÛŒØ´ Ù…ÙˆÙÙ‚ÛŒ Ø¨Ù‡ Ù¾Ø§ÛŒØ§Ù† Ø±Ø³ÛŒØ¯. Ø§Ú¯Ø± Ù…ØªÙ† Ù¾Ø§Ø³Ø® Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ØªØºÛŒÛŒØ± Ø±Ø§ Ø¯Ø§Ø±Ø¯ØŒ Ø¢Ù† Ø§Ø¯Ø¹Ø§ Ù…Ø±Ø¨ÙˆØ· Ø¨Ù‡ Ø§ÛŒÙ† ÙØ§ÛŒÙ„(Ù‡Ø§) Ù†ÛŒØ³Øª - Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯.'
                 };
             } else if (hadEditableFiles && writeBlockCallCount === 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
                 unresolvedEditFailure = {
                     files: [...editStates.keys()].map(name => ({ name, rejectedAttempts: 0, lastReason: null })),
-                    note: 'کاربر فایلی برای ویرایش در دسترس مدل قرار داده بود، اما مدل حتی یک‌بار هم write_block را روی آن صدا نزد - یعنی هیچ تلاشی برای اعمال تغییر واقعی انجام نشده. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، این ادعا نادرست است - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
+                    note: 'Ú©Ø§Ø±Ø¨Ø± ÙØ§ÛŒÙ„ÛŒ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù…Ø¯Ù„ Ù‚Ø±Ø§Ø± Ø¯Ø§Ø¯Ù‡ Ø¨ÙˆØ¯ØŒ Ø§Ù…Ø§ Ù…Ø¯Ù„ Ø­ØªÛŒ ÛŒÚ©â€ŒØ¨Ø§Ø± Ù‡Ù… write_block Ø±Ø§ Ø±ÙˆÛŒ Ø¢Ù† ØµØ¯Ø§ Ù†Ø²Ø¯ - ÛŒØ¹Ù†ÛŒ Ù‡ÛŒÚ† ØªÙ„Ø§Ø´ÛŒ Ø¨Ø±Ø§ÛŒ Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ± ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ù†Ø¬Ø§Ù… Ù†Ø´Ø¯Ù‡. Ø§Ú¯Ø± Ù…ØªÙ† Ù¾Ø§Ø³Ø® Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ØªØºÛŒÛŒØ± Ø±Ø§ Ø¯Ø§Ø±Ø¯ØŒ Ø§ÛŒÙ† Ø§Ø¯Ø¹Ø§ Ù†Ø§Ø¯Ø±Ø³Øª Ø§Ø³Øª - Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯.'
                 };
             }
             if (unresolvedEditFailure) {
@@ -2924,11 +2923,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 };
             }
 
-            const resultText = searchResult?.result || searchResult?.message || 'نتیجه‌ای از جستجو دریافت نشد.';
+            const resultText = searchResult?.result || searchResult?.message || 'Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ Ø§Ø² Ø¬Ø³ØªØ¬Ùˆ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯.';
             workingContents.push({
                 role: 'user',
                 parts: [{
-                    text: `[نتیجه جستجوی وب — جستجو برای این سؤال تمام شده و دیگر هیچ ابزاری استفاده نکن]:\n${resultText}`
+                    text: `[Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ â€” Ø¬Ø³ØªØ¬Ùˆ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ ØªÙ…Ø§Ù… Ø´Ø¯Ù‡ Ùˆ Ø¯ÛŒÚ¯Ø± Ù‡ÛŒÚ† Ø§Ø¨Ø²Ø§Ø±ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†]:\n${resultText}`
                 }]
             });
 
@@ -2948,20 +2947,20 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         const responseParts = [];
         let earlyAskUser = null;
 
-        // FIX (root cause of "بررسی ساختار فایل" چندبار تکرار می‌شود و
-        // Rate limit همه‌ی کلیدها را می‌ترکاند): با هر بار inspect_file،
-        // computeLogicalChunks کل نقشه‌ی chunk را از صفر و با مرزهای
-        // متفاوت می‌سازد (چون هیچ حالتی بین صداها نگه داشته نمی‌شود).
-        // هیچ‌جای system prompt هم مدل را از صدا زدن دوباره‌ی inspect_file
-        // منع نمی‌کرد، پس وقتی مدل روی یک فایل بزرگ گیج می‌شد، راه‌حلش
-        // "از اول نگاه کن" بود - دقیقاً همان رفتار "می‌ره ۲۰۰، بعد ۱۰۰۰،
-        // بعد برمی‌گرده ۱۰۰" که باعث شد هر ۱۲ کلید با 429 تمام شوند.
-        // این حالت را به‌ازای هر فایل، در طول کل درخواست (نه فقط یک
-        // round)، یک‌بار محدود می‌کنیم؛ صداهای بعدی بدون تماس با Gemini
-        // رد می‌شوند و مدل به get_file_chunk (که فقط می‌خواند، چیزی را
-        // دوباره نمی‌سازد) هدایت می‌شود.
-        // (inspectedFilesThisRequest و chunkReadsPerFile بیرون حلقه‌ی round
-        // تعریف شده‌اند تا بین round ها پاک نشوند.)
+        // FIX (root cause of "Ø¨Ø±Ø±Ø³ÛŒ Ø³Ø§Ø®ØªØ§Ø± ÙØ§ÛŒÙ„" Ú†Ù†Ø¯Ø¨Ø§Ø± ØªÚ©Ø±Ø§Ø± Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ
+        // Rate limit Ù‡Ù…Ù‡â€ŒÛŒ Ú©Ù„ÛŒØ¯Ù‡Ø§ Ø±Ø§ Ù…ÛŒâ€ŒØªØ±Ú©Ø§Ù†Ø¯): Ø¨Ø§ Ù‡Ø± Ø¨Ø§Ø± inspect_fileØŒ
+        // computeLogicalChunks Ú©Ù„ Ù†Ù‚Ø´Ù‡â€ŒÛŒ chunk Ø±Ø§ Ø§Ø² ØµÙØ± Ùˆ Ø¨Ø§ Ù…Ø±Ø²Ù‡Ø§ÛŒ
+        // Ù…ØªÙØ§ÙˆØª Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ (Ú†ÙˆÙ† Ù‡ÛŒÚ† Ø­Ø§Ù„ØªÛŒ Ø¨ÛŒÙ† ØµØ¯Ø§Ù‡Ø§ Ù†Ú¯Ù‡ Ø¯Ø§Ø´ØªÙ‡ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯).
+        // Ù‡ÛŒÚ†â€ŒØ¬Ø§ÛŒ system prompt Ù‡Ù… Ù…Ø¯Ù„ Ø±Ø§ Ø§Ø² ØµØ¯Ø§ Ø²Ø¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡â€ŒÛŒ inspect_file
+        // Ù…Ù†Ø¹ Ù†Ù…ÛŒâ€ŒÚ©Ø±Ø¯ØŒ Ù¾Ø³ ÙˆÙ‚ØªÛŒ Ù…Ø¯Ù„ Ø±ÙˆÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ø¨Ø²Ø±Ú¯ Ú¯ÛŒØ¬ Ù…ÛŒâ€ŒØ´Ø¯ØŒ Ø±Ø§Ù‡â€ŒØ­Ù„Ø´
+        // "Ø§Ø² Ø§ÙˆÙ„ Ù†Ú¯Ø§Ù‡ Ú©Ù†" Ø¨ÙˆØ¯ - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù‡Ù…Ø§Ù† Ø±ÙØªØ§Ø± "Ù…ÛŒâ€ŒØ±Ù‡ Û²Û°Û°ØŒ Ø¨Ø¹Ø¯ Û±Û°Û°Û°ØŒ
+        // Ø¨Ø¹Ø¯ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ù‡ Û±Û°Û°" Ú©Ù‡ Ø¨Ø§Ø¹Ø« Ø´Ø¯ Ù‡Ø± Û±Û² Ú©Ù„ÛŒØ¯ Ø¨Ø§ 429 ØªÙ…Ø§Ù… Ø´ÙˆÙ†Ø¯.
+        // Ø§ÛŒÙ† Ø­Ø§Ù„Øª Ø±Ø§ Ø¨Ù‡â€ŒØ§Ø²Ø§ÛŒ Ù‡Ø± ÙØ§ÛŒÙ„ØŒ Ø¯Ø± Ø·ÙˆÙ„ Ú©Ù„ Ø¯Ø±Ø®ÙˆØ§Ø³Øª (Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ©
+        // round)ØŒ ÛŒÚ©â€ŒØ¨Ø§Ø± Ù…Ø­Ø¯ÙˆØ¯ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…Ø› ØµØ¯Ø§Ù‡Ø§ÛŒ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø¯ÙˆÙ† ØªÙ…Ø§Ø³ Ø¨Ø§ Gemini
+        // Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ Ùˆ Ù…Ø¯Ù„ Ø¨Ù‡ get_file_chunk (Ú©Ù‡ ÙÙ‚Ø· Ù…ÛŒâ€ŒØ®ÙˆØ§Ù†Ø¯ØŒ Ú†ÛŒØ²ÛŒ Ø±Ø§
+        // Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù†Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯) Ù‡Ø¯Ø§ÛŒØª Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+        // (inspectedFilesThisRequest Ùˆ chunkReadsPerFile Ø¨ÛŒØ±ÙˆÙ† Ø­Ù„Ù‚Ù‡â€ŒÛŒ round
+        // ØªØ¹Ø±ÛŒÙ Ø´Ø¯Ù‡â€ŒØ§Ù†Ø¯ ØªØ§ Ø¨ÛŒÙ† round Ù‡Ø§ Ù¾Ø§Ú© Ù†Ø´ÙˆÙ†Ø¯.)
 
         // FIX (root cause of "searches many sites for one simple question"):
         // Gemini's function-calling can return SEVERAL functionCall parts in
@@ -2993,7 +2992,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     responseParts.push({
                         functionResponse: {
                             name: call.name,
-                            response: { error: 'جستجو برای این سؤال قبلاً انجام شده؛ با همان نتیجه پاسخ بده و جستجوی دیگری انجام نده.' }
+                            response: { error: 'Ø¬Ø³ØªØ¬Ùˆ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ Ù‚Ø¨Ù„Ø§Ù‹ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡Ø› Ø¨Ø§ Ù‡Ù…Ø§Ù† Ù†ØªÛŒØ¬Ù‡ Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡ Ùˆ Ø¬Ø³ØªØ¬ÙˆÛŒ Ø¯ÛŒÚ¯Ø±ÛŒ Ø§Ù†Ø¬Ø§Ù… Ù†Ø¯Ù‡.' }
                         }
                     });
                     continue;
@@ -3003,7 +3002,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 responseParts.push({
                     functionResponse: {
                         name: call.name,
-                        response: { error: 'بعد از web_search ابزارها برای این سؤال غیرفعال شده‌اند؛ با نتیجهٔ جستجو پاسخ بده.' }
+                        response: { error: 'Ø¨Ø¹Ø¯ Ø§Ø² web_search Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ ØºÛŒØ±ÙØ¹Ø§Ù„ Ø´Ø¯Ù‡â€ŒØ§Ù†Ø¯Ø› Ø¨Ø§ Ù†ØªÛŒØ¬Ù‡Ù” Ø¬Ø³ØªØ¬Ùˆ Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡.' }
                     }
                 });
                 continue;
@@ -3030,11 +3029,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
             if (call.name === 'read_file_section') lastToolCallWasSectionRead = true;
 
-            // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
-            // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
-            // خطا خودش حجیم نشود) و خلاصه‌ای از نتیجه ثبت می‌کنیم. تعداد کل
-            // هر ابزار در toolCallTally جمع می‌شود تا تکرار غیرعادی (مثلاً
-            // inspect_file چندبار پشت‌سرهم) فوراً قابل مشاهده باشد.
+            // DIAGNOSTICS: Ù‡Ø± ØµØ¯Ø§ Ø²Ø¯Ù† Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ Ø¨Ø§ Ø¢Ø±Ú¯ÙˆÙ…Ø§Ù†â€ŒÙ‡Ø§ÛŒ Ú©Ù„ÛŒØ¯ÛŒ (Ù†Ù‡ Ú©Ù„
+            // Ù…Ø­ØªÙˆØ§ - ÙÙ‚Ø· Ø§Ø³Ù… ÙØ§ÛŒÙ„/Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø·/Ø·ÙˆÙ„ queryØŒ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø±Ø¯Ù
+            // Ø®Ø·Ø§ Ø®ÙˆØ¯Ø´ Ø­Ø¬ÛŒÙ… Ù†Ø´ÙˆØ¯) Ùˆ Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ù†ØªÛŒØ¬Ù‡ Ø«Ø¨Øª Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…. ØªØ¹Ø¯Ø§Ø¯ Ú©Ù„
+            // Ù‡Ø± Ø§Ø¨Ø²Ø§Ø± Ø¯Ø± toolCallTally Ø¬Ù…Ø¹ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§ ØªÚ©Ø±Ø§Ø± ØºÛŒØ±Ø¹Ø§Ø¯ÛŒ (Ù…Ø«Ù„Ø§Ù‹
+            // inspect_file Ú†Ù†Ø¯Ø¨Ø§Ø± Ù¾Ø´Øªâ€ŒØ³Ø±Ù‡Ù…) ÙÙˆØ±Ø§Ù‹ Ù‚Ø§Ø¨Ù„ Ù…Ø´Ø§Ù‡Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.
             toolCallTally[call.name] = (toolCallTally[call.name] || 0) + 1;
             roundEntry.toolCalls.push({
                 name: call.name,
@@ -3088,16 +3087,16 @@ responseParts.push({
     }
 
     // Safety net: too many tool rounds without a final answer.
-    // DIAGNOSTICS: این یکی از دو حالتی است که قبلاً هیچ اطلاعی از "چرا"
-    // به کاربر نمی‌رسید - فقط همین پیام ثابت. حالا diagnostics هم برمی‌گردد
-    // تا در "جزئیات بیشتر" معلوم باشد کدام ابزار چندبار تکرار شده بود.
+    // DIAGNOSTICS: Ø§ÛŒÙ† ÛŒÚ©ÛŒ Ø§Ø² Ø¯Ùˆ Ø­Ø§Ù„ØªÛŒ Ø§Ø³Øª Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ù‡ÛŒÚ† Ø§Ø·Ù„Ø§Ø¹ÛŒ Ø§Ø² "Ú†Ø±Ø§"
+    // Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù†Ù…ÛŒâ€ŒØ±Ø³ÛŒØ¯ - ÙÙ‚Ø· Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… Ø«Ø§Ø¨Øª. Ø­Ø§Ù„Ø§ diagnostics Ù‡Ù… Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø¯
+    // ØªØ§ Ø¯Ø± "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ù…Ø¹Ù„ÙˆÙ… Ø¨Ø§Ø´Ø¯ Ú©Ø¯Ø§Ù… Ø§Ø¨Ø²Ø§Ø± Ú†Ù†Ø¯Ø¨Ø§Ø± ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ø¨ÙˆØ¯.
     const loopLimitTrace = summarizeAgentTrace(roundTrace, toolCallTally, {
         stoppedReason: 'round_limit',
         round: MAX_TOOL_ROUNDS
     });
     log.warn('agent.tool_loop_limit_hit', { toolCallTally, roundTrace });
     return {
-        finalText: 'متأسفم، در پردازش این درخواست به مشکل خوردم (تعداد مراحل زیاد شد). می‌تونی دوباره یا واضح‌تر بپرسی؟',
+        finalText: 'Ù…ØªØ£Ø³ÙÙ…ØŒ Ø¯Ø± Ù¾Ø±Ø¯Ø§Ø²Ø´ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø¨Ù‡ Ù…Ø´Ú©Ù„ Ø®ÙˆØ±Ø¯Ù… (ØªØ¹Ø¯Ø§Ø¯ Ù…Ø±Ø§Ø­Ù„ Ø²ÛŒØ§Ø¯ Ø´Ø¯). Ù…ÛŒâ€ŒØªÙˆÙ†ÛŒ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ÛŒØ§ ÙˆØ§Ø¶Ø­â€ŒØªØ± Ø¨Ù¾Ø±Ø³ÛŒØŸ',
         finishReason: 'TOOL_LOOP_LIMIT',
         usage: lastUsage,
         askUser: null,
@@ -3105,12 +3104,12 @@ responseParts.push({
     };
 }
 
-// DIAGNOSTICS: از یک roundTrace خام یک خلاصه‌ی دوبخشی می‌سازد:
-//  - humanSummary: چند خط فارسی ساده، همان چیزی که کاربر توی "جزئیات
-//    بیشتر" می‌بیند (بدون اصطلاح فنی زیاد)
-//  - raw: خودِ roundTrace + toolCallTally، برای لاگ سرور و دیباگ عمیق‌تر
-// این تابع هیچ تصمیمی نمی‌گیرد و چیزی را silent نمی‌کند؛ فقط چیزی که در
-// طول اجرا واقعاً اتفاق افتاده را به فارسیِ قابل‌خواندن ترجمه می‌کند.
+// DIAGNOSTICS: Ø§Ø² ÛŒÚ© roundTrace Ø®Ø§Ù… ÛŒÚ© Ø®Ù„Ø§ØµÙ‡â€ŒÛŒ Ø¯ÙˆØ¨Ø®Ø´ÛŒ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯:
+//  - humanSummary: Ú†Ù†Ø¯ Ø®Ø· ÙØ§Ø±Ø³ÛŒ Ø³Ø§Ø¯Ù‡ØŒ Ù‡Ù…Ø§Ù† Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªÙˆÛŒ "Ø¬Ø²Ø¦ÛŒØ§Øª
+//    Ø¨ÛŒØ´ØªØ±" Ù…ÛŒâ€ŒØ¨ÛŒÙ†Ø¯ (Ø¨Ø¯ÙˆÙ† Ø§ØµØ·Ù„Ø§Ø­ ÙÙ†ÛŒ Ø²ÛŒØ§Ø¯)
+//  - raw: Ø®ÙˆØ¯Ù roundTrace + toolCallTallyØŒ Ø¨Ø±Ø§ÛŒ Ù„Ø§Ú¯ Ø³Ø±ÙˆØ± Ùˆ Ø¯ÛŒØ¨Ø§Ú¯ Ø¹Ù…ÛŒÙ‚â€ŒØªØ±
+// Ø§ÛŒÙ† ØªØ§Ø¨Ø¹ Ù‡ÛŒÚ† ØªØµÙ…ÛŒÙ…ÛŒ Ù†Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ Ùˆ Ú†ÛŒØ²ÛŒ Ø±Ø§ silent Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯Ø› ÙÙ‚Ø· Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ø¯Ø±
+// Ø·ÙˆÙ„ Ø§Ø¬Ø±Ø§ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø§ØªÙØ§Ù‚ Ø§ÙØªØ§Ø¯Ù‡ Ø±Ø§ Ø¨Ù‡ ÙØ§Ø±Ø³ÛŒÙ Ù‚Ø§Ø¨Ù„â€ŒØ®ÙˆØ§Ù†Ø¯Ù† ØªØ±Ø¬Ù…Ù‡ Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
 function summarizeAgentTrace(roundTrace, toolCallTally, meta) {
     const totalRounds = roundTrace.length;
     const totalDurationMs = roundTrace.reduce((sum, r) => sum + (r.durationMs || 0), 0);
@@ -3124,24 +3123,24 @@ function summarizeAgentTrace(roundTrace, toolCallTally, meta) {
     const lastRound = roundTrace[roundTrace.length - 1] || null;
 
     const lines = [];
-    lines.push(`تعداد مراحل طی‌شده: ${totalRounds} از سقف مجاز`);
-    lines.push(`زمان کل صرف‌شده: ${(totalDurationMs / 1000).toFixed(1)} ثانیه`);
+    lines.push(`ØªØ¹Ø¯Ø§Ø¯ Ù…Ø±Ø§Ø­Ù„ Ø·ÛŒâ€ŒØ´Ø¯Ù‡: ${totalRounds} Ø§Ø² Ø³Ù‚Ù Ù…Ø¬Ø§Ø²`);
+    lines.push(`Ø²Ù…Ø§Ù† Ú©Ù„ ØµØ±Ùâ€ŒØ´Ø¯Ù‡: ${(totalDurationMs / 1000).toFixed(1)} Ø«Ø§Ù†ÛŒÙ‡`);
     if (repeatedTools.length) {
-        lines.push('ابزارهایی که بیش از یک‌بار صدا زده شدند: ' +
-            repeatedTools.map(([name, count]) => `${name} (${count} بار)`).join('، '));
+        lines.push('Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø´Ø¯Ù†Ø¯: ' +
+            repeatedTools.map(([name, count]) => `${name} (${count} Ø¨Ø§Ø±)`).join('ØŒ '));
     }
     if (patchedFiles.length) {
-        lines.push(`قبل از توقف، این فایل‌ها با موفقیت پچ خورده بودند: ${patchedFiles.join('، ')}`);
+        lines.push(`Ù‚Ø¨Ù„ Ø§Ø² ØªÙˆÙ‚ÙØŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ù¾Ú† Ø®ÙˆØ±Ø¯Ù‡ Ø¨ÙˆØ¯Ù†Ø¯: ${patchedFiles.join('ØŒ ')}`);
     } else {
-        lines.push('قبل از توقف، هیچ بلوکی با موفقیت بازنویسی نشده بود.');
+        lines.push('Ù‚Ø¨Ù„ Ø§Ø² ØªÙˆÙ‚ÙØŒ Ù‡ÛŒÚ† Ø¨Ù„ÙˆÚ©ÛŒ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù†Ø´Ø¯Ù‡ Ø¨ÙˆØ¯.');
     }
     if (lastRound) {
-        lines.push(`آخرین مرحله (round ${lastRound.round}): finishReason=${lastRound.finishReason || 'نامشخص'}, متن تولیدشده=${lastRound.textChars} کاراکتر`);
+        lines.push(`Ø¢Ø®Ø±ÛŒÙ† Ù…Ø±Ø­Ù„Ù‡ (round ${lastRound.round}): finishReason=${lastRound.finishReason || 'Ù†Ø§Ù…Ø´Ø®Øµ'}, Ù…ØªÙ† ØªÙˆÙ„ÛŒØ¯Ø´Ø¯Ù‡=${lastRound.textChars} Ú©Ø§Ø±Ø§Ú©ØªØ±`);
     }
     if (meta?.stoppedReason === 'round_limit') {
-        lines.push('نتیجه: به سقف تعداد مراحل رسید بدون رسیدن به پاسخ نهایی یا اعمال کامل تغییرات.');
+        lines.push('Ù†ØªÛŒØ¬Ù‡: Ø¨Ù‡ Ø³Ù‚Ù ØªØ¹Ø¯Ø§Ø¯ Ù…Ø±Ø§Ø­Ù„ Ø±Ø³ÛŒØ¯ Ø¨Ø¯ÙˆÙ† Ø±Ø³ÛŒØ¯Ù† Ø¨Ù‡ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ ÛŒØ§ Ø§Ø¹Ù…Ø§Ù„ Ú©Ø§Ù…Ù„ ØªØºÛŒÛŒØ±Ø§Øª.');
     } else if (meta?.stoppedReason === 'silent_after_tool') {
-        lines.push('نتیجه: بعد از صدا زدن یک ابزار، مدل هیچ متنی برنگرداند (سکوت).');
+        lines.push('Ù†ØªÛŒØ¬Ù‡: Ø¨Ø¹Ø¯ Ø§Ø² ØµØ¯Ø§ Ø²Ø¯Ù† ÛŒÚ© Ø§Ø¨Ø²Ø§Ø±ØŒ Ù…Ø¯Ù„ Ù‡ÛŒÚ† Ù…ØªÙ†ÛŒ Ø¨Ø±Ù†Ú¯Ø±Ø¯Ø§Ù†Ø¯ (Ø³Ú©ÙˆØª).');
     }
 
     return {
@@ -3220,7 +3219,7 @@ async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({
             error: {
-                message: 'متد درخواست پشتیبانی نمی‌شود.'
+                message: 'Ù…ØªØ¯ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾Ø´ØªÛŒØ¨Ø§Ù†ÛŒ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯.'
             }
         });
     }
@@ -3237,7 +3236,7 @@ async function handler(req, res) {
                 log.warn('request.too_large', { approxBytes });
                 return res.status(413).json({
                     error: {
-                        message: 'حجم درخواست خیلی زیاده. لطفاً فایل کوچک‌تری بفرست.',
+                        message: 'Ø­Ø¬Ù… Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø®ÛŒÙ„ÛŒ Ø²ÛŒØ§Ø¯Ù‡. Ù„Ø·ÙØ§Ù‹ ÙØ§ÛŒÙ„ Ú©ÙˆÚ†Ú©â€ŒØªØ±ÛŒ Ø¨ÙØ±Ø³Øª.',
                         type: 'file_too_large',
                         stage: 'request_validation',
                         detail: `approxBytes=${approxBytes}`
@@ -3331,7 +3330,7 @@ async function handler(req, res) {
         | frontend. Kept as an early return in the same handler/file (no new
         | route) so it reuses the same key pool/health-tracking, but it never
         | touches history trimming, file handling, web search, or the main
-        | streaming path — just a fast title guess.
+        | streaming path â€” just a fast title guess.
         */
         if (req.body?.mode === 'title') {
             const title = await generateChatTitle(
@@ -3357,7 +3356,7 @@ async function handler(req, res) {
             log.error('config.no_gemini_keys', {});
             return res.status(500).json({
                 error: {
-                    message: 'سرویس هوش مصنوعی موقتاً پیکربندی نشده است. لطفاً بعداً امتحان کن.',
+                    message: 'Ø³Ø±ÙˆÛŒØ³ Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ù…ÙˆÙ‚ØªØ§Ù‹ Ù¾ÛŒÚ©Ø±Ø¨Ù†Ø¯ÛŒ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª. Ù„Ø·ÙØ§Ù‹ Ø¨Ø¹Ø¯Ø§Ù‹ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
                     type: 'configuration_error',
                     stage: 'config',
                     category: 'missing_api_keys'
@@ -3376,7 +3375,7 @@ async function handler(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | فایل‌ها
+        | ÙØ§ÛŒÙ„â€ŒÙ‡Ø§
         |--------------------------------------------------------------------------
         */
 
@@ -3481,7 +3480,7 @@ async function handler(req, res) {
         if (contents.length === 0) {
             return res.status(400).json({
                 error: {
-                    message: 'متن ورودی خالی است.',
+                    message: 'Ù…ØªÙ† ÙˆØ±ÙˆØ¯ÛŒ Ø®Ø§Ù„ÛŒ Ø§Ø³Øª.',
                     type: 'invalid_file',
                     stage: 'request_validation'
                 }
@@ -3517,7 +3516,7 @@ async function handler(req, res) {
                 if (contents.length === 0) {
                     return res.status(400).json({
                         error: {
-                            message: 'متن ورودی خالی است.',
+                            message: 'Ù…ØªÙ† ÙˆØ±ÙˆØ¯ÛŒ Ø®Ø§Ù„ÛŒ Ø§Ø³Øª.',
                             type: 'invalid_file',
                             stage: 'request_validation'
                         }
@@ -3591,17 +3590,17 @@ async function handler(req, res) {
 
                                 if (isLargeEdit) {
                                     return `\n\n` +
-                                        `[فایل ضمیمه: ${f.name || 'file'} - ${lineCount} خط]\n` +
-                                        `این فایل بزرگ است؛ محتوای کامل آن اینجا داده نشده تا حجم درخواست پایین بماند. ` +
-                                        `برای دیدن ساختار و بخش‌های آن، ابزار inspect_file را با نام دقیق فایل صدا بزن؛ سپس برای هر بخش هدف، get_file_chunk را صدا بزن.`;
+                                        `[ÙØ§ÛŒÙ„ Ø¶Ù…ÛŒÙ…Ù‡: ${f.name || 'file'} - ${lineCount} Ø®Ø·]\n` +
+                                        `Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¨Ø²Ø±Ú¯ Ø§Ø³ØªØ› Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ø¢Ù† Ø§ÛŒÙ†Ø¬Ø§ Ø¯Ø§Ø¯Ù‡ Ù†Ø´Ø¯Ù‡ ØªØ§ Ø­Ø¬Ù… Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾Ø§ÛŒÛŒÙ† Ø¨Ù…Ø§Ù†Ø¯. ` +
+                                        `Ø¨Ø±Ø§ÛŒ Ø¯ÛŒØ¯Ù† Ø³Ø§Ø®ØªØ§Ø± Ùˆ Ø¨Ø®Ø´â€ŒÙ‡Ø§ÛŒ Ø¢Ù†ØŒ Ø§Ø¨Ø²Ø§Ø± inspect_file Ø±Ø§ Ø¨Ø§ Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ ØµØ¯Ø§ Ø¨Ø²Ù†Ø› Ø³Ù¾Ø³ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ø¨Ø®Ø´ Ù‡Ø¯ÙØŒ get_file_chunk Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.`;
                                 }
 
                                 return `\n\n` +
-                                    `[محتوای فایل: ${f.name || 'file'}]\n` +
+                                    `[Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„: ${f.name || 'file'}]\n` +
                                     '```\n' +
                                     content +
                                     '\n```\n' +
-                                    `[پایان محتوای فایل: ${f.name || 'file'}]`;
+                                    `[Ù¾Ø§ÛŒØ§Ù† Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„: ${f.name || 'file'}]`;
                             }
                         )
                         .join('');
@@ -3628,7 +3627,7 @@ async function handler(req, res) {
         // frontend's own limits can be bypassed by a direct API call.
         // NOTE: kept in sync with MAX_BACKEND_BASE64_CHARS in the frontend's
         // processIncomingFile() video branch (index.html) - the client
-        // checks against this same number BEFORE showing "ویدیو آماده", so
+        // checks against this same number BEFORE showing "ÙˆÛŒØ¯ÛŒÙˆ Ø¢Ù…Ø§Ø¯Ù‡", so
         // a compressed video that passes client-side never gets silently
         // 413'd here. If this number changes, update both places.
         const MAX_BINARY_BASE64_CHARS = 15 * 1024 * 1024; // ~15MB of base64 text
@@ -3729,10 +3728,10 @@ async function handler(req, res) {
 
         let systemText = '';
 
-        // FIX: مدل هیچ‌وقت تاریخ واقعی امروز رو نمی‌دونه — فقط از دیتای
-        // آموزشیش (که قدیمیه) حدس می‌زنه، برای همین وقتی می‌پرسی "امروز
-        // چندمه" جواب اشتباه می‌ده. این‌جا تاریخ واقعی سرور (شمسی + میلادی
-        // + ساعت، به وقت تهران) رو مستقیم بهش می‌گیم تا همیشه درست باشه.
+        // FIX: Ù…Ø¯Ù„ Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª ØªØ§Ø±ÛŒØ® ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ù…Ø±ÙˆØ² Ø±Ùˆ Ù†Ù…ÛŒâ€ŒØ¯ÙˆÙ†Ù‡ â€” ÙÙ‚Ø· Ø§Ø² Ø¯ÛŒØªØ§ÛŒ
+        // Ø¢Ù…ÙˆØ²Ø´ÛŒØ´ (Ú©Ù‡ Ù‚Ø¯ÛŒÙ…ÛŒÙ‡) Ø­Ø¯Ø³ Ù…ÛŒâ€ŒØ²Ù†Ù‡ØŒ Ø¨Ø±Ø§ÛŒ Ù‡Ù…ÛŒÙ† ÙˆÙ‚ØªÛŒ Ù…ÛŒâ€ŒÙ¾Ø±Ø³ÛŒ "Ø§Ù…Ø±ÙˆØ²
+        // Ú†Ù†Ø¯Ù…Ù‡" Ø¬ÙˆØ§Ø¨ Ø§Ø´ØªØ¨Ø§Ù‡ Ù…ÛŒâ€ŒØ¯Ù‡. Ø§ÛŒÙ†â€ŒØ¬Ø§ ØªØ§Ø±ÛŒØ® ÙˆØ§Ù‚Ø¹ÛŒ Ø³Ø±ÙˆØ± (Ø´Ù…Ø³ÛŒ + Ù…ÛŒÙ„Ø§Ø¯ÛŒ
+        // + Ø³Ø§Ø¹ØªØŒ Ø¨Ù‡ ÙˆÙ‚Øª ØªÙ‡Ø±Ø§Ù†) Ø±Ùˆ Ù…Ø³ØªÙ‚ÛŒÙ… Ø¨Ù‡Ø´ Ù…ÛŒâ€ŒÚ¯ÛŒÙ… ØªØ§ Ù‡Ù…ÛŒØ´Ù‡ Ø¯Ø±Ø³Øª Ø¨Ø§Ø´Ù‡.
         const now = new Date();
         const jalaliDate = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
             timeZone: 'Asia/Tehran',
@@ -3753,16 +3752,16 @@ async function handler(req, res) {
             minute: '2-digit'
         }).format(now);
         const dateContext = `
-اطلاعات زمان واقعی (این تاریخ همیشه درست است، حتی اگر با دانش قبلی‌ات فرق دارد؛ همیشه همین را ملاک بده):
-امروز: ${jalaliDate} (میلادی: ${gregorianDate})
-ساعت فعلی به وقت تهران: ${tehranTime}
+Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø²Ù…Ø§Ù† ÙˆØ§Ù‚Ø¹ÛŒ (Ø§ÛŒÙ† ØªØ§Ø±ÛŒØ® Ù‡Ù…ÛŒØ´Ù‡ Ø¯Ø±Ø³Øª Ø§Ø³ØªØŒ Ø­ØªÛŒ Ø§Ú¯Ø± Ø¨Ø§ Ø¯Ø§Ù†Ø´ Ù‚Ø¨Ù„ÛŒâ€ŒØ§Øª ÙØ±Ù‚ Ø¯Ø§Ø±Ø¯Ø› Ù‡Ù…ÛŒØ´Ù‡ Ù‡Ù…ÛŒÙ† Ø±Ø§ Ù…Ù„Ø§Ú© Ø¨Ø¯Ù‡):
+Ø§Ù…Ø±ÙˆØ²: ${jalaliDate} (Ù…ÛŒÙ„Ø§Ø¯ÛŒ: ${gregorianDate})
+Ø³Ø§Ø¹Øª ÙØ¹Ù„ÛŒ Ø¨Ù‡ ÙˆÙ‚Øª ØªÙ‡Ø±Ø§Ù†: ${tehranTime}
 `;
 
         const antiSelfQA = `
-قانون سخت‌گیرانه:
-جمله‌ی معرفی مدل («من Virtual Bot ... هستم») را فقط و فقط زمانی بنویس که خودِ کاربر همین الان مستقیم پرسیده باشد «مدلت چیه» یا سؤال هم‌معنی.
-هرگز خودت این سؤال را از زبان خودت مطرح نکن.
-هرگز بدون اینکه کاربر پرسیده باشد، جمله معرفی مدل را در پاسخ دیگری نیاور.
+Ù‚Ø§Ù†ÙˆÙ† Ø³Ø®Øªâ€ŒÚ¯ÛŒØ±Ø§Ù†Ù‡:
+Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ù…Ø¹Ø±ÙÛŒ Ù…Ø¯Ù„ (Â«Ù…Ù† Virtual Bot ... Ù‡Ø³ØªÙ…Â») Ø±Ø§ ÙÙ‚Ø· Ùˆ ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ Ø¨Ù†ÙˆÛŒØ³ Ú©Ù‡ Ø®ÙˆØ¯Ù Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ø§Ù„Ø§Ù† Ù…Ø³ØªÙ‚ÛŒÙ… Ù¾Ø±Ø³ÛŒØ¯Ù‡ Ø¨Ø§Ø´Ø¯ Â«Ù…Ø¯Ù„Øª Ú†ÛŒÙ‡Â» ÛŒØ§ Ø³Ø¤Ø§Ù„ Ù‡Ù…â€ŒÙ…Ø¹Ù†ÛŒ.
+Ù‡Ø±Ú¯Ø² Ø®ÙˆØ¯Øª Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ Ø±Ø§ Ø§Ø² Ø²Ø¨Ø§Ù† Ø®ÙˆØ¯Øª Ù…Ø·Ø±Ø­ Ù†Ú©Ù†.
+Ù‡Ø±Ú¯Ø² Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ†Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù¾Ø±Ø³ÛŒØ¯Ù‡ Ø¨Ø§Ø´Ø¯ØŒ Ø¬Ù…Ù„Ù‡ Ù…Ø¹Ø±ÙÛŒ Ù…Ø¯Ù„ Ø±Ø§ Ø¯Ø± Ù¾Ø§Ø³Ø® Ø¯ÛŒÚ¯Ø±ÛŒ Ù†ÛŒØ§ÙˆØ±.
 `;
 
         /*
@@ -3771,8 +3770,8 @@ async function handler(req, res) {
         |--------------------------------------------------------------------------
         */
 
-        // یک شخصیت واحد و یکسان روی همه‌ی مدل‌ها (نسخه‌بندی جدا حذف شد؛
-        // فقط نام مدل داخلی که در معرفی احتمالی استفاده می‌شود فرق دارد).
+        // ÛŒÚ© Ø´Ø®ØµÛŒØª ÙˆØ§Ø­Ø¯ Ùˆ ÛŒÚ©Ø³Ø§Ù† Ø±ÙˆÛŒ Ù‡Ù…Ù‡â€ŒÛŒ Ù…Ø¯Ù„â€ŒÙ‡Ø§ (Ù†Ø³Ø®Ù‡â€ŒØ¨Ù†Ø¯ÛŒ Ø¬Ø¯Ø§ Ø­Ø°Ù Ø´Ø¯Ø›
+        // ÙÙ‚Ø· Ù†Ø§Ù… Ù…Ø¯Ù„ Ø¯Ø§Ø®Ù„ÛŒ Ú©Ù‡ Ø¯Ø± Ù…Ø¹Ø±ÙÛŒ Ø§Ø­ØªÙ…Ø§Ù„ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ÙØ±Ù‚ Ø¯Ø§Ø±Ø¯).
         const modelDisplayName =
             MODEL_NAME === 'gemini-3.5-flash-lite' ? 'Virtual Bot 1.1' :
             MODEL_NAME === 'gemini-3.7-flash' ? 'Virtual Bot 1.6' :
@@ -3780,84 +3779,84 @@ async function handler(req, res) {
             'Virtual Bot';
 
         systemText = `
-تو ${modelDisplayName} هستی؛ یک دستیار هوش مصنوعی گرم، صمیمی، طبیعی و جذاب. هدفت این است که گفتگو شبیه صحبت با یک دوست باهوش و خوش‌برخورد باشد، نه یک متن خشک و رسمی.
+ØªÙˆ ${modelDisplayName} Ù‡Ø³ØªÛŒØ› ÛŒÚ© Ø¯Ø³ØªÛŒØ§Ø± Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ú¯Ø±Ù…ØŒ ØµÙ…ÛŒÙ…ÛŒØŒ Ø·Ø¨ÛŒØ¹ÛŒ Ùˆ Ø¬Ø°Ø§Ø¨. Ù‡Ø¯ÙØª Ø§ÛŒÙ† Ø§Ø³Øª Ú©Ù‡ Ú¯ÙØªÚ¯Ùˆ Ø´Ø¨ÛŒÙ‡ ØµØ­Ø¨Øª Ø¨Ø§ ÛŒÚ© Ø¯ÙˆØ³Øª Ø¨Ø§Ù‡ÙˆØ´ Ùˆ Ø®ÙˆØ´â€ŒØ¨Ø±Ø®ÙˆØ±Ø¯ Ø¨Ø§Ø´Ø¯ØŒ Ù†Ù‡ ÛŒÚ© Ù…ØªÙ† Ø®Ø´Ú© Ùˆ Ø±Ø³Ù…ÛŒ.
 
-هویت:
-- فقط وقتی کاربر مستقیماً درباره مدل پرسید بگو: «من ${modelDisplayName} هستم.»
-- هرگز خودت را با نسخه‌ی دیگری معرفی نکن.
-- هرگز نام سازنده یا تیمی را از خودت نساز.
-- خودت را Gemini معرفی نکن.
-- درباره چیزهایی که نمی‌دانی اطلاعات ساختگی نده.
+Ù‡ÙˆÛŒØª:
+- ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ú©Ø§Ø±Ø¨Ø± Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ø¯Ø±Ø¨Ø§Ø±Ù‡ Ù…Ø¯Ù„ Ù¾Ø±Ø³ÛŒØ¯ Ø¨Ú¯Ùˆ: Â«Ù…Ù† ${modelDisplayName} Ù‡Ø³ØªÙ….Â»
+- Ù‡Ø±Ú¯Ø² Ø®ÙˆØ¯Øª Ø±Ø§ Ø¨Ø§ Ù†Ø³Ø®Ù‡â€ŒÛŒ Ø¯ÛŒÚ¯Ø±ÛŒ Ù…Ø¹Ø±ÙÛŒ Ù†Ú©Ù†.
+- Ù‡Ø±Ú¯Ø² Ù†Ø§Ù… Ø³Ø§Ø²Ù†Ø¯Ù‡ ÛŒØ§ ØªÛŒÙ…ÛŒ Ø±Ø§ Ø§Ø² Ø®ÙˆØ¯Øª Ù†Ø³Ø§Ø².
+- Ø®ÙˆØ¯Øª Ø±Ø§ Gemini Ù…Ø¹Ø±ÙÛŒ Ù†Ú©Ù†.
+- Ø¯Ø±Ø¨Ø§Ø±Ù‡ Ú†ÛŒØ²Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ù†Ù…ÛŒâ€ŒØ¯Ø§Ù†ÛŒ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø³Ø§Ø®ØªÚ¯ÛŒ Ù†Ø¯Ù‡.
 
-قوانین لحن:
-۱. همیشه تا حد امکان طبیعی و محاوره‌ای صحبت کن؛ مگر اینکه کاربر صراحتاً لحن رسمی بخواهد.
-۲. لحن کاربر را تشخیص بده و متناسب با آن پاسخ بده:
-   - اگر رسمی است، محترمانه و حرفه‌ای باش.
-   - اگر دوستانه است، صمیمی و خودمانی باش.
-   - اگر شوخی می‌کند، در حد مناسب با او شوخی کن.
-   - اگر ناراحت یا نگران است، آرام، همدلانه و بدون شوخی پاسخ بده.
-۳. از اصطلاحات محاوره‌ای فارسی به شکل طبیعی استفاده کن، اما زیاده‌روی نکن.
-۴. جمله‌ها را روان و شبیه گفتگوی واقعی بنویس.
-۵. پاسخ را با واکنش مناسب به حرف کاربر شروع کن و بعد سراغ اصل مطلب برو.
-۶. از ایموجی‌ها به اندازه و متناسب با فضای گفتگو استفاده کن (مثلاً 😂😎🔥)، اما در هر جمله ایموجی نگذار. هرگز از ایموجی 🤖 استفاده نکن.
-۷. از شوخی‌های مصنوعی، تکراری یا بیش‌ازحد استفاده نکن.
-۸. پاسخ‌ها را بی‌دلیل طولانی نکن. اگر سؤال ساده است، جواب ساده بده؛ اگر موضوع پیچیده است، کامل و مرحله‌به‌مرحله توضیح بده.
-۹. اگر کاربر سؤال فنی پرسید، همچنان صمیمی بمان ولی دقت فنی را فدای شوخی نکن.
-۱۰. از تکرار عبارت‌های کلیشه‌ای مثل «حتماً! با کمال میل!» در همه پاسخ‌ها خودداری کن.
-۱۱. وانمود نکن که احساسات یا تجربه‌های انسانی واقعی داری. صمیمی باش، اما درباره ماهیت هوش مصنوعی صادق بمان.
-۱۲. شخصیتت باید ثابت باشد، اما لحن می‌تواند بر اساس موقعیت تغییر کند.
-۱۳. هیچ‌وقت برای صمیمی بودن، اطلاعات نادرست یا حدس بدون مشخص‌کردن عدم قطعیت ارائه نکن.
-۱۴. اگر پاسخ دقیق و جدی لازم است، مستقیم و واضح صحبت کن و شوخی را به حداقل برسان.
-۱۵. قبل از نوشتن هر جمله، از خودت بپرس آیا این ترکیب کلمات در فارسی محاوره‌ای واقعی و طبیعی معنا می‌دهد یا نه. هرگز کلمه یا عبارتی نساز که گویشور فارسی آن را نامفهوم، بی‌معنا یا غیرطبیعی بداند (مثلاً ترکیب‌های ساختگی مثل «سلامتی‌ام» به‌جای «سلامم» یا «حالم خوبه»). اگر نسبت به درست بودن یک عبارت محاوره‌ای مطمئن نیستی، ساده‌ترین و رایج‌ترین شکل آن را بنویس، نه فرم عجیب یا نویی که مطمئن نیستی واقعاً در فارسی رایج است.
+Ù‚ÙˆØ§Ù†ÛŒÙ† Ù„Ø­Ù†:
+Û±. Ù‡Ù…ÛŒØ´Ù‡ ØªØ§ Ø­Ø¯ Ø§Ù…Ú©Ø§Ù† Ø·Ø¨ÛŒØ¹ÛŒ Ùˆ Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ ØµØ­Ø¨Øª Ú©Ù†Ø› Ù…Ú¯Ø± Ø§ÛŒÙ†Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ØµØ±Ø§Ø­ØªØ§Ù‹ Ù„Ø­Ù† Ø±Ø³Ù…ÛŒ Ø¨Ø®ÙˆØ§Ù‡Ø¯.
+Û². Ù„Ø­Ù† Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ ØªØ´Ø®ÛŒØµ Ø¨Ø¯Ù‡ Ùˆ Ù…ØªÙ†Ø§Ø³Ø¨ Ø¨Ø§ Ø¢Ù† Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡:
+   - Ø§Ú¯Ø± Ø±Ø³Ù…ÛŒ Ø§Ø³ØªØŒ Ù…Ø­ØªØ±Ù…Ø§Ù†Ù‡ Ùˆ Ø­Ø±ÙÙ‡â€ŒØ§ÛŒ Ø¨Ø§Ø´.
+   - Ø§Ú¯Ø± Ø¯ÙˆØ³ØªØ§Ù†Ù‡ Ø§Ø³ØªØŒ ØµÙ…ÛŒÙ…ÛŒ Ùˆ Ø®ÙˆØ¯Ù…Ø§Ù†ÛŒ Ø¨Ø§Ø´.
+   - Ø§Ú¯Ø± Ø´ÙˆØ®ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ø¯Ø± Ø­Ø¯ Ù…Ù†Ø§Ø³Ø¨ Ø¨Ø§ Ø§Ùˆ Ø´ÙˆØ®ÛŒ Ú©Ù†.
+   - Ø§Ú¯Ø± Ù†Ø§Ø±Ø§Ø­Øª ÛŒØ§ Ù†Ú¯Ø±Ø§Ù† Ø§Ø³ØªØŒ Ø¢Ø±Ø§Ù…ØŒ Ù‡Ù…Ø¯Ù„Ø§Ù†Ù‡ Ùˆ Ø¨Ø¯ÙˆÙ† Ø´ÙˆØ®ÛŒ Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡.
+Û³. Ø§Ø² Ø§ØµØ·Ù„Ø§Ø­Ø§Øª Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ ÙØ§Ø±Ø³ÛŒ Ø¨Ù‡ Ø´Ú©Ù„ Ø·Ø¨ÛŒØ¹ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†ØŒ Ø§Ù…Ø§ Ø²ÛŒØ§Ø¯Ù‡â€ŒØ±ÙˆÛŒ Ù†Ú©Ù†.
+Û´. Ø¬Ù…Ù„Ù‡â€ŒÙ‡Ø§ Ø±Ø§ Ø±ÙˆØ§Ù† Ùˆ Ø´Ø¨ÛŒÙ‡ Ú¯ÙØªÚ¯ÙˆÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ø¨Ù†ÙˆÛŒØ³.
+Ûµ. Ù¾Ø§Ø³Ø® Ø±Ø§ Ø¨Ø§ ÙˆØ§Ú©Ù†Ø´ Ù…Ù†Ø§Ø³Ø¨ Ø¨Ù‡ Ø­Ø±Ù Ú©Ø§Ø±Ø¨Ø± Ø´Ø±ÙˆØ¹ Ú©Ù† Ùˆ Ø¨Ø¹Ø¯ Ø³Ø±Ø§Øº Ø§ØµÙ„ Ù…Ø·Ù„Ø¨ Ø¨Ø±Ùˆ.
+Û¶. Ø§Ø² Ø§ÛŒÙ…ÙˆØ¬ÛŒâ€ŒÙ‡Ø§ Ø¨Ù‡ Ø§Ù†Ø¯Ø§Ø²Ù‡ Ùˆ Ù…ØªÙ†Ø§Ø³Ø¨ Ø¨Ø§ ÙØ¶Ø§ÛŒ Ú¯ÙØªÚ¯Ùˆ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù† (Ù…Ø«Ù„Ø§Ù‹ ðŸ˜‚ðŸ˜ŽðŸ”¥)ØŒ Ø§Ù…Ø§ Ø¯Ø± Ù‡Ø± Ø¬Ù…Ù„Ù‡ Ø§ÛŒÙ…ÙˆØ¬ÛŒ Ù†Ú¯Ø°Ø§Ø±. Ù‡Ø±Ú¯Ø² Ø§Ø² Ø§ÛŒÙ…ÙˆØ¬ÛŒ ðŸ¤– Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†.
+Û·. Ø§Ø² Ø´ÙˆØ®ÛŒâ€ŒÙ‡Ø§ÛŒ Ù…ØµÙ†ÙˆØ¹ÛŒØŒ ØªÚ©Ø±Ø§Ø±ÛŒ ÛŒØ§ Ø¨ÛŒØ´â€ŒØ§Ø²Ø­Ø¯ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†.
+Û¸. Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ Ø±Ø§ Ø¨ÛŒâ€ŒØ¯Ù„ÛŒÙ„ Ø·ÙˆÙ„Ø§Ù†ÛŒ Ù†Ú©Ù†. Ø§Ú¯Ø± Ø³Ø¤Ø§Ù„ Ø³Ø§Ø¯Ù‡ Ø§Ø³ØªØŒ Ø¬ÙˆØ§Ø¨ Ø³Ø§Ø¯Ù‡ Ø¨Ø¯Ù‡Ø› Ø§Ú¯Ø± Ù…ÙˆØ¶ÙˆØ¹ Ù¾ÛŒÚ†ÛŒØ¯Ù‡ Ø§Ø³ØªØŒ Ú©Ø§Ù…Ù„ Ùˆ Ù…Ø±Ø­Ù„Ù‡â€ŒØ¨Ù‡â€ŒÙ…Ø±Ø­Ù„Ù‡ ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡.
+Û¹. Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø³Ø¤Ø§Ù„ ÙÙ†ÛŒ Ù¾Ø±Ø³ÛŒØ¯ØŒ Ù‡Ù…Ú†Ù†Ø§Ù† ØµÙ…ÛŒÙ…ÛŒ Ø¨Ù…Ø§Ù† ÙˆÙ„ÛŒ Ø¯Ù‚Øª ÙÙ†ÛŒ Ø±Ø§ ÙØ¯Ø§ÛŒ Ø´ÙˆØ®ÛŒ Ù†Ú©Ù†.
+Û±Û°. Ø§Ø² ØªÚ©Ø±Ø§Ø± Ø¹Ø¨Ø§Ø±Øªâ€ŒÙ‡Ø§ÛŒ Ú©Ù„ÛŒØ´Ù‡â€ŒØ§ÛŒ Ù…Ø«Ù„ Â«Ø­ØªÙ…Ø§Ù‹! Ø¨Ø§ Ú©Ù…Ø§Ù„ Ù…ÛŒÙ„!Â» Ø¯Ø± Ù‡Ù…Ù‡ Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ Ø®ÙˆØ¯Ø¯Ø§Ø±ÛŒ Ú©Ù†.
+Û±Û±. ÙˆØ§Ù†Ù…ÙˆØ¯ Ù†Ú©Ù† Ú©Ù‡ Ø§Ø­Ø³Ø§Ø³Ø§Øª ÛŒØ§ ØªØ¬Ø±Ø¨Ù‡â€ŒÙ‡Ø§ÛŒ Ø§Ù†Ø³Ø§Ù†ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ø¯Ø§Ø±ÛŒ. ØµÙ…ÛŒÙ…ÛŒ Ø¨Ø§Ø´ØŒ Ø§Ù…Ø§ Ø¯Ø±Ø¨Ø§Ø±Ù‡ Ù…Ø§Ù‡ÛŒØª Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ ØµØ§Ø¯Ù‚ Ø¨Ù…Ø§Ù†.
+Û±Û². Ø´Ø®ØµÛŒØªØª Ø¨Ø§ÛŒØ¯ Ø«Ø§Ø¨Øª Ø¨Ø§Ø´Ø¯ØŒ Ø§Ù…Ø§ Ù„Ø­Ù† Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø¨Ø± Ø§Ø³Ø§Ø³ Ù…ÙˆÙ‚Ø¹ÛŒØª ØªØºÛŒÛŒØ± Ú©Ù†Ø¯.
+Û±Û³. Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª Ø¨Ø±Ø§ÛŒ ØµÙ…ÛŒÙ…ÛŒ Ø¨ÙˆØ¯Ù†ØŒ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ù†Ø§Ø¯Ø±Ø³Øª ÛŒØ§ Ø­Ø¯Ø³ Ø¨Ø¯ÙˆÙ† Ù…Ø´Ø®Øµâ€ŒÚ©Ø±Ø¯Ù† Ø¹Ø¯Ù… Ù‚Ø·Ø¹ÛŒØª Ø§Ø±Ø§Ø¦Ù‡ Ù†Ú©Ù†.
+Û±Û´. Ø§Ú¯Ø± Ù¾Ø§Ø³Ø® Ø¯Ù‚ÛŒÙ‚ Ùˆ Ø¬Ø¯ÛŒ Ù„Ø§Ø²Ù… Ø§Ø³ØªØŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ùˆ ÙˆØ§Ø¶Ø­ ØµØ­Ø¨Øª Ú©Ù† Ùˆ Ø´ÙˆØ®ÛŒ Ø±Ø§ Ø¨Ù‡ Ø­Ø¯Ø§Ù‚Ù„ Ø¨Ø±Ø³Ø§Ù†.
+Û±Ûµ. Ù‚Ø¨Ù„ Ø§Ø² Ù†ÙˆØ´ØªÙ† Ù‡Ø± Ø¬Ù…Ù„Ù‡ØŒ Ø§Ø² Ø®ÙˆØ¯Øª Ø¨Ù¾Ø±Ø³ Ø¢ÛŒØ§ Ø§ÛŒÙ† ØªØ±Ú©ÛŒØ¨ Ú©Ù„Ù…Ø§Øª Ø¯Ø± ÙØ§Ø±Ø³ÛŒ Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ø·Ø¨ÛŒØ¹ÛŒ Ù…Ø¹Ù†Ø§ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ ÛŒØ§ Ù†Ù‡. Ù‡Ø±Ú¯Ø² Ú©Ù„Ù…Ù‡ ÛŒØ§ Ø¹Ø¨Ø§Ø±ØªÛŒ Ù†Ø³Ø§Ø² Ú©Ù‡ Ú¯ÙˆÛŒØ´ÙˆØ± ÙØ§Ø±Ø³ÛŒ Ø¢Ù† Ø±Ø§ Ù†Ø§Ù…ÙÙ‡ÙˆÙ…ØŒ Ø¨ÛŒâ€ŒÙ…Ø¹Ù†Ø§ ÛŒØ§ ØºÛŒØ±Ø·Ø¨ÛŒØ¹ÛŒ Ø¨Ø¯Ø§Ù†Ø¯ (Ù…Ø«Ù„Ø§Ù‹ ØªØ±Ú©ÛŒØ¨â€ŒÙ‡Ø§ÛŒ Ø³Ø§Ø®ØªÚ¯ÛŒ Ù…Ø«Ù„ Â«Ø³Ù„Ø§Ù…ØªÛŒâ€ŒØ§Ù…Â» Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Â«Ø³Ù„Ø§Ù…Ù…Â» ÛŒØ§ Â«Ø­Ø§Ù„Ù… Ø®ÙˆØ¨Ù‡Â»). Ø§Ú¯Ø± Ù†Ø³Ø¨Øª Ø¨Ù‡ Ø¯Ø±Ø³Øª Ø¨ÙˆØ¯Ù† ÛŒÚ© Ø¹Ø¨Ø§Ø±Øª Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒØŒ Ø³Ø§Ø¯Ù‡â€ŒØªØ±ÛŒÙ† Ùˆ Ø±Ø§ÛŒØ¬â€ŒØªØ±ÛŒÙ† Ø´Ú©Ù„ Ø¢Ù† Ø±Ø§ Ø¨Ù†ÙˆÛŒØ³ØŒ Ù†Ù‡ ÙØ±Ù… Ø¹Ø¬ÛŒØ¨ ÛŒØ§ Ù†ÙˆÛŒÛŒ Ú©Ù‡ Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¯Ø± ÙØ§Ø±Ø³ÛŒ Ø±Ø§ÛŒØ¬ Ø§Ø³Øª.
 
-اصل مهم:
-اول بفهم کاربر چه حال‌وهوایی دارد و چه نوع پاسخی می‌خواهد؛ سپس همان اطلاعات را با طبیعی‌ترین، روان‌ترین و مناسب‌ترین لحن ممکن ارائه کن.
+Ø§ØµÙ„ Ù…Ù‡Ù…:
+Ø§ÙˆÙ„ Ø¨ÙÙ‡Ù… Ú©Ø§Ø±Ø¨Ø± Ú†Ù‡ Ø­Ø§Ù„â€ŒÙˆÙ‡ÙˆØ§ÛŒÛŒ Ø¯Ø§Ø±Ø¯ Ùˆ Ú†Ù‡ Ù†ÙˆØ¹ Ù¾Ø§Ø³Ø®ÛŒ Ù…ÛŒâ€ŒØ®ÙˆØ§Ù‡Ø¯Ø› Ø³Ù¾Ø³ Ù‡Ù…Ø§Ù† Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø±Ø§ Ø¨Ø§ Ø·Ø¨ÛŒØ¹ÛŒâ€ŒØªØ±ÛŒÙ†ØŒ Ø±ÙˆØ§Ù†â€ŒØªØ±ÛŒÙ† Ùˆ Ù…Ù†Ø§Ø³Ø¨â€ŒØªØ±ÛŒÙ† Ù„Ø­Ù† Ù…Ù…Ú©Ù† Ø§Ø±Ø§Ø¦Ù‡ Ú©Ù†.
 
-اصل مهم دیگر (فهم واقعی منظور، نه واکنش سطحی به یک کلمه):
-همیشه منظور واقعی و کامل جمله‌ی کاربر را در همان گفتگوی فعلی در نظر بگیر، نه فقط یک کلمه‌ی شبیه به چیزی که قبلاً دیده‌ای. اگر جمله‌ی کاربر در بافتِ همین گفتگو معنای مشخصی دارد که با برداشت اول تو (مثلاً بر اساس عادت یا گفتگوهای قبلی) فرق می‌کند، همان معنای واقعی و متنی را در نظر بگیر، نه برداشت نادرست را. اگر واقعاً مطمئن نیستی منظور کاربر چیست، به‌جای حدسِ اشتباه با اطمینان کاذب، یا سؤال کوتاه بپرس یا هر دو برداشت محتمل را کوتاه مطرح کن.
+Ø§ØµÙ„ Ù…Ù‡Ù… Ø¯ÛŒÚ¯Ø± (ÙÙ‡Ù… ÙˆØ§Ù‚Ø¹ÛŒ Ù…Ù†Ø¸ÙˆØ±ØŒ Ù†Ù‡ ÙˆØ§Ú©Ù†Ø´ Ø³Ø·Ø­ÛŒ Ø¨Ù‡ ÛŒÚ© Ú©Ù„Ù…Ù‡):
+Ù‡Ù…ÛŒØ´Ù‡ Ù…Ù†Ø¸ÙˆØ± ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ú©Ø§Ù…Ù„ Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ Ø¯Ø± Ù‡Ù…Ø§Ù† Ú¯ÙØªÚ¯ÙˆÛŒ ÙØ¹Ù„ÛŒ Ø¯Ø± Ù†Ø¸Ø± Ø¨Ú¯ÛŒØ±ØŒ Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ© Ú©Ù„Ù…Ù‡â€ŒÛŒ Ø´Ø¨ÛŒÙ‡ Ø¨Ù‡ Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ø¯ÛŒØ¯Ù‡â€ŒØ§ÛŒ. Ø§Ú¯Ø± Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ø¨Ø§ÙØªÙ Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù…Ø¹Ù†Ø§ÛŒ Ù…Ø´Ø®ØµÛŒ Ø¯Ø§Ø±Ø¯ Ú©Ù‡ Ø¨Ø§ Ø¨Ø±Ø¯Ø§Ø´Øª Ø§ÙˆÙ„ ØªÙˆ (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø± Ø§Ø³Ø§Ø³ Ø¹Ø§Ø¯Øª ÛŒØ§ Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ù‚Ø¨Ù„ÛŒ) ÙØ±Ù‚ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ù‡Ù…Ø§Ù† Ù…Ø¹Ù†Ø§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ù…ØªÙ†ÛŒ Ø±Ø§ Ø¯Ø± Ù†Ø¸Ø± Ø¨Ú¯ÛŒØ±ØŒ Ù†Ù‡ Ø¨Ø±Ø¯Ø§Ø´Øª Ù†Ø§Ø¯Ø±Ø³Øª Ø±Ø§. Ø§Ú¯Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒ Ù…Ù†Ø¸ÙˆØ± Ú©Ø§Ø±Ø¨Ø± Ú†ÛŒØ³ØªØŒ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø­Ø¯Ø³Ù Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨Ø§ Ø§Ø·Ù…ÛŒÙ†Ø§Ù† Ú©Ø§Ø°Ø¨ØŒ ÛŒØ§ Ø³Ø¤Ø§Ù„ Ú©ÙˆØªØ§Ù‡ Ø¨Ù¾Ø±Ø³ ÛŒØ§ Ù‡Ø± Ø¯Ùˆ Ø¨Ø±Ø¯Ø§Ø´Øª Ù…Ø­ØªÙ…Ù„ Ø±Ø§ Ú©ÙˆØªØ§Ù‡ Ù…Ø·Ø±Ø­ Ú©Ù†.
 
-تشخیص اولیه‌ی کاربر (از همون پیام اول):
-- از روی نحوه‌ی نوشتن پیام اول (رسمی/شوخ/خودمانی)، موضوعی که می‌پرسد، و هر خلاصه‌ای که از گفتگوهای اخیر او در ادامه‌ی این پیام سیستم داده شده، لحن و سبک پاسخت را از همان جمله‌ی اول تنظیم کن - منتظر پیام دوم نمان.
-- اگر خلاصه‌ای از چت‌های اخیر کاربر در ادامه آمده، از آن فقط برای تنظیم لحن و شناخت کلی علایق/کارش استفاده کن؛ چیزی از آن را که کاربر در همین گفتگو نگفته، به‌عنوان واقعیت مسلم به او نسبت نده مگر با اطمینان کافی.
+ØªØ´Ø®ÛŒØµ Ø§ÙˆÙ„ÛŒÙ‡â€ŒÛŒ Ú©Ø§Ø±Ø¨Ø± (Ø§Ø² Ù‡Ù…ÙˆÙ† Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„):
+- Ø§Ø² Ø±ÙˆÛŒ Ù†Ø­ÙˆÙ‡â€ŒÛŒ Ù†ÙˆØ´ØªÙ† Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ (Ø±Ø³Ù…ÛŒ/Ø´ÙˆØ®/Ø®ÙˆØ¯Ù…Ø§Ù†ÛŒ)ØŒ Ù…ÙˆØ¶ÙˆØ¹ÛŒ Ú©Ù‡ Ù…ÛŒâ€ŒÙ¾Ø±Ø³Ø¯ØŒ Ùˆ Ù‡Ø± Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ú©Ù‡ Ø§Ø² Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ø§Ø®ÛŒØ± Ø§Ùˆ Ø¯Ø± Ø§Ø¯Ø§Ù…Ù‡â€ŒÛŒ Ø§ÛŒÙ† Ù¾ÛŒØ§Ù… Ø³ÛŒØ³ØªÙ… Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡ØŒ Ù„Ø­Ù† Ùˆ Ø³Ø¨Ú© Ù¾Ø§Ø³Ø®Øª Ø±Ø§ Ø§Ø² Ù‡Ù…Ø§Ù† Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ø§ÙˆÙ„ ØªÙ†Ø¸ÛŒÙ… Ú©Ù† - Ù…Ù†ØªØ¸Ø± Ù¾ÛŒØ§Ù… Ø¯ÙˆÙ… Ù†Ù…Ø§Ù†.
+- Ø§Ú¯Ø± Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ú†Øªâ€ŒÙ‡Ø§ÛŒ Ø§Ø®ÛŒØ± Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ø§Ø¯Ø§Ù…Ù‡ Ø¢Ù…Ø¯Ù‡ØŒ Ø§Ø² Ø¢Ù† ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ØªÙ†Ø¸ÛŒÙ… Ù„Ø­Ù† Ùˆ Ø´Ù†Ø§Ø®Øª Ú©Ù„ÛŒ Ø¹Ù„Ø§ÛŒÙ‚/Ú©Ø§Ø±Ø´ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†Ø› Ú†ÛŒØ²ÛŒ Ø§Ø² Ø¢Ù† Ø±Ø§ Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù†Ú¯ÙØªÙ‡ØŒ Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† ÙˆØ§Ù‚Ø¹ÛŒØª Ù…Ø³Ù„Ù… Ø¨Ù‡ Ø§Ùˆ Ù†Ø³Ø¨Øª Ù†Ø¯Ù‡ Ù…Ú¯Ø± Ø¨Ø§ Ø§Ø·Ù…ÛŒÙ†Ø§Ù† Ú©Ø§ÙÛŒ.
 
-نام کاربر:
-"${userName || 'دوست من'}"
+Ù†Ø§Ù… Ú©Ø§Ø±Ø¨Ø±:
+"${userName || 'Ø¯ÙˆØ³Øª Ù…Ù†'}"
 `;
 
-        // FEATURE (recent-chats summary): اگر خلاصه‌ای از چت‌های اخیر کاربر
-        // از سمت کلاینت رسیده، همینجا اضافه‌ش می‌کنیم تا از همون اولین پیام
-        // مدل بدونه کاربر معمولاً چطور صحبت می‌کنه و به چی علاقه داره.
+        // FEATURE (recent-chats summary): Ø§Ú¯Ø± Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ú†Øªâ€ŒÙ‡Ø§ÛŒ Ø§Ø®ÛŒØ± Ú©Ø§Ø±Ø¨Ø±
+        // Ø§Ø² Ø³Ù…Øª Ú©Ù„Ø§ÛŒÙ†Øª Ø±Ø³ÛŒØ¯Ù‡ØŒ Ù‡Ù…ÛŒÙ†Ø¬Ø§ Ø§Ø¶Ø§ÙÙ‡â€ŒØ´ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… ØªØ§ Ø§Ø² Ù‡Ù…ÙˆÙ† Ø§ÙˆÙ„ÛŒÙ† Ù¾ÛŒØ§Ù…
+        // Ù…Ø¯Ù„ Ø¨Ø¯ÙˆÙ†Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù…Ø¹Ù…ÙˆÙ„Ø§Ù‹ Ú†Ø·ÙˆØ± ØµØ­Ø¨Øª Ù…ÛŒâ€ŒÚ©Ù†Ù‡ Ùˆ Ø¨Ù‡ Ú†ÛŒ Ø¹Ù„Ø§Ù‚Ù‡ Ø¯Ø§Ø±Ù‡.
         if (typeof recentChatsSummary === 'string' && recentChatsSummary.trim()) {
             systemText += `
-خلاصه‌ای از چند گفتگوی اخیر همین کاربر (فقط برای شناخت لحن/زمینه - نه منبع واقعیت مطلق):
+Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ú†Ù†Ø¯ Ú¯ÙØªÚ¯ÙˆÛŒ Ø§Ø®ÛŒØ± Ù‡Ù…ÛŒÙ† Ú©Ø§Ø±Ø¨Ø± (ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø´Ù†Ø§Ø®Øª Ù„Ø­Ù†/Ø²Ù…ÛŒÙ†Ù‡ - Ù†Ù‡ Ù…Ù†Ø¨Ø¹ ÙˆØ§Ù‚Ø¹ÛŒØª Ù…Ø·Ù„Ù‚):
 ${recentChatsSummary.trim()}
 
-هشدار مهم درباره‌ی همین خلاصه:
-این خلاصه مربوط به گفتگوهای دیگر و جداگانه است، نه همین گفتگوی فعلی. اگر آن گفتگوهای قبلی درباره‌ی ویرایش فایل/کد بوده‌اند، این به‌هیچ‌وجه به این معنا نیست که تو الان هم در «حالت ویرایشگر» هستی یا کاربر همین الان هم فایلی برایت فرستاده. نقش، لحن یا فرضیات آن گفتگوهای قبلی را به این گفتگوی تازه سرایت نده. فقط وقتی واقعاً در همین گفتگو فایلی ضمیمه شده باشد (بخش [حالت ویرایش فایل] در همین پیام سیستم)، خودت را در نقش ویرایشگر کد بدان؛ در غیر این صورت یک دستیار گفتگوی عادی هستی.
+Ù‡Ø´Ø¯Ø§Ø± Ù…Ù‡Ù… Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Ù‡Ù…ÛŒÙ† Ø®Ù„Ø§ØµÙ‡:
+Ø§ÛŒÙ† Ø®Ù„Ø§ØµÙ‡ Ù…Ø±Ø¨ÙˆØ· Ø¨Ù‡ Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ø¯ÛŒÚ¯Ø± Ùˆ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ø§Ø³ØªØŒ Ù†Ù‡ Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯ÙˆÛŒ ÙØ¹Ù„ÛŒ. Ø§Ú¯Ø± Ø¢Ù† Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ù‚Ø¨Ù„ÛŒ Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„/Ú©Ø¯ Ø¨ÙˆØ¯Ù‡â€ŒØ§Ù†Ø¯ØŒ Ø§ÛŒÙ† Ø¨Ù‡â€ŒÙ‡ÛŒÚ†â€ŒÙˆØ¬Ù‡ Ø¨Ù‡ Ø§ÛŒÙ† Ù…Ø¹Ù†Ø§ Ù†ÛŒØ³Øª Ú©Ù‡ ØªÙˆ Ø§Ù„Ø§Ù† Ù‡Ù… Ø¯Ø± Â«Ø­Ø§Ù„Øª ÙˆÛŒØ±Ø§ÛŒØ´Ú¯Ø±Â» Ù‡Ø³ØªÛŒ ÛŒØ§ Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ø§Ù„Ø§Ù† Ù‡Ù… ÙØ§ÛŒÙ„ÛŒ Ø¨Ø±Ø§ÛŒØª ÙØ±Ø³ØªØ§Ø¯Ù‡. Ù†Ù‚Ø´ØŒ Ù„Ø­Ù† ÛŒØ§ ÙØ±Ø¶ÛŒØ§Øª Ø¢Ù† Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ù‚Ø¨Ù„ÛŒ Ø±Ø§ Ø¨Ù‡ Ø§ÛŒÙ† Ú¯ÙØªÚ¯ÙˆÛŒ ØªØ§Ø²Ù‡ Ø³Ø±Ø§ÛŒØª Ù†Ø¯Ù‡. ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¯Ø± Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ ÙØ§ÛŒÙ„ÛŒ Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯ (Ø¨Ø®Ø´ [Ø­Ø§Ù„Øª ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„] Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… Ø³ÛŒØ³ØªÙ…)ØŒ Ø®ÙˆØ¯Øª Ø±Ø§ Ø¯Ø± Ù†Ù‚Ø´ ÙˆÛŒØ±Ø§ÛŒØ´Ú¯Ø± Ú©Ø¯ Ø¨Ø¯Ø§Ù†Ø› Ø¯Ø± ØºÛŒØ± Ø§ÛŒÙ† ØµÙˆØ±Øª ÛŒÚ© Ø¯Ø³ØªÛŒØ§Ø± Ú¯ÙØªÚ¯ÙˆÛŒ Ø¹Ø§Ø¯ÛŒ Ù‡Ø³ØªÛŒ.
 `;
         }
 
-        // FEATURE (richer message formatting): قالب‌های اضافی که رابط کاربری
-        // پشتیبانی می‌کند - مدل باید فقط جایی که واقعاً به خوانایی کمک می‌کند
-        // از این‌ها استفاده کند، نه در هر پاسخ.
+        // FEATURE (richer message formatting): Ù‚Ø§Ù„Ø¨â€ŒÙ‡Ø§ÛŒ Ø§Ø¶Ø§ÙÛŒ Ú©Ù‡ Ø±Ø§Ø¨Ø· Ú©Ø§Ø±Ø¨Ø±ÛŒ
+        // Ù¾Ø´ØªÛŒØ¨Ø§Ù†ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ - Ù…Ø¯Ù„ Ø¨Ø§ÛŒØ¯ ÙÙ‚Ø· Ø¬Ø§ÛŒÛŒ Ú©Ù‡ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ø®ÙˆØ§Ù†Ø§ÛŒÛŒ Ú©Ù…Ú© Ù…ÛŒâ€ŒÚ©Ù†Ø¯
+        // Ø§Ø² Ø§ÛŒÙ†â€ŒÙ‡Ø§ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†Ø¯ØŒ Ù†Ù‡ Ø¯Ø± Ù‡Ø± Ù¾Ø§Ø³Ø®.
         systemText += `
-قالب‌بندی پیشرفته‌ی در دسترس (در صورت نیاز واقعی استفاده کن، نه همیشه):
-- ایتالیک: *متن* یا _متن_
-- خط‌خورده: ~~متن~~
-- لینک: [متن لینک](https://...) - فقط لینک واقعی که مطمئنی درست است بگذار، لینک ساختگی نساز.
-- جدول: با نحو استاندارد مارک‌داون (ردیف هدر، سپس ردیف |---|---|، سپس ردیف‌های داده) - فقط وقتی داده‌ی واقعاً جدولی (چند ستون قابل‌مقایسه) داری.
-- لیست تودرتو: با ۲ فاصله برای هر سطح تو رفتگی جلوی - یا 1. بگذار.
-- چیپ/بج برای یک نام یا مفهوم کوتاه مهم: {{entity:نام}} (مثلاً {{entity:OpenAI}}) - فقط برای اسم‌های خاص کوتاه، نه جمله.
+Ù‚Ø§Ù„Ø¨â€ŒØ¨Ù†Ø¯ÛŒ Ù¾ÛŒØ´Ø±ÙØªÙ‡â€ŒÛŒ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ (Ø¯Ø± ØµÙˆØ±Øª Ù†ÛŒØ§Ø² ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†ØŒ Ù†Ù‡ Ù‡Ù…ÛŒØ´Ù‡):
+- Ø§ÛŒØªØ§Ù„ÛŒÚ©: *Ù…ØªÙ†* ÛŒØ§ _Ù…ØªÙ†_
+- Ø®Ø·â€ŒØ®ÙˆØ±Ø¯Ù‡: ~~Ù…ØªÙ†~~
+- Ù„ÛŒÙ†Ú©: [Ù…ØªÙ† Ù„ÛŒÙ†Ú©](https://...) - ÙÙ‚Ø· Ù„ÛŒÙ†Ú© ÙˆØ§Ù‚Ø¹ÛŒ Ú©Ù‡ Ù…Ø·Ù…Ø¦Ù†ÛŒ Ø¯Ø±Ø³Øª Ø§Ø³Øª Ø¨Ú¯Ø°Ø§Ø±ØŒ Ù„ÛŒÙ†Ú© Ø³Ø§Ø®ØªÚ¯ÛŒ Ù†Ø³Ø§Ø².
+- Ø¬Ø¯ÙˆÙ„: Ø¨Ø§ Ù†Ø­Ùˆ Ø§Ø³ØªØ§Ù†Ø¯Ø§Ø±Ø¯ Ù…Ø§Ø±Ú©â€ŒØ¯Ø§ÙˆÙ† (Ø±Ø¯ÛŒÙ Ù‡Ø¯Ø±ØŒ Ø³Ù¾Ø³ Ø±Ø¯ÛŒÙ |---|---|ØŒ Ø³Ù¾Ø³ Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§ÛŒ Ø¯Ø§Ø¯Ù‡) - ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ø¯Ø§Ø¯Ù‡â€ŒÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¬Ø¯ÙˆÙ„ÛŒ (Ú†Ù†Ø¯ Ø³ØªÙˆÙ† Ù‚Ø§Ø¨Ù„â€ŒÙ…Ù‚Ø§ÛŒØ³Ù‡) Ø¯Ø§Ø±ÛŒ.
+- Ù„ÛŒØ³Øª ØªÙˆØ¯Ø±ØªÙˆ: Ø¨Ø§ Û² ÙØ§ØµÙ„Ù‡ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ø³Ø·Ø­ ØªÙˆ Ø±ÙØªÚ¯ÛŒ Ø¬Ù„ÙˆÛŒ - ÛŒØ§ 1. Ø¨Ú¯Ø°Ø§Ø±.
+- Ú†ÛŒÙ¾/Ø¨Ø¬ Ø¨Ø±Ø§ÛŒ ÛŒÚ© Ù†Ø§Ù… ÛŒØ§ Ù…ÙÙ‡ÙˆÙ… Ú©ÙˆØªØ§Ù‡ Ù…Ù‡Ù…: {{entity:Ù†Ø§Ù…}} (Ù…Ø«Ù„Ø§Ù‹ {{entity:OpenAI}}) - ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø§Ø³Ù…â€ŒÙ‡Ø§ÛŒ Ø®Ø§Øµ Ú©ÙˆØªØ§Ù‡ØŒ Ù†Ù‡ Ø¬Ù…Ù„Ù‡.
 `;
 
         systemText += antiSelfQA;
         systemText += dateContext;
         systemText += `
-ابزارها:
-- ابزار web_search را هر وقت واقعاً به اطلاعات به‌روز/زنده نیاز داری صدا بزن (قیمت، اخبار، رویدادها، چیزی که ممکن است بعد از آموزشت تغییر کرده باشد). برای سؤالات عمومی/ثابت (تعریف، مفهوم، تاریخ گذشته) نیازی به سرچ نیست.
-- برای یک سؤال ساده، فقط یک‌بار سرچ کن و با همان نتایج جواب بده. دوباره سرچ کردن (با کوئری متفاوت یا حتی مشابه) فقط وقتی مجاز است که نتیجه‌ی سرچ اول واقعاً ناکافی/نامرتبط بود یا سؤال چند بخش جدا از هم دارد که هرکدام نیاز به سرچ مجزا دارند. سرچ‌های تکراری روی همان موضوع را انجام نده.
-- اگر تصمیم گرفتی هر ابزار را صدا بزنی، مخصوصاً web_search، قبل از Function Call هیچ متن توضیحی، مقدمه یا جمله‌ای تولید نکن؛ Function Call باید اولین خروجی مدل در آن نوبت باشد. بعد از دریافت نتیجه‌ی ابزار، پاسخ نهایی را به‌صورت عادی و streaming تولید کن.
-- ابزار ask_user را فقط برای تغییرات اساسی/غیرقابل‌برگشت یا تصمیم‌هایی با چند راه‌حل متفاوت صدا بزن (مثلاً بازنویسی کامل یک فایل، حذف بخش بزرگ کد). برای کارهای کوچک یا واضح، مستقیم انجام بده و از این ابزار استفاده نکن.
+Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§:
+- Ø§Ø¨Ø²Ø§Ø± web_search Ø±Ø§ Ù‡Ø± ÙˆÙ‚Øª ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø¨Ù‡â€ŒØ±ÙˆØ²/Ø²Ù†Ø¯Ù‡ Ù†ÛŒØ§Ø² Ø¯Ø§Ø±ÛŒ ØµØ¯Ø§ Ø¨Ø²Ù† (Ù‚ÛŒÙ…ØªØŒ Ø§Ø®Ø¨Ø§Ø±ØŒ Ø±ÙˆÛŒØ¯Ø§Ø¯Ù‡Ø§ØŒ Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ù…ÙˆØ²Ø´Øª ØªØºÛŒÛŒØ± Ú©Ø±Ø¯Ù‡ Ø¨Ø§Ø´Ø¯). Ø¨Ø±Ø§ÛŒ Ø³Ø¤Ø§Ù„Ø§Øª Ø¹Ù…ÙˆÙ…ÛŒ/Ø«Ø§Ø¨Øª (ØªØ¹Ø±ÛŒÙØŒ Ù…ÙÙ‡ÙˆÙ…ØŒ ØªØ§Ø±ÛŒØ® Ú¯Ø°Ø´ØªÙ‡) Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ Ø³Ø±Ú† Ù†ÛŒØ³Øª.
+- Ø¨Ø±Ø§ÛŒ ÛŒÚ© Ø³Ø¤Ø§Ù„ Ø³Ø§Ø¯Ù‡ØŒ ÙÙ‚Ø· ÛŒÚ©â€ŒØ¨Ø§Ø± Ø³Ø±Ú† Ú©Ù† Ùˆ Ø¨Ø§ Ù‡Ù…Ø§Ù† Ù†ØªØ§ÛŒØ¬ Ø¬ÙˆØ§Ø¨ Ø¨Ø¯Ù‡. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø³Ø±Ú† Ú©Ø±Ø¯Ù† (Ø¨Ø§ Ú©ÙˆØ¦Ø±ÛŒ Ù…ØªÙØ§ÙˆØª ÛŒØ§ Ø­ØªÛŒ Ù…Ø´Ø§Ø¨Ù‡) ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ù…Ø¬Ø§Ø² Ø§Ø³Øª Ú©Ù‡ Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø³Ø±Ú† Ø§ÙˆÙ„ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù†Ø§Ú©Ø§ÙÛŒ/Ù†Ø§Ù…Ø±ØªØ¨Ø· Ø¨ÙˆØ¯ ÛŒØ§ Ø³Ø¤Ø§Ù„ Ú†Ù†Ø¯ Ø¨Ø®Ø´ Ø¬Ø¯Ø§ Ø§Ø² Ù‡Ù… Ø¯Ø§Ø±Ø¯ Ú©Ù‡ Ù‡Ø±Ú©Ø¯Ø§Ù… Ù†ÛŒØ§Ø² Ø¨Ù‡ Ø³Ø±Ú† Ù…Ø¬Ø²Ø§ Ø¯Ø§Ø±Ù†Ø¯. Ø³Ø±Ú†â€ŒÙ‡Ø§ÛŒ ØªÚ©Ø±Ø§Ø±ÛŒ Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† Ù…ÙˆØ¶ÙˆØ¹ Ø±Ø§ Ø§Ù†Ø¬Ø§Ù… Ù†Ø¯Ù‡.
+- Ø§Ú¯Ø± ØªØµÙ…ÛŒÙ… Ú¯Ø±ÙØªÛŒ Ù‡Ø± Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†ÛŒØŒ Ù…Ø®ØµÙˆØµØ§Ù‹ web_searchØŒ Ù‚Ø¨Ù„ Ø§Ø² Function Call Ù‡ÛŒÚ† Ù…ØªÙ† ØªÙˆØ¶ÛŒØ­ÛŒØŒ Ù…Ù‚Ø¯Ù…Ù‡ ÛŒØ§ Ø¬Ù…Ù„Ù‡â€ŒØ§ÛŒ ØªÙˆÙ„ÛŒØ¯ Ù†Ú©Ù†Ø› Function Call Ø¨Ø§ÛŒØ¯ Ø§ÙˆÙ„ÛŒÙ† Ø®Ø±ÙˆØ¬ÛŒ Ù…Ø¯Ù„ Ø¯Ø± Ø¢Ù† Ù†ÙˆØ¨Øª Ø¨Ø§Ø´Ø¯. Ø¨Ø¹Ø¯ Ø§Ø² Ø¯Ø±ÛŒØ§ÙØª Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø§Ø¨Ø²Ø§Ø±ØŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ù‡â€ŒØµÙˆØ±Øª Ø¹Ø§Ø¯ÛŒ Ùˆ streaming ØªÙˆÙ„ÛŒØ¯ Ú©Ù†.
+- Ø§Ø¨Ø²Ø§Ø± ask_user Ø±Ø§ ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ØªØºÛŒÛŒØ±Ø§Øª Ø§Ø³Ø§Ø³ÛŒ/ØºÛŒØ±Ù‚Ø§Ø¨Ù„â€ŒØ¨Ø±Ú¯Ø´Øª ÛŒØ§ ØªØµÙ…ÛŒÙ…â€ŒÙ‡Ø§ÛŒÛŒ Ø¨Ø§ Ú†Ù†Ø¯ Ø±Ø§Ù‡â€ŒØ­Ù„ Ù…ØªÙØ§ÙˆØª ØµØ¯Ø§ Ø¨Ø²Ù† (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ø§Ù…Ù„ ÛŒÚ© ÙØ§ÛŒÙ„ØŒ Ø­Ø°Ù Ø¨Ø®Ø´ Ø¨Ø²Ø±Ú¯ Ú©Ø¯). Ø¨Ø±Ø§ÛŒ Ú©Ø§Ø±Ù‡Ø§ÛŒ Ú©ÙˆÚ†Ú© ÛŒØ§ ÙˆØ§Ø¶Ø­ØŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ø§Ù†Ø¬Ø§Ù… Ø¨Ø¯Ù‡ Ùˆ Ø§Ø² Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†.
 `;
 
         // FEATURE (persistent file memory): tell the model which files exist
@@ -3867,11 +3866,11 @@ ${recentChatsSummary.trim()}
         // grow for chats that never used this.
         if (archivedFileNames.length > 0) {
             systemText += `
-فایل‌های آرشیوشده در این گفتگو (فقط نام - محتوا با ابزار get_archived_file قابل دریافت است):
+ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¢Ø±Ø´ÛŒÙˆØ´Ø¯Ù‡ Ø¯Ø± Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ (ÙÙ‚Ø· Ù†Ø§Ù… - Ù…Ø­ØªÙˆØ§ Ø¨Ø§ Ø§Ø¨Ø²Ø§Ø± get_archived_file Ù‚Ø§Ø¨Ù„ Ø¯Ø±ÛŒØ§ÙØª Ø§Ø³Øª):
 ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
-فقط وقتی کاربر واقعاً به محتوای یکی از این فایل‌ها نیاز دارد یا ارجاع می‌دهد (نه صرفاً وقتی اسمش را می‌بینی)، ابزار get_archived_file را با نام دقیق فایل صدا بزن.
-مهم: اگر کاربر در همین پیام یک فایل را مستقیماً ضمیمه کرده (چه پیام اول باشد چه Retry)، همیشه از همان نسخه‌ی ضمیمه‌شده (که در بخش فایل‌های فعلی در دسترس توست) استفاده کن، حتی اگر فایلی هم‌نام در آرشیو موجود باشد. get_archived_file را در این حالت صدا نزن؛ این ابزار فقط برای فایل‌هایی است که کاربر به آن‌ها ارجاع می‌دهد بدون این‌که دوباره ضمیمه کرده باشد.
+ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ú©Ø§Ø±Ø¨Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ù…Ø­ØªÙˆØ§ÛŒ ÛŒÚ©ÛŒ Ø§Ø² Ø§ÛŒÙ† ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ Ù†ÛŒØ§Ø² Ø¯Ø§Ø±Ø¯ ÛŒØ§ Ø§Ø±Ø¬Ø§Ø¹ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ (Ù†Ù‡ ØµØ±ÙØ§Ù‹ ÙˆÙ‚ØªÛŒ Ø§Ø³Ù…Ø´ Ø±Ø§ Ù…ÛŒâ€ŒØ¨ÛŒÙ†ÛŒ)ØŒ Ø§Ø¨Ø²Ø§Ø± get_archived_file Ø±Ø§ Ø¨Ø§ Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ ØµØ¯Ø§ Ø¨Ø²Ù†.
+Ù…Ù‡Ù…: Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÛŒÚ© ÙØ§ÛŒÙ„ Ø±Ø§ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ (Ú†Ù‡ Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ Ø¨Ø§Ø´Ø¯ Ú†Ù‡ Retry)ØŒ Ù‡Ù…ÛŒØ´Ù‡ Ø§Ø² Ù‡Ù…Ø§Ù† Ù†Ø³Ø®Ù‡â€ŒÛŒ Ø¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ (Ú©Ù‡ Ø¯Ø± Ø¨Ø®Ø´ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ ØªÙˆØ³Øª) Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†ØŒ Ø­ØªÛŒ Ø§Ú¯Ø± ÙØ§ÛŒÙ„ÛŒ Ù‡Ù…â€ŒÙ†Ø§Ù… Ø¯Ø± Ø¢Ø±Ø´ÛŒÙˆ Ù…ÙˆØ¬ÙˆØ¯ Ø¨Ø§Ø´Ø¯. get_archived_file Ø±Ø§ Ø¯Ø± Ø§ÛŒÙ† Ø­Ø§Ù„Øª ØµØ¯Ø§ Ù†Ø²Ù†Ø› Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒÛŒ Ø§Ø³Øª Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¨Ù‡ Ø¢Ù†â€ŒÙ‡Ø§ Ø§Ø±Ø¬Ø§Ø¹ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.
 `;
         }
 
@@ -3886,50 +3885,50 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 textFiles
                     .map(
                         f =>
-                            `«${f.name || 'file'}»`
+                            `Â«${f.name || 'file'}Â»`
                     )
-                    .join('، ');
+                    .join('ØŒ ');
 
             systemText += `
 
-حالت ویرایش فایل (SEARCH/REPLACE):
+Ø­Ø§Ù„Øª ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ (SEARCH/REPLACE):
 
-- کاربر ${textFiles.length > 1
-                    ? `${textFiles.length} فایل کد/متن (${fileNamesList})`
-                    : `یک فایل کد/متن`
-                } ضمیمه کرده است.
+- Ú©Ø§Ø±Ø¨Ø± ${textFiles.length > 1
+                    ? `${textFiles.length} ÙØ§ÛŒÙ„ Ú©Ø¯/Ù…ØªÙ† (${fileNamesList})`
+                    : `ÛŒÚ© ÙØ§ÛŒÙ„ Ú©Ø¯/Ù…ØªÙ†`
+                } Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ Ø§Ø³Øª.
 
-- محتوای فایل منبع معتبر کد است.
-- اگر کاربر تغییر کد خواست، واقعاً تغییر را روی فایل اعمال کن.
-- ساختارهای موجود را بررسی کن و چیزهای بی‌دلیل اختراع نکن.
-- به جای بازنویسی کل فایل، فقط قطعه(های) لازم را با apply_edit تغییر بده.
+- Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ù…Ù†Ø¨Ø¹ Ù…Ø¹ØªØ¨Ø± Ú©Ø¯ Ø§Ø³Øª.
+- Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± ØªØºÛŒÛŒØ± Ú©Ø¯ Ø®ÙˆØ§Ø³ØªØŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ ØªØºÛŒÛŒØ± Ø±Ø§ Ø±ÙˆÛŒ ÙØ§ÛŒÙ„ Ø§Ø¹Ù…Ø§Ù„ Ú©Ù†.
+- Ø³Ø§Ø®ØªØ§Ø±Ù‡Ø§ÛŒ Ù…ÙˆØ¬ÙˆØ¯ Ø±Ø§ Ø¨Ø±Ø±Ø³ÛŒ Ú©Ù† Ùˆ Ú†ÛŒØ²Ù‡Ø§ÛŒ Ø¨ÛŒâ€ŒØ¯Ù„ÛŒÙ„ Ø§Ø®ØªØ±Ø§Ø¹ Ù†Ú©Ù†.
+- Ø¨Ù‡ Ø¬Ø§ÛŒ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ù„ ÙØ§ÛŒÙ„ØŒ ÙÙ‚Ø· Ù‚Ø·Ø¹Ù‡(Ù‡Ø§ÛŒ) Ù„Ø§Ø²Ù… Ø±Ø§ Ø¨Ø§ apply_edit ØªØºÛŒÛŒØ± Ø¨Ø¯Ù‡.
 
-محتوای کامل هر فایل از قبل در پیام سیستم (بخش [محتوای کامل فایل(های) قابل ویرایش]) به تو داده شده است.
+Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ù‡Ø± ÙØ§ÛŒÙ„ Ø§Ø² Ù‚Ø¨Ù„ Ø¯Ø± Ù¾ÛŒØ§Ù… Ø³ÛŒØ³ØªÙ… (Ø¨Ø®Ø´ [Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„(Ù‡Ø§ÛŒ) Ù‚Ø§Ø¨Ù„ ÙˆÛŒØ±Ø§ÛŒØ´]) Ø¨Ù‡ ØªÙˆ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡ Ø§Ø³Øª.
 
-روند اجباری ویرایش (هر مرحله قبل از بعدی):
-۱. از روی محتوای کامل فایل که داری، بخش دقیقی که باید تغییر کند را پیدا کن - حدس نزن، متن واقعی را از همان محتوا کپی کن.
-۲. apply_edit را با file، search (متن دقیق موجود - چند خط اطراف تغییر برای یکتا بودن) و replace (متن نهایی جدید همان بخش) صدا بزن.
-   - اگر success:true و valid:true برگشت، تغییر اعمال شد.
-   - اگر success:false برگشت (پیدا نشد یا مبهم بود)، از context هایی که در پاسخ خطا برگردانده می‌شود کمک بگیر تا search را دقیق‌تر/یکتاتر کنی، سپس دوباره صدا بزن. هرگز حدس نزن یا محتوا را از حافظه بازسازی نکن - از context واقعی برگشتی استفاده کن.
-   - اگر لازم بود متن دقیق یک بخش را دوباره ببینی (فایل خیلی بزرگ بود یا مطمئن نبودی)، read_file_section را با startLine/endLine صدا بزن.
-۳. اگر چند بخش جدا از هم باید تغییر کنند، apply_edit را یکی‌یکی برای هرکدام صدا بزن.
-۴. بعد از تمام apply_edit های لازم، حتماً verify_file را صدا بزن. اگر valid:false برگشت، بخش مشکل‌دار را با apply_edit دیگری اصلاح و دوباره verify_file را صدا بزن - تا valid:true نگیری اجازه‌ی پاسخ نهایی را نداری.
-۵. بعد از verify_file موفق (valid:true)، به کاربر بگو چه تغییری دادی؛ نیازی به چاپ کد کامل فایل یا هیچ بلاک JSON خاصی در پاسخ نیست - فایل نهایی از روی تغییرات اعمال‌شده به کاربر تحویل داده می‌شود.
+Ø±ÙˆÙ†Ø¯ Ø§Ø¬Ø¨Ø§Ø±ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ (Ù‡Ø± Ù…Ø±Ø­Ù„Ù‡ Ù‚Ø¨Ù„ Ø§Ø² Ø¨Ø¹Ø¯ÛŒ):
+Û±. Ø§Ø² Ø±ÙˆÛŒ Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ú©Ù‡ Ø¯Ø§Ø±ÛŒØŒ Ø¨Ø®Ø´ Ø¯Ù‚ÛŒÙ‚ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ ØªØºÛŒÛŒØ± Ú©Ù†Ø¯ Ø±Ø§ Ù¾ÛŒØ¯Ø§ Ú©Ù† - Ø­Ø¯Ø³ Ù†Ø²Ù†ØŒ Ù…ØªÙ† ÙˆØ§Ù‚Ø¹ÛŒ Ø±Ø§ Ø§Ø² Ù‡Ù…Ø§Ù† Ù…Ø­ØªÙˆØ§ Ú©Ù¾ÛŒ Ú©Ù†.
+Û². apply_edit Ø±Ø§ Ø¨Ø§ fileØŒ search (Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ - Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù ØªØºÛŒÛŒØ± Ø¨Ø±Ø§ÛŒ ÛŒÚ©ØªØ§ Ø¨ÙˆØ¯Ù†) Ùˆ replace (Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ Ø¬Ø¯ÛŒØ¯ Ù‡Ù…Ø§Ù† Ø¨Ø®Ø´) ØµØ¯Ø§ Ø¨Ø²Ù†.
+   - Ø§Ú¯Ø± success:true Ùˆ valid:true Ø¨Ø±Ú¯Ø´ØªØŒ ØªØºÛŒÛŒØ± Ø§Ø¹Ù…Ø§Ù„ Ø´Ø¯.
+   - Ø§Ú¯Ø± success:false Ø¨Ø±Ú¯Ø´Øª (Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ ÛŒØ§ Ù…Ø¨Ù‡Ù… Ø¨ÙˆØ¯)ØŒ Ø§Ø² context Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ø¯Ø± Ù¾Ø§Ø³Ø® Ø®Ø·Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú©Ù…Ú© Ø¨Ú¯ÛŒØ± ØªØ§ search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ±/ÛŒÚ©ØªØ§ØªØ± Ú©Ù†ÛŒØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†. Ù‡Ø±Ú¯Ø² Ø­Ø¯Ø³ Ù†Ø²Ù† ÛŒØ§ Ù…Ø­ØªÙˆØ§ Ø±Ø§ Ø§Ø² Ø­Ø§ÙØ¸Ù‡ Ø¨Ø§Ø²Ø³Ø§Ø²ÛŒ Ù†Ú©Ù† - Ø§Ø² context ÙˆØ§Ù‚Ø¹ÛŒ Ø¨Ø±Ú¯Ø´ØªÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†.
+   - Ø§Ú¯Ø± Ù„Ø§Ø²Ù… Ø¨ÙˆØ¯ Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ ÛŒÚ© Ø¨Ø®Ø´ Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¨Ø¨ÛŒÙ†ÛŒ (ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø¨ÙˆØ¯ ÛŒØ§ Ù…Ø·Ù…Ø¦Ù† Ù†Ø¨ÙˆØ¯ÛŒ)ØŒ read_file_section Ø±Ø§ Ø¨Ø§ startLine/endLine ØµØ¯Ø§ Ø¨Ø²Ù†.
+Û³. Ø§Ú¯Ø± Ú†Ù†Ø¯ Ø¨Ø®Ø´ Ø¬Ø¯Ø§ Ø§Ø² Ù‡Ù… Ø¨Ø§ÛŒØ¯ ØªØºÛŒÛŒØ± Ú©Ù†Ù†Ø¯ØŒ apply_edit Ø±Ø§ ÛŒÚ©ÛŒâ€ŒÛŒÚ©ÛŒ Ø¨Ø±Ø§ÛŒ Ù‡Ø±Ú©Ø¯Ø§Ù… ØµØ¯Ø§ Ø¨Ø²Ù†.
+Û´. Ø¨Ø¹Ø¯ Ø§Ø² ØªÙ…Ø§Ù… apply_edit Ù‡Ø§ÛŒ Ù„Ø§Ø²Ù…ØŒ Ø­ØªÙ…Ø§Ù‹ verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. Ø§Ú¯Ø± valid:false Ø¨Ø±Ú¯Ø´ØªØŒ Ø¨Ø®Ø´ Ù…Ø´Ú©Ù„â€ŒØ¯Ø§Ø± Ø±Ø§ Ø¨Ø§ apply_edit Ø¯ÛŒÚ¯Ø±ÛŒ Ø§ØµÙ„Ø§Ø­ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù† - ØªØ§ valid:true Ù†Ú¯ÛŒØ±ÛŒ Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ù†Ø¯Ø§Ø±ÛŒ.
+Ûµ. Ø¨Ø¹Ø¯ Ø§Ø² verify_file Ù…ÙˆÙÙ‚ (valid:true)ØŒ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¨Ú¯Ùˆ Ú†Ù‡ ØªØºÛŒÛŒØ±ÛŒ Ø¯Ø§Ø¯ÛŒØ› Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ Ú†Ø§Ù¾ Ú©Ø¯ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ ÛŒØ§ Ù‡ÛŒÚ† Ø¨Ù„Ø§Ú© JSON Ø®Ø§ØµÛŒ Ø¯Ø± Ù¾Ø§Ø³Ø® Ù†ÛŒØ³Øª - ÙØ§ÛŒÙ„ Ù†Ù‡Ø§ÛŒÛŒ Ø§Ø² Ø±ÙˆÛŒ ØªØºÛŒÛŒØ±Ø§Øª Ø§Ø¹Ù…Ø§Ù„â€ŒØ´Ø¯Ù‡ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªØ­ÙˆÛŒÙ„ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
 
-خارج از این روند، کد کامل فایل را دوباره چاپ نکن.
+Ø®Ø§Ø±Ø¬ Ø§Ø² Ø§ÛŒÙ† Ø±ÙˆÙ†Ø¯ØŒ Ú©Ø¯ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ú†Ø§Ù¾ Ù†Ú©Ù†.
 
-قوانین حیاتی درباره‌ی ادعای موفقیت (بسیار مهم - نقض این قوانین یعنی کاربر هیچ فایلی دریافت نمی‌کند):
-- هرگز جمله‌هایی مثل «با موفقیت ذخیره/ویرایش/اعمال شد» یا مشابه آن ننویس مگر اینکه واقعاً apply_edit را صدا زده باشی (و success:true گرفته باشی) و سپس verify_file را صدا زده باشی و valid:true گرفته باشی. اگر این دو ابزار صدا زده نشده یا شکست خورده‌اند، هرگز ادعای موفقیت نکن - فقط بگو که هنوز موفق نشده‌ای.
-- تغییر کد را هرگز به‌صورت یک بلوک کد جدا (مثلاً \`\`\`html ... \`\`\` یا \`\`\`css ... \`\`\`) در متن پاسخ ننویس یا نشان نده، حتی اگر بخواهی فقط توضیح بدهی چه چیزی عوض شده - این کار توسط رابط کاربری به‌عنوان یک فایل جدید و جداگانه (نه ویرایش فایل موجود) نمایش داده می‌شود، هیچ دکمه‌ی دانلود واقعی ندارد، و کاربر را گیج می‌کند چون فکر می‌کند این همان فایل ویرایش‌شده است در حالی که نیست. اگر می‌خواهی تغییر را توضیح دهی، فقط در قالب متن عادی (بدون \`\`\`) توضیح بده؛ تغییر واقعی فقط و فقط از طریق apply_edit + verify_file اعمال می‌شود.
-- اگر apply_edit یا verify_file شکست خوردند و نتوانستی با تلاش مجدد درستشان کنی، صادقانه بگو که ویرایش انجام نشد و چرا - هرگز وانمود نکن که انجام شده، و هرگز به‌جای انجام واقعی ویرایش، فقط فایل را در پاسخ متنی بازنویسی نکن.
+Ù‚ÙˆØ§Ù†ÛŒÙ† Ø­ÛŒØ§ØªÛŒ Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Ø§Ø¯Ø¹Ø§ÛŒ Ù…ÙˆÙÙ‚ÛŒØª (Ø¨Ø³ÛŒØ§Ø± Ù…Ù‡Ù… - Ù†Ù‚Ø¶ Ø§ÛŒÙ† Ù‚ÙˆØ§Ù†ÛŒÙ† ÛŒØ¹Ù†ÛŒ Ú©Ø§Ø±Ø¨Ø± Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯):
+- Ù‡Ø±Ú¯Ø² Ø¬Ù…Ù„Ù‡â€ŒÙ‡Ø§ÛŒÛŒ Ù…Ø«Ù„ Â«Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø°Ø®ÛŒØ±Ù‡/ÙˆÛŒØ±Ø§ÛŒØ´/Ø§Ø¹Ù…Ø§Ù„ Ø´Ø¯Â» ÛŒØ§ Ù…Ø´Ø§Ø¨Ù‡ Ø¢Ù† Ù†Ù†ÙˆÛŒØ³ Ù…Ú¯Ø± Ø§ÛŒÙ†Ú©Ù‡ ÙˆØ§Ù‚Ø¹Ø§Ù‹ apply_edit Ø±Ø§ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø¨Ø§Ø´ÛŒ (Ùˆ success:true Ú¯Ø±ÙØªÙ‡ Ø¨Ø§Ø´ÛŒ) Ùˆ Ø³Ù¾Ø³ verify_file Ø±Ø§ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø¨Ø§Ø´ÛŒ Ùˆ valid:true Ú¯Ø±ÙØªÙ‡ Ø¨Ø§Ø´ÛŒ. Ø§Ú¯Ø± Ø§ÛŒÙ† Ø¯Ùˆ Ø§Ø¨Ø²Ø§Ø± ØµØ¯Ø§ Ø²Ø¯Ù‡ Ù†Ø´Ø¯Ù‡ ÛŒØ§ Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯Ù‡â€ŒØ§Ù†Ø¯ØŒ Ù‡Ø±Ú¯Ø² Ø§Ø¯Ø¹Ø§ÛŒ Ù…ÙˆÙÙ‚ÛŒØª Ù†Ú©Ù† - ÙÙ‚Ø· Ø¨Ú¯Ùˆ Ú©Ù‡ Ù‡Ù†ÙˆØ² Ù…ÙˆÙÙ‚ Ù†Ø´Ø¯Ù‡â€ŒØ§ÛŒ.
+- ØªØºÛŒÛŒØ± Ú©Ø¯ Ø±Ø§ Ù‡Ø±Ú¯Ø² Ø¨Ù‡â€ŒØµÙˆØ±Øª ÛŒÚ© Ø¨Ù„ÙˆÚ© Ú©Ø¯ Ø¬Ø¯Ø§ (Ù…Ø«Ù„Ø§Ù‹ \`\`\`html ... \`\`\` ÛŒØ§ \`\`\`css ... \`\`\`) Ø¯Ø± Ù…ØªÙ† Ù¾Ø§Ø³Ø® Ù†Ù†ÙˆÛŒØ³ ÛŒØ§ Ù†Ø´Ø§Ù† Ù†Ø¯Ù‡ØŒ Ø­ØªÛŒ Ø§Ú¯Ø± Ø¨Ø®ÙˆØ§Ù‡ÛŒ ÙÙ‚Ø· ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡ÛŒ Ú†Ù‡ Ú†ÛŒØ²ÛŒ Ø¹ÙˆØ¶ Ø´Ø¯Ù‡ - Ø§ÛŒÙ† Ú©Ø§Ø± ØªÙˆØ³Ø· Ø±Ø§Ø¨Ø· Ú©Ø§Ø±Ø¨Ø±ÛŒ Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† ÛŒÚ© ÙØ§ÛŒÙ„ Ø¬Ø¯ÛŒØ¯ Ùˆ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ (Ù†Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ Ù…ÙˆØ¬ÙˆØ¯) Ù†Ù…Ø§ÛŒØ´ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ù‡ÛŒÚ† Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙˆØ§Ù‚Ø¹ÛŒ Ù†Ø¯Ø§Ø±Ø¯ØŒ Ùˆ Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ Ú¯ÛŒØ¬ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ú†ÙˆÙ† ÙÚ©Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ø§ÛŒÙ† Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡ Ø§Ø³Øª Ø¯Ø± Ø­Ø§Ù„ÛŒ Ú©Ù‡ Ù†ÛŒØ³Øª. Ø§Ú¯Ø± Ù…ÛŒâ€ŒØ®ÙˆØ§Ù‡ÛŒ ØªØºÛŒÛŒØ± Ø±Ø§ ØªÙˆØ¶ÛŒØ­ Ø¯Ù‡ÛŒØŒ ÙÙ‚Ø· Ø¯Ø± Ù‚Ø§Ù„Ø¨ Ù…ØªÙ† Ø¹Ø§Ø¯ÛŒ (Ø¨Ø¯ÙˆÙ† \`\`\`) ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡Ø› ØªØºÛŒÛŒØ± ÙˆØ§Ù‚Ø¹ÛŒ ÙÙ‚Ø· Ùˆ ÙÙ‚Ø· Ø§Ø² Ø·Ø±ÛŒÙ‚ apply_edit + verify_file Ø§Ø¹Ù…Ø§Ù„ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+- Ø§Ú¯Ø± apply_edit ÛŒØ§ verify_file Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯Ù†Ø¯ Ùˆ Ù†ØªÙˆØ§Ù†Ø³ØªÛŒ Ø¨Ø§ ØªÙ„Ø§Ø´ Ù…Ø¬Ø¯Ø¯ Ø¯Ø±Ø³ØªØ´Ø§Ù† Ú©Ù†ÛŒØŒ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ø¨Ú¯Ùˆ Ú©Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ù†Ø´Ø¯ Ùˆ Ú†Ø±Ø§ - Ù‡Ø±Ú¯Ø² ÙˆØ§Ù†Ù…ÙˆØ¯ Ù†Ú©Ù† Ú©Ù‡ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ØŒ Ùˆ Ù‡Ø±Ú¯Ø² Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù… ÙˆØ§Ù‚Ø¹ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ØŒ ÙÙ‚Ø· ÙØ§ÛŒÙ„ Ø±Ø§ Ø¯Ø± Ù¾Ø§Ø³Ø® Ù…ØªÙ†ÛŒ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù†Ú©Ù†.
 `;
         }
 
         if (oversizedTextFiles.length > 0) {
-            const droppedNames = oversizedTextFiles.map(f => `«${f.name || 'file'}»`).join('، ');
+            const droppedNames = oversizedTextFiles.map(f => `Â«${f.name || 'file'}Â»`).join('ØŒ ');
             systemText += `
 
-توجه: فایل(های) ${droppedNames} به‌دلیل حجم زیاد (بیش از حد مجاز) پردازش نشدند و در اختیار تو نیستند. اگر کاربر درباره‌ی این فایل سؤال کرد، صادقانه بگو که فایل به‌خاطر حجم زیاد دریافت نشده و باید نسخه‌ی کوچک‌تری بفرستد.
+ØªÙˆØ¬Ù‡: ÙØ§ÛŒÙ„(Ù‡Ø§ÛŒ) ${droppedNames} Ø¨Ù‡â€ŒØ¯Ù„ÛŒÙ„ Ø­Ø¬Ù… Ø²ÛŒØ§Ø¯ (Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ù…Ø¬Ø§Ø²) Ù¾Ø±Ø¯Ø§Ø²Ø´ Ù†Ø´Ø¯Ù†Ø¯ Ùˆ Ø¯Ø± Ø§Ø®ØªÛŒØ§Ø± ØªÙˆ Ù†ÛŒØ³ØªÙ†Ø¯. Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø³Ø¤Ø§Ù„ Ú©Ø±Ø¯ØŒ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ø¨Ú¯Ùˆ Ú©Ù‡ ÙØ§ÛŒÙ„ Ø¨Ù‡â€ŒØ®Ø§Ø·Ø± Ø­Ø¬Ù… Ø²ÛŒØ§Ø¯ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯Ù‡ Ùˆ Ø¨Ø§ÛŒØ¯ Ù†Ø³Ø®Ù‡â€ŒÛŒ Ú©ÙˆÚ†Ú©â€ŒØªØ±ÛŒ Ø¨ÙØ±Ø³ØªØ¯.
 `;
         }
 
@@ -3997,8 +3996,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
             // FIX: 60s was a hard ceiling on the *whole* streaming attempt
             // (checked only between model/key retries, not during an
-            // in-progress stream). For heavy replies — long code files,
-            // multi-file edits — Gemini can legitimately take longer than
+            // in-progress stream). For heavy replies â€” long code files,
+            // multi-file edits â€” Gemini can legitimately take longer than
             // that just to finish one stream, and this file already has no
             // per-chunk timeout, so raising the deadline doesn't reduce
             // safety, it just stops penalizing large-but-healthy streams.
@@ -4038,7 +4037,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                 // Previously `rotateKeysByHealth` was defined but never
                 // called here, so a bad/rate-limited key at index 0 would
                 // eat a full 6s timeout on *every single request* before
-                // falling through to a healthy key — this was the other
+                // falling through to a healthy key â€” this was the other
                 // big contributor to multi-second delays on non-lite
                 // models (which, unlike flash-lite, have >1 key attempt
                 // in the common case). Sorting first means a key that
@@ -4065,7 +4064,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     attemptsTried++;
 
                     // Declared OUTSIDE the try so it's always defined by the
-                    // time the catch block below runs — this was previously
+                    // time the catch block below runs â€” this was previously
                     // declared inside try{}, which is normally fine (same
                     // block scope as its catch), but a stale/partial deploy
                     // once left a version where the two were out of sync and
@@ -4127,7 +4126,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         // token-by-token streaming of the final answer for
                         // real tool use - the reply still appears to the
                         // user as one flush (not the old incremental
-                        // typing), but with live "در حال انجام..." steps
+                        // typing), but with live "Ø¯Ø± Ø­Ø§Ù„ Ø§Ù†Ø¬Ø§Ù…..." steps
                         // along the way to fill that gap.
                         let searchWasPerformed = false;
                         const requestSearchIntent = looksLikeWebSearchIntent(searchQueryBase || text);
@@ -4135,7 +4134,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         // FIX (heavy code UX): code blocks now stream live,
                         // chunk-by-chunk, exactly like normal prose - no more
                         // buffering the whole fenced block and flushing it in
-                        // one piece, and no more fake "در حال نوشتن کد..."
+                        // one piece, and no more fake "Ø¯Ø± Ø­Ø§Ù„ Ù†ÙˆØ´ØªÙ† Ú©Ø¯..."
                         // step event standing in for it (that event used to
                         // fire on ANY ``` fence, including ones that weren't
                         // real code, which made it misleading). We still keep
@@ -4179,7 +4178,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                                     seenTail = (seenTail + chunk).slice(-32);
                                     if (seenTail.includes('```file-edit')) {
                                         fileEditStepSent = true;
-                                        res.write(`data: ${JSON.stringify({ step: 'در حال اعمال تغییرات روی فایل...' })}\n\n`);
+                                        res.write(`data: ${JSON.stringify({ step: 'Ø¯Ø± Ø­Ø§Ù„ Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ±Ø§Øª Ø±ÙˆÛŒ ÙØ§ÛŒÙ„...' })}\n\n`);
                                         if (typeof res.flush === 'function') res.flush();
                                     }
                                 }
@@ -4220,11 +4219,10 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
                         clearTimeout(deadlineTimer);
                         markKeyResult(currentKey, true);
-                        log.info('agent.completed', {
+                        log.info('model.connected', {
                             mode: 'stream',
                             model: currentModel,
-                            durationMs: Date.now() - attemptStartedAt,
-                            rounds: Array.isArray(agentResult.roundTrace) ? agentResult.roundTrace.length : undefined
+                            connectMs: Date.now() - attemptStartedAt
                         });
 
                         try {
@@ -4255,13 +4253,13 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         const truncated =
                             agentResult.finishReason === 'MAX_TOKENS';
 
-                        // DIAGNOSTICS: وقتی حلقه به سقف MAX_TOOL_ROUNDS
-                        // می‌رسد (finishReason === 'TOOL_LOOP_LIMIT')، این
-                        // مسیر throw نمی‌کند - یک finalText عمومی برمی‌گرداند
-                        // و به همین شکل به کاربر می‌رسد، بدون توضیح واقعی.
-                        // agentResult.diagnostics را همینجا هم به لاگ سرور و
-                        // هم (تحت "جزئیات بیشتر" مشابه مسیر خطا) به کلاینت
-                        // می‌فرستیم تا این حالت هم دیگر کورکورانه نباشد.
+                        // DIAGNOSTICS: ÙˆÙ‚ØªÛŒ Ø­Ù„Ù‚Ù‡ Ø¨Ù‡ Ø³Ù‚Ù MAX_TOOL_ROUNDS
+                        // Ù…ÛŒâ€ŒØ±Ø³Ø¯ (finishReason === 'TOOL_LOOP_LIMIT')ØŒ Ø§ÛŒÙ†
+                        // Ù…Ø³ÛŒØ± throw Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯ - ÛŒÚ© finalText Ø¹Ù…ÙˆÙ…ÛŒ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯
+                        // Ùˆ Ø¨Ù‡ Ù‡Ù…ÛŒÙ† Ø´Ú©Ù„ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù…ÛŒâ€ŒØ±Ø³Ø¯ØŒ Ø¨Ø¯ÙˆÙ† ØªÙˆØ¶ÛŒØ­ ÙˆØ§Ù‚Ø¹ÛŒ.
+                        // agentResult.diagnostics Ø±Ø§ Ù‡Ù…ÛŒÙ†Ø¬Ø§ Ù‡Ù… Ø¨Ù‡ Ù„Ø§Ú¯ Ø³Ø±ÙˆØ± Ùˆ
+                        // Ù‡Ù… (ØªØ­Øª "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ù…Ø´Ø§Ø¨Ù‡ Ù…Ø³ÛŒØ± Ø®Ø·Ø§) Ø¨Ù‡ Ú©Ù„Ø§ÛŒÙ†Øª
+                        // Ù…ÛŒâ€ŒÙØ±Ø³ØªÛŒÙ… ØªØ§ Ø§ÛŒÙ† Ø­Ø§Ù„Øª Ù‡Ù… Ø¯ÛŒÚ¯Ø± Ú©ÙˆØ±Ú©ÙˆØ±Ø§Ù†Ù‡ Ù†Ø¨Ø§Ø´Ø¯.
                         if (agentResult.diagnostics) {
                             log.warn('agent.tool_loop_limit_surfaced', {
                                 model: currentModel,
@@ -4361,8 +4359,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             // hit faster when web_search is on since each turn costs 2+
             // Gemini calls instead of 1) from anything else (auth,
             // permission, model-not-found, etc). Both live only in the
-            // "detail" field the client already renders behind "جزئیات
-            // بیشتر", so no UI changes are needed to see them.
+            // "detail" field the client already renders behind "Ø¬Ø²Ø¦ÛŒØ§Øª
+            // Ø¨ÛŒØ´ØªØ±", so no UI changes are needed to see them.
             const classification = lastError?._classification || classifyGeminiError(lastError);
             const geminiStatusCode = classification.status;
             const geminiReasonMessage = classification.rawMessage || 'unknown';
@@ -4383,19 +4381,19 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             // it was ALL keys, not just the last one tried.
             const allKeysExhaustedMessage =
                 (classification.category === 'quota_exhausted' || classification.category === 'rate_limit') && classification.keySpecific
-                    ? `همهٔ ${geminiKeys.length} کلید تنظیم‌شده در سهمیه/محدودیت نرخ گیر کردند؛ لطفاً کمی بعد دوباره تلاش کن.`
+                    ? `Ù‡Ù…Ù‡Ù” ${geminiKeys.length} Ú©Ù„ÛŒØ¯ ØªÙ†Ø¸ÛŒÙ…â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ø³Ù‡Ù…ÛŒÙ‡/Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ù†Ø±Ø® Ú¯ÛŒØ± Ú©Ø±Ø¯Ù†Ø¯Ø› Ù„Ø·ÙØ§Ù‹ Ú©Ù…ÛŒ Ø¨Ø¹Ø¯ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†.`
                     : classification.message;
 
-            // DIAGNOSTICS: اگر خطا از نوع "سکوت بعد از ابزار" یا "سقف
-            // مراحل" بود، lastError.diagnostics.humanSummary را داریم (چون
-            // runAgentLoop آن را در err.body گذاشته و لاین بالا کل err.body
-            // را روی lastError پخش می‌کند). آن را به detail اضافه می‌کنیم
-            // تا بدون هیچ تغییر فرانت‌اندی، زیر "جزئیات بیشتر" دیده شود.
+            // DIAGNOSTICS: Ø§Ú¯Ø± Ø®Ø·Ø§ Ø§Ø² Ù†ÙˆØ¹ "Ø³Ú©ÙˆØª Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø¨Ø²Ø§Ø±" ÛŒØ§ "Ø³Ù‚Ù
+            // Ù…Ø±Ø§Ø­Ù„" Ø¨ÙˆØ¯ØŒ lastError.diagnostics.humanSummary Ø±Ø§ Ø¯Ø§Ø±ÛŒÙ… (Ú†ÙˆÙ†
+            // runAgentLoop Ø¢Ù† Ø±Ø§ Ø¯Ø± err.body Ú¯Ø°Ø§Ø´ØªÙ‡ Ùˆ Ù„Ø§ÛŒÙ† Ø¨Ø§Ù„Ø§ Ú©Ù„ err.body
+            // Ø±Ø§ Ø±ÙˆÛŒ lastError Ù¾Ø®Ø´ Ù…ÛŒâ€ŒÚ©Ù†Ø¯). Ø¢Ù† Ø±Ø§ Ø¨Ù‡ detail Ø§Ø¶Ø§ÙÙ‡ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…
+            // ØªØ§ Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† ØªØºÛŒÛŒØ± ÙØ±Ø§Ù†Øªâ€ŒØ§Ù†Ø¯ÛŒØŒ Ø²ÛŒØ± "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ø¯ÛŒØ¯Ù‡ Ø´ÙˆØ¯.
             const diagnosticsSummary = lastError?.diagnostics?.humanSummary || null;
             const detailText =
                 `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${geminiReasonMessage}` +
                 ` (actual attempts: ${attemptsTried})` +
-                (diagnosticsSummary ? `\n\n--- ردِ اجرای مدل ---\n${diagnosticsSummary}` : '');
+                (diagnosticsSummary ? `\n\n--- Ø±Ø¯Ù Ø§Ø¬Ø±Ø§ÛŒ Ù…Ø¯Ù„ ---\n${diagnosticsSummary}` : '');
 
             res.write(
                 `data: ${JSON.stringify({
@@ -4428,8 +4426,8 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         // streaming path above was already raised to 180s. A video
         // attachment routed through the non-stream path (or a slow non-video
         // reply that needed a second model/key retry) could get cut off here
-        // well before Gemini finished, producing the exact "پاسخ بیش از حد
-        // طول کشید" timeout being reported. Matching it to the same 180s
+        // well before Gemini finished, producing the exact "Ù¾Ø§Ø³Ø® Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯
+        // Ø·ÙˆÙ„ Ú©Ø´ÛŒØ¯" timeout being reported. Matching it to the same 180s
         // (and further via hasVideoAttachment inside runAgentLoop's own
         // per-round timeout) keeps both code paths consistent.
         // FIX (false "all keys exhausted" after just 1-2 tries): same
@@ -4439,7 +4437,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
         let lastError = null;
         // FIX 3 (block-based rewrite): see the matching comment in the
-        // other attempt loop above and inside runAgentLoop — keeps block
+        // other attempt loop above and inside runAgentLoop â€” keeps block
         // read/edit/verify progress alive across retryable key/model
         // retries within this one HTTP request.
         const sharedRequestState = {
@@ -4540,9 +4538,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             }
                         ],
                         usageMetadata: agentResult.usage || undefined,
-                        // DIAGNOSTICS: فقط وقتی finishReason غیرعادی است
-                        // (سقف مراحل و مشابه آن) پر می‌شود؛ روی پاسخ‌های
-                        // معمولی چیزی اضافه نمی‌کند.
+                        // DIAGNOSTICS: ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ finishReason ØºÛŒØ±Ø¹Ø§Ø¯ÛŒ Ø§Ø³Øª
+                        // (Ø³Ù‚Ù Ù…Ø±Ø§Ø­Ù„ Ùˆ Ù…Ø´Ø§Ø¨Ù‡ Ø¢Ù†) Ù¾Ø± Ù…ÛŒâ€ŒØ´ÙˆØ¯Ø› Ø±ÙˆÛŒ Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ÛŒ
+                        // Ù…Ø¹Ù…ÙˆÙ„ÛŒ Ú†ÛŒØ²ÛŒ Ø§Ø¶Ø§ÙÙ‡ Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
                         ...(agentResult.diagnostics ? { diagnostics: agentResult.diagnostics } : {}),
                         ...(agentResult.editedFiles?.length ? { editedFiles: agentResult.editedFiles } : {}),
                         ...(agentResult.unresolvedEditFailure ? { unresolvedEditFailure: agentResult.unresolvedEditFailure } : {})
@@ -4596,17 +4594,17 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         // combo has already been tried and failed.
         const allKeysExhaustedMessageNonStream =
             (classification.category === 'quota_exhausted' || classification.category === 'rate_limit') && classification.keySpecific
-                ? `همهٔ ${geminiKeys.length} کلید تنظیم‌شده در سهمیه/محدودیت نرخ گیر کردند؛ لطفاً کمی بعد دوباره تلاش کن.`
+                ? `Ù‡Ù…Ù‡Ù” ${geminiKeys.length} Ú©Ù„ÛŒØ¯ ØªÙ†Ø¸ÛŒÙ…â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ø³Ù‡Ù…ÛŒÙ‡/Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ù†Ø±Ø® Ú¯ÛŒØ± Ú©Ø±Ø¯Ù†Ø¯Ø› Ù„Ø·ÙØ§Ù‹ Ú©Ù…ÛŒ Ø¨Ø¹Ø¯ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†.`
                 : classification.message;
 
-        // DIAGNOSTICS: همان الگوی مسیر streaming - اگر runAgentLoop یک
-        // diagnostics روی err.body گذاشته بود (empty_after_tool_call یا
-        // tool_loop_limit)، اینجا هم به detail و هم به فیلد جدا اضافه‌اش کن.
+        // DIAGNOSTICS: Ù‡Ù…Ø§Ù† Ø§Ù„Ú¯ÙˆÛŒ Ù…Ø³ÛŒØ± streaming - Ø§Ú¯Ø± runAgentLoop ÛŒÚ©
+        // diagnostics Ø±ÙˆÛŒ err.body Ú¯Ø°Ø§Ø´ØªÙ‡ Ø¨ÙˆØ¯ (empty_after_tool_call ÛŒØ§
+        // tool_loop_limit)ØŒ Ø§ÛŒÙ†Ø¬Ø§ Ù‡Ù… Ø¨Ù‡ detail Ùˆ Ù‡Ù… Ø¨Ù‡ ÙÛŒÙ„Ø¯ Ø¬Ø¯Ø§ Ø§Ø¶Ø§ÙÙ‡â€ŒØ§Ø´ Ú©Ù†.
         const diagnosticsSummaryNonStream = lastError?.diagnostics?.humanSummary || null;
         const detailTextNonStream =
             `Gemini${classification.status ? ' [' + classification.status + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${classification.rawMessage || 'unknown'}` +
             ` (actual attempts: ${attemptsTried})` +
-            (diagnosticsSummaryNonStream ? `\n\n--- ردِ اجرای مدل ---\n${diagnosticsSummaryNonStream}` : '');
+            (diagnosticsSummaryNonStream ? `\n\n--- Ø±Ø¯Ù Ø§Ø¬Ø±Ø§ÛŒ Ù…Ø¯Ù„ ---\n${diagnosticsSummaryNonStream}` : '');
 
         return res.status(classification.category === 'empty_response' ? 502 : (classification.status && classification.status >= 400 && classification.status < 600 ? classification.status : 500)).json({
             error: {
@@ -4631,7 +4629,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         // res.write()/res.setHeader() as soon as it starts sending SSE
         // chunks. If something throws AFTER that point (e.g. a late error
         // while reading the upstream stream), execution falls through to
-        // here — and calling res.status(...).json(...) on a response whose
+        // here â€” and calling res.status(...).json(...) on a response whose
         // headers are already sent crashes with ERR_HTTP_HEADERS_SENT,
         // which is exactly what killed the reply instead of just failing
         // gracefully. We now check res.headersSent first: if the response
@@ -4645,7 +4643,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     res.write(
                         `data: ${JSON.stringify({
                             error: {
-                                message: 'خطای داخلی سرور در میانه‌ی پاسخ. لطفاً دوباره امتحان کن.',
+                                message: 'Ø®Ø·Ø§ÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø³Ø±ÙˆØ± Ø¯Ø± Ù…ÛŒØ§Ù†Ù‡â€ŒÛŒ Ù¾Ø§Ø³Ø®. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
                                 type: 'internal_error',
                                 category: 'handler_mid_stream',
                                 stage: 'handler_mid_stream',
@@ -4656,7 +4654,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
                 }
             } catch (_) {
-                // Stream may already be broken/closed — nothing more we can do.
+                // Stream may already be broken/closed â€” nothing more we can do.
             }
             if (!res.writableEnded) {
                 try { res.end(); } catch (_) {}
@@ -4666,7 +4664,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
         return res.status(500).json({
             error: {
-                message: 'خطای داخلی سرور. لطفاً دوباره امتحان کن.',
+                message: 'Ø®Ø·Ø§ÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø³Ø±ÙˆØ±. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
                 type: 'internal_error',
                 category: 'handler',
                 stage: 'handler',
