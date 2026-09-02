@@ -90,10 +90,11 @@ function classifyGeminiError(error) {
     const normalized = `${providerCode || ''} ${rawMessage}`.toLowerCase();
 
     if (error?.type === 'empty_after_tool_call') {
+        const isFirstRound = error?.round === 0;
         return {
             category: 'empty_response',
-            retryable: false,
-            keySpecific: false,
+            retryable: isFirstRound,
+            keySpecific: isFirstRound,
             message: 'Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø¬Ø±Ø§ÛŒ Ø§Ø¨Ø²Ø§Ø± Ù¾Ø§Ø³Ø® Ù‚Ø§Ø¨Ù„â€ŒØ§Ø³ØªÙØ§Ø¯Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ù†Ú¯Ø±Ø¯Ø§Ù†Ø¯. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
             status,
             providerCode,
@@ -2794,6 +2795,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         : 'ÙØ¯Ù Ø¬ÙØ§Ø¨ Ø®Ø§ÙÛ Ø¨Ø±Ú¯Ø±Ø¯ÙÙØ¯ (Ø§Ø­ØªÙØ§ÙØ§Ù ÙÛÙØªØ± Ø§ÛÙÙÛ ÛØ§ ÙØ´Ú©Ù ÙÙÙØª). ÙØ·ÙØ§Ù Ø¯ÙØ¨Ø§Ø±Ù Ø§ÙØªØ­Ø§Ù Ú©Ù.',
                     type: 'empty_after_tool_call',
                     finishReason,
+                    round,
                     diagnostics: traceSummary,
                     ...(partialFiles.length ? { partialFiles, canContinue: true } : {})
                 };
