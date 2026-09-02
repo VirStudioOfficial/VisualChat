@@ -2354,9 +2354,19 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // the next key. Scope the long budget back down to rounds that
     // genuinely follow a heavy read (archive/block/chunk) or carry video,
     // same as before fileEditIntent was blanket-added.
+    // FIX (timeout right after web_search): a round immediately following a
+    // web_search tool call previously got the same tight 60s budget as any
+    // plain text round, even though this round has to read potentially
+    // 1-2 Tavily results (up to ~1800 chars each) PLUS everything else in
+    // context, then stream a full answer - Gemini can legitimately take
+    // longer than 60s here, especially under load. This looked exactly like
+    // the "پاسخ سرویس بیش از زمان مجاز طول کشید" error even though nothing
+    // was actually stuck - the round was simply cut off before Gemini
+    // finished. web_search now gets the same longer post-tool-call budget
+    // archive/section reads already get.
     const roundNeedsMoreTime = (round) =>
         hasVideoAttachment ||
-        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasSectionRead));
+        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasSectionRead || lastToolCallWasWebSearch));
     let lastToolCallWasArchiveRead = false;
     // FIX (dead flag): lastToolCallWasChunkRead tracked get_file_chunk,
     // which no longer exists in the block-based system - it was declared
@@ -2364,6 +2374,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // false. read_block is this system's equivalent heavy read and gets
     // the same "give the NEXT round more time" treatment archive reads do.
     let lastToolCallWasSectionRead = false;
+    let lastToolCallWasWebSearch = false;
 
     // DIAGNOSTICS (ردِ کامل اجرای عامل): برای هر round، یک رکورد ساختاریافته
     // نگه می‌داریم - نه فقط یک پیام خطای کلی در انتها. این آرایه همیشه (چه
@@ -2393,6 +2404,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         lastToolCallWasSectionRead = false; // consumed for this round; re-armed below only if this round's own tool call is a section read
+        lastToolCallWasWebSearch = false; // consumed for this round; re-armed below only if this round's own tool call was web_search
         const roundStartedAt = Date.now();
         const roundEntry = {
             round: round + 1,
@@ -3006,6 +3018,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
             if (call.name === 'read_file_section') lastToolCallWasSectionRead = true;
+            if (call.name === 'web_search') lastToolCallWasWebSearch = true;
 
             // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
             // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
@@ -3831,7 +3844,9 @@ ${recentChatsSummary.trim()}
         systemText += dateContext;
         systemText += `
 ابزارها:
-- ابزار web_search را هر وقت واقعاً به اطلاعات به‌روز/زنده نیاز داری صدا بزن (قیمت، اخبار، رویدادها، چیزی که ممکن است بعد از آموزشت تغییر کرده باشد). برای سؤالات عمومی/ثابت (تعریف، مفهوم، تاریخ گذشته) نیازی به سرچ نیست.
+- ابزار web_search را فقط زمانی صدا بزن که سؤالِ همین پیام کاربر واقعاً به یک واقعیتِ زنده و به‌روز نیاز دارد که ممکن است بعد از آموزشت تغییر کرده باشد (مثلاً: قیمت/نرخ لحظه‌ای، اخبار امروز، نتیجه‌ی یک رویداد اخیر، وضعیت آب‌وهوا). صرفاً وجود کلماتی مثل «قیمت»، «دلار»، «امروز» و مشابه آن‌ها در گفتگوی قبلی یا در حافظه/خلاصه‌ی چت کافی نیست؛ فقط به *این* پیام نگاه کن.
+- اگر پیام کاربر یک جمله‌ی کوتاهِ مکالمه‌ای/احساسی/واکنشی است (مثل «هعی خدا»، «باشه»، «ممنون»، «چه بد»، یک شکلک، یا واکنش به چیزی که خودت همین الان گفتی) — حتی اگر موضوع گفتگو قبلاً قیمت یا خبر بوده — سرچ نکن؛ فقط طبیعی و مکالمه‌ای جواب بده.
+- برای سؤالات عمومی/ثابت (تعریف، مفهوم، تاریخ گذشته) نیازی به سرچ نیست.
 - برای یک سؤال ساده، فقط یک‌بار سرچ کن و با همان نتایج جواب بده. دوباره سرچ کردن (با کوئری متفاوت یا حتی مشابه) فقط وقتی مجاز است که نتیجه‌ی سرچ اول واقعاً ناکافی/نامرتبط بود یا سؤال چند بخش جدا از هم دارد که هرکدام نیاز به سرچ مجزا دارند. سرچ‌های تکراری روی همان موضوع را انجام نده.
 - اگر تصمیم گرفتی هر ابزار را صدا بزنی، مخصوصاً web_search، قبل از Function Call هیچ متن توضیحی، مقدمه یا جمله‌ای تولید نکن؛ Function Call باید اولین خروجی مدل در آن نوبت باشد. بعد از دریافت نتیجه‌ی ابزار، پاسخ نهایی را به‌صورت عادی و streaming تولید کن.
 - ابزار ask_user را فقط برای تغییرات اساسی/غیرقابل‌برگشت یا تصمیم‌هایی با چند راه‌حل متفاوت صدا بزن (مثلاً بازنویسی کامل یک فایل، حذف بخش بزرگ کد). برای کارهای کوچک یا واضح، مستقیم انجام بده و از این ابزار استفاده نکن.
