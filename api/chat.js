@@ -2499,8 +2499,44 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             try { onChunk(text); } catch (_) {}
         };
 
+        // FIX (کندی محسوس فقط روی مدل‌های thinking-capable با سوالات
+        // شبه‌سرچ): قبلاً pendingToolPreamble تا پایان کامل همان round
+        // (یعنی تا جایی که مشخص شود functionCall آمده یا نه) هیچ خروجی‌ای
+        // به کاربر نمی‌داد. برای مدل‌هایی که پیش از تصمیم‌گیری درباره‌ی
+        // tool call یک مرحله‌ی داخلی طولانی‌تر «فکر کردن» دارند (هر چیزی
+        // غیر از flash-lite)، این یعنی سکوت کامل تا پایان همان مرحله.
+        // این تایمر یک سقف زمانی کوتاه می‌گذارد: اگر تا PREAMBLE_HOLD_MS
+        // هنوز نه functionCall دیده شده نه round تمام شده، هر چه تا این
+        // لحظه بافر شده را همین الان flush می‌کنیم و از همان لحظه به بعد
+        // استریم را زنده (live) می‌کنیم - دقیقاً مثل حالتی که از اول
+        // sawFunctionCall نمی‌شد. منطق تشخیص سرچ/tool call دست‌نخورده
+        // می‌ماند: اگر functionCall واقعاً برسد، هنوز طبق همان مسیر قبلی
+        // discard می‌شود (چون preambleTimedOut فقط جلوی نگه‌داشتن بافر را
+        // می‌گیرد، نه منطق eventHasFunctionCall را). تنها ریسک این است که
+        // در موارد نادر یک preamble کوتاه («باشه بذار چک کنم...») قبل از
+        // نتیجه‌ی سرچ نشان داده شود - که خیلی بهتر از چند ثانیه سکوت است.
+        const PREAMBLE_HOLD_MS = 1500;
+        let preambleTimedOut = false;
+        let preambleHoldTimer = null;
+        const armPreambleHoldTimer = () => {
+            if (preambleHoldTimer || preambleTimedOut) return;
+            preambleHoldTimer = setTimeout(() => {
+                preambleTimedOut = true;
+                if (pendingToolPreamble) {
+                    emitStreamText(pendingToolPreamble);
+                    pendingToolPreamble = '';
+                }
+            }, PREAMBLE_HOLD_MS);
+        };
+        const clearPreambleHoldTimer = () => {
+            if (preambleHoldTimer) {
+                clearTimeout(preambleHoldTimer);
+                preambleHoldTimer = null;
+            }
+        };
+
         const handleStreamText = (text) => {
-            if (!searchIntent || disableTools || scopedSearchState.used || sawFunctionCall) {
+            if (!searchIntent || disableTools || scopedSearchState.used || sawFunctionCall || preambleTimedOut) {
                 emitStreamText(text);
                 return;
             }
@@ -2510,8 +2546,10 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // functionCall (then the buffer is discarded) or finishes without
             // a tool (then the buffer is flushed below). This is intentionally
             // scoped ONLY to likely search requests, so ordinary chat keeps the
-            // zero-buffer live streaming path.
+            // zero-buffer live streaming path. Bounded by PREAMBLE_HOLD_MS
+            // above so a slow-to-decide model never blocks the UI for long.
             pendingToolPreamble += text;
+            armPreambleHoldTimer();
         };
 
         const handleEventPayload = (jsonStr) => {
@@ -2526,7 +2564,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             const eventHasFunctionCall = parts.some(part => !!part?.functionCall);
             if (eventHasFunctionCall) {
                 sawFunctionCall = true;
+                clearPreambleHoldTimer();
                 // Anything held so far was pre-tool narration. Do NOT flush it.
+                // (If preambleTimedOut already flushed some of it live, that
+                // small preamble is left as-is — the discard only applies to
+                // whatever is still sitting in the buffer at this point.)
                 pendingToolPreamble = '';
             }
 
@@ -2586,7 +2628,9 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             if (sseBuffer.trim().startsWith('data:')) {
                 handleEventPayload(sseBuffer.trim().slice(5).trim());
             }
+            clearPreambleHoldTimer();
         } catch (streamErr) {
+            clearPreambleHoldTimer();
             roundEntry.durationMs = Date.now() - roundStartedAt;
             if (streamErr?.name === 'AbortError') {
                 roundEntry.timedOut = true;
@@ -2647,6 +2691,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         }
 
         if (functionCalls.length === 0) {
+            clearPreambleHoldTimer();
             // No tool call arrived after all. Release any selectively held
             // preamble so the final answer is not lost.
             if (pendingToolPreamble) {
