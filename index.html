@@ -73,7 +73,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css">
     <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="manifest" href="/manifest.json">
-    <script src="https://accounts.google.com/gsi/client" defer></script>
+    <!-- FIX (رفع نیاز به لاگین دستی مکرر): اسکریپت GSI دیگر لازم نیست -
+         لاگین حالا با ریدایرکت به api/auth-start.js انجام می‌شود. -->
 
     <style>
         .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.35; shape-rendering: geometricPrecision; }
@@ -204,6 +205,17 @@
         .auth-card h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: 8px; color: var(--text-main); }
         .auth-card p { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px; line-height: 1.6; }
         .google-btn-wrapper { display: flex; justify-content: center; }
+        .google-oauth-btn {
+            display: inline-flex; align-items: center; gap: 10px;
+            background: #fff; color: #1f1f1f;
+            border-radius: 999px; padding: 10px 22px;
+            font-size: 0.9rem; font-weight: 600;
+            text-decoration: none; cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            transition: box-shadow 0.15s ease, transform 0.1s ease;
+        }
+        .google-oauth-btn:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+        .google-oauth-btn:active { transform: scale(0.98); }
 
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(6px); }
@@ -1803,12 +1815,20 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <h2>ورود به Virtual Chat</h2>
             <p>برای شروع گفتگو و ذخیره ایمن اطلاعات، لطفاً با حساب گوگل خود وارد شوید.</p>
             <div class="google-btn-wrapper">
-                <div id="g_id_onload"
-                    data-client_id="456624147681-8kiuefcbn37d0sfrmfa5vp51ujqj07ci.apps.googleusercontent.com"
-                    data-callback="handleCredentialResponse"
-                    data-auto_prompt="false">
-                </div>
-                <div class="g_id_signin" data-type="standard" data-size="large" data-theme="filled_black" data-shape="pill"></div>
+                <!-- FEATURE (رفع نیاز به لاگین دستی مکرر): به‌جای دکمه‌ی
+                     Google Identity Services (که فقط id_token کوتاه‌عمر
+                     می‌داد)، کاربر را به فلوی OAuth آفلاین می‌فرستیم که
+                     یک‌بار برای همیشه دسترسی می‌گیرد - نگاه کن به
+                     api/auth-start.js و api/auth-callback.js -->
+                <a href="https://notify-admin-iota.vercel.app/api/auth-start" class="google-oauth-btn">
+                    <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                        <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/>
+                        <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/>
+                        <path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.05l3.01-2.33z"/>
+                        <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/>
+                    </svg>
+                    <span>ورود با حساب گوگل</span>
+                </a>
             </div>
         </div>
     </div>
@@ -2536,7 +2556,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             });
         }
         
-        checkSavedUser();
+        // اگر کاربر همین الان از فلوی OAuth برگشته (authEmail در URL است)،
+        // اول آن را پردازش می‌کنیم؛ اگر نبود، طبق روال قبلی سراغ کاربر
+        // ذخیره‌شده‌ی قبلی در localStorage می‌رویم.
+        if (!checkOAuthRedirect()) {
+            checkSavedUser();
+        }
         updateFaviconStatus(false);
         loadSettings();
         initNotifSystem();
@@ -2622,6 +2647,50 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         showToast('متن طولانی به یک فایل تبدیل شد — روش کلیک کن تا ویرایشش کنی.', 'info');
     }
 
+    // FEATURE (رفع نیاز به لاگین دستی مکرر): جایگزین handleCredentialResponse
+    // قدیمی (که GSI مستقیم صدا می‌زد). حالا بعد از فلوی OAuth آفلاین،
+    // auth-callback.js کاربر را با authEmail/authName/authPicture در
+    // query string به همین صفحه برمی‌گرداند. دیگر نیازی به id_token خام
+    // نیست - refresh_token سمت سرور (جدول user_tokens) ذخیره شده و
+    // sync گفتگوها فقط با فرستادن همین ایمیل در هدر X-User-Email کار
+    // می‌کند (نگاه کن به authFetch/pullChatsFromServer پایین‌تر).
+    function checkOAuthRedirect() {
+        const params = new URLSearchParams(window.location.search);
+        const authEmail = params.get('authEmail');
+        const authError = params.get('authError');
+
+        if (!authEmail && !authError) return false;
+
+        // URL را همین‌جا تمیز می‌کنیم تا با رفرش صفحه دوباره پردازش نشود.
+        const cleanUrl = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+
+        if (authError) {
+            showToast(decodeURIComponent(authError), 'error');
+            return false;
+        }
+
+        const authName = params.get('authName') || '';
+        const authPicture = params.get('authPicture') || '';
+        const autoExtractedName = extractNameFromEmail(authEmail, authName);
+        currentUser = {
+            name: autoExtractedName,
+            customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
+            email: authEmail,
+            picture: authPicture
+        };
+        localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
+        // توکن‌های قدیمی id_token دیگر لازم نیستند - سرور خودش با
+        // refresh_token ذخیره‌شده هویت را تأیید می‌کند.
+        try {
+            localStorage.removeItem('vc_google_id_token');
+            localStorage.removeItem('vc_google_id_token_issued_at');
+        } catch (_) {}
+        document.getElementById('authOverlay').classList.remove('active');
+        initUserData();
+        return true;
+    }
+
     function extractNameFromEmail(email, googleName = '') {
         if (googleName && googleName.trim() && !googleName.includes('@')) return googleName.trim();
         if (!email) return 'دوست من';
@@ -2630,150 +2699,38 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'دوست من';
     }
 
-    function handleCredentialResponse(response) {
-        const responsePayload = parseJwt(response.credential);
-        const autoExtractedName = extractNameFromEmail(responsePayload.email, responsePayload.name);
-        currentUser = {
-            name: autoExtractedName,
-            customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
-            email: responsePayload.email,
-            picture: responsePayload.picture
-        };
-        localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
-        // FEATURE (sync گفتگوها بین دستگاه‌ها): خودِ id_token خام گوگل رو
-        // (نه فقط اطلاعات دیکدشده‌ش رو) نگه می‌داریم، چون سرور (api/chats.js)
-        // برای هر درخواست باید این توکن رو مستقیم با گوگل تأیید کنه تا
-        // owner_email قابل‌اعتماد باشه - یک ایمیل ساده که کلاینت بگه «من
-        // این کاربرم» به‌تنهایی قابل‌اعتماد نیست. این توکن معمولاً حدود
-        // ۱ ساعت اعتبار داره؛ اعتبارسنجی و رفرش خودکارش تابع
-        // getFreshGoogleIdToken پایین‌تر انجام می‌ده.
-        try {
-            localStorage.setItem('vc_google_id_token', response.credential);
-            localStorage.setItem('vc_google_id_token_issued_at', String(Date.now()));
-        } catch (_) {}
-        document.getElementById('authOverlay').classList.remove('active');
-        initUserData();
-    }
+    // FIX (رفع نیاز به لاگین دستی مکرر): handleCredentialResponse (کال‌بک
+    // قدیمی Google Identity Services) دیگر لازم نیست و حذف شد - نقشش را
+    // حالا checkOAuthRedirect (بالاتر) برعهده دارد که با فلوی OAuth
+    // آفلاین (auth-start.js/auth-callback.js) کار می‌کند.
 
-    // ===== توکن گوگل برای احراز هویت با سرور (sync گفتگوها) =====
-    // id_token گوگل عمر کوتاهی داره (تقریباً ۱ ساعت)، پس نمی‌شه همون یکی
-    // که موقع لاگین گرفتیم رو برای همیشه استفاده کرد. این تابع اگه توکن
-    // ذخیره‌شده هنوز به‌اندازه‌ی کافی تازه باشه همونو برمی‌گردونه، وگرنه
-    // بی‌صدا (بدون نمایش پنجره‌ی لاگین به کاربر) از گوگل یه توکن تازه
-    // می‌گیره - همون قابلیت "One Tap silent re-auth" که Google Identity
-    // Services به‌صورت پیش‌فرض پشتیبانی می‌کنه چون کاربر قبلاً یک‌بار
-    // اجازه داده.
-    const GOOGLE_TOKEN_MAX_AGE_MS = 50 * 60 * 1000; // 50 دقیقه - کمی قبل از انقضای واقعی (۶۰ دقیقه) رفرش می‌کنیم
-    let googleTokenRefreshPromise = null;
-
-    async function getFreshGoogleIdToken() {
-        const token = localStorage.getItem('vc_google_id_token');
-        const issuedAt = Number(localStorage.getItem('vc_google_id_token_issued_at') || 0);
-        if (token && (Date.now() - issuedAt) < GOOGLE_TOKEN_MAX_AGE_MS) {
-            return token;
-        }
-        // FIX (پاپ‌آپ انتخاب حساب گوگل هر یکی‌دو دقیقه وسط استفاده‌ی عادی):
-        // این تابع قبلاً وقتی توکن نزدیک انقضا بود، google.accounts.id.prompt()
-        // را صدا می‌زد تا "بی‌صدا" توکن تازه بگیرد. اما prompt() یک API
-        // داخلی گوگل است که خودش تصمیم می‌گیرد UI نشان بدهد یا نه - وقتی
-        // کاربر چند حساب گوگل روی مرورگرش لاگین دارد، گوگل اغلب به‌جای
-        // silent refresh واقعی، همان پنجره‌ی انتخاب حساب را نشان می‌داد.
-        // چون این تابع از authFetch صدا زده می‌شود و authFetch هم با هر
-        // ذخیره‌ی پیام (syncChatToServer) اجرا می‌شود، این یعنی تقریباً هر
-        // پیامی که کاربر می‌فرستاد، احتمال نمایش این پاپ‌آپ را داشت.
-        // راه‌حل: دیگر هیچ‌وقت اینجا prompt() را برای رفرش معمولی صدا
-        // نمی‌زنیم؛ همان توکن قدیمی را برمی‌گردانیم. اگر واقعاً منقضی شده
-        // باشد، سرور با 401 جواب می‌دهد و authFetch (پایین‌تر) فقط در آن
-        // لحظه‌ی نادر یک تلاش کنترل‌شده برای گرفتن توکن تازه انجام می‌دهد.
-        return token || null;
-    }
-
-    // تلاش صریح و یک‌باره برای گرفتن توکن تازه از گوگل - فقط زمانی صدا زده
-    // می‌شود که سرور واقعاً 401 داده باشد (یعنی توکن قطعاً منقضی شده)، نه
-    // به‌عنوان رفرش پیش‌گیرانه‌ی معمول. اگر کاربر session فعال گوگل داشته
-    // باشد این معمولاً بی‌صدا انجام می‌شود؛ در غیر این صورت ممکن است گوگل
-    // پنجره‌ی انتخاب حساب را نشان دهد - که چون فقط در همین لحظه‌ی نادر
-    // (واقعاً منقضی شدن، نه هر چند دقیقه) اتفاق می‌افتد، منطقی و قابل قبول
-    // است.
-    async function forceRefreshGoogleIdToken() {
-        if (googleTokenRefreshPromise) return googleTokenRefreshPromise;
-        googleTokenRefreshPromise = new Promise((resolve) => {
-            if (!window.google || !google.accounts || !google.accounts.id) {
-                resolve(null);
-                return;
-            }
-            let settled = false;
-            const timeoutId = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, 4000);
-            try {
-                google.accounts.id.initialize({
-                    client_id: document.querySelector('#g_id_onload')?.dataset?.client_id || undefined,
-                    callback: (resp) => {
-                        if (settled) return;
-                        settled = true;
-                        clearTimeout(timeoutId);
-                        try {
-                            localStorage.setItem('vc_google_id_token', resp.credential);
-                            localStorage.setItem('vc_google_id_token_issued_at', String(Date.now()));
-                        } catch (_) {}
-                        resolve(resp.credential);
-                    }
-                });
-                google.accounts.id.prompt((notification) => {
-                    if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {
-                        if (!settled) { settled = true; clearTimeout(timeoutId); resolve(null); }
-                    }
-                });
-            } catch (_) {
-                if (!settled) { settled = true; clearTimeout(timeoutId); resolve(null); }
-            }
-        }).finally(() => { googleTokenRefreshPromise = null; });
-        return googleTokenRefreshPromise;
-    }
-
-
+    // ===== احراز هویت با سرور (sync گفتگوها) =====
+    // FIX (رفع نیاز به لاگین دستی مکرر): قبلاً این‌جا یک مکانیزم پیچیده
+    // برای نگه‌داشتن و رفرش id_token کوتاه‌عمر گوگل (~۱ ساعت) بود که وقتی
+    // کاربر چند حساب گوگل روی مرورگرش لاگین داشت، مرتب پاپ‌آپ انتخاب حساب
+    // نشان می‌داد یا با انقضای توکن بی‌صدا خراب می‌شد. حالا دیگر نیازی به
+    // هیچ‌کدام نیست: کلاینت فقط همان ایمیلی که موقع لاگین (از فلوی OAuth
+    // آفلاین در auth-start.js/auth-callback.js) گرفته را در هدر
+    // X-User-Email می‌فرستد؛ رفرش واقعی توکن کاملاً پشت صحنه، سمت سرور و
+    // با refresh_token دائمی ذخیره‌شده در جدول user_tokens انجام می‌شود -
+    // نگاه کن به verifyOwnerFromRefreshToken در api/chats.js.
     async function authFetch(url, options = {}) {
-        const token = await getFreshGoogleIdToken();
-        const doFetch = (t) => fetch(url, {
+        const email = currentUser?.email;
+        const res = await fetch(url, {
             ...options,
             headers: {
                 ...(options.headers || {}),
-                ...(t ? { 'Authorization': `Bearer ${t}` } : {})
+                ...(email ? { 'X-User-Email': email } : {})
             }
         });
-        const res = await doFetch(token);
-        // FIX: قبلاً وقتی توکن واقعاً منقضی می‌شد، درخواست فقط 401 می‌گرفت
-        // و بی‌صدا شکست می‌خورد (کاربر هیچ نشانه‌ای نمی‌دید که چرا sync کار
-        // نمی‌کند). حالا فقط همین‌جا - دقیقاً وقتی سرور تأیید کرده که توکن
-        // منقضی است، نه به‌صورت پیش‌گیرانه - یک تلاش برای گرفتن توکن تازه
-        // انجام می‌دهیم و درخواست را یک بار دیگر تکرار می‌کنیم.
-        if (res.status === 401) {
-            const freshToken = await forceRefreshGoogleIdToken();
-            if (freshToken) {
-                const retryRes = await doFetch(freshToken);
-                if (retryRes.status !== 401) return retryRes;
-                // سرور با توکنِ *واقعاً تازه* هم 401 داد → توکن قطعاً رد شده.
-                try {
-                    localStorage.removeItem('vc_google_id_token');
-                    localStorage.removeItem('vc_google_id_token_issued_at');
-                    localStorage.removeItem('virtual_chat_user');
-                } catch (_) {}
-                const overlay = document.getElementById('authOverlay');
-                if (overlay) overlay.classList.add('active');
-                return retryRes;
-            }
-            // FIX 2: forceRefreshGoogleIdToken چیزی برنگرداند (freshToken === null).
-            // این می‌تواند یعنی «توکن واقعاً خراب است» یا صرفاً یعنی «خودِ فرآیند
-            // رفرش با VPN/FedCM/کندی شبکه گیر کرد» - و این دو حالت را نباید یکسان
-            // درمان کرد. اگر اصلاً token ای برای این درخواست نداشتیم (کاربر از قبل
-            // لاگین نبود)، پاک کردن بی‌ضرر است. اما اگر token داشتیم و فقط رفرشش
-            // fail شد، توکن قدیمی ممکن است هنوز از نظر گوگل معتبر باشد؛ پاک کردنش
-            // با VPN باعث می‌شد یک session سالم به‌اشتباه از بین برود. پس در این
-            // حالت فقط اورلی لاگین را نشان می‌دهیم (برای کاربرانی که واقعاً باید
-            // وارد شوند) بدون آنکه چیزی از localStorage پاک شود.
-            if (!token) {
-                const overlay = document.getElementById('authOverlay');
-                if (overlay) overlay.classList.add('active');
-            }
+        // FIX: اگر با وجود ایمیل هم 401 گرفتیم، یعنی سرور دیگر refresh_token
+        // معتبری برای این کاربر ندارد (مثلاً کاربر دسترسی اپ را از حساب
+        // گوگلش لغو کرده) - این حالت واقعاً نادر است و فقط این‌جا از کاربر
+        // می‌خواهیم دوباره وارد شود؛ چیزی را خودکار پاک نمی‌کنیم چون ممکن
+        // است صرفاً یک خطای موقت شبکه/سرور باشد.
+        if (res.status === 401 && email) {
+            const overlay = document.getElementById('authOverlay');
+            if (overlay) overlay.classList.add('active');
         }
         return res;
     }
@@ -2876,14 +2833,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function pullChatsFromServer() {
         if (!currentUser?.email) return;
         try {
-            // یک بار توکن رو از قبل می‌گیریم و برای همه‌ی درخواست‌های این
-            // تابع (چه لیست، چه هر چت داخل حلقه) از همون استفاده می‌کنیم.
-            // قبلاً هر صدا زدن authFetch جدا getFreshGoogleIdToken رو صدا
-            // می‌زد و برای هر چت یک بار google.accounts.id.initialize/prompt
-            // اجرا می‌شد - همین باعث می‌شد پاپ‌آپ ورود گوگل پشت‌سرهم و مکرر
-            // (تقریباً هر ثانیه) دوباره ظاهر بشه.
-            const sharedToken = await getFreshGoogleIdToken();
-            const authHeaders = sharedToken ? { 'Authorization': `Bearer ${sharedToken}` } : {};
+            // FIX (رفع نیاز به لاگین دستی مکرر): دیگر نیازی به گرفتن/رفرش
+            // id_token نیست - همان ایمیل کاربر کافی است، رفرش واقعی توکن
+            // کاملاً سمت سرور با refresh_token دائمی انجام می‌شود (نگاه
+            // کن به authFetch و verifyOwnerFromRefreshToken در api/chats.js).
+            const authHeaders = { 'X-User-Email': currentUser.email };
 
             const listRes = await fetch(CHATS_API_URL, { headers: authHeaders });
             if (!listRes.ok) return;
@@ -3143,10 +3097,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         localStorage.removeItem('virtual_chat_user');
         currentUser = null;
         document.getElementById('authOverlay').classList.add('active');
-        if (window.google && google.accounts && google.accounts.id) {
-            google.accounts.id.disableAutoSelect();
-            google.accounts.id.prompt();
-        }
+        // FIX (رفع نیاز به لاگین دستی مکرر): دیگر از GSI استفاده نمی‌کنیم،
+        // پس نیازی به disableAutoSelect/prompt نیست - کاربر با کلیک روی
+        // دکمه‌ی اورلی به فلوی OAuth آفلاین هدایت می‌شود.
     }
 
     function updateCustomName(val) {
