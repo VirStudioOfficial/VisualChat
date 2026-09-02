@@ -1570,7 +1570,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 @media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
 
     
-        /* ===== Virtual Chat 1.6 polish ===== */
+        /* ===== Virtual Chat 1.6
+        polish ===== */
         .sidebar-close-btn { display:flex !important; }
         .history-tools { display:flex; align-items:center; gap:7px; margin-top:10px; }
         .history-search-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
@@ -2650,10 +2651,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // FEATURE (رفع نیاز به لاگین دستی مکرر): جایگزین handleCredentialResponse
     // قدیمی (که GSI مستقیم صدا می‌زد). حالا بعد از فلوی OAuth آفلاین،
     // auth-callback.js کاربر را با authEmail/authName/authPicture در
-    // query string به همین صفحه برمی‌گرداند. دیگر نیازی به id_token خام
-    // نیست - refresh_token سمت سرور (جدول user_tokens) ذخیره شده و
-    // sync گفتگوها فقط با فرستادن همین ایمیل در هدر X-User-Email کار
-    // می‌کند (نگاه کن به authFetch/pullChatsFromServer پایین‌تر).
+    // query string به همین صفحه برمی‌گرداند. لاگین صرفاً برای نمایش نام/
+    // عکس کاربر است؛ گفتگوها به هیچ سروری sync نمی‌شوند و فقط محلی
+    // (IndexedDB همین دستگاه) ذخیره می‌شوند.
     function checkOAuthRedirect() {
         const params = new URLSearchParams(window.location.search);
         const authEmail = params.get('authEmail');
@@ -2704,37 +2704,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     // حالا checkOAuthRedirect (بالاتر) برعهده دارد که با فلوی OAuth
     // آفلاین (auth-start.js/auth-callback.js) کار می‌کند.
 
-    // ===== احراز هویت با سرور (sync گفتگوها) =====
-    // FIX (رفع نیاز به لاگین دستی مکرر): قبلاً این‌جا یک مکانیزم پیچیده
-    // برای نگه‌داشتن و رفرش id_token کوتاه‌عمر گوگل (~۱ ساعت) بود که وقتی
-    // کاربر چند حساب گوگل روی مرورگرش لاگین داشت، مرتب پاپ‌آپ انتخاب حساب
-    // نشان می‌داد یا با انقضای توکن بی‌صدا خراب می‌شد. حالا دیگر نیازی به
-    // هیچ‌کدام نیست: کلاینت فقط همان ایمیلی که موقع لاگین (از فلوی OAuth
-    // آفلاین در auth-start.js/auth-callback.js) گرفته را در هدر
-    // X-User-Email می‌فرستد؛ رفرش واقعی توکن کاملاً پشت صحنه، سمت سرور و
-    // با refresh_token دائمی ذخیره‌شده در جدول user_tokens انجام می‌شود -
-    // نگاه کن به verifyOwnerFromRefreshToken در api/chats.js.
-    async function authFetch(url, options = {}) {
-        const email = currentUser?.email;
-        const res = await fetch(url, {
-            ...options,
-            headers: {
-                ...(options.headers || {}),
-                ...(email ? { 'X-User-Email': email } : {})
-            }
-        });
-        // FIX: اگر با وجود ایمیل هم 401 گرفتیم، یعنی سرور دیگر refresh_token
-        // معتبری برای این کاربر ندارد (مثلاً کاربر دسترسی اپ را از حساب
-        // گوگلش لغو کرده) - این حالت واقعاً نادر است و فقط این‌جا از کاربر
-        // می‌خواهیم دوباره وارد شود؛ چیزی را خودکار پاک نمی‌کنیم چون ممکن
-        // است صرفاً یک خطای موقت شبکه/سرور باشد.
-        if (res.status === 401 && email) {
-            const overlay = document.getElementById('authOverlay');
-            if (overlay) overlay.classList.add('active');
-        }
-        return res;
-    }
-
     function parseJwt(token) {
         var base64Url = token.split('.')[1];
         var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
@@ -2763,7 +2732,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // وابستگی به گوگل باز می‌شود؛ لاگین صرفاً برای کسی که واقعاً
             // sync بین دستگاه‌ها می‌خواهد، از طریق UI اکانت در دسترس می‌ماند.
             overlay.classList.remove('active');
-            initUserData(); // چت‌های محلیِ مهمان را از IndexedDB لود می‌کند؛ pullChatsFromServer خودش برای مهمان (بدون email) کاری انجام نمی‌دهد
+            initUserData(); // چت‌ها را از IndexedDB محلی همین دستگاه لود می‌کند (بدون sync با سرور)
         }
     }
 
@@ -2779,109 +2748,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function getChatOwnerKey() {
         return currentUser?.email ? String(currentUser.email).toLowerCase() : 'guest';
-    }
-
-    // ===== Sync گفتگوها/فایل‌ها با سرور (Supabase پشت api/chats.js) =====
-    // این بخش کل نکته‌ی رفع باگ «لاگین با همون اکانت گوگل روی دستگاه دیگه
-    // یعنی گفتگوها نیستن» هست: قبلاً IndexedDB تنها منبع واقعی بود و هیچ‌جا
-    // آپلود نمی‌شد. حالا IndexedDB به‌عنوان یک کش محلی (برای باز شدن سریع و
-    // کارکردن آفلاین) باقی می‌مونه، ولی سرور منبع اصلی برای sync بین
-    // دستگاه‌هاست: هر ذخیره هم به IndexedDB هم به سرور می‌ره (fire-and-
-    // forget، بدون بلاک کردن UI)، و هر بار initUserData (لاگین/رفرش صفحه)
-    // اول تلاش می‌کنه از سرور بکشه، بعد با IndexedDB merge می‌کنه.
-    const CHATS_API_URL = 'https://notify-admin-iota.vercel.app/api/chats';
-
-    async function syncChatToServer(chatId) {
-        if (!currentUser?.email) return; // مهمان (guest) چیزی برای sync کردن نداره - جایی برای لاگین نیست
-        const chat = chats[chatId];
-        if (!chat) return;
-        try {
-            await authFetch(`${CHATS_API_URL}?chatId=${encodeURIComponent(chatId)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: chat.title || 'گفتگوی جدید',
-                    html: chat.html || '',
-                    pinned: !!chat.pinned,
-                    updatedAt: chat.updatedAt || Date.now(),
-                    history: chatHistoryData[chatId] || [],
-                    files: chatFileArchive[chatId] || []
-                })
-            });
-        } catch (e) {
-            // شکست بی‌صدا - نسخه‌ی محلی (IndexedDB) هنوز درست کار می‌کنه؛
-            // sync فقط یک لایه‌ی اضافه‌ست، نباید جلوی کارکردن آفلاین رو بگیره.
-            console.error('syncChatToServer failed:', e?.message || e);
-        }
-    }
-
-    async function deleteChatFromServer(chatIds) {
-        if (!currentUser?.email) return;
-        const ids = Array.isArray(chatIds) ? chatIds : [chatIds];
-        if (!ids.length) return;
-        try {
-            await authFetch(`${CHATS_API_URL}?ids=${ids.map(id => encodeURIComponent(id)).join(',')}`, { method: 'DELETE' });
-        } catch (e) {
-            console.error('deleteChatFromServer failed:', e?.message || e);
-        }
-    }
-
-    // موقع لاگین/رفرش صفحه: لیست چت‌های سرور رو می‌گیریم و با نسخه‌ی محلی
-    // مقایسه می‌کنیم - هر چتی که سمت سرور جدیدتره (updated_at بزرگ‌تر) یا
-    // اصلاً محلی نداریمش، کامل (html+history+files) از سرور کشیده می‌شه.
-    // این دقیقاً چیزیه که وقتی روی دستگاه دوم لاگین می‌کنی لازم داری.
-    async function pullChatsFromServer() {
-        if (!currentUser?.email) return;
-        try {
-            // FIX (رفع نیاز به لاگین دستی مکرر): دیگر نیازی به گرفتن/رفرش
-            // id_token نیست - همان ایمیل کاربر کافی است، رفرش واقعی توکن
-            // کاملاً سمت سرور با refresh_token دائمی انجام می‌شود (نگاه
-            // کن به authFetch و verifyOwnerFromRefreshToken در api/chats.js).
-            const authHeaders = { 'X-User-Email': currentUser.email };
-
-            const listRes = await fetch(CHATS_API_URL, { headers: authHeaders });
-            if (!listRes.ok) return;
-            const { items } = await listRes.json();
-            if (!Array.isArray(items) || !items.length) return;
-
-            const owner = getChatOwnerKey();
-            for (const remote of items) {
-                const localChat = chats[remote.chat_id];
-                const remoteIsNewer = !localChat || (remote.updated_at || 0) > (localChat.updatedAt || 0);
-                if (!remoteIsNewer) continue;
-
-                const fullRes = await fetch(`${CHATS_API_URL}?chatId=${encodeURIComponent(remote.chat_id)}`, { headers: authHeaders });
-                if (!fullRes.ok) continue;
-                const full = await fullRes.json();
-
-                chats[remote.chat_id] = {
-                    title: full.chat.title || 'گفتگوی جدید',
-                    html: full.chat.html || '',
-                    pinned: !!full.chat.pinned,
-                    updatedAt: full.chat.updated_at || Date.now()
-                };
-                chatHistoryData[remote.chat_id] = full.history || [];
-                chatFileArchive[remote.chat_id] = full.files || [];
-
-                // توی IndexedDB محلی هم بنویسیم تا دفعه‌ی بعد بدون نیاز به
-                // اینترنت هم همین چت در دسترس باشه (کش آفلاین).
-                try {
-                    await idbPut(CHAT_STORE, {
-                        id: `${owner}:${remote.chat_id}`, owner, chatId: String(remote.chat_id),
-                        title: chats[remote.chat_id].title, html: chats[remote.chat_id].html,
-                        updatedAt: chats[remote.chat_id].updatedAt, pinned: chats[remote.chat_id].pinned
-                    });
-                    await idbPut(HISTORY_STORE, {
-                        id: `${owner}:${remote.chat_id}`, owner, chatId: String(remote.chat_id),
-                        history: chatHistoryData[remote.chat_id]
-                    });
-                } catch (e) {
-                    console.error('caching pulled chat into IndexedDB failed:', e);
-                }
-            }
-        } catch (e) {
-            console.error('pullChatsFromServer failed:', e?.message || e);
-        }
     }
 
     function openChatDB() {
@@ -3029,11 +2895,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             console.error('IndexedDB chat save failed:', e);
             if (typeof showToast === 'function') showToast('ذخیره‌ی گفتگو با مشکل روبه‌رو شد؛ اطلاعات فعلی در صفحه باقی مانده است.', 'error', 5000);
         });
-        // sync سمت سرور جدا و بدون بلاک کردن ذخیره‌ی محلی انجام می‌شه - اگه
-        // اینترنت نباشه یا سرور مشکل داشته باشه، ذخیره‌ی محلی (بالا) هنوز
-        // موفق می‌شه و کاربر چیزی رو از دست نمی‌ده؛ فقط sync بین دستگاه‌ها
-        // تا اتصال بعدی عقب می‌افته.
-        syncChatToServer(chatId);
     }
 
     async function initUserData() {
@@ -3048,22 +2909,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             try { chats = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch (_) { chats = {}; }
             try { chatHistoryData = JSON.parse(localStorage.getItem(historyKey) || '{}') || {}; } catch (_) { chatHistoryData = {}; }
         }
-        // اول همون چیزی که محلی داریم رو نشون بده (سریع، حتی آفلاین)، بعد
-        // در پس‌زمینه با سرور sync کن - این دقیقاً چیزیه که مشکل «لاگین روی
-        // دستگاه جدید یعنی گفتگویی نیست» رو حل می‌کنه: چون این‌جا سرور رو
-        // هم می‌پرسیم، نه فقط IndexedDB خالیِ همین دستگاه رو.
+        // گفتگوها فقط از همین دستگاه (IndexedDB محلی) نشون داده می‌شن؛
+        // هیچ sync ای با سرور انجام نمی‌شه.
         renderHistoryList();
         if (chats[currentChatId]) loadChat(currentChatId, true);
-        try {
-            await pullChatsFromServer();
-            renderHistoryList();
-            // اگه چتی که همین الان بازه از سرور آپدیت شد (مثلاً روی یه
-            // دستگاه دیگه پیام جدیدی بهش اضافه شده بود)، محتوای تازه رو
-            // نشون بده - نه نسخه‌ی قدیمی‌ای که قبل از pull لود شده بود.
-            if (chats[currentChatId]) loadChat(currentChatId, true);
-        } catch (e) {
-            console.error('pullChatsFromServer in initUserData failed:', e);
-        }
     }
 
 
@@ -4410,7 +4259,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (chatHistoryData[currentChatId].some(item => item.__virtualPersona)) return;
         chatHistoryData[currentChatId].unshift(
             { role: 'user', text: virtualPersona, __virtualPersona: true },
-            { role: 'model', text: 'متوجه شدم؛ از این به بعد با شخصیت گرم، طبیعی و خودمانی پاسخ می‌دهم.', __virtualPersona: true }
+            { role: 'model', text: 'متوجه شدم؛ از این به بعد با شخصیت گرم، طبیعی و خودمونی پاسخ می‌دهم.', __virtualPersona: true }
         );
     }
 
@@ -5904,7 +5753,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (btn) btn.classList.remove('active');
         if (list) list.classList.remove('select-mode');
         updateHistoryBulkBar();
-        deleteChatFromServer(idsToDelete); // یه درخواست واحد برای حذف دسته‌جمعی از سرور
 
         if (deletedCurrentChat) {
             startNewChat();
@@ -6030,7 +5878,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         } catch (e) {
             console.error('IndexedDB chat delete failed:', e);
         }
-        deleteChatFromServer(chatId);
         if (wasCurrent) {
             startNewChat();
         } else {
@@ -6147,7 +5994,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         } catch (e) {
             console.error('IndexedDB chat delete failed:', e);
         }
-        deleteChatFromServer(id);
         startNewChat();
         closeSettings();
         showToast('گفتگو حذف شد', 'success');
