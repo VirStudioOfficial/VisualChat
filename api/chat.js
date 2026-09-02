@@ -2403,6 +2403,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         lastToolCallWasSectionRead = false; // consumed for this round; re-armed below only if this round's own tool call is a section read
         const roundStartedAt = Date.now();
+        log.info('round.started', { model: currentModel, round: round + 1 });
         const roundEntry = {
             round: round + 1,
             toolCalls: [],       // [{ name, argsSummary, resultSummary }]
@@ -4219,10 +4220,11 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
                         clearTimeout(deadlineTimer);
                         markKeyResult(currentKey, true);
-                        log.info('model.connected', {
+                        log.info('agent.completed', {
                             mode: 'stream',
                             model: currentModel,
-                            connectMs: Date.now() - attemptStartedAt
+                            durationMs: Date.now() - attemptStartedAt,
+                            rounds: Array.isArray(agentResult.roundTrace) ? agentResult.roundTrace.length : undefined
                         });
 
                         try {
