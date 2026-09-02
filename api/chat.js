@@ -2755,7 +2755,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // loop actually kicks in instead of silently succeeding with
             // nothing.
             const normalStop = !finishReason || finishReason === 'STOP';
-            if (textParts.length === 0 && round > 0) {
+            if (textParts.length === 0) {
                 log.warn('agent.empty_after_tool_call', {
                     finishReason,
                     round,
@@ -2789,7 +2789,9 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     round
                 });
                 err.body = {
-                    message: 'Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø³ØªÙØ§Ø¯Ù‡ Ø§Ø² Ø§Ø¨Ø²Ø§Ø± Ø¬ÙˆØ§Ø¨ Ø®Ø§Ù„ÛŒ Ø¨Ø±Ú¯Ø±Ø¯ÙˆÙ†Ø¯. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
+                    message: round > 0
+                        ? 'Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø³ØªÙØ§Ø¯Ù‡ Ø§Ø² Ø§Ø¨Ø²Ø§Ø± Ø¬ÙˆØ§Ø¨ Ø®Ø§Ù„ÛŒ Ø¨Ø±Ú¯Ø±Ø¯ÙˆÙ†Ø¯. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.'
+                        : 'ÙØ¯Ù Ø¬ÙØ§Ø¨ Ø®Ø§ÙÛ Ø¨Ø±Ú¯Ø±Ø¯ÙÙØ¯ (Ø§Ø­ØªÙØ§ÙØ§Ù ÙÛÙØªØ± Ø§ÛÙÙÛ ÛØ§ ÙØ´Ú©Ù ÙÙÙØª). ÙØ·ÙØ§Ù Ø¯ÙØ¨Ø§Ø±Ù Ø§ÙØªØ­Ø§Ù Ú©Ù.',
                     type: 'empty_after_tool_call',
                     finishReason,
                     diagnostics: traceSummary,
