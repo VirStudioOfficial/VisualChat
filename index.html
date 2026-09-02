@@ -436,6 +436,11 @@
             min-height: 56px;
         }
         .user-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+        .user-avatar-letter {
+            display: flex; align-items: center; justify-content: center;
+            background: var(--text-main); color: var(--bg-main);
+            font-weight: 800; font-size: 1rem;
+        }
         .user-info { flex: 1; overflow: hidden; }
         .user-name { font-size: 0.9rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
         .user-actions { display: flex; gap: 4px; align-items: center; }
@@ -3137,8 +3142,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (!currentUser) return;
         const profileDiv = document.getElementById('userProfile');
         const nameToDisplay = currentUser.customName || currentUser.name;
+        // FIX (عکس شکسته کنار اسم کاربر): چون دیگه از گوگل عکس پروفایل
+        // نمی‌گیریم، currentUser.picture همیشه خالیه و تگ <img> قدیمی
+        // آیکون شکسته‌ی مرورگر + alt="User" رو نشون می‌داد. حالا به‌جاش
+        // یه آواتار حرفی (حرف اول اسم/ایمیل) بدون وابستگی به عکس می‌سازیم.
+        const avatarLetter = (nameToDisplay || currentUser.email || '?').trim().charAt(0).toUpperCase();
         profileDiv.innerHTML = `
-            <img src="${currentUser.picture}" class="user-avatar" alt="User">
+            <div class="user-avatar user-avatar-letter">${avatarLetter}</div>
             <div class="user-info"><div class="user-name">${nameToDisplay}</div></div>
             <div class="user-actions">
                 <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="ph-bold ph-arrows-clockwise"></i></button>
