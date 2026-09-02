@@ -2425,7 +2425,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         contents: workingContents,
                         // FIX (کندی محسوس با مدل‌های غیر از flash-lite): تا
                         // اینجا هیچ generationConfig/thinkingConfig ارسال
-                        // نمی‌شد، پس gemini-3.6-flash و gemini-3.1-pro-preview
+                        // نمی‌شد، پس gemini-3.7-flash و gemini-3.1-pro-preview
                         // با سطح تفکر پیش‌فرض خودشان (که برای این خانواده از
                         // مدل‌ها معمولاً medium/high است) اجرا می‌شدند - یعنی
                         // قبل از شروع استریم پاسخ، مدل مدت قابل‌توجهی صرف
@@ -3752,7 +3752,7 @@ async function handler(req, res) {
         // فقط نام مدل داخلی که در معرفی احتمالی استفاده می‌شود فرق دارد).
         const modelDisplayName =
             MODEL_NAME === 'gemini-3.5-flash-lite' ? 'Virtual Bot 1.1' :
-            MODEL_NAME === 'gemini-3.6-flash' ? 'Virtual Bot 1.5' :
+            MODEL_NAME === 'gemini-3.7-flash' ? 'Virtual Bot 1.6' :
             MODEL_NAME === 'gemini-3.1-pro-preview' ? 'Virtual Bot 1.3' :
             'Virtual Bot';
 
@@ -3923,7 +3923,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             'gemini-3.1-pro-preview'
         ) {
             modelsToTry.push(
-                'gemini-3.6-flash'
+                'gemini-3.7-flash'
             );
 
             modelsToTry.push(
@@ -3933,7 +3933,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
         if (
             MODEL_NAME ===
-            'gemini-3.6-flash'
+            'gemini-3.7-flash'
         ) {
             modelsToTry.push(
                 'gemini-3.5-flash-lite'
