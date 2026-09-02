@@ -2213,6 +2213,35 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         document.getElementById('modelDropdown').classList.toggle('active');
     }
 
+    // Thinking capabilities are intentionally exposed per model so the UI
+    // can never offer a level that the selected Gemini model rejects.
+    const THINK_LEVELS_BY_MODEL = {
+        'gemini-3.5-flash-lite': ['off'],
+        'gemini-3.7-flash': ['low', 'medium', 'high'],
+        'gemini-3.1-pro-preview': ['low', 'medium', 'high']
+    };
+
+    function normalizeThinkLevelForModel(model, level) {
+        const allowed = THINK_LEVELS_BY_MODEL[model] || ['off'];
+        return allowed.includes(level) ? level : allowed[0];
+    }
+
+    function syncThinkOptionsForModel() {
+        const allowed = THINK_LEVELS_BY_MODEL[currentModel] || ['off'];
+        const normalized = normalizeThinkLevelForModel(currentModel, currentThinkLevel);
+
+        if (currentThinkLevel !== normalized) {
+            currentThinkLevel = normalized;
+            localStorage.setItem('virtual_think_level', currentThinkLevel);
+        }
+
+        document.querySelectorAll('.think-option').forEach(opt => {
+            const isAllowed = allowed.includes(opt.dataset.level);
+            opt.style.display = isAllowed ? '' : 'none';
+            opt.setAttribute('aria-hidden', isAllowed ? 'false' : 'true');
+        });
+    }
+
     function selectModel(element, displayName, modelValue) {
         document.getElementById('modelDropdown').classList.remove('active');
         
@@ -2224,6 +2253,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         document.getElementById('modelDisplayName').textContent = displayName;
         currentModel = modelValue;
         localStorage.setItem('virtual_selected_model', currentModel);
+
+        // Immediately constrain the Think selector to this model's supported
+        // levels. Lite becomes Off; 3.7/3.1 expose Low/Medium/High only.
+        syncThinkOptionsForModel();
+        renderThinkUI();
     }
 
     document.addEventListener('click', function(e) {
@@ -2258,12 +2292,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     function toggleThinkPanel(e) {
         if (e) e.stopPropagation();
+        syncThinkOptionsForModel();
+        renderThinkUI();
         document.getElementById('thinkPanel').classList.toggle('active');
     }
 
     function setThinkLevel(level) {
-        currentThinkLevel = level;
-        localStorage.setItem('virtual_think_level', level);
+        const normalized = normalizeThinkLevelForModel(currentModel, level);
+        currentThinkLevel = normalized;
+        localStorage.setItem('virtual_think_level', normalized);
         renderThinkUI();
         document.getElementById('thinkPanel').classList.remove('active');
     }
@@ -2276,6 +2313,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
     });
 
+    syncThinkOptionsForModel();
     renderThinkUI();
 
     // =====================================================
@@ -2556,6 +2594,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 if (item.dataset.model === savedModel) item.classList.add('active');
             });
         }
+                syncThinkOptionsForModel();
+        renderThinkUI();
         
         // اگر کاربر همین الان از فلوی OAuth برگشته (authEmail در URL است)،
         // اول آن را پردازش می‌کنیم؛ اگر نبود، طبق روال قبلی سراغ کاربر
