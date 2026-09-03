@@ -2434,6 +2434,24 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     body: JSON.stringify({
                         system_instruction: { parts: [{ text: systemText }] },
                         contents: workingContents,
+                        // FIX (silent empty reply with no SAFETY label): no
+                        // safetySettings were ever sent, so Gemini used its
+                        // own default (often stricter) thresholds. When the
+                        // default filter blocks a response, some Gemini API
+                        // versions return it as a plain empty response
+                        // (finishReason null/NONE, 0 chars) rather than
+                        // explicitly labeling it SAFETY - which is exactly
+                        // what agent.empty_after_tool_call was seeing on
+                        // round 0, no tool calls, ~1s duration. Explicitly
+                        // setting the least-restrictive commonly-supported
+                        // threshold here reduces false-positive blocks
+                        // without disabling safety entirely.
+                        safetySettings: [
+                            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+                            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+                            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+                            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' }
+                        ],
                         // FIX (Ú©Ù†Ø¯ÛŒ Ù…Ø­Ø³ÙˆØ³ Ø¨Ø§ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒ ØºÛŒØ± Ø§Ø² flash-lite): ØªØ§
                         // Ø§ÛŒÙ†Ø¬Ø§ Ù‡ÛŒÚ† generationConfig/thinkingConfig Ø§Ø±Ø³Ø§Ù„
                         // Ù†Ù…ÛŒâ€ŒØ´Ø¯ØŒ Ù¾Ø³ gemini-3.7-flash Ùˆ gemini-3.1-pro-preview
