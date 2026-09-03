@@ -2806,7 +2806,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     .slice(-2)
                     .map(c => (Array.isArray(c.parts) ? c.parts.map(p => p && p.text || '').join(' ') : ''))
                     .join(' ');
-                const childSafetyPattern = /(Ø¨Ú†Ù‡[\s\u200c]?(Ù‡|â€ŒÙ‡)?ØŸ?|Ú©ÙˆØ¯Ú©|Ø³Ø§Ù„Ù‡â€ŒØ§Ù…|ÛŒÚ© Ø¨Ú†Ù‡|Ø¨Ú†Ù‡ Û¹|Ø¨Ú†Ù‡ Û¸|Ø¨Ú†Ù‡ Û·|Ø¨Ú†Ù‡ Û¶|Ø³Ø§Ù„Ù‡ Ù‡Ø³ØªÙ…|Ø³Ø§Ù„Ù… Ø§Ø³Øª|child|kid|minor|years? old)/i;
+                const childSafetyPattern = /(بچه|کودک|کودکان|ساله|سال دارم|ساله‌ام|سالمه|سالمو|سالمه\b|child|kid|minor|years? old|year-old|toddler)/i;
                 const likelyChildSafetyBlock = childSafetyPattern.test(recentUserText);
                 // FEATURE (Continue button): if apply_patch already
                 // succeeded one or more times before the model went silent,
