@@ -1,4711 +1,6703 @@
-// pages/api/chat.js
-
-/*
-|--------------------------------------------------------------------------
-| Think mode levels
-|--------------------------------------------------------------------------
-| Maps the client's "Ø­Ø§Ù„Øª ØªÙÚ©Ø±" selector (off/low/medium/high) to Gemini's
-| thinkingLevel values. 'off' (or anything unrecognized) falls back to the
-| existing per-model default in runAgentLoop - Think mode is opt-in.
-*/
-const THINK_LEVEL_MAP = {
-    low: 'low',
-    medium: 'medium',
-    high: 'high'
-};
-
-// Thinking support is model-specific. Flash-Lite must not receive a
-// thinkingConfig at all, while 3.7 Flash and 3.1 Pro do not support
-// the MINIMAL thinking level.
-const THINKING_MODEL_DEFAULTS = {
-    'gemini-3.5-flash-lite': null,
-    'gemini-3.7-flash': 'low',
-    'gemini-3.1-pro-preview': 'low'
-};
-
-/*
-|--------------------------------------------------------------------------
-| Logger - structured, no secrets ever printed
-|--------------------------------------------------------------------------
-| Every log line is one JSON object so it's easy to grep/parse in Vercel
-| logs. Never pass raw API keys, full file base64, or full user history to
-| this â€” only short, safe summaries.
-*/
-const log = {
-    _base(level, event, meta) {
-        try {
-            const safeMeta = { ...meta };
-            // Extra safety net: strip anything that looks like a key/token by name,
-            // in case a caller accidentally spreads a bigger object into meta.
-            for (const k of Object.keys(safeMeta)) {
-                if (/key|token|secret|authorization/i.test(k)) delete safeMeta[k];
-            }
-            console.log(JSON.stringify({
-                ts: new Date().toISOString(),
-                level,
-                event,
-                ...safeMeta
-            }));
-        } catch (_) {
-            // Logging must never crash the request.
-        }
-    },
-    info(event, meta) { this._base('info', event, meta); },
-    warn(event, meta) { this._base('warn', event, meta); },
-    error(event, meta) { this._base('error', event, meta); }
-};
-
-
-/*
-|--------------------------------------------------------------------------
-| Error classification
-|--------------------------------------------------------------------------
-| Never label every failure as "API error". We keep the provider's raw code
-| for diagnostics, but classify it into a small set of actionable categories
-| for the UI and for key-rotation decisions.
-*/
-function classifyGeminiError(error) {
-    const status = Number(
-        error?.status ??
-        error?.error?.code ??
-        error?.body?.status ??
-        error?.body?.error?.code ??
-        0
-    ) || null;
-
-    const providerCode =
-        error?.error?.status ||
-        error?.body?.error?.status ||
-        error?.statusText ||
-        null;
-
-    const rawMessage = String(
-        error?.message ||
-        error?.error?.message ||
-        error?.body?.message ||
-        error?.body?.error?.message ||
-        ''
-    ).trim();
-
-    const normalized = `${providerCode || ''} ${rawMessage}`.toLowerCase();
-
-    if (error?.type === 'empty_after_tool_call') {
-        const isFirstRound = error?.round === 0;
-        return {
-            category: 'empty_response',
-            retryable: isFirstRound,
-            keySpecific: isFirstRound,
-            message: 'Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø¬Ø±Ø§ÛŒ Ø§Ø¨Ø²Ø§Ø± Ù¾Ø§Ø³Ø® Ù‚Ø§Ø¨Ù„â€ŒØ§Ø³ØªÙØ§Ø¯Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ù†Ú¯Ø±Ø¯Ø§Ù†Ø¯. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
-            status,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (error?.name === 'AbortError' || /timeout|timed out|deadline exceeded/.test(normalized)) {
-        return {
-            category: 'timeout',
-            retryable: true,
-            keySpecific: false,
-            message: 'Ù¾Ø§Ø³Ø® Ø³Ø±ÙˆÛŒØ³ Ø¨ÛŒØ´ Ø§Ø² Ø²Ù…Ø§Ù† Ù…Ø¬Ø§Ø² Ø·ÙˆÙ„ Ú©Ø´ÛŒØ¯. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
-            status,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (status === 429 || /resource_exhausted|quota|rate.?limit|too many requests/.test(normalized)) {
-        // NOTE: Google's free-tier generate_content quota (RPM/RPD) is scoped
-        // PER API KEY / PER PROJECT, not shared across unrelated projects.
-        // When each key comes from its own separate Google account/project
-        // (as is the case here), one key hitting "free_tier ... quota
-        // exceeded" says nothing about the other keys' quota - so this must
-        // stay keySpecific + retryable so the outer loop rotates to the next
-        // key instead of aborting the whole request.
-        const freeTierPerKeyQuota =
-            /generate_content_[^\s]*free_tier[^\s]*requests/.test(normalized) ||
-            (/free.?tier/.test(normalized) && /quota|exceeded|resource_exhausted/.test(normalized)) ||
-            /daily.?quota|quota.?exceeded|exceeded your current quota/.test(normalized);
-
-        const retryAfterMatch = normalized.match(/retry in\s+([0-9]+(?:\.[0-9]+)?)s/);
-        const retryAfterSeconds = retryAfterMatch ? Number(retryAfterMatch[1]) : null;
-
-        if (freeTierPerKeyQuota) {
-            return {
-                category: 'quota_exhausted',
-                retryable: true,
-                keySpecific: true,
-                message: 'Ø³Ù‡Ù…ÛŒÙ‡ Free Tier Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ ØªÙ…Ø§Ù… Ø´Ø¯Ù‡Ø› Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
-                status: status || 429,
-                providerCode,
-                rawMessage,
-                retryAfterSeconds
-            };
-        }
-
-        return {
-            category: 'rate_limit',
-            retryable: true,
-            keySpecific: true,
-            message: 'Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ Ø¨Ù‡ Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ø³Ø±Ø¹Øª Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø³ÛŒØ¯Ù‡ Ø§Ø³ØªØ› Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
-            status: status || 429,
-            providerCode,
-            rawMessage,
-            retryAfterSeconds
-        };
-    }
-
-    if (status === 401 || /api key|invalid.*key|unauthenticated|authentication/.test(normalized)) {
-        return {
-            category: 'invalid_api_key',
-            retryable: true,
-            keySpecific: true,
-            message: 'Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ API Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª ÛŒØ§ Ø§Ø­Ø±Ø§Ø² Ù‡ÙˆÛŒØª Ø¢Ù† Ø±Ø¯ Ø´Ø¯Ù‡ Ø§Ø³Øª. Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
-            status: status || 401,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (status === 403 || /permission|forbidden|access denied|not authorized/.test(normalized)) {
-        return {
-            category: 'permission_denied',
-            retryable: true,
-            keySpecific: true,
-            message: 'Ø¯Ø³ØªØ±Ø³ÛŒ Ø§ÛŒÙ† Ú©Ù„ÛŒØ¯ Ø¨Ù‡ Ø³Ø±ÙˆÛŒØ³ ÛŒØ§ Ù…Ø¯Ù„ Ø±Ø¯ Ø´Ø¯Ù‡ Ø§Ø³Øª. Ú©Ù„ÛŒØ¯ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯.',
-            status: status || 403,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (status === 404 || /model.*not found|not_found|unknown model/.test(normalized)) {
-        return {
-            category: 'model_not_found',
-            retryable: true,
-            keySpecific: false,
-            message: 'Ù…Ø¯Ù„ Ø¯Ø± Ø³Ø±ÙˆÛŒØ³ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ ÛŒØ§ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ø§ÛŒÙ† Ù…Ø³ÛŒØ± Ù†ÛŒØ³Øª.',
-            status: status || 404,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (status === 400 || /invalid argument|invalid request|bad request|malformed/.test(normalized)) {
-        return {
-            category: 'invalid_request',
-            retryable: false,
-            keySpecific: false,
-            message: 'Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø§Ø±Ø³Ø§Ù„ÛŒ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø¨ÙˆØ¯. Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ ÛŒÚ©ÛŒ Ø§Ø² ÙˆØ±ÙˆØ¯ÛŒâ€ŒÙ‡Ø§ ÛŒØ§ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù…Ø´Ú©Ù„ Ø¯Ø§Ø±Ø¯.',
-            status: status || 400,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (status === 413 || /too large|payload.*large|request.*size|token limit|context length/.test(normalized)) {
-        return {
-            category: 'request_too_large',
-            retryable: false,
-            keySpecific: false,
-            message: 'Ø­Ø¬Ù… Ø¯Ø±Ø®ÙˆØ§Ø³Øª ÛŒØ§ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ù…Ø¬Ø§Ø² Ø§Ø³Øª.',
-            status: status || 413,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (status >= 500 && status <= 599 || /service unavailable|internal server error|bad gateway|temporarily unavailable/.test(normalized)) {
-        return {
-            category: 'provider_unavailable',
-            retryable: true,
-            keySpecific: false,
-            message: 'Ø³Ø±ÙˆÛŒØ³ Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ù…ÙˆÙ‚ØªØ§Ù‹ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù†ÛŒØ³Øª. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ….',
-            status,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    if (error instanceof TypeError || /fetch failed|network|socket|econn|enotfound|connection/.test(normalized)) {
-        return {
-            category: 'network_error',
-            retryable: true,
-            keySpecific: false,
-            message: 'Ø§Ø±ØªØ¨Ø§Ø· Virtual Bot Ø¨Ø§ Ø³Ø±ÙˆÛŒØ³ Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ù‚Ø·Ø¹ Ø´Ø¯. Ø§ØªØµØ§Ù„ Ø±Ø§ Ø¨Ø±Ø±Ø³ÛŒ Ú©Ù† Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
-            status,
-            providerCode,
-            rawMessage
-        };
-    }
-
-    return {
-        category: 'unknown_error',
-        retryable: true,
-        keySpecific: false,
-        message: 'ÛŒÚ© Ø®Ø·Ø§ÛŒ Ù†Ø§Ø´Ù†Ø§Ø®ØªÙ‡ Ù‡Ù†Ú¯Ø§Ù… Ù¾Ø±Ø¯Ø§Ø²Ø´ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø® Ø¯Ø§Ø¯.',
-        status,
-        providerCode,
-        rawMessage
-    };
-}
-
-/*
-|--------------------------------------------------------------------------
-| Key Rotation Manager
-|--------------------------------------------------------------------------
-| Keeps a per-process (best-effort, resets on cold start) failure counter for
-| each API key so keys that are erroring a lot get tried last, instead of a
-| pure random shuffle every time. This is intentionally in-memory only: it
-| does not need a database, and never logs the key itself (only its index).
-*/
-const __keyFailureCounts = new Map(); // key -> consecutive failure count
-
-/*
-|--------------------------------------------------------------------------
-| Google API usage telemetry (observed locally, never fabricated)
-|--------------------------------------------------------------------------
-| Google does not expose the project's live RPM/TPM/RPD quota through the
-| Gemini API key itself. We therefore expose ONLY requests this backend
-| actually sent with each configured key, plus real 429/error observations.
-| The rolling window is process-local (serverless instances can reset).
-*/
-const __googleUsage = new Map();
-
-/*
- * Persistent usage storage (Vercel KV / Upstash Redis integration).
- *
- * Required environment variables on Vercel:
- *   KV_REST_API_URL
- *   KV_REST_API_TOKEN
- *
- * If they are not configured, we keep the old in-memory fallback so local
- * development still works. The UI is told whether the data is persistent.
- * No API key value is ever stored; only its stable 1-based index is used.
- */
-const USAGE_KV_PREFIX = 'virtual-bot:google-usage:v2';
-const USAGE_WINDOW_MS = 60_000;
-const USAGE_TTL_SECONDS = 180;
-
-function hasUsageKV() {
-    return Boolean((process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) || process.env.REDIS_URL);
-}
-
-let __redisClientPromise = null;
-async function getRedisClient() {
-    if (!process.env.REDIS_URL) return null;
-    if (!__redisClientPromise) {
-        __redisClientPromise = import('redis').then(async ({ createClient }) => {
-            const client = createClient({ url: process.env.REDIS_URL });
-            client.on('error', (err) => log.warn('usage.redis_error', { message: err?.message || String(err) }));
-            await client.connect();
-            return client;
-        }).catch((err) => { __redisClientPromise = null; throw err; });
-    }
-    return __redisClientPromise;
-}
-
-async function usageKvCommand(command, args = []) {
-    if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1800);
-        try {
-            const response = await fetch(process.env.KV_REST_API_URL, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${process.env.KV_REST_API_TOKEN}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify([command, ...args]),
-                signal: controller.signal
-            });
-            if (!response.ok) throw new Error(`KV ${command} returned ${response.status}`);
-            const data = await response.json();
-            return data?.result ?? null;
-        } finally { clearTimeout(timeoutId); }
-    }
-    const client = await getRedisClient();
-    if (!client) return null;
-    switch (command) {
-        case 'ZADD': return client.zAdd(args[0], [{ score: Number(args[1]), value: String(args[2]) }]);
-        case 'EXPIRE': return client.expire(args[0], Number(args[1]));
-        case 'HINCRBY': return client.hIncrBy(args[0], args[1], Number(args[2]));
-        case 'HSET': {
-            const values = {};
-            for (let i = 1; i < args.length; i += 2) values[args[i]] = String(args[i + 1] ?? '');
-            return client.hSet(args[0], values);
-        }
-        case 'ZREMRANGEBYSCORE': return client.zRemRangeByScore(args[0], args[1], args[2]);
-        case 'ZCOUNT': return client.zCount(args[0], args[1], args[2]);
-        case 'ZRANGE': {
-            const withScores = args[3] === 'WITHSCORES';
-            const rows = withScores ? await client.zRangeWithScores(args[0], Number(args[1]), Number(args[2])) : await client.zRange(args[0], Number(args[1]), Number(args[2]));
-            return withScores ? rows.flatMap(r => [r.value, String(r.score)]) : rows;
-        }
-        case 'HGETALL': return client.hGetAll(args[0]);
-        default: throw new Error(`Unsupported Redis command: ${command}`);
-    }
-}
-
-function recordGoogleAttemptMemory(key, status) {
-    const now = Date.now();
-    let row = __googleUsage.get(key);
-    if (!row) {
-        row = { timestamps: [], total: 0, success: 0, errors: 0, lastStatus: null, lastAt: null };
-        __googleUsage.set(key, row);
-    }
-    row.timestamps.push(now);
-    row.total += 1;
-    row.lastStatus = Number.isFinite(status) ? status : null;
-    row.lastAt = now;
-    if (status >= 200 && status < 300) row.success += 1;
-    else row.errors += 1;
-    const cutoff = now - USAGE_WINDOW_MS;
-    row.timestamps = row.timestamps.filter(t => t >= cutoff);
-}
-
-/*
- * Record the request in both the local fallback and persistent storage.
- * The KV write is deliberately fire-and-forget so telemetry cannot add a
- * network round-trip to Gemini response latency. The write happens while
- * the current Vercel request is still active.
- */
-async function recordGoogleAttempt(key, status, keyIndex) {
-    // Always update the in-process counter synchronously. This is the source
-    // used immediately if persistent telemetry is unavailable.
-    recordGoogleAttemptMemory(key, status);
-
-    if (!hasUsageKV()) return;
-
-    // IMPORTANT: do NOT fire-and-forget the persistent write. On Vercel/serverless
-    // the function can finish or be suspended before an un-awaited Promise has
-    // flushed, which made the dashboard show `0 requests` even though Gemini had
-    // already returned a real 429. The request must be counted before we move on.
-    const now = Date.now();
-    const id = `${now}:${Math.random().toString(36).slice(2, 10)}`;
-    const zsetKey = `${USAGE_KV_PREFIX}:key:${keyIndex}`;
-    const metaKey = `${USAGE_KV_PREFIX}:meta:${keyIndex}`;
-    const score = String(now);
-
-    try {
-        await Promise.all([
-            usageKvCommand('ZADD', [zsetKey, score, id]),
-            usageKvCommand('EXPIRE', [zsetKey, String(USAGE_TTL_SECONDS)]),
-            usageKvCommand('HINCRBY', [metaKey, 'totalObserved', '1']),
-            usageKvCommand('HINCRBY', [metaKey, status >= 200 && status < 300 ? 'successfulObserved' : 'errorsObserved', '1']),
-            usageKvCommand('HSET', [metaKey, 'lastStatus', String(Number.isFinite(status) ? status : ''), 'lastAt', new Date(now).toISOString()]),
-            usageKvCommand('EXPIRE', [metaKey, String(90 * 24 * 60 * 60)])
-        ]);
-    } catch (error) {
-        log.warn('usage.storage_write_failed', { message: error?.message || String(error) });
-    }
-}
-
-function pruneGoogleUsage() {
-    const cutoff = Date.now() - USAGE_WINDOW_MS;
-    for (const row of __googleUsage.values()) row.timestamps = row.timestamps.filter(t => t >= cutoff);
-}
-
-async function getPersistentGoogleUsage(index) {
-    const now = Date.now();
-    const cutoff = String(now - USAGE_WINDOW_MS);
-    const zsetKey = `${USAGE_KV_PREFIX}:key:${index}`;
-    const metaKey = `${USAGE_KV_PREFIX}:meta:${index}`;
-
-    await usageKvCommand('ZREMRANGEBYSCORE', [zsetKey, '-inf', cutoff]);
-    const [count, oldest, meta] = await Promise.all([
-        usageKvCommand('ZCOUNT', [zsetKey, cutoff, '+inf']),
-        usageKvCommand('ZRANGE', [zsetKey, '0', '0', 'WITHSCORES']),
-        usageKvCommand('HGETALL', [metaKey])
-    ]);
-
-    let oldestAt = null;
-    if (Array.isArray(oldest) && oldest.length >= 2) {
-        const score = Number(oldest[1]);
-        if (Number.isFinite(score)) oldestAt = score;
-    }
-
-    const metaObj = meta && typeof meta === 'object' ? meta : {};
-    return {
-        requestsLast60s: Number(count) || 0,
-        totalObserved: Number(metaObj.totalObserved) || 0,
-        successfulObserved: Number(metaObj.successfulObserved) || 0,
-        errorsObserved: Number(metaObj.errorsObserved) || 0,
-        lastStatus: metaObj.lastStatus === '' || metaObj.lastStatus == null ? null : Number(metaObj.lastStatus),
-        lastAt: metaObj.lastAt || null,
-        secondsUntilOldestExpires: oldestAt ? Math.max(0, Math.ceil((oldestAt + USAGE_WINDOW_MS - now) / 1000)) : 0
-    };
-}
-
-async function getGoogleUsageSnapshot(keys) {
-    if (hasUsageKV()) {
-        try {
-            const persistent = await Promise.all(keys.map((_, index) => getPersistentGoogleUsage(index + 1)));
-            return keys.map((_, index) => ({
-                label: `Key ${String(index + 1).padStart(2, '0')}`,
-                ...persistent[index]
-            }));
-        } catch (error) {
-            log.warn('usage.storage_read_failed', { message: error?.message || String(error) });
-        }
-    }
-
-    pruneGoogleUsage();
-    const now = Date.now();
-    return keys.map((key, index) => {
-        const row = __googleUsage.get(key) || { timestamps: [], total: 0, success: 0, errors: 0, lastStatus: null, lastAt: null };
-        return {
-            label: `Key ${String(index + 1).padStart(2, '0')}`,
-            requestsLast60s: row.timestamps.length,
-            totalObserved: row.total,
-            successfulObserved: row.success,
-            errorsObserved: row.errors,
-            lastStatus: row.lastStatus,
-            lastAt: row.lastAt ? new Date(row.lastAt).toISOString() : null,
-            secondsUntilOldestExpires: row.timestamps.length ? Math.max(0, Math.ceil((row.timestamps[0] + USAGE_WINDOW_MS - now) / 1000)) : 0
-        };
-    });
-}
-function rotateKeysByHealth(keys) {
-    // Randomize first (keeps load spread across otherwise-equal keys),
-    // then stable-sort healthier keys first.
-    const shuffled = keys
-        .map(k => ({ k, sort: Math.random() }))
-        .sort((a, b) => a.sort - b.sort)
-        .map(({ k }) => k);
-
-    return shuffled.sort((a, b) => {
-        const fa = __keyFailureCounts.get(a) || 0;
-        const fb = __keyFailureCounts.get(b) || 0;
-        return fa - fb;
-    });
-}
-
-function markKeyResult(key, ok) {
-    if (ok) {
-        __keyFailureCounts.set(key, 0);
-    } else {
-        __keyFailureCounts.set(key, (__keyFailureCounts.get(key) || 0) + 1);
-    }
-}
-
-function keyLabel(keys, key) {
-    // Never log the actual key - just a stable, non-reversible index label.
-    const idx = keys.indexOf(key);
-    return `key#${idx + 1}/${keys.length}`;
-}
-
-/*
-|--------------------------------------------------------------------------
-| Context / History size management
-|--------------------------------------------------------------------------
-| Gemini has a large context window, but sending an ever-growing raw history
-| on every turn is wasteful, slow, and can eventually hit request-size or
-| token limits. We cap how many recent turns we send verbatim, and fold
-| anything older than that into one short summary turn so continuity isn't
-| lost. This is a lightweight heuristic summary (not a model call) so it
-| never adds latency or extra API cost.
-*/
-const MAX_HISTORY_TURNS = 60;       // most recent user+model turns kept verbatim (~30 user messages, since each user turn has a matching model turn)
-const MAX_HISTORY_CHARS = 60000;    // rough safety cap on total history text size
-const MAX_SEARCH_RESULT_CHARS = 12000; // safety cap on a single web_search result injected into context
-
-function summarizeOldTurns(oldTurns) {
-    if (!oldTurns.length) return null;
-    const topics = oldTurns
-        .filter(t => t.role === 'user')
-        .map(t => String(t.text || t.content || '').slice(0, 80).trim())
-        .filter(Boolean)
-        .slice(-8); // last few user topics from the trimmed-off section
-
-    if (!topics.length) return null;
-
-    return (
-        `[Ø®Ù„Ø§ØµÙ‡â€ŒÛŒ Ù…Ú©Ø§Ù„Ù…Ù‡â€ŒÛŒ Ù‚Ø¨Ù„ÛŒ - Ø¨Ø±Ø§ÛŒ ØµØ±ÙÙ‡â€ŒØ¬ÙˆÛŒÛŒ Ø¯Ø± Ø­Ø¬Ù…ØŒ Ù¾ÛŒØ§Ù…â€ŒÙ‡Ø§ÛŒ Ù‚Ø¯ÛŒÙ…ÛŒâ€ŒØªØ± Ø®Ù„Ø§ØµÙ‡ Ø´Ø¯Ù†Ø¯]\n` +
-        `Ù…ÙˆØ¶ÙˆØ¹Ø§ØªÛŒ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ù…Ø·Ø±Ø­ Ø´Ø¯Ù‡: ` +
-        topics.map(t => `Â«${t}Â»`).join('ØŒ ')
-    );
-}
-
-function trimHistoryForContext(history) {
-    if (!Array.isArray(history) || history.length === 0) return [];
-
-    // Never trim away pinned/persona turns (added by the frontend at index 0-1).
-    const personaTurns = history.filter(h => h.__virtualPersona);
-    const regularTurns = history.filter(h => !h.__virtualPersona);
-
-    let working = regularTurns;
-
-    if (working.length > MAX_HISTORY_TURNS) {
-        const cut = working.length - MAX_HISTORY_TURNS;
-        const dropped = working.slice(0, cut);
-        working = working.slice(cut);
-
-        const summaryText = summarizeOldTurns(dropped);
-        if (summaryText) {
-            working = [
-                { role: 'user', text: summaryText },
-                { role: 'model', text: 'Ø¨Ø§Ø´Ù‡ØŒ Ø²Ù…ÛŒÙ†Ù‡â€ŒÛŒ Ù‚Ø¨Ù„ÛŒ Ø±Ùˆ Ø¯Ø± Ù†Ø¸Ø± Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ù….' },
-                ...working
-            ];
-        }
-    }
-
-    // Hard character-size safety net, in case a few turns are each very long
-    // (e.g. pasted file contents already folded into history by the client).
-    let totalChars = working.reduce((sum, t) => sum + String(t.text || t.content || '').length, 0);
-    while (totalChars > MAX_HISTORY_CHARS && working.length > 2) {
-        const removed = working.shift();
-        totalChars -= String(removed.text || removed.content || '').length;
-    }
-
-    return [...personaTurns, ...working];
-}
-
-// FIX: replaced by real function-calling web search (see runAgentLoop /
-// GEMINI_TOOLS below). The old version decided whether to search using a
-// fixed Persian keyword list, so anything phrased differently (or in
-// English, or just not on the list) silently never triggered a search even
-// when it clearly needed one. The model itself now decides, per-turn and
-// based on actual understanding of the question, whether to call the
-// web_search tool â€” including calling it more than once if the first
-// result isn't enough. Kept as a no-op stub (unused) instead of deleting
-// outright, in case any other code path still references it.
-function shouldSearchWeb() {
-    return false;
-}
-
-// Fast client/request-side hint used only to protect the first streamed
-// chunks when the user explicitly asks for live/searchable information.
-// This does NOT decide whether Gemini should search; Gemini still makes that
-// decision with the real web_search tool. It only prevents a friendly
-// preamble such as "Ø³Ù„Ø§Ù… ..." from leaking before that tool call.
-function looksLikeWebSearchIntent(text) {
-    const s = String(text || '').toLowerCase();
-    if (!s.trim()) return false;
-    return /(?:Ø³Ø±Ú†|Ø¬Ø³ØªØ¬Ùˆ|Ú¯ÙˆÚ¯Ù„|ÙˆØ¨|Ø§ÛŒÙ†ØªØ±Ù†Øª|Ù‚ÛŒÙ…Øª(?:\s|â€Œ)*(?:Ø§Ù„Ø§Ù†|Ø§Ù…Ø±ÙˆØ²|ÙØ¹Ù„ÛŒ|Ø¬Ø¯ÛŒØ¯|Ù„Ø­Ø¸Ù‡)|Ø§Ù„Ø§Ù† Ú†Ù†Ø¯Ù‡|Ú†Ù†Ø¯Ù‡|Ú†Ù‚Ø¯Ø±(?:Ù‡|Ù‡ØŸ)|Ú†Ù‚Ø¯Ø±Ù‡|Ù‚ÛŒÙ…ØªØ´|Ù‚ÛŒÙ…ØªØ´ Ú†Ù†Ø¯Ù‡|Ù‡Ø²ÛŒÙ†Ù‡|Ù‡Ø²ÛŒÙ†Ø´|Ø¢Ø®Ø±ÛŒÙ†|Ø§Ù…Ø±ÙˆØ²|Ø§Ù…Ø´Ø¨|Ø§Ø®Ø¨Ø§Ø±|Ø®Ø¨Ø±Ù‡Ø§ÛŒ|Ø¢Ø¨[\u200c ]?ÙˆÙ‡ÙˆØ§|Ù‡ÙˆØ§(?:ÛŒ|\s)|Ù†Ø±Ø®|Ø§Ø±Ø²|Ø¯Ù„Ø§Ø±|ÛŒÙˆØ±Ùˆ|Ø·Ù„Ø§|Ø³Ù‡Ø§Ù…|Ù…ÙˆØ¬ÙˆØ¯ÛŒ|Ù‚ÛŒÙ…Øª ÙØ¹Ù„ÛŒ|current|latest|today|right now|now|search|google|look up|news|weather|price|stock|exchange rate|availability)/i.test(s);
-}
-
-
-
-/*
-|--------------------------------------------------------------------------
-| Tavily
-|--------------------------------------------------------------------------
-*/
-async function generateChatTitle(userText, botText, geminiKeys) {
-    const fallback = (userText || '').trim().slice(0, 20) + '...';
-    if (!userText || !geminiKeys || geminiKeys.length === 0) return fallback;
-
-    const titlePrompt = `
-ÛŒÚ© Ø¹Ù†ÙˆØ§Ù† Ø¨Ø³ÛŒØ§Ø± Ú©ÙˆØªØ§Ù‡ (Ø­Ø¯Ø§Ú©Ø«Ø± Û´ ØªØ§ Û¶ Ú©Ù„Ù…Ù‡ØŒ Ø¨Ù‡ ÙØ§Ø±Ø³ÛŒ) Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ø¨Ø³Ø§Ø² Ú©Ù‡
-Ù…ÙˆØ¶ÙˆØ¹ Ø§ØµÙ„ÛŒ Ø±Ø§ Ù†Ø´Ø§Ù† Ø¨Ø¯Ù‡Ø¯ â€” Ù†Ù‡ ÛŒÚ© Ø¬Ù…Ù„Ù‡ Ú©Ø§Ù…Ù„ØŒ ÙÙ‚Ø· ÛŒÚ© Ø¹Ù†ÙˆØ§Ù† Ù…Ø«Ù„ ØªÛŒØªØ±.
-
-Ù‚ÙˆØ§Ù†ÛŒÙ†:
-- ÙÙ‚Ø· Ø®ÙˆØ¯Ù Ø¹Ù†ÙˆØ§Ù† Ø±Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†ØŒ Ø¨Ø¯ÙˆÙ† Ú¯ÛŒÙˆÙ…Ù‡ØŒ Ø¨Ø¯ÙˆÙ† ØªÙˆØ¶ÛŒØ­ØŒ Ø¨Ø¯ÙˆÙ† Ù†Ù‚Ø·Ù‡ Ø¯Ø± Ø§Ù†ØªÙ‡Ø§.
-- Ø§Ø² Ú©Ù„Ù…Ø§Øª Ø¹Ù…ÙˆÙ…ÛŒ Ù…Ø«Ù„ Â«Ø³Ù„Ø§Ù…Â» ÛŒØ§ Â«Ú¯ÙØªÚ¯ÙˆÂ» Ø¨Ù‡â€ŒØªÙ†Ù‡Ø§ÛŒÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†Ø› Ù…ÙˆØ¶ÙˆØ¹ ÙˆØ§Ù‚Ø¹ÛŒ Ø±Ø§ Ø¨Ú¯ÛŒØ±.
-- Ø§Ú¯Ø± Ù¾ÛŒØ§Ù… Ú©Ø§Ø±Ø¨Ø± ÙÙ‚Ø· Ø³Ù„Ø§Ù… Ùˆ Ø§Ø­ÙˆØ§Ù„â€ŒÙ¾Ø±Ø³ÛŒ Ø§Ø³Øª Ùˆ Ù…ÙˆØ¶ÙˆØ¹ Ù…Ø´Ø®ØµÛŒ Ù†Ø¯Ø§Ø±Ø¯ØŒ Ø¹Ù†ÙˆØ§Ù†ÛŒ Ù…Ø«Ù„
-  Â«Ú¯ÙØªÚ¯ÙˆÛŒ Ø¹Ù…ÙˆÙ…ÛŒÂ» Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†.
-
-Ù¾ÛŒØ§Ù… Ú©Ø§Ø±Ø¨Ø±:
-${String(userText).slice(0, 500)}
-
-Ù¾Ø§Ø³Ø® Ø±Ø¨Ø§Øª (Ø§Ú¯Ø± Ù…ÙˆØ¬ÙˆØ¯ Ø¨ÙˆØ¯):
-${String(botText || '').slice(0, 500)}
-`;
-
-    for (let i = 0; i < geminiKeys.length; i++) {
-        const key = geminiKeys[i];
-        const keyIndex = i + 1;
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 8000);
-            let response;
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Virtual Chat</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%236b7078%22/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2248%25%22%20stop-color%3D%22%233a3c42%22/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231d1f24%22/%3E%0A%20%20%20%20%3C/linearGradient%3E%0A%20%20%3C/defs%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22url%28%23g%29%22/%3E%0A%20%20%3Cpath%20d%3D%22M32%2014%20L36.2%2027.8%20L50%2032%20L36.2%2036.2%20L32%2050%20L27.8%2036.2%20L14%2032%20L27.8%2027.8%20Z%22%20fill%3D%22%23f1f3f5%22/%3E%0A%20%20%3Ccircle%20cx%3D%2249%22%20cy%3D%2215%22%20r%3D%224%22%20fill%3D%22%23b6bac1%22/%3E%0A%3C/svg%3E%0A" id="favicon">
+    <script>
+        (function () {
             try {
-                response = await fetch(
-                    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
-                    {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-                        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: titlePrompt }] }] }),
-                        signal: controller.signal
+                var saved = JSON.parse(localStorage.getItem('virtual_settings') || '{}');
+                var mode = saved.theme || 'auto';
+                var resolved = mode === 'auto'
+                    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+                    : mode;
+                document.documentElement.setAttribute('data-theme', resolved);
+
+                // FEATURE (clean flat black/white UI): پیش‌تر این اسکریپت هر بار
+                // یک پالت خاکستری/رنگی سفارشی (isCharcoal) را روی متغیرهای
+                // :root سوار می‌کرد و همیشه ظاهر واقعی صفحه را بازنویسی می‌کرد -
+                // برای همین حتی با تغییر CSS اصلی هم رنگ واقعا مشکی خالص
+                // نمی‌شد. الان فقط یک پالت ساده و صاف (مشکی در دارک، سفید در
+                // لایت) اعمال می‌شود، هماهنگ با مقادیر پیش‌فرض :root در CSS.
+                var root = document.documentElement;
+
+                function applyFlatPalette() {
+                    if (resolved === 'light') {
+                        root.style.setProperty('--bg-main', '#ffffff');
+                        root.style.setProperty('--bg-sidebar', '#f9f9f9');
+                        root.style.setProperty('--bg-card', '#f2f2f2');
+                        root.style.setProperty('--bg-card-hover', '#e8e8e8');
+                        root.style.setProperty('--bg-input', '#f2f2f2');
+                        root.style.setProperty('--border', '#e5e5e5');
+                        root.style.setProperty('--border-soft', 'rgba(15,23,42,0.08)');
+                        root.style.setProperty('--text-main', '#0d0d0d');
+                        root.style.setProperty('--text-muted', '#6b6b6b');
+                        root.style.setProperty('--code-bg', '#f2f2f2');
+                        root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
+                        root.style.setProperty('--code-text', '#0d0d0d');
+                        root.style.setProperty('--shadow-a', 'rgba(30,41,59,0.08)');
+                        root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
+                        root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%), radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%)');
+                    } else {
+                        root.style.setProperty('--bg-main', '#000000');
+                        root.style.setProperty('--bg-sidebar', '#0a0a0a');
+                        root.style.setProperty('--bg-card', '#171717');
+                        root.style.setProperty('--bg-card-hover', '#212121');
+                        root.style.setProperty('--bg-input', '#171717');
+                        root.style.setProperty('--border', '#262626');
+                        root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
+                        root.style.setProperty('--text-main', '#f4f6fb');
+                        root.style.setProperty('--text-muted', '#8a8a8a');
+                        root.style.setProperty('--code-bg', '#0d0d0d');
+                        root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.04)');
+                        root.style.setProperty('--code-text', '#f4f6fb');
+                        root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.3)');
+                        root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
+                        root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%), radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%)');
                     }
-                );
-            } finally {
-                clearTimeout(timeoutId);
-            }
+                }
 
-            // Title generation is a real Gemini request too, so it must appear
-            // in the same usage dashboard as the main chat requests.
-            await recordGoogleAttempt(key, response.status, keyIndex);
+                applyFlatPalette();
+                if (saved.fontSize) {
+                    var sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
+                    document.documentElement.style.setProperty('--msg-font-size', sizes[saved.fontSize] || sizes.normal);
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/bold/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="manifest" href="/manifest.json">
+    <!-- FIX (رفع نیاز به لاگین دستی مکرر): اسکریپت GSI دیگر لازم نیست -
+         لاگین حالا با ریدایرکت به api/auth-start.js انجام می‌شود. -->
 
-            if (!response.ok) {
-                let body = null;
-                try { body = await response.json(); } catch (_) {}
-                const classified = classifyGeminiError({ status: response.status, body });
-                if (!classified.retryable) break;
-                continue;
-            }
-
-            const data = await response.json();
-            let title = data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('').trim();
-            if (title) {
-                title = title.replace(/^["'Â«Â»]+|["'Â«Â»]+$/g, '').replace(/\.$/, '').trim();
-                if (title.length > 40) title = title.slice(0, 40).trim() + 'â€¦';
-                log.info('chat.title_generated', {});
-                return title;
-            }
-        } catch (error) {
-            const classified = classifyGeminiError(error);
-            log.warn('chat.title_generation_failed', {
-                keyIndex,
-                category: classified.category,
-                status: classified.status
-            });
-            if (!classified.retryable) break;
+    <style>
+        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.35; shape-rendering: geometricPrecision; }
+        [class*="ph-"] { vertical-align: -0.09em; }
+        :root {
+            --bg-main: #000000;
+            --bg-sidebar: #0a0a0a;
+            --bg-card: #171717;
+            --bg-card-hover: #212121;
+            --bg-input: #171717;
+            --accent-1: #6366f1;
+            --accent-2: #a855f7;
+            --accent-grad: linear-gradient(135deg, #6366f1, #a855f7);
+            --danger: #f87171;
+            --text-main: #f4f6fb;
+            --text-muted: #a3a3a3;
+            --border: #262626;
+            --border-soft: rgba(255,255,255,0.08);
+            --shadow-a: rgba(0,0,0,0.3);
+            --shadow-b: rgba(0,0,0,0.55);
+            --msg-font-size: 0.92rem;
+            --success: #34d399;
+            --warning: #fbbf24;
+            --code-bg: #0d0d0d;
+            --code-head-bg: rgba(255,255,255,0.04);
+            --code-head-bg-solid: #1c1c1c;
+            --code-text: #f4f6fb;
+            /* پس‌زمینه صاف و مشکی خالص - بدون گرادیان رنگی؛ فقط یک درخشش
+               بسیار محو و خنثی (نه رنگی) که فقط عمق کمی به صفحه می‌دهد. */
+            --app-bg-image:
+                radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%);
         }
-    }
 
-    log.warn('chat.title_generation_fallback', { reason: 'title unavailable' });
-    return fallback;
-}
+        :root[data-theme="light"] {
+            --bg-main: #ffffff;
+            --bg-sidebar: #f9f9f9;
+            --bg-card: #f2f2f2;
+            --bg-card-hover: #e8e8e8;
+            --bg-input: #f2f2f2;
+            --text-main: #0d0d0d;
+            --text-muted: #595959;
+            --border: #e5e5e5;
+            --code-bg: #f2f2f2;
+            --code-head-bg: rgba(0,0,0,0.04);
+            --code-text: #0d0d0d;
+            --border-soft: rgba(15,23,42,0.08);
+            --shadow-a: rgba(30,41,59,0.08);
+            --shadow-b: rgba(30,41,59,0.14);
+            --app-bg-image:
+                radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%),
+                radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%);
+        }
 
-/*
-|--------------------------------------------------------------------------
-| Tavily
-|--------------------------------------------------------------------------
-*/
+        :root[data-theme="light"] body {
+            background-image: var(--app-bg-image);
+        }
 
-async function fetchTavilyResults(query, tavilyKeys, searchCache) {
-    if (!tavilyKeys || tavilyKeys.length === 0) {
-        return {
-            ok: false,
-            code: 'search_not_configured',
-            message: 'Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù¾ÛŒÚ©Ø±Ø¨Ù†Ø¯ÛŒ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.'
+        :root[data-theme="light"] textarea { color: #1a1d29 !important; }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Vazirmatn', sans-serif;
+            font-weight: 500;
+            -webkit-tap-highlight-color: transparent;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        select, input, button {
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+            outline: none !important;
+            border: none;
+            background: none;
+        }
+        
+        textarea {
+            outline: none !important;
+            border: none;
+            background: none;
+        }
+
+        html, body {
+            height: 100%;
+            height: 100dvh;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        body {
+            display: flex;
+            position: relative;
+            background: var(--bg-main);
+            background-image: var(--app-bg-image);
+        }
+
+        #authOverlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(10, 12, 18, 0.88);
+            backdrop-filter: blur(12px);
+            z-index: 9999;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+        }
+        #authOverlay.active { display: flex !important; }
+
+        .auth-card {
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 20px;
+            padding: 36px 28px;
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 20px 50px var(--shadow-b);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .auth-card .home-mark { margin: 0 auto 18px auto; }
+        .auth-card h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: 8px; color: var(--text-main); }
+        .auth-card p { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 24px; line-height: 1.6; }
+        .google-btn-wrapper { display: flex; justify-content: center; }
+        .google-oauth-btn {
+            display: inline-flex; align-items: center; gap: 10px;
+            background: #fff; color: #1f1f1f;
+            border-radius: 999px; padding: 10px 22px;
+            font-size: 0.9rem; font-weight: 600;
+            text-decoration: none; cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            transition: box-shadow 0.15s ease, transform 0.1s ease;
+        }
+        .google-oauth-btn:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+        .google-oauth-btn:active { transform: scale(0.98); }
+
+        /* FEATURE (ایمیل/پسورد داخلی به‌جای گوگل): فرم لاگین/ثبت‌نام سبک،
+           هم‌راستا با ظاهر auth-card موجود. */
+        .auth-form { display: flex; flex-direction: column; gap: 12px; text-align: right; }
+        .auth-form input {
+            width: 100%; box-sizing: border-box;
+            background: var(--bg-main); color: var(--text-main);
+            border: 1px solid var(--border-soft); border-radius: 12px;
+            padding: 12px 14px; font-size: 0.9rem; font-family: inherit;
+            direction: ltr; text-align: left;
+        }
+        .auth-form input:focus { outline: none; border-color: var(--accent, #6d5efc); }
+        .auth-submit-btn {
+            width: 100%; border: none; border-radius: 999px;
+            padding: 11px 22px; font-size: 0.9rem; font-weight: 700;
+            cursor: pointer; background: var(--text-main); color: var(--bg-main);
+            transition: opacity 0.15s ease, transform 0.1s ease;
+        }
+        .auth-submit-btn:hover { opacity: 0.9; }
+        .auth-submit-btn:active { transform: scale(0.98); }
+        .auth-submit-btn:disabled { opacity: 0.6; cursor: default; }
+        .auth-error-msg {
+            color: var(--danger); font-size: 0.8rem; min-height: 1em;
+            margin-top: -2px;
+        }
+        .auth-toggle-line { font-size: 0.82rem; color: var(--text-muted); margin-top: 4px; }
+        .auth-toggle-line a { color: var(--text-main); font-weight: 700; cursor: pointer; text-decoration: underline; }
+        .auth-guest-line { margin-top: 18px; }
+        .auth-guest-line a { color: var(--text-muted); font-size: 0.8rem; cursor: pointer; text-decoration: underline; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes messageIn {
+            from { opacity: 0; transform: translateY(10px) scale(0.985); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
+            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        @keyframes glowPulse {
+            0%, 100% { opacity: 0.55; }
+            50% { opacity: 1; }
+        }
+
+        @keyframes dotBounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+            40% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        @keyframes pulseMic {
+            0% { transform: scale(1); color: var(--danger); }
+            50% { transform: scale(1.15); color: #ef4444; }
+            100% { transform: scale(1); color: var(--danger); }
+        }
+
+        /* ===== انیمیشن‌های جدید ===== */
+        @keyframes messageInSoft {
+            0% { opacity: 0; transform: translateY(14px) scale(0.97); }
+            60% { opacity: 1; }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes sendPop {
+            0% { transform: scale(1) rotate(0deg); }
+            35% { transform: scale(0.82) rotate(-8deg); }
+            65% { transform: scale(1.12) rotate(4deg); }
+            100% { transform: scale(1) rotate(0deg); }
+        }
+        @keyframes accentShimmer {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        @keyframes chevronFlip {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(180deg); }
+        }
+        @keyframes cardPress {
+            0% { transform: scale(1); }
+            50% { transform: scale(0.96); }
+            100% { transform: scale(1); }
+        }
+        @keyframes underlineGrow {
+            from { width: 0; opacity: 0; }
+            to { width: 100%; opacity: 1; }
+        }
+        @keyframes floatUpFade {
+            0% { opacity: 0; transform: translateY(8px); }
+            15% { opacity: 1; transform: translateY(0); }
+            85% { opacity: 1; }
+            100% { opacity: 0; transform: translateY(-6px); }
+        }
+
+        .message-wrapper { animation: messageInSoft 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+
+        .action-btn:active i { animation: sendPop 0.38s ease; }
+
+        .model-dropdown-item.active {
+            position: relative;
+            overflow: hidden;
+        }
+        .model-dropdown-item.active::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, color-mix(in srgb, var(--accent-1) 10%, transparent), color-mix(in srgb, var(--accent-2) 14%, transparent), color-mix(in srgb, var(--accent-1) 10%, transparent));
+            background-size: 200% 200%;
+            animation: accentShimmer 3.2s ease infinite;
+            pointer-events: none;
+        }
+
+        .model-selector:has(.model-dropdown.active) .model-chevron i { transform: rotate(180deg); transition: transform 0.2s ease; }
+        .model-chevron i { transition: transform 0.2s ease; }
+
+        .icon-btn:active, .msg-action:active { opacity: 0.75; }
+        button > *, .icon-btn > *, .msg-action > * { pointer-events: none; }
+
+        .suggestion-chip { position: relative; overflow: hidden; }
+        .suggestion-chip::after {
+            content: "";
+            position: absolute;
+            right: 14px;
+            bottom: 6px;
+            left: 14px;
+            height: 2px;
+            border-radius: 2px;
+            background: var(--accent-grad);
+            width: 0;
+            opacity: 0;
+            transition: none;
+        }
+        .suggestion-chip:hover::after { animation: underlineGrow 0.25s ease forwards; }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 15;
+        }
+        .sidebar-overlay.active { display: block; }
+
+        .sidebar {
+            width: 272px;
+            background-color: var(--bg-sidebar);
+            border-left: 1px solid var(--border-soft);
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            z-index: 20;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        padding 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .brand-title {
+            font-size: 1.15rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+            padding: 0 2px;
+            letter-spacing: -0.02em;
+        }
+        .brand-title .brand-name { display: flex; align-items: center; gap: 9px; }
+        .brand-mark {
+            width: 26px; height: 26px;
+            border-radius: 8px;
+            background: var(--accent-grad);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.75rem; color: #fff; flex-shrink: 0;
+            box-shadow: 0 0 18px color-mix(in srgb, var(--accent-1) 45%, transparent);
+            position: relative;
+        }
+        .brand-mark::after {
+            content: '';
+            position: absolute;
+            bottom: -2px; left: -2px;
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            background: #22c55e;
+            border: 2px solid var(--bg-sidebar);
+            transition: background-color 0.2s ease;
+        }
+        .brand-mark.generating::after {
+            background: #ef4444;
+            animation: statusDotPulse 1s ease-in-out infinite;
+        }
+        @keyframes statusDotPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+        .brand-text {
+            background: var(--accent-grad);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .user-profile {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            padding: 10px 12px;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 56px;
+        }
+        .user-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+        .user-avatar-letter {
+            display: flex; align-items: center; justify-content: center;
+            background: var(--text-main); color: var(--bg-main);
+            font-weight: 800; font-size: 1rem;
+        }
+        .user-info { flex: 1; overflow: hidden; }
+        .user-name { font-size: 0.9rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
+        .user-actions { display: flex; gap: 4px; align-items: center; }
+        .user-actions .icon-btn { width: 28px; height: 28px; font-size: 0.8rem; }
+
+        .new-chat-btn {
+            background: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid var(--border-soft);
+            padding: 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .new-chat-btn i { color: var(--accent-2); }
+
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+            /* FEATURE: fade mask روی لبه بالا/پایین لیست قابل‌اسکرول - به‌جای
+               بریدگی تیز محتوا، به‌آرومی محو می‌شه (مثل اکثر اپ‌های چت). */
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+        }
+        .history-list::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+
+        .history-item {
+            padding: 10px 12px;
+            border-radius: 9px;
+            font-size: 0.84rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            white-space: nowrap;
+            transition: 0.15s;
+            border: 1px solid transparent;
+        }
+        .history-item i { font-size: 0.75rem; flex-shrink: 0; }
+        .history-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .history-item:hover { background-color: var(--bg-card); color: var(--text-main); }
+        /* رفع باگ: بدون این خط، مرورگر به‌طور پیش‌فرض دور آیتمی که کلیک/فوکوس
+           شده یک outline آبی می‌کشه که ربطی به استایل .active ما نداره. این
+           outline فقط روی همون آیتمی می‌مونه که آخرین بار فوکوس گرفته - نه
+           لزوماً چتِ باز فعلی - و با کلیک روی چت دیگه هم پاک نمی‌شه مگر
+           فوکوس عوض بشه. حذفش می‌کنیم و به‌جاش outline رو با استایل خودمون
+           هماهنگ می‌کنیم تا با .active قاطی نشه. */
+        .history-item:focus,
+        .history-item:focus-visible { outline: none; }
+        .history-item.active { background-color: var(--bg-card); color: var(--text-main); border-color: color-mix(in srgb, var(--accent-1) 35%, transparent); }
+        .history-item.active i { color: var(--accent-2); }
+        .history-item-menu-btn {
+            width: 26px; height: 26px; flex-shrink: 0;
+            opacity: 0; transition: opacity 0.15s;
+        }
+        .history-item:hover .history-item-menu-btn,
+        .history-item-menu-btn:focus { opacity: 1; }
+        .history-item-menu {
+            position: fixed;
+            z-index: 10002;
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            box-shadow: 0 16px 40px var(--shadow-b);
+            padding: 6px;
+            min-width: 170px;
+            animation: fadeIn 0.14s ease-out;
+        }
+        .history-item-menu button {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%; padding: 9px 10px; border-radius: 8px;
+            background: transparent; border: none; color: var(--text-main);
+            font-family: inherit; font-size: 0.82rem; cursor: pointer; text-align: right;
+        }
+        .history-item-menu button:hover { background: var(--border-soft); }
+        .history-item-menu button.danger { color: var(--danger, #e5484d); }
+        .history-item-menu button i { font-size: 0.85rem; }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            height: 100dvh;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            padding: 14px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-soft);
+            z-index: 5;
+        }
+
+        .header-left { display: flex; align-items: center; gap: 12px; }
+        .header-brand-text { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); letter-spacing: 0.2px; }
+        .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; }
+        .header-right { display: flex; align-items: center; gap: 8px; }
+
+        .model-selector {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            position: relative;
+        }
+        .model-selector:hover {
+            border-color: color-mix(in srgb, var(--accent-1) 40%, transparent);
+            color: var(--text-main);
+        }
+        .model-selector .model-name {
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .model-selector .model-chevron {
+            font-size: 0.65rem;
+            margin-right: 2px;
+        }
+
+        .model-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            padding: 6px;
+            min-width: 200px;
+            box-shadow: 0 12px 40px var(--shadow-b);
+            z-index: 100;
+            animation: fadeIn 0.2s ease;
+        }
+        .model-dropdown.active { display: block; }
+        .model-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .model-dropdown-item:hover {
+            background: var(--bg-card);
+            color: var(--text-main);
+        }
+        .model-dropdown-item.active {
+            background: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid color-mix(in srgb, var(--accent-1) 30%, transparent);
+        }
+        .model-dropdown-item .item-name { font-weight: 600; }
+        .model-dropdown-item .item-desc { font-size: 0.65rem; opacity: 0.6; }
+        .model-dropdown-item .item-check { margin-right: auto; color: var(--accent-2); }
+
+        @media (max-width: 900px) {
+            .model-selector .model-name { display: none; }
+            .model-dropdown { min-width: 160px; left: auto; right: 0; transform: none; }
+        }
+
+        /* سلکتور مدل کنار نوار پیام (به سبک کلود) */
+        .composer-model-selector {
+            margin-right: 2px;
+            flex-shrink: 0;
+        }
+        .composer-model-selector .model-dropdown {
+            top: auto;
+            bottom: calc(100% + 10px);
+            left: 0;
+            right: auto;
+            transform: none;
+            animation: dropUp 0.18s ease;
+        }
+        @media (max-width: 900px) {
+            .composer-model-selector .model-name { display: none; }
+            .composer-model-selector .model-dropdown { left: auto; right: 0; }
+        }
+        @keyframes dropUp {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .home-screen {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 26px;
+            padding: 20px;
+            text-align: center;
+            animation: fadeIn 0.35s ease-out;
+        }
+
+        .home-mark {
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: var(--accent-grad);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; color: #fff;
+            box-shadow: 0 0 40px color-mix(in srgb, var(--accent-1) 35%, transparent);
+            animation: glowPulse 3.5s ease-in-out infinite;
+        }
+
+        .home-text { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+        .home-title { font-size: 1.5rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; line-height: 1.4; max-width: 460px; }
+        .home-subtitle { font-size: 0.92rem; color: var(--text-muted); line-height: 1.6; }
+
+        .suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 520px; }
+        .suggestion-chip {
+            padding: 9px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 20px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .suggestion-chip:hover { color: var(--text-main); border-color: color-mix(in srgb, var(--accent-1) 40%, transparent); background: var(--bg-card-hover); }
+
+        .chat-box {
+            flex: 1;
+            padding: 22px 15%;
+            overflow-y: auto;
+            display: none;
+            flex-direction: column;
+            gap: 30px;
+            scroll-behavior: smooth;
+            --chat-box-pad-top: 22px;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+            /* FEATURE: همون fade mask روی لبه بالا/پایین ناحیه پیام‌ها */
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+        }
+        .chat-box::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+
+        .message-wrapper { display: flex; flex-direction: column; max-width: 85%; }
+        .message-wrapper.user { align-self: flex-start; }
+        .message-wrapper.bot { align-self: flex-end; }
+
+        .message {
+            padding: 13px 17px;
+            border-radius: 16px;
+            line-height: 1.7;
+            word-wrap: break-word;
+            font-size: var(--msg-font-size);
+            animation: messageIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            transform-origin: bottom;
+            position: relative;
+        }
+
+        .msg-content-in { animation: msgContentIn 0.42s cubic-bezier(0.22, 1, 0.36, 1); }
+        @keyframes msgContentIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            background-color: var(--bg-card);
+            border: none;
+            color: var(--text-main);
+            border-radius: 20px;
+        }
+
+        .message.bot {
+            background: transparent;
+            color: var(--text-main);
+            padding: 2px 0;
+        }
+
+        .message.bot { font-size: clamp(0.98rem, 1vw, 1.08rem); line-height: 2.05; }
+        .message.bot p { margin: 0 0 1.05rem; }
+        .message.bot p:last-child { margin-bottom: 0; }
+        .message.bot h2, .message.bot h3, .message.bot h4 { margin: 1.35rem 0 0.65rem; line-height: 1.45; }
+        .message.bot h2 { font-size: 1.2rem; }
+        .message.bot h3 { font-size: 1.08rem; }
+        .message.bot ul, .message.bot ol { margin: 0.5rem 0 1.1rem; padding-right: 1.35rem; }
+        .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
+        .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
+        .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
+        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
+        .code-actions { display:flex; gap:6px; }
+        .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:5px 9px; cursor:pointer; font-family:inherit; font-size:0.76rem; }
+        .code-action:hover { border-color:var(--accent-2); }
+        .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; tab-size: 2; border-radius: 0 0 14px 14px; flex-shrink: 0; }
+        .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.85rem; color: var(--code-text); }
+        .code-card pre::-webkit-scrollbar { height: 8px; }
+        .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
+        .code-card-head span:first-child { text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: var(--accent-2); }
+        .code-card-collapsed .code-card-filelabel { display:flex; align-items:center; gap:7px; text-transform:none; letter-spacing:normal; font-weight:600; color: var(--text-main); }
+        .code-card-collapsed .code-card-meta { padding: 10px 14px 14px; font-size: 0.78rem; color: var(--text-muted); }
+
+        /* ===== Error / More Details (§8) ===== */
+        .error-message { display: flex; align-items: flex-start; gap: 8px; color: var(--danger); font-size: 0.9rem; line-height: 1.6; }
+        .error-message i { margin-top: 2px; flex-shrink: 0; }
+        .more-details-btn { margin-top: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-family: inherit; font-size: 0.76rem; }
+        .more-details-btn:hover { color: var(--text-main); border-color: var(--accent-2); }
+        .error-details { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--code-bg); font-size: 0.8rem; color: var(--text-muted); direction: ltr; text-align: left; word-break: break-word; }
+        .error-details > div { margin-bottom: 4px; }
+        .err-detail-label { color: var(--text-main); font-weight: 600; }
+        .error-details .code-action { margin-top: 6px; }
+
+        /* ===== Edited File Card ===== */
+        .edited-file-meta { padding: 0 14px 12px; font-size: 0.78rem; color: var(--text-muted); }
+
+        .retry-row { display:flex; align-items:center; gap:9px; margin-top:10px; color:var(--text-muted); font-size:0.84rem; }
+        .retry-btn { border:1px solid rgba(248,113,113,.35); background:rgba(248,113,113,.08); color:#fca5a5; border-radius:9px; padding:7px 11px; cursor:pointer; font-family:inherit; }
+        .retry-btn:hover { background:rgba(248,113,113,.14); }
+
+        .typing-dots { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
+        .typing-dots span {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--accent-2);
+            animation: dotBounce 1.2s infinite;
+        }
+        .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+        .loader-dots { display: inline-flex; gap: 7px; align-items: center; padding: 10px 2px; }
+        .loader-dots span {
+            width: 9px; height: 9px; border-radius: 50%;
+            background: var(--accent-grad);
+            animation: loaderPulse 1s ease-in-out infinite;
+        }
+        .loader-dots span:nth-child(2) { animation-delay: 0.16s; }
+        .loader-dots span:nth-child(3) { animation-delay: 0.32s; }
+        @keyframes loaderPulse {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.35; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+        .loader-searching .loader-dots span { background: var(--accent-2); }
+
+        /* FIX: added a live "typing cursor" so real token-by-token
+           streaming is visually obvious as text lands, instead of the
+           reply just silently growing. */
+        .stream-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            margin-inline-start: 2px;
+            vertical-align: -0.15em;
+            background: var(--accent-2, currentColor);
+            animation: streamCursorBlink 0.9s steps(1) infinite;
+        }
+        @keyframes streamCursorBlink {
+            0%, 49% { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+
+        .agent-step-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 0.85rem; color: var(--text-muted);
+            padding: 4px 2px 8px 2px;
+            animation: agentStepFadeIn 0.25s ease;
+        }
+        .agent-step-label .agent-step-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--accent-2);
+            animation: loaderPulse 1s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+        @keyframes agentStepFadeIn {
+            from { opacity: 0; transform: translateY(-3px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .scroll-latest-btn { position:absolute; top:-48px; left:50%; transform:translateX(-50%) translateY(8px); width:36px; height:36px; border-radius:50%; border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); box-shadow:0 8px 24px var(--shadow-b); cursor:pointer; opacity:0; pointer-events:none; transition:opacity .18s, transform .18s; z-index:4; }
+        .scroll-latest-btn.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
+        .scroll-latest-btn:hover { border-color:var(--accent-2); }
+
+        .input-wrapper {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 10px 15px 16px 15px;
+            position: relative;
+        }
+
+        .input-box {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-soft);
+            border-radius: 22px;
+            padding: 6px 10px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 6px 24px var(--shadow-a);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .input-box:focus-within {
+            border-color: color-mix(in srgb, var(--accent-1) 55%, transparent);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-1) 12%, transparent), 0 6px 24px var(--shadow-a);
+        }
+
+        /* پیش‌نمایش فایل/عکس‌های ضمیمه اکنون ردیف بالاییِ خودِ نوار چت است
+           (نه یک باکس شناور جدا)، با یک جداکننده از ردیف تایپ. چون این
+           بخش یک ردیف flex کاملاً مجزاست (نه سیبلینگ textarea در همون
+           ردیف)، هیچ تداخلی با تایپ/نوشتن متن کاربر ندارد. نمایش/عدم‌نمایش
+           با کلاس has-items کنترل می‌شود، نه style.display مستقیم، تا از
+           همون باگی که باعث می‌شد پیش‌نمایش عکس گاهی درجا ناپدید بشه دوباره
+           تکرار نشود. */
+        .input-box-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* REDESIGN (چیدمان جمع‌وجورتر نوار ورودی): ترتیب بصری در RTL از
+           راست به چپ اینه: دکمه‌ی ارسال، textarea، دکمه‌ی تفکر، سلکتور
+           مدل، و در انتها (سمت چپِ چپ) دکمه‌ی افزودن فایل. از order به‌جای
+           جابه‌جایی HTML استفاده شده تا هیچ منطق JS‌ای که به id/ساختار
+           فعلی وابسته است به‌هم نریزد. */
+        #actionBtn { order: 1; }
+        textarea#userInput { order: 2; }
+        #thinkModeBtn { order: 3; }
+        .composer-model-selector { order: 4; }
+        #attachBtn { order: 5; }
+
+        textarea#userInput {
+            flex: 1;
+            color: var(--text-main) !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+            field-sizing: fixed !important;
+            resize: none !important;
+            overflow-y: hidden !important;
+            height: 27px;
+            min-height: 27px;
+            max-height: 180px;
+            font-size: 0.94rem;
+            padding: 4px 2px;
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+        textarea#userInput.overflowing {
+            overflow-y: auto !important;
+        }
+
+        textarea#userInput::-webkit-scrollbar {
+            width: 5px;
+        }
+        textarea#userInput::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        textarea#userInput::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        textarea#userInput::-webkit-resizer,
+        textarea#userInput::-webkit-scrollbar-corner {
+            display: none !important;
+            opacity: 0 !important;
+        }
+
+        textarea#userInput:-webkit-autofill,
+        textarea#userInput:-webkit-autofill:hover,
+        textarea#userInput:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--text-main) !important;
+            -webkit-box-shadow: 0 0 0px 1000px var(--bg-input) inset !important;
+            transition: background-color 5000s ease-in-out 0s !important;
+        }
+
+        textarea::placeholder { color: var(--text-muted) !important; }
+        textarea:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        .icon-btn {
+            color: var(--text-muted);
+            font-size: 1.05rem;
+            cursor: pointer;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: color 0.15s, background-color 0.15s, border-color 0.15s, opacity 0.15s;
+        }
+        .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); }
+        .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* ===== دکمه‌ی حالت تفکر (Think) ===== */
+        .think-btn-wrap { position: relative; flex-shrink: 0; }
+        .think-btn {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            height: 34px;
+            padding: 0 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border-soft);
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 0.76rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .think-btn i { font-size: 0.95rem; }
+        .think-btn:hover { color: var(--text-main); background-color: var(--border-soft); }
+        .think-btn.think-on {
+            color: var(--accent-2);
+            border-color: color-mix(in srgb, var(--accent-2) 45%, transparent);
+            background-color: color-mix(in srgb, var(--accent-2) 12%, transparent);
+        }
+        @media (max-width: 900px) {
+            .think-btn .think-label { display: none; }
+            .think-btn { padding: 0; width: 34px; justify-content: center; }
+        }
+        .think-panel {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 10px);
+            right: 0;
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 14px;
+            padding: 8px;
+            min-width: 190px;
+            box-shadow: 0 12px 40px var(--shadow-b);
+            z-index: 100;
+            animation: dropUp 0.18s ease;
+        }
+        .think-panel.active { display: block; }
+        .think-panel-title {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            padding: 4px 8px 6px;
+            font-weight: 600;
+        }
+        .think-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            transition: all 0.15s;
+        }
+        .think-option:hover { background: var(--bg-card); color: var(--text-main); }
+        .think-option.active { background: var(--bg-card); color: var(--text-main); }
+        .think-option .item-check { color: var(--accent-2); opacity: 0; }
+        .think-option.active .item-check { opacity: 1; }
+        @media (max-width: 900px) {
+            .think-panel { right: auto; left: 0; }
+        }
+
+        .icon-btn.search-active {
+            color: var(--accent-2) !important;
+            background-color: color-mix(in srgb, var(--accent-2) 14%, transparent) !important;
+        }
+
+        .icon-btn.recording { animation: pulseMic 1.2s infinite; }
+
+        /* ===== Notification bell ===== */
+        .notif-wrap { position: relative; }
+        #notifBellBtn { position: relative; }
+        .notif-badge {
+            position: absolute; top: 2px; right: 2px;
+            min-width: 16px; height: 16px; padding: 0 4px;
+            background: var(--danger, #e5484d); color: #fff;
+            font-size: 0.65rem; font-weight: 700; line-height: 16px;
+            text-align: center; border-radius: 999px;
+            box-shadow: 0 0 0 2px var(--bg-sidebar, #111);
+        }
+        .notif-status-dot {
+            position: absolute; top: 3px; left: 3px;
+            width: 10px; height: 10px; border-radius: 50%;
+            border: 2px solid var(--bg-sidebar, #111);
+            box-shadow: 0 0 6px rgba(0,0,0,0.4);
+            z-index: 2;
+        }
+        .notif-status-dot.yellow { background-color: #fbbf24; }
+        .notif-status-dot.green { background-color: #22c55e; }
+        .notif-status-badge {
+            font-size: 0.7rem; font-weight: 700; padding: 2px 8px;
+            border-radius: 12px; display: inline-block; white-space: nowrap; flex-shrink: 0;
+        }
+        .notif-status-badge.status-green { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+        .notif-status-badge.status-yellow { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+        .notif-status-badge.status-gray { background: rgba(148,163,184,0.15); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); }
+        .notif-section-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); padding: 8px 10px 4px; border-bottom: 1px solid var(--border-soft); margin-bottom: 4px; }
+        .notif-item-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+        .notif-panel {
+            display: none; position: absolute; top: calc(100% + 10px); left: 0;
+            width: min(340px, 88vw); max-height: 420px; overflow-y: auto;
+            background: var(--bg-sidebar); border: 1px solid var(--border);
+            border-radius: 14px; box-shadow: 0 20px 60px var(--shadow-b);
+            z-index: 70; animation: fadeIn .16s ease;
+        }
+        .notif-panel.active { display: block; }
+        .notif-panel-header {
+            padding: 12px 14px; font-size: 0.85rem; font-weight: 700;
+            border-bottom: 1px solid var(--border-soft); color: var(--text-main);
+        }
+        .notif-list { padding: 6px; }
+        .notif-item { padding: 10px 10px; border-radius: 10px; }
+        .notif-item:hover { background: var(--border-soft); }
+        .notif-item + .notif-item { margin-top: 2px; }
+        .notif-item-title { font-size: 0.82rem; font-weight: 700; color: var(--text-main); margin-bottom: 3px; }
+        .notif-item-body { font-size: 0.76rem; color: var(--text-muted); line-height: 1.6; }
+        .notif-item-date { font-size: 0.68rem; color: var(--text-muted); opacity: 0.7; margin-top: 4px; }
+        .notif-empty { padding: 20px 12px; text-align: center; font-size: 0.78rem; color: var(--text-muted); }
+
+        .action-btn {
+            background: var(--accent-grad);
+            color: #fff !important;
+        }
+        .action-btn:hover:not(:disabled) { filter: brightness(1.1); }
+        .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
+
+        /* REDESIGN v2 (مطابق نمونه‌ی درخواستی): فایل‌های غیرتصویری به‌صورت
+           چیپ بزرگ‌تر با آیکون دایره‌ای توپر و دو خط متن (اسم + نوع فایل)
+           نمایش داده می‌شوند؛ عکس‌ها یک thumbnail مربعیِ جدا و بزرگ‌تر با
+           گوشه‌ی گرد هستند - دقیقاً همان الگوی آشنای ChatGPT. */
+        .file-preview-bar {
+            display: none;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 10px;
+            padding: 0;
+            max-height: 0;
+            overflow: hidden;
+        }
+        .file-preview-bar.has-items {
+            display: flex;
+            padding: 8px 6px 10px 6px;
+            max-height: none;
+            overflow: visible;
+            border-bottom: 1px solid var(--border-soft);
+            margin-bottom: 6px;
+        }
+        #codeFilesBar.has-items {
+            display: flex;
+            border-bottom: 1px solid var(--border-soft);
+            margin-bottom: 6px;
+        }
+
+        .file-preview {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px 8px 10px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            max-width: 240px;
+            flex-shrink: 0;
+            position: relative;
+            transition: background 0.15s;
+        }
+        .file-preview:hover { background: rgba(255,255,255,0.1); }
+        .file-preview.is-image {
+            padding: 0;
+            border: none;
+            background: transparent;
+            border-radius: 12px;
+        }
+        .file-preview .fp-icon-wrap {
+            width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.12); color: var(--text-main); font-size: 1rem;
+            overflow: hidden;
+        }
+        .file-preview .fp-icon-wrap .fp-type-icon { width: 18px; height: 18px; }
+        .file-preview.is-image .fp-icon-wrap { display: none; }
+        .file-preview img.fp-thumb { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; display: block; }
+        .file-preview .fp-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; max-width: 150px; }
+        .file-preview.is-image .fp-text { display: none; }
+        .file-preview .fp-name { font-size: 0.82rem; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .file-preview span { font-size: 0.8rem; color: var(--text-muted); }
+        .file-preview .file-status {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .file-preview .file-status.loading { color: var(--warning); }
+        .file-preview .file-status.success { color: var(--success); }
+        .file-preview .file-status.error { color: var(--danger); }
+        .file-preview .fp-remove {
+            position: absolute; top: -6px; left: -6px;
+            width: 20px; height: 20px; border-radius: 50%;
+            background: var(--bg-sidebar); border: 1px solid var(--border-soft);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.7rem; cursor: pointer; color: var(--text-main);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            opacity: 0; transition: opacity 0.15s;
+        }
+        .file-preview:hover .fp-remove { opacity: 1; }
+
+        .settings-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(6px);
+            z-index: 64;
+        }
+        .settings-overlay.active { display: block; }
+
+        .settings-modal {
+            display: none;
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 94%;
+            max-width: 760px;
+            height: 82vh;
+            max-height: 640px;
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 20px;
+            padding: 0;
+            z-index: 65;
+            box-shadow: 0 20px 60px var(--shadow-b);
+            overflow: hidden;
+        }
+        .settings-modal.active { display: flex; animation: modalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+        .settings-layout { display: flex; width: 100%; height: 100%; }
+
+        .settings-nav {
+            width: 220px;
+            flex-shrink: 0;
+            border-left: 1px solid var(--border-soft);
+            background: color-mix(in srgb, var(--bg-card) 45%, transparent);
+            padding: 16px 10px;
+            overflow-y: auto;
+            scrollbar-width: none;
+        }
+        .settings-nav::-webkit-scrollbar { display: none; }
+        .settings-nav-title { font-size: 0.78rem; font-weight: 700; color: var(--text-muted); padding: 6px 12px 12px; }
+        .settings-nav-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 9px 12px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            margin-bottom: 2px;
+        }
+        .settings-nav-item i { font-size: 1rem; width: 18px; text-align: center; flex-shrink: 0; }
+        .settings-nav-item:hover { background: var(--bg-card); color: var(--text-main); }
+        .settings-nav-item.active { background: var(--accent-grad); color: #fff; }
+
+        .settings-main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-soft);
+            flex-shrink: 0;
+        }
+        .settings-header h2 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .settings-header h2 i { color: var(--accent-2); font-size: 0.95rem; }
+
+        .settings-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 22px 24px;
+            scrollbar-width: none;
+        }
+        .settings-body::-webkit-scrollbar { display: none; }
+
+        .settings-page { display: none; }
+        .settings-page.active { display: block; animation: fadeIn 0.18s ease; }
+
+        .settings-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 14px;
+            padding: 13px 2px;
+            border-bottom: 1px solid var(--border-soft);
+        }
+        .settings-row:last-child { border-bottom: none; }
+        .settings-row-title { font-size: 0.88rem; font-weight: 600; color: var(--text-main); }
+        .settings-row-desc { font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+
+        .toggle-switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-switch .toggle-track {
+            position: absolute; inset: 0; border-radius: 999px; cursor: pointer;
+            background: var(--border-soft); transition: background 0.2s;
+        }
+        .toggle-switch .toggle-track::before {
+            content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+            border-radius: 50%; background: #fff; transition: transform 0.2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .toggle-switch input:checked + .toggle-track { background: var(--accent-grad); }
+        .toggle-switch input:checked + .toggle-track::before { transform: translateX(-18px); }
+
+        .settings-section { margin-bottom: 22px; }
+        .settings-section:last-child { margin-bottom: 0; }
+        .settings-label { font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; }
+
+        @media (max-width: 640px) {
+            .settings-modal { width: 96%; height: 88vh; max-height: none; border-radius: 16px; }
+            .settings-nav { width: 76px; padding: 12px 6px; }
+            .settings-nav-title { display: none; }
+            .settings-nav-item span { display: none; }
+            .settings-nav-item { justify-content: center; padding: 11px 6px; }
+            .settings-nav-item i { width: auto; font-size: 1.15rem; }
+        }
+
+        .settings-input-text {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 10px 14px;
+            color: var(--text-main);
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+        }
+        .settings-input-text:focus { border-color: var(--accent-1); }
+
+        .segmented {
+            display: flex;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 3px;
+            gap: 3px;
+        }
+        .segmented-btn {
+            flex: 1;
+            padding: 8px 6px;
+            border-radius: 99px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .segmented-btn:hover { color: var(--text-main); }
+        .segmented-btn.active { background: var(--accent-grad); color: #fff; }
+
+        .accent-swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+        .accent-swatch {
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .accent-swatch-charcoal { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); }
+        .accent-swatch:hover { transform: scale(1.08); }
+        .accent-swatch.active { border-color: var(--text-main); }
+
+        .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .settings-toggle-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; }
+
+        .switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; cursor: pointer; }
+        .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .switch-slider {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft);
+            border-radius: 999px;
+            transition: background 0.2s;
+        }
+        .switch-slider::before {
+            content: "";
+            position: absolute;
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: #fff;
+            top: 2px; right: 2px;
+            transition: transform 0.2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .switch input:checked + .switch-slider { background: var(--accent-grad); border-color: transparent; }
+        .switch input:checked + .switch-slider::before { transform: translateX(-18px); }
+
+        @media (max-width: 900px) {
+            .chat-box { padding: 15px 5%; --chat-box-pad-top: 15px; }
+        }
+
+        @media (max-width: 768px) {
+            .menu-btn { display: block; }
+            .sidebar {
+                position: fixed;
+                top: 0; right: 0; bottom: 0;
+                transform: translateX(100%);
+                box-shadow: -5px 0 25px rgba(0,0,0,0.5);
+            }
+            .sidebar.open { transform: translateX(0); }
+            .message-wrapper { max-width: 90%; }
+            .home-title { font-size: 1.4rem; }
+            .input-wrapper { padding: 8px 10px 10px 10px; }
+        }
+
+        /* ===== Virtual Chat refresh ===== */
+        :root {
+            --bg-main: #090b14;
+            --bg-sidebar: #101522;
+            --bg-card: #151b2a;
+            --bg-card-hover: #1b2436;
+            --bg-input: #121827;
+            --text-main: #f7f8fc;
+            --text-muted: #aab3c5;
+            --border-soft: rgba(255,255,255,0.09);
+            --msg-font-size: 1rem;
+        }
+        body {
+            background-image:
+                radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent 32%),
+                radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--accent-1) 12%, transparent), transparent 36%);
+        }
+        .sidebar { background: var(--bg-sidebar); backdrop-filter: blur(18px); }
+        .chat-header {
+            padding: 16px 24px;
+            background: var(--bg-main);
+            backdrop-filter: blur(16px);
+        }
+        .model-selector {
+            border-radius: 999px;
+            padding: 7px 13px;
+            color: var(--text-main);
+            background: var(--bg-card);
+        }
+        .home-screen {
+            justify-content: center;
+            gap: 20px;
+            padding-bottom: 8vh;
+        }
+        .home-mark {
+            width: 72px; height: 72px; border-radius: 24px;
+            box-shadow: 0 18px 55px color-mix(in srgb, var(--accent-2) 14%, transparent), 0 0 35px color-mix(in srgb, var(--accent-1) 22%, transparent);
+        }
+        .home-title {
+            font-size: clamp(1.7rem, 3vw, 2.35rem);
+            font-weight: 800;
+            max-width: 680px;
+        }
+        .home-subtitle { font-size: 1rem; max-width: 580px; }
+        .suggestion-chips { max-width: 650px; gap: 10px; }
+        .suggestion-chip {
+            padding: 11px 17px;
+            color: var(--text-main);
+            background: var(--bg-card);
+            border-radius: 14px;
+        }
+        .suggestion-chip:hover { transform: translateY(-2px); }
+        .chat-box {
+            padding: 30px max(7%, calc((100% - 940px) / 2));
+            gap: 22px;
+            --chat-box-pad-top: 30px;
+        }
+        .message-wrapper { max-width: min(100%, 820px); }
+        .message-wrapper.user { align-self: flex-start; }
+        .message-wrapper.bot { align-self: stretch; max-width: 940px; }
+        .message {
+            font-size: var(--msg-font-size);
+            line-height: 2;
+            letter-spacing: 0.005em;
+        }
+        .message.user {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 14px 18px;
+        }
+        .message.bot {
+            background: transparent;
+            border: none;
+            padding: 4px 2px;
+            box-shadow: none;
+        }
+        .message.bot h2, .message.bot h3 { margin: 16px 0 7px; line-height: 1.6; }
+        .message.bot h2:first-child, .message.bot h3:first-child { margin-top: 0; }
+        .message.bot ul, .message.bot ol { padding-right: 24px; margin: 8px 0; }
+        .message.bot li { margin: 5px 0; }
+        .message.bot p { margin: 0 0 10px; }
+        .message.bot p:last-child { margin-bottom: 0; }
+        .message.bot code {
+            direction: ltr;
+            display: inline-block;
+            background: var(--border-soft);
+            padding: 1px 6px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        }
+        .message.bot pre {
+            direction: ltr;
+            text-align: left;
+            white-space: pre;
+            tab-size: 2;
+            background: #0b0f19;
+            padding: 16px;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin: 12px 0 4px;
+            border: 1px solid var(--border-soft);
+            line-height: 1.7;
+        }
+        .input-wrapper { max-width: 940px; padding-bottom: 22px; }
+        .input-box {
+            border-radius: 18px;
+            padding: 8px 10px;
+            background: var(--bg-input);
+            backdrop-filter: blur(14px);
+        }
+        textarea#userInput { font-size: 1rem; line-height: 1.7; }
+        .action-btn { border-radius: 12px; }
+        .new-chat-btn {
+            background: linear-gradient(135deg, color-mix(in srgb, var(--accent-1) 18%, transparent), color-mix(in srgb, var(--accent-2) 10%, transparent));
+            border-color: color-mix(in srgb, var(--accent-1) 28%, transparent);
+        }
+        @media (max-width: 768px) {
+            .chat-box { padding: 18px 14px; --chat-box-pad-top: 18px; }
+            .message-wrapper.bot { max-width: 100%; }
+            .message { font-size: 0.98rem; line-height: 1.9; }
+            .home-screen { padding: 20px 18px 12vh; }
+        }
+
+
+        /* ===== v3 fixes: input alignment, drag & drop, readable long answers ===== */
+        .input-wrapper.drag-over .input-box {
+            border-color: var(--accent-2);
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 12%, transparent), 0 12px 34px rgba(0,0,0,0.18);
+        }
+        .input-wrapper.drag-over::after {
+            content: "فایل را اینجا رها کن";
+            position: absolute;
+            inset: 0 15px 16px;
+            border: 1px dashed var(--accent-2);
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(10,12,18,0.72);
+            color: var(--text-main);
+            font-size: .88rem;
+            font-weight: 600;
+            pointer-events: none;
+            z-index: 10;
+            backdrop-filter: blur(2px);
+        }
+        textarea#userInput {
+            min-height: 27px;
+            line-height: 1.45 !important;
+            padding: 2px 2px !important;
+            font-size: .95rem !important;
+        }
+        .message.bot {
+            font-size: .96rem !important;
+            line-height: 1.92 !important;
+            letter-spacing: 0 !important;
+        }
+        .message.bot p { margin: 0 0 .95rem !important; }
+        .message.bot h2, .message.bot h3, .message.bot h4 { margin: 1.25rem 0 .55rem !important; }
+        .message.bot ul, .message.bot ol { margin: .65rem 0 .95rem !important; }
+        .message.bot li { margin: .32rem 0 !important; }
+        @media (max-width:768px) {
+            .message.bot { font-size: .94rem !important; line-height: 1.88 !important; }
+            textarea#userInput { font-size: .94rem !important; }
+        }
+
+    
+
+/* ===== Virtual Chat UX upgrade ===== */
+:root { --msg-font-size: .92rem; --surface-2: rgba(255,255,255,.035); }
+body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,color-mix(in srgb, var(--accent-1) 2%, transparent) 50%,transparent 56%);opacity:.8}
+.header{backdrop-filter:blur(18px);background:color-mix(in srgb,var(--bg-main) 72%,transparent)}
+.home-screen{position:relative;overflow:hidden}
+.home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb, var(--accent-1) 12%, transparent),transparent 65%);filter:blur(10px);pointer-events:none}
+.home-text,.suggestion-chips,.home-mark{position:relative;z-index:1}
+.suggestion-chip{box-shadow:0 8px 24px rgba(0,0,0,.08)}
+.message-wrapper{position:relative;gap:5px}
+.message.bot{font-size:var(--msg-font-size);line-height:1.92;max-width:100%;letter-spacing:.005em}
+.message.user{line-height:1.75}
+.message.bot p{margin:0 0 .9rem}.message.bot p:last-child{margin-bottom:0}
+.message.bot h2,.message.bot h3,.message.bot h4{margin:1.15rem 0 .55rem}.message.bot h2:first-child,.message.bot h3:first-child,.message.bot h4:first-child{margin-top:0}
+.message.bot ul,.message.bot ol{margin:.45rem 0 .9rem}.message.bot li{margin:.28rem 0}
+.message.bot blockquote{margin:.8rem 0;padding:.55rem .85rem;border-right:3px solid var(--accent-2);background:var(--surface-2);border-radius:10px;color:var(--text-muted)}
+.message.bot em{font-style:italic}
+.message.bot del{opacity:.65;text-decoration:line-through}
+.message.bot a.msg-link{color:var(--accent-1);text-decoration:underline;text-underline-offset:2px;word-break:break-all}
+.message.bot a.msg-link:hover{opacity:.82}
+.entity-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 8px;border-radius:999px;background:var(--bg-card);border:1px solid var(--border-soft);font-size:.85em;font-weight:600;color:var(--text-main);vertical-align:middle}
+.entity-chip i{font-size:.9em;color:var(--accent-1)}
+/* FEATURE: لیست تودرتو - هر سطح تورفتگی بیشتر یعنی یک <ul>/<ol> داخل <li> والدش */
+.message.bot li>ul,.message.bot li>ol{margin:.28rem 0 .28rem .1rem}
+/* FEATURE: جدول مارک‌داون */
+.msg-table-wrap{overflow-x:auto;margin:.8rem 0;border:1px solid var(--border-soft);border-radius:12px}
+.msg-table{width:100%;border-collapse:collapse;font-size:.86em}
+.msg-table th,.msg-table td{padding:9px 14px;text-align:right;border-bottom:1px solid var(--border-soft)}
+.msg-table thead th{background:var(--bg-card);color:var(--text-main);font-weight:700;white-space:nowrap}
+.msg-table tbody tr:last-child td{border-bottom:none}
+.msg-table tbody tr:hover{background:var(--bg-card-hover)}
+.message-actions{display:flex;gap:4px;opacity:0;transform:translateY(-2px);transition:.18s;min-height:26px;padding:0 4px;direction:rtl}
+.message-wrapper:hover .message-actions,.message-wrapper:focus-within .message-actions{opacity:1;transform:none}
+.msg-action{width:28px;height:28px;border:1px solid var(--border-soft);border-radius:8px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);display:inline-flex;align-items:center;justify-content:center;font-size:.72rem}
+.msg-action:hover{color:var(--text-main);border-color:color-mix(in srgb, var(--accent-2) 42%, transparent)}
+.input-wrapper{padding-top:8px}body.drag-over .input-box{outline:2px dashed var(--accent-2);outline-offset:4px;box-shadow:0 0 0 8px color-mix(in srgb, var(--accent-2) 8%, transparent)}body.drag-over::after{content:'فایل را رها کنید';position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:var(--text-main);background:rgba(0,0,0,0.45);backdrop-filter:blur(3px);pointer-events:none;border:3px dashed var(--accent-2);margin:14px;border-radius:18px}
+.composer-hint{position:absolute;bottom:4px;right:22px;color:var(--text-muted);font-size:.67rem;opacity:.75;pointer-events:none}
+.composer-hint kbd{font-family:inherit;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:0 4px;margin:0 2px;background:var(--bg-card)}
+.input-box{box-shadow:0 14px 42px var(--shadow-a)}
+.chat-search{display:none;position:fixed;top:76px;left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 28px));z-index:60;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:10px;animation:fadeIn .18s ease}
+.chat-search.active{display:block}.chat-search-row{display:flex;align-items:center;gap:8px}.chat-search input{flex:1;color:var(--text-main);padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:10px;font-family:inherit}.chat-search-count{font-size:.72rem;color:var(--text-muted);white-space:nowrap}
+.message.search-hit{box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent),0 0 28px color-mix(in srgb, var(--accent-2) 12%, transparent)}
+.command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
+.chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:color-mix(in srgb, var(--accent-1) 45%, transparent)}
+@media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
+
+    
+        /* ===== Virtual Chat 1.6
+        polish ===== */
+        .sidebar-close-btn { display:flex !important; }
+        .history-tools { display:flex; align-items:center; gap:7px; margin-top:10px; }
+        .history-search-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
+        .history-search-toggle:hover { color:var(--text-main); border-color:color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .history-search-input { display:none; min-width:0; flex:1; height:36px; padding:0 11px; border:1px solid var(--border-soft); outline:none; background:var(--bg-input); color:var(--text-main); border-radius:10px; font-family:inherit; font-size:.78rem; }
+        .history-tools.active .history-search-input { display:block; animation:fadeIn .16s ease; }
+        .history-empty { color:var(--text-muted); font-size:.75rem; text-align:center; padding:18px 8px; line-height:1.7; }
+
+        /* ===== Multi-select bulk delete for chat history ===== */
+        .history-select-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
+        .history-select-toggle:hover, .history-select-toggle.active { color:var(--text-main); border-color:color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .history-select-toggle.active { background: var(--accent-grad); color:#fff; border-color:transparent; }
+        .history-list.select-mode .history-item { padding-right: 40px; position: relative; }
+        .history-item-checkbox {
+            display: none;
+            position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+            width: 18px; height: 18px; border-radius: 5px;
+            border: 1.5px solid var(--border-soft); background: var(--bg-input);
+            cursor: pointer; flex-shrink: 0; align-items: center; justify-content: center;
+        }
+        .history-list.select-mode .history-item-checkbox { display: flex; }
+        .history-item-checkbox.checked { background: var(--accent-grad); border-color: transparent; }
+        .history-item-checkbox i { font-size: 0.7rem; color: #fff; display: none; }
+        .history-item-checkbox.checked i { display: block; }
+        .history-list.select-mode .history-item-menu-btn { display: none; }
+        .history-bulk-bar {
+            display: none;
+            align-items: center; justify-content: space-between; gap: 8px;
+            padding: 9px 10px; margin-top: 8px;
+            background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 12px;
+        }
+        .history-bulk-bar.active { display: flex; animation: fadeIn 0.16s ease; }
+        .history-bulk-count { font-size: 0.78rem; color: var(--text-main); font-weight: 600; }
+        .history-bulk-actions { display: flex; gap: 6px; }
+        .history-bulk-btn { border: 1px solid var(--border-soft); background: var(--bg-input); color: var(--text-main); border-radius: 8px; padding: 6px 10px; font-size: 0.74rem; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+        .history-bulk-btn.danger { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+        .history-bulk-btn:hover { filter: brightness(1.15); }
+        .sidebar.collapsed { width:0; min-width:0; padding-left:0; padding-right:0; border:0; overflow:hidden; }
+        .sidebar > * { transition: opacity 0.2s ease; }
+        .sidebar.collapsed > * { opacity:0; pointer-events:none; }
+        .menu-btn { display:flex !important; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; }
+        .menu-btn:hover { background:var(--bg-card); }
+        .chat-header { min-height:58px; }
+        .message { line-height:1.85; }
+        .message.bot p { margin:0 0 14px; }
+        .message.bot p:last-child { margin-bottom:0; }
+        .message.bot h2, .message.bot h3, .message.bot h4 { margin:20px 0 9px; line-height:1.45; }
+        .message.bot ul, .message.bot ol { margin:9px 0 16px; padding-right:24px; }
+        .message.bot li { margin:6px 0; padding-right:3px; }
+        .message.bot blockquote { margin:14px 0; padding:10px 14px; border-right:3px solid var(--accent-2); background:color-mix(in srgb, var(--accent-2) 5%, transparent); border-radius:10px; }
+        @media (max-width:768px) {
+            .sidebar-close-btn { display:flex !important; }
+        }
+        .stopped-state {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: var(--text-muted);
+            font-size: 0.88em;
+        }
+        .stopped-state i { color: var(--danger); }
+
+        /* ===== Toast notifications ===== */
+        #toastContainer {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+            pointer-events: none;
+            width: 100%;
+            padding: 0 16px;
+        }
+        .toast {
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: 420px;
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            box-shadow: 0 12px 30px var(--shadow-b);
+            font-size: 0.86rem;
+            color: var(--text-main);
+            animation: toastIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .toast.leaving { animation: toastOut 0.2s ease forwards; }
+        .toast i { flex-shrink: 0; font-size: 1rem; }
+        .toast.success i { color: var(--success); }
+        .toast.error i { color: var(--danger); }
+        .toast.info i { color: var(--accent-2); }
+        .toast.warning i { color: var(--warning); }
+        .toast span { flex: 1; line-height: 1.5; }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateY(12px) scale(0.96); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes toastOut {
+            from { opacity: 1; transform: translateY(0) scale(1); }
+            to { opacity: 0; transform: translateY(8px) scale(0.96); }
+        }
+
+        /* ===== Confirm modal (replaces native confirm()) ===== */
+        #confirmOverlay {
+            position: fixed; inset: 0;
+            background: rgba(10, 12, 18, 0.6);
+            backdrop-filter: blur(6px);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #confirmOverlay.active { display: flex; }
+        #promptOverlay {
+            position: fixed; inset: 0;
+            background: rgba(10, 12, 18, 0.6);
+            backdrop-filter: blur(6px);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #promptOverlay.active { display: flex; }
+        #textFileEditorOverlay {
+            position: fixed; inset: 0;
+            background: rgba(10, 12, 18, 0.6);
+            backdrop-filter: blur(6px);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #textFileEditorOverlay.active { display: flex; }
+        .prompt-input {
+            width: 100%; box-sizing: border-box; padding: 10px 12px;
+            margin-bottom: 16px; border-radius: 10px;
+            border: 1px solid var(--border-soft); background: var(--bg-input);
+            color: var(--text-main); font-family: inherit; font-size: 0.88rem;
+        }
+        .prompt-input:focus { outline: none; border-color: color-mix(in srgb, var(--accent-1) 45%, transparent); }
+        .confirm-card {
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-soft);
+            border-radius: 18px;
+            padding: 24px;
+            width: 90%;
+            max-width: 340px;
+            text-align: center;
+            box-shadow: 0 20px 50px var(--shadow-b);
+            animation: fadeIn 0.2s ease-out;
+        }
+        .confirm-card p { color: var(--text-main); font-size: 0.92rem; margin-bottom: 18px; line-height: 1.6; }
+        .confirm-actions { display: flex; gap: 8px; }
+        .confirm-actions button {
+            flex: 1;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 0.86rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .confirm-actions .confirm-cancel { background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border); }
+        .confirm-actions .confirm-ok { background: var(--danger); color: #fff; border: 1px solid var(--danger); }
+        .confirm-actions .confirm-cancel:hover { background: var(--bg-card-hover); }
+        .confirm-actions .confirm-ok:hover { opacity: 0.9; }
+
+        /* ===== Online/offline status pill ===== */
+        #connectionStatus {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-150%);
+            z-index: 9998;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 7px 14px;
+            border-radius: 20px;
+            background: var(--danger);
+            color: #fff;
+            font-size: 0.8rem;
+            box-shadow: 0 8px 24px var(--shadow-b);
+            transition: transform 0.25s ease;
+        }
+        #connectionStatus.show { transform: translateX(-50%) translateY(0); }
+        #connectionStatus.reconnected { background: var(--success); }
+</style>
+
+<style>
+.api-usage-wrap{position:relative}.api-usage-panel{display:none;position:absolute;top:calc(100% + 10px);left:0;right:auto;width:min(390px,calc(100vw - 28px));z-index:100;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:14px;backdrop-filter:blur(18px)}.api-usage-panel.active{display:block;animation:fadeIn .16s ease}.api-usage-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.api-usage-title{font-weight:800;font-size:.9rem}.api-usage-sub{font-size:.7rem;color:var(--text-muted);line-height:1.45}.api-usage-summary{padding:10px;border:1px solid var(--border-soft);border-radius:12px;background:var(--bg-card);margin-bottom:10px}.api-usage-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border-soft);font-size:.75rem}.api-usage-row:last-child{border-bottom:0}.api-usage-key{font-weight:700}.api-usage-count{font-variant-numeric:tabular-nums}.api-usage-status{font-size:.66rem;color:var(--text-muted)}.api-usage-refresh{border:1px solid var(--border);background:transparent;color:var(--text-main);border-radius:8px;padding:5px 8px;cursor:pointer}.api-usage-note{margin-top:9px;font-size:.67rem;color:var(--text-muted);line-height:1.5}.api-usage-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-2);margin-left:5px}.api-usage-dot.warn{background:var(--danger)}
+</style>
+</head>
+<body>
+
+    <div id="toastContainer" aria-live="polite"></div>
+
+    <div id="confirmOverlay">
+        <div class="confirm-card">
+            <p id="confirmMessage">این کار انجام شود؟</p>
+            <div class="confirm-actions">
+                <button type="button" class="confirm-cancel" id="confirmCancelBtn">انصراف</button>
+                <button type="button" class="confirm-ok" id="confirmOkBtn">تأیید</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="promptOverlay">
+        <div class="confirm-card">
+            <p id="promptMessage">نام جدید را وارد کن</p>
+            <input type="text" id="promptInput" class="prompt-input" autocomplete="off">
+            <div class="confirm-actions">
+                <button type="button" class="confirm-cancel" id="promptCancelBtn">انصراف</button>
+                <button type="button" class="confirm-ok" id="promptOkBtn">ذخیره</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="textFileEditorOverlay">
+        <div class="confirm-card" style="width:min(680px, 92vw); max-width:680px;">
+            <p id="textFileEditorTitle" style="margin-bottom:10px;">ویرایش فایل متنی</p>
+            <textarea id="textFileEditorArea" class="prompt-input" autocomplete="off" spellcheck="false"
+                style="width:100%; min-height:50vh; max-height:65vh; resize:vertical; font-family:Consolas, monospace; font-size:0.85rem; line-height:1.6; direction:ltr; text-align:left; white-space:pre; overflow:auto; padding:10px;"></textarea>
+            <div class="confirm-actions">
+                <button type="button" class="confirm-cancel" id="textFileEditorCancelBtn">انصراف</button>
+                <button type="button" class="confirm-ok" id="textFileEditorSaveBtn">ذخیره</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="connectionStatus"><i class="lucide-icon" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span></div>
+
+    <div id="authOverlay">
+        <div class="auth-card">
+            <div class="home-mark"><i class="ph-fill ph-sparkle"></i></div>
+            <h2 id="authCardTitle">ورود به Virtual Chat</h2>
+            <p id="authCardDesc">برای sync گفتگوها بین دستگاه‌ها، وارد حساب خودت شو.</p>
+
+            <!-- FEATURE (ایمیل/پسورد داخلی به‌جای گوگل): فرم ساده‌ی
+                 ثبت‌نام/ورود که مستقیم با api/auth.js (روی پروژه‌ی جدا
+                 virtual-chat-sync) صحبت می‌کند. authMode مشخص می‌کند در
+                 حالت لاگین هستیم یا ثبت‌نام؛ toggleAuthMode بینشان سوییچ
+                 می‌کند. -->
+            <form class="auth-form" id="authForm" onsubmit="return handleAuthSubmit(event)">
+                <input type="email" id="authEmailInput" placeholder="ایمیل" autocomplete="username" required>
+                <input type="password" id="authPasswordInput" placeholder="پسورد (حداقل ۶ کاراکتر)" autocomplete="current-password" minlength="6" required>
+                <div class="auth-error-msg" id="authErrorMsg"></div>
+                <button type="submit" class="auth-submit-btn" id="authSubmitBtn">ورود</button>
+            </form>
+            <div class="auth-toggle-line" id="authToggleLine">
+                حساب نداری؟ <a onclick="toggleAuthMode()">ثبت‌نام کن</a>
+            </div>
+
+            <div class="auth-guest-line">
+                <a onclick="continueAsGuest()">فعلاً بدون حساب ادامه بده</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+    <div class="sidebar" id="sidebar">
+        <div class="brand-title">
+            <div class="brand-name">
+                <span class="brand-mark"><i class="ph-fill ph-sparkle"></i></span>
+                <span class="brand-text">Virtual Chat</span>
+            </div>
+            <button class="icon-btn sidebar-close-btn" onclick="toggleSidebar()" title="بستن پنل گفتگوها"><i class="lucide-icon" data-lucide="x"></i></button>
+        </div>
+
+        <div class="user-profile" id="userProfile">
+            <div class="user-info"><div class="user-name" style="font-size:0.8rem; color:var(--text-muted);">مهمان</div></div>
+            <div class="user-actions">
+                <button class="icon-btn" onclick="document.getElementById('authOverlay').classList.add('active')" title="ورود / ثبت‌نام (اختیاری - برای sync بین دستگاه‌ها)"><i class="lucide-icon" data-lucide="log-in"></i></button>
+            </div>
+        </div>
+
+        <button class="new-chat-btn" id="newChatBtn" onclick="startNewChat()">
+            <i class="lucide-icon" data-lucide="plus"></i> گفتگوی تازه
+        </button>
+        <div class="history-tools">
+            <button class="history-search-toggle" type="button" onclick="toggleHistorySearch()" title="جستجو بین گفتگوها"><i class="lucide-icon" data-lucide="search"></i></button>
+            <input id="historySearchInput" class="history-search-input" type="search" placeholder="جستجو بین گفتگوها..." oninput="filterHistory(this.value)" autocomplete="off">
+            <button class="history-select-toggle" id="historySelectToggle" type="button" onclick="toggleHistorySelectMode()" title="انتخاب چندتایی برای حذف"><i class="lucide-icon" data-lucide="list-checks"></i></button>
+        </div>
+        <div class="history-bulk-bar" id="historyBulkBar">
+            <span class="history-bulk-count" id="historyBulkCount">۰ انتخاب شده</span>
+            <div class="history-bulk-actions">
+                <button class="history-bulk-btn" type="button" onclick="selectAllHistoryItems()"><i class="lucide-icon" data-lucide="check-check"></i> همه</button>
+                <button class="history-bulk-btn danger" type="button" onclick="deleteSelectedHistoryItems()"><i class="lucide-icon" data-lucide="trash-2"></i> حذف</button>
+            </div>
+        </div>
+        <div class="history-list" id="historyList"></div>
+        <div class="history-empty" id="historyEmpty" style="display:none;">گفتگویی با این عنوان پیدا نشد.</div>
+    </div>
+
+    <div class="main-content">
+        <div class="chat-header">
+            <div class="header-left">
+                <button class="menu-btn" onclick="toggleSidebar()" title="منو">
+                    <i class="lucide-icon" data-lucide="menu"></i>
+                </button>
+                <span class="header-brand-text">Virtual Chat</span>
+            </div>
+            <div class="header-right">
+                <div class="notif-wrap" id="notifWrap">
+                    <button class="icon-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="اعلان‌ها">
+                        <i class="lucide-icon" data-lucide="bell"></i>
+                        <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+                        <span class="notif-status-dot" id="notifStatusDot" style="display:none;"></span>
+                    </button>
+                    <div class="notif-panel" id="notifPanel">
+                        <div class="notif-panel-header">تغییرات و اعلان‌ها</div>
+                        <div class="notif-list" id="notifList">
+                            <div class="notif-empty">در حال بارگذاری...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="api-usage-wrap">
+                    <button class="icon-btn" id="apiUsageBtn" onclick="toggleApiUsage(event)" title="مصرف API گوگل">
+                        <i class="lucide-icon" data-lucide="activity"></i>
+                    </button>
+                    <div class="api-usage-panel" id="apiUsagePanel">
+                        <div class="api-usage-head">
+                            <div><div class="api-usage-title">⚡ Google API Usage</div><div class="api-usage-sub">مصرف واقعی ثبت‌شده توسط Backend در ۶۰ ثانیه اخیر</div></div>
+                            <button class="api-usage-refresh" onclick="refreshApiUsage(event)">↻</button>
+                        </div>
+                        <div class="api-usage-summary" id="apiUsageSummary">در حال دریافت...</div>
+                        <div id="apiUsageKeys"></div>
+                        <div class="api-usage-note">⚠️ این پنل سقف RPM/TPM/RPD گوگل را حدس نمی‌زند. اعداد فقط Requestهای واقعی Virtual Bot هستند. اگر Vercel KV تنظیم شده باشد، Usage بین instanceها مشترک و پایدارتر است؛ در غیر این صورت فقط حافظه همان instance است.</div>
+                    </div>
+                </div>
+                <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
+                    <i class="lucide-icon" data-lucide="search"></i>
+                </button>
+                <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
+                    <i class="lucide-icon" data-lucide="settings-2"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="home-screen" id="homeScreen">
+            <div class="home-mark"><i class="ph-fill ph-sparkle"></i></div>
+            <div class="home-text">
+                <h1 class="home-title" id="welcomeHomeTitle">سلام! امروز چیکار کنیم؟</h1>
+            </div>
+            <div class="suggestion-chips">
+                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده خفن بده</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">ساده توضیح بده</div>
+                <div class="suggestion-chip" onclick="useSuggestion(this)">کد بنویس</div>
+            </div>
+        </div>
+
+        <div class="chat-box" id="chatBox"></div>
+
+        <div class="input-wrapper">
+            <div class="command-menu" id="commandMenu">
+                <div class="command-item" onclick="runComposerCommand('web')"><span><i class="lucide-icon" data-lucide="globe"></i> جستجو در وب</span><span>/web</span></div>
+                <div class="command-item" onclick="runComposerCommand('code')"><span><i class="lucide-icon" data-lucide="code"></i> حالت کدنویسی</span><span>/code</span></div>
+                <div class="command-item" onclick="runComposerCommand('clear')"><span><i class="lucide-icon" data-lucide="eraser"></i> پاک کردن متن</span><span>/clear</span></div>
+            </div>
+            <div class="composer-hint"><kbd>Enter</kbd> ارسال <span>·</span> <kbd>Shift</kbd>+<kbd>Enter</kbd> خط جدید <span>·</span> / فرمان‌ها</div>
+            <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="lucide-icon" data-lucide="arrow-down"></i></button>
+            <div class="input-box">
+                <div id="filePreviewList" class="file-preview-bar"></div>
+                <div id="codeFilesBar" style="flex-wrap:wrap; gap:6px;"></div>
+
+                <div class="input-box-row">
+                <button class="icon-btn action-btn" id="actionBtn" onclick="handleActionClick()" title="ارسال">
+                    <i class="ph-fill ph-paper-plane-tilt" id="actionIcon"></i>
+                </button>
+
+                <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
+
+
+                <input type="file" id="fileInput" hidden multiple onchange="handleFileSelect(event)">
+                <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
+                    <i class="lucide-icon" data-lucide="plus"></i>
+                </button>
+
+                <div class="think-btn-wrap" id="thinkModeBtn">
+                    <button class="think-btn" id="thinkToggleBtn" type="button" onclick="toggleThinkPanel(event)" title="حالت تفکر">
+                        <i class="lucide-icon" data-lucide="brain"></i>
+                        <span class="think-label" id="thinkBtnLabel">تفکر</span>
+                    </button>
+                    <div class="think-panel" id="thinkPanel">
+                        <div class="think-panel-title">سطح تفکر مدل</div>
+                        <div class="think-option" data-level="off" onclick="setThinkLevel('off')">
+                            <span>خاموش</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="think-option" data-level="low" onclick="setThinkLevel('low')">
+                            <span>کم</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="think-option" data-level="medium" onclick="setThinkLevel('medium')">
+                            <span>متوسط</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="think-option" data-level="high" onclick="setThinkLevel('high')">
+                            <span>زیاد</span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="model-selector composer-model-selector" id="modelSelector" onclick="toggleModelDropdown()">
+                    <span class="model-name" id="modelDisplayName">Virtual Bot 1.6</span>
+                    <span class="model-chevron"><i class="lucide-icon" data-lucide="chevron-up"></i></span>
+                    <div class="model-dropdown" id="modelDropdown">
+                        <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.1</div>
+                                <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
+                            </span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item active" data-model="gemini-3.7-flash" onclick="selectModel(this, 'Virtual Bot 1.6', 'gemini-3.7-flash')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.6</div>
+                                <div class="item-desc">جدیدترین مدل</div>
+                            </span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                        <div class="model-dropdown-item" data-model="gemini-3.1-pro-preview" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro-preview')">
+                            <span>
+                                <div class="item-name">Virtual Bot 1.3</div>
+                                <div class="item-desc">مناسب کدنویسی</div>
+                            </span>
+                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="chat-search" id="chatSearchPanel" role="dialog" aria-label="جستجو در گفتگو">
+        <div class="chat-search-row">
+            <button class="msg-action" type="button" onclick="closeChatSearch()" title="بستن"><i class="lucide-icon" data-lucide="x"></i></button>
+            <input id="chatSearchInput" type="search" placeholder="جستجو داخل همین گفتگو..." oninput="searchInCurrentChat(this.value)">
+            <span class="chat-search-count" id="chatSearchCount"></span>
+        </div>
+    </div>
+
+    <div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
+    <div class="settings-modal" id="settingsModal">
+        <div class="settings-layout">
+            <div class="settings-nav">
+                <div class="settings-nav-title">تنظیمات</div>
+                <div class="settings-nav-item active" data-page="general" onclick="switchSettingsPage('general', this)">
+                    <i class="lucide-icon" data-lucide="settings"></i><span>عمومی</span>
+                </div>
+                <div class="settings-nav-item" data-page="appearance" onclick="switchSettingsPage('appearance', this)">
+                    <i class="lucide-icon" data-lucide="palette"></i><span>ظاهر</span>
+                </div>
+                <div class="settings-nav-item" data-page="chat-tools" onclick="switchSettingsPage('chat-tools', this)">
+                    <i class="lucide-icon" data-lucide="message-square"></i><span>ابزار گفتگو</span>
+                </div>
+                <div class="settings-nav-item" data-page="support" onclick="switchSettingsPage('support', this)">
+                    <i class="lucide-icon" data-lucide="life-buoy"></i><span>پشتیبانی</span>
+                </div>
+            </div>
+
+            <div class="settings-main">
+                <div class="settings-header">
+                    <h2 id="settingsPageTitle"><i class="lucide-icon" data-lucide="settings"></i> عمومی</h2>
+                    <button class="icon-btn" type="button" onclick="closeSettings()" title="بستن"><i class="lucide-icon" data-lucide="x"></i></button>
+                </div>
+
+                <div class="settings-body">
+                    <!-- General page -->
+                    <div class="settings-page active" data-page="general">
+                        <div class="settings-section">
+                            <div class="settings-label">نام شما در چت</div>
+                            <input type="text" class="settings-input-text" id="customUserNameInput" placeholder="مثلاً: ارشیا" onchange="updateCustomName(this.value)">
+                        </div>
+                    </div>
+
+                    <!-- Appearance page -->
+                    <div class="settings-page" data-page="appearance">
+                        <div class="settings-section">
+                            <div class="settings-label">حالت نمایش</div>
+                            <div class="segmented" id="themeSegmented">
+                                <button class="segmented-btn" data-value="light"><i class="ph-fill ph-sun"></i> روشن</button>
+                                <button class="segmented-btn" data-value="dark"><i class="ph-fill ph-moon-stars"></i> تاریک</button>
+                                <button class="segmented-btn" data-value="auto"><i class="lucide-icon" data-lucide="contrast"></i> خودکار</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-label">اندازه‌ی متن گفتگو</div>
+                            <div class="segmented" id="fontSegmented">
+                                <button class="segmented-btn" data-value="small">کوچک</button>
+                                <button class="segmented-btn" data-value="normal">معمولی</button>
+                                <button class="segmented-btn" data-value="large">بزرگ</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chat tools page -->
+                    <div class="settings-page" data-page="chat-tools">
+                        <div class="settings-section">
+                            <div class="settings-label">ابزار گفتگو</div>
+                            <div class="chat-empty-tools">
+                                <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="lucide-icon" data-lucide="file-down"></i> خروجی Markdown</button>
+                                <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="lucide-icon" data-lucide="copy"></i> خروجی متن</button>
+                                <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="lucide-icon" data-lucide="trash-2"></i> پاک کردن گفتگو</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Support page -->
+                    <div class="settings-page" data-page="support">
+                        <div class="settings-section">
+                            <div class="settings-label">گزارش مشکل</div>
+                            <textarea id="bugReportText" class="settings-input-text" rows="3" style="width:100%; resize:vertical; font-family:inherit;" placeholder="چه مشکلی دیدی؟ هرچی دقیق‌تر بنویسی بهتره..."></textarea>
+                            <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+                                <button class="mini-tool" type="button" id="bugReportSendBtn" onclick="sendBugReport()"><i class="ph-bold ph-bug"></i> ارسال گزارش</button>
+                                <span id="bugReportStatus" style="font-size:0.82em; color:var(--text-muted, #94a3b8);"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SETTINGS_PAGE_TITLES = {
+            'general': { icon: 'settings', label: 'عمومی' },
+            'appearance': { icon: 'palette', label: 'ظاهر' },
+            'chat-tools': { icon: 'message-square', label: 'ابزار گفتگو' },
+            'support': { icon: 'life-buoy', label: 'پشتیبانی' }
         };
+        function switchSettingsPage(page, navEl) {
+            document.querySelectorAll('.settings-nav-item').forEach(el => el.classList.remove('active'));
+            navEl.classList.add('active');
+            document.querySelectorAll('.settings-page').forEach(el => el.classList.remove('active'));
+            const target = document.querySelector(`.settings-page[data-page="${page}"]`);
+            if (target) target.classList.add('active');
+            const meta = SETTINGS_PAGE_TITLES[page];
+            const titleEl = document.getElementById('settingsPageTitle');
+            if (meta && titleEl) {
+                titleEl.innerHTML = `<i class="lucide-icon" data-lucide="${meta.icon}"></i> ${meta.label}`;
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
+            const body = document.querySelector('.settings-body');
+            if (body) body.scrollTop = 0;
+        }
+    </script>
+
+<script>
+    // =====================================================
+    // گزارش باگ
+    // =====================================================
+    const BUG_REPORT_ENDPOINT = 'https://notify-admin-iota.vercel.app/api/bugreports';
+    const BUG_CLIENT_ID_KEY = 'vc_bug_client_id';
+
+    function getBugClientId() {
+        let id = localStorage.getItem(BUG_CLIENT_ID_KEY);
+        if (!id) {
+            id = 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+            localStorage.setItem(BUG_CLIENT_ID_KEY, id);
+        }
+        return id;
     }
 
-    // One logical web_search = at most ONE Tavily HTTP request.
-    // The previous implementation looped over every Tavily key after a
-    // failure. That looked like one search in the UI, but could actually
-    // generate many provider requests for the same user question.
-    const cacheKey = String(query).trim().toLowerCase();
+    async function sendBugReport() {
+        const textEl = document.getElementById('bugReportText');
+        const statusEl = document.getElementById('bugReportStatus');
+        const btn = document.getElementById('bugReportSendBtn');
+        const message = (textEl?.value || '').trim();
 
-    if (searchCache && searchCache.has(cacheKey)) {
-        log.info('search.cache_hit', { queryPreview: String(query).slice(0, 100) });
-        return searchCache.get(cacheKey);
-    }
+        if (!message) {
+            statusEl.textContent = 'اول متن مشکل رو بنویس';
+            statusEl.style.color = '#f87171';
+            return;
+        }
 
-    // Spread requests across healthy keys, but never retry another key inside
-    // this logical search. A different incoming request can select another
-    // key, so a fleet of keys is still useful without violating the one-search
-    // limit.
-    const orderedTavilyKeys = rotateKeysByHealth(tavilyKeys);
-    const currentKey = orderedTavilyKeys[0];
-    const keyIndex = tavilyKeys.indexOf(currentKey) + 1;
+        btn.disabled = true;
+        statusEl.style.color = 'var(--text-muted, #94a3b8)';
+        statusEl.textContent = 'در حال ارسال...';
 
-    const fail = (code, message, status = null, retryable = false) => {
-        const failure = {
-            ok: false,
-            code,
-            status,
-            retryable,
-            message
-        };
-        if (searchCache) searchCache.set(cacheKey, failure);
-        return failure;
-    };
-
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-        let response;
         try {
-            response = await fetch(
-                'https://api.tavily.com/search',
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        api_key: currentKey,
-                        query,
-                        search_depth: 'basic',
-                        max_results: 2
-                    }),
-                    signal: controller.signal
-                }
-            );
-        } finally {
-            clearTimeout(timeoutId);
-        }
-
-        if (!response.ok) {
-            let body = null;
-            try { body = await response.json(); } catch (_) {}
-
-            const status = response.status;
-            const providerMessage =
-                body?.detail ||
-                body?.message ||
-                body?.error ||
-                `HTTP ${status}`;
-
-            markKeyResult(currentKey, false);
-
-            if (status === 401 || status === 403) {
-                return fail(
-                    'search_invalid_key',
-                    'Ú©Ù„ÛŒØ¯ Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª ÛŒØ§ Ø¯Ø³ØªØ±Ø³ÛŒ Ø¢Ù† Ø±Ø¯ Ø´Ø¯Ù‡ Ø§Ø³Øª.',
-                    status,
-                    false
-                );
-            }
-
-            if (status === 429) {
-                return fail(
-                    'search_rate_limit',
-                    'Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ø¨Ù‡ Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø³ÛŒØ¯Ù‡ Ø§Ø³Øª. Ø§ÛŒÙ† Ø¬Ø³ØªØ¬Ùˆ ÙÙ‚Ø· ÛŒÚ©â€ŒØ¨Ø§Ø± ØªÙ„Ø§Ø´ Ø´Ø¯ ØªØ§ Ø¯Ø±Ø®ÙˆØ§Ø³Øªâ€ŒÙ‡Ø§ÛŒ Ø§Ø¶Ø§ÙÛŒ Ø§ÛŒØ¬Ø§Ø¯ Ù†Ø´ÙˆØ¯.',
-                    status,
-                    true
-                );
-            }
-
-            if (status >= 500) {
-                return fail(
-                    'search_provider_error',
-                    'Ø®ÙˆØ¯ Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù…ÙˆÙ‚ØªØ§Ù‹ Ø¨Ø§ Ø®Ø·Ø§ÛŒ Ø³Ø±ÙˆØ± Ù…ÙˆØ§Ø¬Ù‡ Ø´Ø¯.',
-                    status,
-                    true
-                );
-            }
-
-            return fail(
-                'search_http_error',
-                `Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø§ Ø±Ø¯ Ú©Ø±Ø¯ (${status}).`,
-                status,
-                false
-            );
-        }
-
-        const data = await response.json();
-
-        if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
-            markKeyResult(currentKey, true);
-            return fail(
-                'search_no_results',
-                'Ø¬Ø³ØªØ¬Ùˆ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯ Ø§Ù…Ø§ Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø¹Ø¨Ø§Ø±Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.',
-                200,
-                false
-            );
-        }
-
-        markKeyResult(currentKey, true);
-
-        const formatted = data.results
-            .map(
-                r =>
-                    `Ø¹Ù†ÙˆØ§Ù†: ${r.title || 'Ø¨Ø¯ÙˆÙ† Ø¹Ù†ÙˆØ§Ù†'}\n` +
-                    `Ù…Ù†Ø¨Ø¹: ${r.url || 'Ù†Ø§Ù…Ø´Ø®Øµ'}\n` +
-                    `Ù…Ø­ØªÙˆØ§: ${String(r.content || '').slice(0, 1800)}`
-            )
-            .join('\n\n---\n\n');
-
-        const success = {
-            ok: true,
-            code: 'search_success',
-            status: 200,
-            result: formatted
-        };
-
-        if (searchCache) searchCache.set(cacheKey, success);
-
-        log.info('search.succeeded', {
-            keyIndex,
-            resultCount: data.results.length
-        });
-
-        return success;
-
-    } catch (error) {
-        markKeyResult(currentKey, false);
-
-        if (error?.name === 'AbortError') {
-            return fail(
-                'search_timeout',
-                'Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ø¯Ø± Ø²Ù…Ø§Ù† ØªØ¹ÛŒÛŒÙ†â€ŒØ´Ø¯Ù‡ Ù¾Ø§Ø³Ø® Ù†Ø¯Ø§Ø¯.',
-                408,
-                true
-            );
-        }
-
-        log.error('search.request_failed', {
-            keyIndex,
-            message: error?.message || String(error)
-        });
-
-        return fail(
-            'search_network_error',
-            'Ø§Ø±ØªØ¨Ø§Ø· Ø¨Ø§ Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ø¨Ø±Ù‚Ø±Ø§Ø± Ù†Ø´Ø¯.',
-            null,
-            true
-        );
-    }
-}
-
-/*
-|--------------------------------------------------------------------------
-| Agentic Tool Calling
-|--------------------------------------------------------------------------
-| Instead of a fixed Persian keyword list deciding up-front whether to
-| search the web, the model itself is given a real "web_search" tool (via
-| Gemini's function calling) and decides per-turn whether/how many times
-| to call it, based on actually understanding the question. It can also
-| call "ask_user" when it judges a change the user asked for to be
-| significant enough to confirm first (e.g. "rewrite this whole file" /
-| "delete this data") instead of just doing it.
-|
-| Each tool call is narrated to the client as a lightweight {step: ...}
-| SSE event *before* the tool result comes back, so a slow web search
-| doesn't look like a silent hang - the user sees "Ø¯Ø§Ø±Ù… ØªÙˆÛŒ ÙˆØ¨ Ø³Ø±Ú† Ù…ÛŒâ€ŒÚ©Ù†Ù…â€¦"
-| immediately, the same way a person narrates what they're doing.
-*/
-
-
-/*
-|--------------------------------------------------------------------------
-| File Structure Intelligence
-|--------------------------------------------------------------------------
-| This is intentionally lightweight and dependency-free. It does not try to
-| compile or execute user code; it extracts a stable structural map that the
-| model can use before producing file-edit operations. The same tool is used
-| for every text/code file type we can reasonably inspect.
-*/
-function looksLikeFileEditIntent(text) {
-    const t = String(text || '').trim().toLowerCase();
-    if (!t) return false;
-    return /(?:ÙˆÛŒØ±Ø§ÛŒØ´|Ø§Ø¯ÛŒØª|ØªØºÛŒÛŒØ± Ø¨Ø¯Ù‡|ØªØºÛŒÛŒØ±Ø´ Ø¨Ø¯Ù‡|Ø§Ø¶Ø§ÙÙ‡ Ú©Ù†|Ø§Ø¶Ø§ÙÙ‡â€Œ|Ø­Ø°Ù Ú©Ù†|Ù¾Ø§Ú© Ú©Ù†|Ø§ØµÙ„Ø§Ø­ Ú©Ù†|Ø¯Ø±Ø³Øª Ú©Ù†|Ù¾ÛŒØ§Ø¯Ù‡ Ú©Ù†|Ù¾ÛŒØ§Ø¯Ù‡â€Œ|Ø¨Ø±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ú©Ù†|Ø¢Ù¾Ø¯ÛŒØª Ú©Ù†|Ø¨Ù‡â€ŒØ±ÙˆØ² Ú©Ù†|Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ú©Ù†|Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ù†|Ø§Ø¶Ø§ÙÙ‡ Ú©Ø±Ø¯Ù†|Ø­Ø°Ù Ú©Ø±Ø¯Ù†|ØªØºÛŒÛŒØ± Ø¯Ø§Ø¯Ù†|Ø§ØµÙ„Ø§Ø­ Ú©Ø±Ø¯Ù†|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor)/i.test(t);
-}
-
-/*
-|--------------------------------------------------------------------------
-| Versioned output filename
-|--------------------------------------------------------------------------
-| Ø§Ú¯Ù‡ Ø§Ø³Ù… ÙØ§ÛŒÙ„ Ø¨Ù‡ Ø¹Ø¯Ø¯ Ø®ØªÙ… Ø¨Ø´Ù‡ (index58 -> index59) Ø¹Ø¯Ø¯ ÛŒÚ©ÛŒ Ø²ÛŒØ§Ø¯ Ù…ÛŒâ€ŒØ´Ù‡.
-| Ø§Ú¯Ù‡ Ù†Ù‡ØŒ Ø¨Ø±Ú†Ø³Ø¨ _edited Ø§Ø¶Ø§ÙÙ‡ Ù…ÛŒâ€ŒØ´Ù‡ (chat.js -> chat_edited.js)ØŒ Ùˆ Ø§Ú¯Ù‡ Ø§Ø²
-| Ù‚Ø¨Ù„ _edited Ø¯Ø§Ø´Øª Ø´Ù…Ø§Ø±Ù‡â€ŒØ¯Ø§Ø± Ù…ÛŒâ€ŒØ´Ù‡ (_edited -> _edited2 -> _edited3 ...).
-| Ø§ÛŒÙ† Ø¬Ù„ÙˆÛŒ Ø§ÙˆÙ† Ù…Ø´Ú©Ù„ "Ø§Ø³Ù… Ø®Ø±ÙˆØ¬ÛŒ Ø¨Ø§ Ø§Ø³Ù… ÙˆØ±ÙˆØ¯ÛŒ ÛŒÚ©ÛŒÙ‡ Ùˆ Ù…Ø¹Ù„ÙˆÙ… Ù†ÛŒØ³Øª Ú©Ø¯ÙˆÙ… ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡"
-| Ø±Ùˆ Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ù‡.
-*/
-function nextEditedFileName(originalName) {
-    const name = String(originalName || '').trim();
-    if (!name) return 'edited_file';
-
-    const dotIndex = name.lastIndexOf('.');
-    const hasExt = dotIndex > 0 && dotIndex < name.length - 1;
-    const base = hasExt ? name.slice(0, dotIndex) : name;
-    const ext = hasExt ? name.slice(dotIndex) : '';
-
-    const trailingNumberMatch = base.match(/^(.*?)(\d+)$/);
-    if (trailingNumberMatch) {
-        const prefix = trailingNumberMatch[1];
-        const num = trailingNumberMatch[2];
-        const nextNum = String(Number(num) + 1).padStart(num.length, '0');
-        return `${prefix}${nextNum}${ext}`;
-    }
-
-    const editedMatch = base.match(/^(.*)_edited(\d*)$/);
-    if (editedMatch) {
-        const prefix = editedMatch[1];
-        const currentNum = editedMatch[2] ? Number(editedMatch[2]) : 1;
-        return `${prefix}_edited${currentNum + 1}${ext}`;
-    }
-
-    return `${base}_edited${ext}`;
-}
-
-/*
-|--------------------------------------------------------------------------
-| Transactional patch engine
-|--------------------------------------------------------------------------
-| apply_patch tool Ø§ÛŒÙ†Ùˆ ØµØ¯Ø§ Ù…ÛŒâ€ŒØ²Ù†Ù‡. Ù‡Ø± patch Ø¨Ø§ÛŒØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„
-| Ù¾ÛŒØ¯Ø§ Ø¨Ø´Ù‡Ø› Ø§Ú¯Ù‡ Ù†Ø´Ø¯ ÛŒØ§ Ù…Ø¨Ù‡Ù… Ø¨ÙˆØ¯ØŒ ÛŒÙ‡ Ú¯Ø²Ø§Ø±Ø´ Ø¯Ù‚ÛŒÙ‚ (Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context) Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ù‡
-| Ú©Ù‡ Ù…Ø¯Ù„ Ø¨Ø§ Ø§ÙˆÙ† old Ø±Ùˆ Ø§ØµÙ„Ø§Ø­ Ú©Ù†Ù‡ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†Ù‡ - Ù‡ÛŒÚ† Ø­Ø¯Ø³/fuzzy-match ÛŒ
-| Ø¯Ø± Ú©Ø§Ø± Ù†ÛŒØ³Øª.
-*/
-/*
-|==========================================================================
-| BLOCK-BASED FILE EDITING (rewrite - replaces inspect_file/get_file_chunk/
-| apply_patch entirely for text files)
-|==========================================================================
-|
-| Ú†Ø±Ø§ Ø§ÛŒÙ† Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù„Ø§Ø²Ù… Ø¨ÙˆØ¯:
-| Ù…Ø¹Ù…Ø§Ø±ÛŒ Ù‚Ø¨Ù„ÛŒ (inspect_file + get_file_chunk Ø¨Ø§ startLine/endLine Ø¯Ù„Ø®ÙˆØ§Ù‡ +
-| apply_patch Ø¨Ø§ old/new Ù…ØªÙ†ÛŒ ÛŒØ§ Ø®Ø·â€ŒÙ…Ø­ÙˆØ±) Ø³Ù‡ Ø¯Ø³ØªÙ‡ Ø¨Ø§Ú¯ Ø¬Ø¯Ø§ ØªÙˆÙ„ÛŒØ¯ Ù…ÛŒâ€ŒÚ©Ø±Ø¯ Ú©Ù‡ Ù‡Ø±
-| Ø¨Ø§Ø± ÛŒÚ©ÛŒ Ø±ÙØ¹ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ø¨Ø¹Ø¯ÛŒ Ø³Ø± Ø¨Ø± Ù…ÛŒâ€ŒØ¢ÙˆØ±Ø¯:
-|   Û±) overlap Ø¬Ø²Ø¦ÛŒ Ø¨ÛŒÙ† Ø¯Ùˆ Ø®ÙˆØ§Ù†Ø¯Ù† (Ù†Ù‡ subset Ø¯Ù‚ÛŒÙ‚ØŒ Ù†Ù‡ Ú©Ø§Ù…Ù„Ø§Ù‹ Ù‚Ø¨Ù„ Ø§Ø² Ù‚Ø¨Ù„ÛŒ)
-|      Ù‡ÛŒÚ†â€ŒØ¬Ø§ ØªØ´Ø®ÛŒØµ Ø¯Ø§Ø¯Ù‡ Ù†Ù…ÛŒâ€ŒØ´Ø¯ -> Ù…Ø¯Ù„ Ø¨Ø®Ø´ÛŒ Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…ÛŒâ€ŒØ®ÙˆØ§Ù†Ø¯.
-|   Û²) state Ù¾ÛŒØ´Ø±ÙØª (Ú©Ø¯Ø§Ù… Ø®Ø·â€ŒÙ‡Ø§ Ø®ÙˆØ§Ù†Ø¯Ù‡/ÙˆÛŒØ±Ø§ÛŒØ´ Ø´Ø¯Ù‡) Ø¯Ø§Ø®Ù„ runAgentLoop ØªØ¹Ø±ÛŒÙ
-|      Ù…ÛŒâ€ŒØ´Ø¯ -> Ø¨Ø§ Ù‡Ø± retry (Ú©Ù„ÛŒØ¯/Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ÛŒ Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† Ø¯Ø±Ø®ÙˆØ§Ø³Øª HTTP) Ø§Ø² ØµÙØ±
-|      Ø³Ø§Ø®ØªÙ‡ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ù…Ø¯Ù„ Ú©Ø§Ù…Ù„Ø§Ù‹ ÙØ±Ø§Ù…ÙˆØ´ Ù…ÛŒâ€ŒÚ©Ø±Ø¯ Ú©Ø¬Ø§ Ø¨ÙˆØ¯Ù‡.
-|   Û³) apply_patch Ø¨Ø§ ØªØ·Ø¨ÛŒÙ‚ Ù…ØªÙ†ÛŒ (old/new) Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¨Ø²Ø±Ú¯ Ø´Ú©Ù†Ù†Ø¯Ù‡ Ø¨ÙˆØ¯: Ø§Ú¯Ø±
-|      Ù…Ø¯Ù„ Ø­ØªÛŒ ÛŒÚ© Ú©Ø§Ø±Ø§Ú©ØªØ± (ÙØ§ØµÙ„Ù‡/Ú©ÙˆØªÛŒØ´Ù†) Ø±Ø§ Ø§Ø² Ø­Ø§ÙØ¸Ù‡ Ø¨Ø§Ø²Ø³Ø§Ø²ÛŒ Ù…ÛŒâ€ŒÚ©Ø±Ø¯ØŒ Ú©Ù„
-|      patch Ø±Ø¯ Ù…ÛŒâ€ŒØ´Ø¯.
-|
-| Ø±Ø§Ù‡â€ŒØ­Ù„: Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø¯Ù„Ø®ÙˆØ§Ù‡ØŒ ÙØ§ÛŒÙ„ Ø¨Ù‡ Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ Ø´Ù…Ø§Ø±Ù‡â€ŒØ¯Ø§Ø± Ùˆ
-| Ø«Ø§Ø¨Øª (ØªÙˆØ³Ø· Ú©Ø¯ØŒ Ù†Ù‡ Ù…Ø¯Ù„) ØªÙ‚Ø³ÛŒÙ… Ù…ÛŒâ€ŒØ´ÙˆØ¯. Ù…Ø¯Ù„ ÙÙ‚Ø· Ø¨Ø§ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ø¨Ù„ÙˆÚ© Ú©Ø§Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯ -
-| Ù†Ù‡ Ù…Ø­Ø§Ø³Ø¨Ù‡â€ŒÛŒ Ø®Ø·ØŒ Ù†Ù‡ ØªØ·Ø¨ÛŒÙ‚ Ù…ØªÙ†ÛŒ. state Ù¾ÛŒØ´Ø±ÙØª (Ú©Ø¯Ø§Ù… Ø¨Ù„ÙˆÚ© Ø®ÙˆØ§Ù†Ø¯Ù‡/ÙˆÛŒØ±Ø§ÛŒØ´ Ø´Ø¯Ù‡ØŒ
-| Ø¢ÛŒØ§ verify Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ø®Ø±ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ùˆ Ù¾Ø§Ø³ Ø´Ø¯Ù‡) Ø¯Ø± ÛŒÚ© Ø¢Ø¨Ø¬Ú©Øª ÙˆØ§Ø­Ø¯
-| (BlockFileState) Ù†Ú¯Ù‡ Ø¯Ø§Ø´ØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú©Ù‡ Ø®ÙˆØ¯Ù caller (Ø³Ø·Ø­ HTTP requestØŒ Ù†Ù‡
-| runAgentLoop) Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ Ùˆ Ø¨ÛŒÙ† Ù‡Ù…Ù‡â€ŒÛŒ retryÙ‡Ø§ÛŒ Ù‡Ù…Ø§Ù† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù…Ø´ØªØ±Ú© Ø§Ø³Øª - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹
-| Ù…Ø«Ù„ sharedRequestState Ø¨Ø±Ø§ÛŒ inspect/chunk Ù‚Ø¨Ù„ÛŒØŒ Ø§Ù…Ø§ Ø§ÛŒÙ† Ø¨Ø§Ø± state ÙˆØ§Ø­Ø¯ Ùˆ
-| Ú©Ø§Ù…Ù„ Ø´Ø§Ù…Ù„ Ø®ÙˆØ¯Ù Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ù‡Ù… Ù‡Ø³ØªØŒ Ù†Ù‡ Ù¾Ø®Ø´ Ø¯Ø± Ú†Ù†Ø¯ Set/Map Ø¬Ø¯Ø§.
-|
-| Ù‚ÙˆØ§Ù†ÛŒÙ† Ú©Ù„ÛŒØ¯ÛŒ:
-|   - Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒ Ù‚Ø·Ø¹ÛŒ Ùˆ ØªÚ©Ø±Ø§Ø±Ù¾Ø°ÛŒØ± Ø§Ø³Øª: Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ Ù‡Ù…ÛŒØ´Ù‡ Ù‡Ù…Ø§Ù† Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ Ø±Ø§ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯.
-|   - write_block Ú©Ù„ ÛŒÚ© Ø¨Ù„ÙˆÚ© Ø±Ø§ Ø¨Ø§ Ù…Ø­ØªÙˆØ§ÛŒ Ø¬Ø¯ÛŒØ¯ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒÚ©Ù†Ø¯ (Ù†Ù‡ diff) -
-|     Ù…Ù‚Ø§ÙˆÙ… Ø¯Ø± Ø¨Ø±Ø§Ø¨Ø± Ø®Ø·Ø§ÛŒ Ú©ÙˆÚ†Ú© Ù…ØªÙ†ÛŒØŒ Ú†ÙˆÙ† Ú©Ù„ Ø¨Ù„ÙˆÚ© Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ù†Ù‡ Ø¨Ø®Ø´ÛŒ Ø§Ø² Ø¢Ù†.
-|   - Ø¨Ø¹Ø¯ Ø§Ø² Ù‡Ø± write_blockØŒ Ù¾Ø±Ú†Ù… "verified" Ø±ÛŒØ³Øª Ù…ÛŒâ€ŒØ´ÙˆØ¯Ø› Ù…Ø¯Ù„ ØªØ§ verify_file
-|     Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ù†Ø²Ù†Ø¯ Ùˆ Ù¾Ø§Ø³ Ù†Ø´ÙˆØ¯ØŒ Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ Ø¬ÙˆØ§Ø¨ Ù†Ù‡Ø§ÛŒÛŒ (Ø¨Ø¯ÙˆÙ† Ø§Ø¨Ø²Ø§Ø±) Ø±Ø§
-|     Ù†Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ - Ø§ÛŒÙ† Ø±Ø§ runAgentLoop Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† Ù‡Ø± round Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ù†Ù‡ ÛŒÚ©
-|     Ù‚Ø§Ù†ÙˆÙ† ØµØ±ÙØ§Ù‹ Ø¯Ø± system prompt Ú©Ù‡ Ù‚Ø§Ø¨Ù„ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† Ø¨Ø§Ø´Ø¯.
-|
-|==========================================================================
-*/
-
-// PERF (Vercel Hobby 60s function timeout on heavy files): each round in
-// runAgentLoop is a fully sequential, blocking network round-trip to
-// Gemini - there is no parallelism between read_block/write_block/
-// verify_file calls. A targeted edit on a heavy file (e.g. a single CSS
-// rule change on a 5000+ line index.html) still costs one round per
-// block it touches, so the fewer/larger the blocks, the fewer
-// round-trips a normal edit needs, and the less real wall-clock time the
-// whole request burns before Vercel's hard timeout kills the connection
-// with no response at all (see the "Ù¾Ø§Ø³Ø®ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯" case). Doubled
-// from 250 -> 500: a typical single-section edit still fits inside one
-// or two blocks (unchanged behavior), but a 5000-line file now maps to
-// roughly half as many total blocks, which also roughly halves the
-// MAX_TOOL_ROUNDS ceiling computed from block count below. This does not
-// change the read_block/write_block/verify_file contract or validation
-// logic - only how finely the same file is sliced.
-// ==========================================================================
-// REWRITE (block architecture -> SEARCH/REPLACE with fallback, Aider-style)
-// ==========================================================================
-// Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ú©Ø§Ù…Ù„ Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒ: Ù…Ø¯Ù„ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ ÛŒÚ© Ù‚Ø·Ø¹Ù‡â€ŒÛŒ Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ (search) Ùˆ
-// Ù…ØªÙ† Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† (replace) Ù…ÛŒâ€ŒØ¯Ù‡Ø¯. Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ø¨Ù„ÙˆÚ© Ø«Ø§Ø¨Øª (Ú©Ù‡ Ø¨Ø§ Ù‡Ø± ÙˆÛŒØ±Ø§ÛŒØ´
-// Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ù…Ø¯Ù„ Ø¨Ø§ÛŒØ¯ Ø¯Ø§Ø¦Ù… Ù†Ù‚Ø´Ù‡â€ŒÛŒ Ø¬Ø¯ÛŒØ¯ Ø±Ø§ Ø¯Ù†Ø¨Ø§Ù„ Ù…ÛŒâ€ŒÚ©Ø±Ø¯)ØŒ Ø®ÙˆØ¯Ù
-// Ù…Ø­ØªÙˆØ§ Ù…Ø¹ÛŒØ§Ø± Ø§Ø³Øª. Û´ Ù„Ø§ÛŒÙ‡â€ŒÛŒ fallback Ø¨Ù‡ ØªØ±ØªÛŒØ¨ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒØ´ÙˆØ¯:
-//   Û±) ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚ (exact substring)
-//   Û²) ØªØ·Ø¨ÛŒÙ‚ Ø¨Ø§ Ø§Ù†Ø¹Ø·Ø§Ù ÙØ§ØµÙ„Ù‡/ØªØ¨/whitespace (Ø®Ø·ÙˆØ· normalize Ø´Ø¯Ù‡ Ù…Ù‚Ø§ÛŒØ³Ù‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯)
-//   Û³) ØªØ·Ø¨ÛŒÙ‚ fuzzy Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø· (Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† ÙØ§ØµÙ„Ù‡â€ŒÛŒ Ø§Ø¨ØªØ¯Ø§/Ø§Ù†ØªÙ‡Ø§ÛŒ Ø®Ø·)
-//   Û´) Ø´Ú©Ø³Øª: Ú¯Ø²Ø§Ø±Ø´ Ø¯Ù‚ÛŒÙ‚ Ø¨Ø§ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context Ù‡Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§ Ù…Ø¯Ù„
-//      search Ø±Ø§ Ø§ØµÙ„Ø§Ø­ Ú©Ù†Ø¯ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†Ø¯ - Ù‡ÛŒÚ† Ø­Ø¯Ø³ÛŒ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ù…Ø¯Ù„ Ø²Ø¯Ù‡ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-// Ø§Ú¯Ø± search Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´ÙˆØ¯ (Ø§Ø¨Ù‡Ø§Ù…)ØŒ Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ù…Ú¯Ø±
-// occurrence Ù…Ø´Ø®Øµ Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.
-
-// \r ØªÙ†Ù‡Ø§ (Ø¨Ø¯ÙˆÙ† \n Ø¨Ø¹Ø¯Ø´) Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø§Ø² Ø¨Ø±Ø´ Ù†Ø§Ø¯Ø±Ø³Øª Ù…ØªÙ† ØªÙˆØ³Ø· Ù…Ø¯Ù„ Ø§ÛŒØ¬Ø§Ø¯ Ø´ÙˆØ¯Ø› Ø§Ú¯Ø±
-// Ù†Ø±Ù…Ø§Ù„â€ŒØ³Ø§Ø²ÛŒ Ø´ÙˆØ¯ØŒ \r\n\r ÙˆØ§Ù‚Ø¹ÛŒ Ø®Ø±Ø§Ø¨ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú†ÙˆÙ† Ø§Ø¨ØªØ¯Ø§ \r\n Ú©Ø§Ù…Ù„ ØªØ¨Ø¯ÛŒÙ„ Ùˆ Ø­Ø°Ù
-// Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ ÙÙ‚Ø· \r Ø¨Ø§Ù‚ÛŒâ€ŒÙ…Ø§Ù†Ø¯Ù‡ (ØªÙ†Ù‡Ø§) Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† ØªØ¨Ø¯ÛŒÙ„ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-function normalizeLineEndings(text) {
-    return String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-}
-
-function normalizeForFuzzyMatch(line) {
-    return line.trim().replace(/\s+/g, ' ');
-}
-
-// Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û±: ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚ substring.
-function findExactMatches(content, search) {
-    const indices = [];
-    let from = 0;
-    while (true) {
-        const idx = content.indexOf(search, from);
-        if (idx === -1) break;
-        indices.push(idx);
-        from = idx + Math.max(1, search.length);
-    }
-    return indices;
-}
-
-// Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û²: ØªØ·Ø¨ÛŒÙ‚ Ø¨Ø§ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† ØªÙØ§ÙˆØªâ€ŒÙ‡Ø§ÛŒ whitespace (Ù‡Ø± Ø¯Ùˆ Ø·Ø±Ù
-// normalizeLineEndings Ø´Ø¯Ù‡ Ùˆ Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø· Ø¨Ø§ ÙØ§ØµÙ„Ù‡â€ŒÛŒ ÛŒÚ©Ø³Ø§Ù†â€ŒØ´Ø¯Ù‡ Ù…Ù‚Ø§ÛŒØ³Ù‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯).
-// Ú†ÙˆÙ† Ø·ÙˆÙ„ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¹ÙˆØ¶ Ø´ÙˆØ¯ (ØªØ¹Ø¯Ø§Ø¯ ÙØ§ØµÙ„Ù‡â€ŒÙ‡Ø§ ÙØ±Ù‚ Ø¯Ø§Ø±Ø¯)ØŒ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ indexOf Ø³Ø§Ø¯Ù‡ØŒ
-// ÛŒÚ© ØªØ·Ø¨ÛŒÙ‚ Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø· Ø±ÙˆÛŒ Ø¢Ø±Ø§ÛŒÙ‡â€ŒÛŒ Ø®Ø·ÙˆØ· Ø§Ù†Ø¬Ø§Ù… Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø· Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-function findWhitespaceFlexibleMatch(contentLines, searchLines) {
-    if (searchLines.length === 0) return null;
-    const normSearch = searchLines.map(normalizeForFuzzyMatch);
-    const matches = [];
-    for (let i = 0; i <= contentLines.length - searchLines.length; i++) {
-        let ok = true;
-        for (let j = 0; j < searchLines.length; j++) {
-            if (normalizeForFuzzyMatch(contentLines[i + j]) !== normSearch[j]) { ok = false; break; }
-        }
-        if (ok) matches.push(i);
-    }
-    return matches;
-}
-
-// Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û³: fuzzy - ÙÙ‚Ø· Ø®Ø·ÙˆØ· ØºÛŒØ±Ø®Ø§Ù„ÛŒ search Ø¨Ø§ÛŒØ¯ Ø¨Ù‡ ØªØ±ØªÛŒØ¨ (Ø¨Ø§ Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ
-// Ú†Ø³Ø¨ÛŒØ¯Ú¯ÛŒ Ù†Ù‡â€ŒÚ†Ù†Ø¯Ø§Ù†â€ŒØ³Ø®Øªâ€ŒÚ¯ÛŒØ±Ø§Ù†Ù‡) Ø¯Ø± Ù…Ø­ØªÙˆØ§ Ù¾ÛŒØ¯Ø§ Ø´ÙˆÙ†Ø¯Ø› Ø®Ø·ÙˆØ· Ø®Ø§Ù„ÛŒ Ø¯Ø§Ø®Ù„ search
-// Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯. Ø§ÛŒÙ† Ø¢Ø®Ø±ÛŒÙ† Ù„Ø§ÛŒÙ‡ Ù‚Ø¨Ù„ Ø§Ø² Ø´Ú©Ø³Øª Ú©Ø§Ù…Ù„ Ø§Ø³Øª Ùˆ ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ
-// Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú©Ù‡ Ù„Ø§ÛŒÙ‡â€ŒÛŒ Û± Ùˆ Û² Ù‡Ø± Ø¯Ùˆ ØµÙØ± ØªØ·Ø¨ÛŒÙ‚ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ù†Ø¯.
-function findFuzzyMatch(contentLines, searchLines) {
-    const meaningfulSearch = searchLines.map(normalizeForFuzzyMatch).filter(Boolean);
-    if (meaningfulSearch.length === 0) return null;
-    const matches = [];
-    const windowSize = searchLines.length;
-    for (let i = 0; i <= contentLines.length - windowSize; i++) {
-        const windowNorm = contentLines.slice(i, i + windowSize).map(normalizeForFuzzyMatch).filter(Boolean);
-        if (windowNorm.length !== meaningfulSearch.length) continue;
-        let ok = true;
-        for (let j = 0; j < meaningfulSearch.length; j++) {
-            if (windowNorm[j] !== meaningfulSearch[j]) { ok = false; break; }
-        }
-        if (ok) matches.push(i);
-    }
-    return matches;
-}
-
-// Ú¯Ø²Ø§Ø±Ø´ Ø´Ú©Ø³Øª: Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context Ù‡Ø§ Ø±Ø§ (Ø¨Ø± Ø§Ø³Ø§Ø³ Ø§ÙˆÙ„ÛŒÙ† Ø®Ø· ØºÛŒØ±Ø®Ø§Ù„ÛŒ search)
-// Ù¾ÛŒØ¯Ø§ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ ØªØ§ Ù…Ø¯Ù„ Ø¨ØªÙˆØ§Ù†Ø¯ search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± Ú©Ù¾ÛŒ Ú©Ù†Ø¯.
-function buildEditFailureReport(content, search, reasonText) {
-    const searchLines = search.split('\n');
-    const firstMeaningfulLine = (searchLines.find(l => l.trim()) || '').trim();
-    const contentLines = content.split('\n');
-    const candidates = [];
-    const needle = firstMeaningfulLine.slice(0, Math.min(30, firstMeaningfulLine.length));
-    if (needle) {
-        contentLines.forEach((line, idx) => {
-            if (line.includes(needle)) {
-                const start = Math.max(0, idx - 3);
-                const end = Math.min(contentLines.length, idx + 4);
-                candidates.push({
-                    lineNumber: idx + 1,
-                    context: contentLines.slice(start, end).join('\n')
-                });
-            }
-        });
-    }
-    return {
-        reason: reasonText,
-        candidatesFound: candidates.length,
-        candidates: candidates.slice(0, 5),
-        hint: 'search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø§Ø² ÛŒÚ©ÛŒ Ø§Ø² Ø§ÛŒÙ† context Ù‡Ø§ Ú©Ù¾ÛŒ Ú©Ù† (Ú©Ø§Ø±Ø§Ú©ØªØ± Ø¨Ù‡ Ú©Ø§Ø±Ø§Ú©ØªØ±ØŒ Ø´Ø§Ù…Ù„ ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ Ùˆ ØªÙˆØ±ÙØªÚ¯ÛŒ) ØªØ§ ÛŒÚ©ØªØ§ Ùˆ Ú©Ø§Ù…Ù„ ØªØ·Ø¨ÛŒÙ‚ Ù¾ÛŒØ¯Ø§ Ø´ÙˆØ¯ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ apply_edit Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. Ø§Ú¯Ø± Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒ Ù…Ø­ØªÙˆØ§ÛŒ Ø¯Ù‚ÛŒÙ‚ Ú©Ø¬Ø§Ø³ØªØŒ Ø§Ø¨ØªØ¯Ø§ Ø¨Ø§ read_file_section Ø¨Ø®Ø´ÛŒ Ø§Ø² ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨Ø¨ÛŒÙ†.'
-    };
-}
-
-// Ù…ÙˆØªÙˆØ± Ø§ØµÙ„ÛŒ: content Ú©Ø§Ù…Ù„ + search + replace Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ØŒ Ù‡Ø± Û´ Ù„Ø§ÛŒÙ‡ Ø±Ø§ Ø¨Ù‡
-// ØªØ±ØªÛŒØ¨ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ùˆ ÛŒØ§ content Ø¬Ø¯ÛŒØ¯ Ø±Ø§ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ ÛŒØ§ Ø®Ø·Ø§ÛŒ Ø¯Ù‚ÛŒÙ‚.
-// occurrence (Ø§Ø®ØªÛŒØ§Ø±ÛŒØŒ Û±-Ù¾Ø§ÛŒÙ‡) Ø¨Ø±Ø§ÛŒ Ø²Ù…Ø§Ù†ÛŒ Ø§Ø³Øª Ú©Ù‡ search Ø¹Ù…Ø¯Ø§Ù‹ Ú†Ù†Ø¯Ø¨Ø§Ø± Ø¯Ø±
-// ÙØ§ÛŒÙ„ ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ùˆ Ù…Ø¯Ù„ Ù…Ø´Ø®Øµ Ú©Ø±Ø¯Ù‡ Ú©Ø¯Ø§Ù… Ù†Ù…ÙˆÙ†Ù‡ Ù…Ø¯Ù†Ø¸Ø±Ø´ Ø§Ø³Øª.
-function applySearchReplace(content, search, replace, occurrence) {
-    if (!search || typeof search !== 'string') {
-        return { success: false, reason: 'not_found', report: buildEditFailureReport(content, search || '', 'search Ø®Ø§Ù„ÛŒ ÛŒØ§ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø¨ÙˆØ¯.') };
-    }
-
-    const originalHadCRLF = /\r\n/.test(content);
-    const normContent = normalizeLineEndings(content);
-    const normSearch = normalizeLineEndings(search);
-    const normReplace = normalizeLineEndings(replace == null ? '' : replace);
-
-    const applyAt = (startIdx, endIdx) => {
-        let result = normContent.slice(0, startIdx) + normReplace + normContent.slice(endIdx);
-        if (originalHadCRLF) result = result.replace(/\n/g, '\r\n');
-        return result;
-    };
-
-    // Ù„Ø§ÛŒÙ‡ Û±: ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚
-    const exactMatches = findExactMatches(normContent, normSearch);
-    if (exactMatches.length === 1) {
-        return { success: true, content: applyAt(exactMatches[0], exactMatches[0] + normSearch.length), layer: 'exact' };
-    }
-    if (exactMatches.length > 1) {
-        if (Number.isFinite(occurrence) && occurrence >= 1 && occurrence <= exactMatches.length) {
-            const idx = exactMatches[occurrence - 1];
-            return { success: true, content: applyAt(idx, idx + normSearch.length), layer: 'exact_occurrence' };
-        }
-        return {
-            success: false,
-            reason: 'ambiguous',
-            report: {
-                reason: `Ø§ÛŒÙ† search Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ ${exactMatches.length} Ø¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ø¨Ø§ÛŒØ¯ ÛŒÚ©ØªØ§ Ø¨Ø§Ø´Ø¯ ÛŒØ§ occurrence Ù…Ø´Ø®Øµ Ø´ÙˆØ¯.`,
-                candidatesFound: exactMatches.length,
-                candidates: exactMatches.slice(0, 5).map(idx => ({
-                    lineNumber: normContent.slice(0, idx).split('\n').length,
-                    context: normContent.slice(Math.max(0, idx - 60), idx + normSearch.length + 60)
-                })),
-                hint: 'ÛŒØ§ search Ø±Ø§ Ø¨Ø§ Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù Ø¨ÛŒØ´ØªØ± ÛŒÚ©ØªØ§ Ú©Ù†ØŒ ÛŒØ§ occurrence (Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ù†Ù…ÙˆÙ†Ù‡â€ŒÛŒ Ù…ÙˆØ±Ø¯Ù†Ø¸Ø±ØŒ Ø§Ø² Û± Ø´Ø±ÙˆØ¹) Ø±Ø§ Ø¯Ø± ÙØ±Ø§Ø®ÙˆØ§Ù†ÛŒ apply_edit Ù…Ø´Ø®Øµ Ú©Ù†.'
-            }
-        };
-    }
-
-    // Ù„Ø§ÛŒÙ‡ Û²: whitespace-flexible Ø®Ø·â€ŒØ¨Ù‡â€ŒØ®Ø·
-    const contentLines = normContent.split('\n');
-    const searchLines = normSearch.split('\n');
-    const wsMatches = findWhitespaceFlexibleMatch(contentLines, searchLines);
-    if (wsMatches && wsMatches.length >= 1) {
-        if (wsMatches.length === 1 || (Number.isFinite(occurrence) && occurrence >= 1 && occurrence <= wsMatches.length)) {
-            const lineIdx = wsMatches.length === 1 ? wsMatches[0] : wsMatches[occurrence - 1];
-            const startIdx = contentLines.slice(0, lineIdx).join('\n').length + (lineIdx > 0 ? 1 : 0);
-            const matchedText = contentLines.slice(lineIdx, lineIdx + searchLines.length).join('\n');
-            const endIdx = startIdx + matchedText.length;
-            return { success: true, content: applyAt(startIdx, endIdx), layer: 'whitespace_flexible' };
-        }
-        return {
-            success: false,
-            reason: 'ambiguous',
-            report: {
-                reason: `Ø§ÛŒÙ† search (Ø¨Ø§ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ) ${wsMatches.length} Ø¨Ø§Ø± Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ø¨Ø§ÛŒØ¯ ÛŒÚ©ØªØ§ Ø¨Ø§Ø´Ø¯ ÛŒØ§ occurrence Ù…Ø´Ø®Øµ Ø´ÙˆØ¯.`,
-                candidatesFound: wsMatches.length,
-                candidates: wsMatches.slice(0, 5).map(lineIdx => ({
-                    lineNumber: lineIdx + 1,
-                    context: contentLines.slice(Math.max(0, lineIdx - 3), lineIdx + searchLines.length + 3).join('\n')
-                })),
-                hint: 'search Ø±Ø§ Ø¨Ø§ ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± Ø¨Ø¯Ù‡ ÛŒØ§ occurrence Ù…Ø´Ø®Øµ Ú©Ù†.'
-            }
-        };
-    }
-
-    // Ù„Ø§ÛŒÙ‡ Û³: fuzzy (Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ† Ø®Ø·ÙˆØ· Ø®Ø§Ù„ÛŒ Ø¯Ø§Ø®Ù„ search + ÙØ§ØµÙ„Ù‡â€ŒÛŒ Ø§Ø·Ø±Ø§Ù)
-    const fuzzyMatches = findFuzzyMatch(contentLines, searchLines);
-    if (fuzzyMatches && fuzzyMatches.length === 1) {
-        const lineIdx = fuzzyMatches[0];
-        const startIdx = contentLines.slice(0, lineIdx).join('\n').length + (lineIdx > 0 ? 1 : 0);
-        const matchedText = contentLines.slice(lineIdx, lineIdx + searchLines.length).join('\n');
-        const endIdx = startIdx + matchedText.length;
-        return { success: true, content: applyAt(startIdx, endIdx), layer: 'fuzzy' };
-    }
-    if (fuzzyMatches && fuzzyMatches.length > 1) {
-        return {
-            success: false,
-            reason: 'ambiguous',
-            report: buildEditFailureReport(normContent, normSearch, `Ø§ÛŒÙ† search Ø­ØªÛŒ Ø¨Ù‡â€ŒØµÙˆØ±Øª fuzzy Ù‡Ù… ${fuzzyMatches.length} Ø¨Ø§Ø± Ù…Ø´Ø§Ø¨Ù‡ Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ù…Ø¨Ù‡Ù… Ø§Ø³Øª.`)
-        };
-    }
-
-    // Ù„Ø§ÛŒÙ‡ Û´: Ø´Ú©Ø³Øª Ú©Ø§Ù…Ù„
-    return {
-        success: false,
-        reason: 'not_found',
-        report: buildEditFailureReport(normContent, normSearch, 'Ø§ÛŒÙ† Ù…ØªÙ† (search) Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ ÛŒØ§ Ø­ØªÛŒ Ø¨Ù‡â€ŒØµÙˆØ±Øª fuzzy Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.')
-    };
-}
-
-// ÛŒÚ© FileEditState Ø¨Ø±Ø§ÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ - Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ø³Ø§Ø¯Ù‡â€ŒÛŒ BlockFileState.
-// ÙÙ‚Ø· Ù…Ø­ØªÙˆØ§ÛŒ ÙØ¹Ù„ÛŒ + ØªØ§Ø±ÛŒØ®Ú†Ù‡â€ŒÛŒ Ø§Ø¯ÛŒØªâ€ŒÙ‡Ø§ Ø±Ø§ Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±Ø¯Ø› Ù‡ÛŒÚ† Ø´Ù…Ø§Ø±Ù‡â€ŒØ¨Ù†Ø¯ÛŒ Ø¨Ù„ÙˆÚ©ÛŒ
-// Ø¯Ø± Ú©Ø§Ø± Ù†ÛŒØ³ØªØŒ Ù¾Ø³ Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ recompute Ø¨Ø¹Ø¯ Ø§Ø² Ù‡Ø± ØªØºÛŒÛŒØ± Ø·ÙˆÙ„ Ù‡Ù… Ù†ÛŒØ³Øª.
-function createFileEditState(file) {
-    return {
-        name: file.name,
-        content: String(file.content || ''),
-        editCount: 0,
-        verified: false,
-        editedName: null
-    };
-}
-
-const FILE_BLOCK_TARGET_LINES = 500; // Ø§Ù†Ø¯Ø§Ø²Ù‡â€ŒÛŒ Ù‡Ø¯Ù Ù‡Ø± Ø¨Ù„ÙˆÚ© - Ù†Ù‡ Ø³Ù‚Ù Ø³Ø®ØªØŒ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† Ù…Ø±Ø² Ù…Ù†Ø·Ù‚ÛŒ (Ø®Ø· Ø®Ø§Ù„ÛŒ/section) Ø¨Ù‡ Ø§ÛŒÙ† Ø¹Ø¯Ø¯ Ø§Ù†ØªØ®Ø§Ø¨ Ù…ÛŒâ€ŒØ´ÙˆØ¯
-
-// ÛŒÚ© ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨Ù‡ Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ Ø«Ø§Ø¨Øª ØªÙ‚Ø³ÛŒÙ… Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ù…Ø±Ø² Ù‡Ø± Ø¨Ù„ÙˆÚ© ØªØ§ Ø­Ø¯ Ø§Ù…Ú©Ø§Ù† Ø±ÙˆÛŒ ÛŒÚ©
-// Ø®Ø· Ø®Ø§Ù„ÛŒ ÛŒØ§ Ù…Ø±Ø² section (Ø§Ø² analyzeFileStructure) Ù‚Ø±Ø§Ø± Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ ØªØ§ ÙˆØ³Ø· ÛŒÚ©
-// ØªØ§Ø¨Ø¹/ØªÚ¯ Ù‚Ø·Ø¹ Ù†Ø´ÙˆØ¯Ø› Ø§Ù…Ø§ Ø§ÛŒÙ† ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø®ÙˆØ§Ù†Ø§ÛŒÛŒ preview Ø§Ø³Øª - Ú†ÙˆÙ† write_block
-// Ù‡Ù…ÛŒØ´Ù‡ Ú©Ù„ Ø¨Ù„ÙˆÚ© Ø±Ø§ Ø¹ÙˆØ¶ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ù†Ù‡ ÛŒÚ© semantic unit Ø±Ø§ØŒ Ù‚Ø·Ø¹ Ø´Ø¯Ù† ÙˆØ³Ø· ØªØ§Ø¨Ø¹ Ù‡ÛŒÚ†
-// Ù…Ø´Ú©Ù„ ØµØ­ØªÛŒ Ø§ÛŒØ¬Ø§Ø¯ Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
-// Ù…Ø­Ø§Ø³Ø¨Ù‡â€ŒÛŒ Ø¹Ù…Ù‚ ØªÙˆØ¯Ø±ØªÙˆÛŒÛŒ ØªÚ¯â€ŒÙ‡Ø§ÛŒ XML/HTML Ø¯Ø± Ø§Ù†ØªÙ‡Ø§ÛŒ Ù‡Ø± Ø®Ø·ØŒ Ø¨Ø±Ø§ÛŒ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ
-// html/svg/xml. Ø§ÛŒÙ† ÙÙ‚Ø· ÛŒÚ© Ø´Ù…Ø§Ø±Ù†Ø¯Ù‡â€ŒÛŒ Ø³Ø§Ø¯Ù‡â€ŒÛŒ Ø¨Ø§Ø²/Ø¨Ø³ØªÙ‡ (Ø¨Ø¯ÙˆÙ† Ù¾Ø§Ø±Ø³ ÙˆØ§Ù‚Ø¹ÛŒ) Ø§Ø³Øª -
-// Ú©Ø§ÙÛŒ Ø§Ø³Øª ØªØ§ Ø¨ÙÙ‡Ù…ÛŒÙ… Ù…Ø±Ø² Ø¨ÛŒÙ† Ø¯Ùˆ Ø®Ø· "Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ Ø¨Ø§Ø²" Ø§Ø³Øª ÛŒØ§ Ù†Ù‡. ØªÚ¯â€ŒÙ‡Ø§ÛŒ
-// self-closing (<path .../>) Ùˆ void element Ù‡Ø§ÛŒ HTML (br, img, ...) Ø¹Ù…Ù‚ Ø±Ø§
-// ØªØºÛŒÛŒØ± Ù†Ù…ÛŒâ€ŒØ¯Ù‡Ù†Ø¯. Ú©Ø§Ù…Ù†Øªâ€ŒÙ‡Ø§ÛŒ XML/HTML (<!-- ... -->) Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ú¯Ø±ÙØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ ØªØ§
-// ØªÚ¯ Ø¯Ø§Ø®Ù„ Ú©Ø§Ù…Ù†Øª Ø¨Ø§Ø¹Ø« Ø§Ø´ØªØ¨Ø§Ù‡ Ø´Ù…Ø§Ø±Ø´ Ù†Ø´ÙˆØ¯.
-const VOID_HTML_TAGS = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-function computeTagDepthPerLine(content) {
-    const lines = String(content || '').split(/\r?\n/);
-    const depths = new Array(lines.length + 1).fill(0); // depths[i] = Ø¹Ù…Ù‚ Ø¨Ø¹Ø¯ Ø§Ø² Ù¾Ø§ÛŒØ§Ù† Ø®Ø· i (1-indexed)
-    let depth = 0;
-    let insideComment = false;
-    const tagRe = /<!--|-->|<\/?([a-zA-Z][a-zA-Z0-9:-]*)[^>]*?(\/?)>/g;
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        let m;
-        tagRe.lastIndex = 0;
-        while ((m = tagRe.exec(line))) {
-            const token = m[0];
-            if (token === '<!--') { insideComment = true; continue; }
-            if (token === '-->') { insideComment = false; continue; }
-            if (insideComment) continue;
-            const tagName = (m[1] || '').toLowerCase();
-            const selfClosing = m[2] === '/' || VOID_HTML_TAGS.has(tagName);
-            if (selfClosing) continue;
-            if (token.startsWith('</')) {
-                depth = Math.max(0, depth - 1);
-            } else {
-                depth++;
-            }
-        }
-        depths[i + 1] = depth;
-    }
-    return depths;
-}
-
-function computeFileBlocks(content, fileName) {
-    const lines = String(content || '').split(/\r?\n/);
-    const totalLines = lines.length;
-    const blocks = [];
-
-    if (totalLines === 0) {
-        return [{ number: 1, startLine: 1, endLine: 0, preview: '(ÙØ§ÛŒÙ„ Ø®Ø§Ù„ÛŒ Ø§Ø³Øª)' }];
-    }
-
-    let analysis = null;
-    try {
-        analysis = analyzeFileStructure(content, fileName, '');
-    } catch (_) {
-        analysis = null;
-    }
-    const preferredBoundaries = new Set();
-    if (analysis) {
-        [...(analysis.sections || []), ...(analysis.functions || []), ...(analysis.classes || [])]
-            .forEach(item => { if (item && Number.isFinite(item.line)) preferredBoundaries.add(item.line); });
-    }
-
-    // FIX (Ø¨Ù„ÙˆÚ© ÙˆØ³Ø· <g>/<svg>... Ù‚Ø·Ø¹ Ù…ÛŒâ€ŒØ´Ø¯): Ø¨Ø±Ø§ÛŒ html/svg/xmlØŒ Ù…Ø±Ø² Ø¨Ù„ÙˆÚ©
-    // Ù‡Ø±Ú¯Ø² Ù†Ø¨Ø§ÛŒØ¯ Ø¬Ø§ÛŒÛŒ Ø¨Ø§Ø´Ø¯ Ú©Ù‡ Ø¹Ù…Ù‚ ØªÚ¯ Ø¨Ø§Ø² Ø§Ø³Øª - ÛŒØ¹Ù†ÛŒ Ù‡Ù†ÙˆØ² Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ Ù†Ø¨Ø³ØªÙ‡
-    // Ù‡Ø³ØªÛŒÙ…. Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ† Ú†Ú©ØŒ preferredBoundaries ÙÙ‚Ø· ØªÚ¯â€ŒÙ‡Ø§ÛŒ Ø´Ù†Ø§Ø®ØªÙ‡â€ŒØ´Ø¯Ù‡â€ŒÛŒ Ù…Ø­Ø¯ÙˆØ¯
-    // (div/section/...) Ø±Ø§ Ù…ÛŒâ€ŒØ¯ÛŒØ¯ Ùˆ <g>/<path>/Ø¹Ù†Ø§ØµØ± SVG Ø±Ø§ Ø§ØµÙ„Ø§Ù‹ Ù†Ù…ÛŒâ€ŒØ´Ù†Ø§Ø®ØªØŒ
-    // Ù¾Ø³ ÛŒÚ© Ø®Ø· Ø®Ø§Ù„ÛŒÙ ØªØµØ§Ø¯ÙÛŒÙ ÙˆØ³Ø· <g> Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† Ù…Ø±Ø² Ø§Ù†ØªØ®Ø§Ø¨ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ write_block
-    // Ø±ÙˆÛŒ ÛŒÚ© ØªÚ¯ Ù†ØµÙÙ‡ Ø±Ø¯ Ù…ÛŒâ€ŒØ´Ø¯.
-    const lowerName = String(fileName || '').toLowerCase();
-    const isMarkup = /\.(html?|htm|svg|xml)$/.test(lowerName) || /<svg[\s>]/i.test(content.slice(0, 2000));
-    const tagDepths = isMarkup ? computeTagDepthPerLine(content) : null;
-
-    let cursor = 1;
-    let blockNumber = 1;
-    while (cursor <= totalLines) {
-        const idealEnd = Math.min(totalLines, cursor + FILE_BLOCK_TARGET_LINES - 1);
-        let end = idealEnd;
-
-        if (idealEnd < totalLines) {
-            const searchWindow = 40;
-            let bestEnd = null;
-            for (let candidate = idealEnd; candidate > Math.max(cursor, idealEnd - searchWindow); candidate--) {
-                // Ø§Ú¯Ø± Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ Ø¨Ø§Ø² Ù‡Ø³ØªÛŒÙ… (Ø¹Ù…Ù‚ > Û° Ø¯Ø± Ø§Ù†ØªÙ‡Ø§ÛŒ Ø§ÛŒÙ† Ø®Ø·)ØŒ Ø§ÛŒÙ†
-                // Ù†Ù‚Ø·Ù‡ Ù‡Ø±Ú¯Ø² Ù…Ø±Ø² Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª - Ø­ØªÛŒ Ø§Ú¯Ø± preferredBoundaries ÛŒØ§
-                // Ø®Ø· Ø®Ø§Ù„ÛŒ Ø¨Ø§Ø´Ø¯ØŒ Ú†ÙˆÙ† Ù‚Ø·Ø¹ Ú©Ø±Ø¯Ù† Ø§ÛŒÙ†Ø¬Ø§ ÛŒÚ© ØªÚ¯ Ø¨Ø§Ø² Ø±Ø§ Ù†ØµÙÙ‡ Ø±Ù‡Ø§
-                // Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
-                if (tagDepths && tagDepths[candidate] > 0) continue;
-
-                const lineText = lines[candidate - 1];
-                const nextLineIsBoundary = preferredBoundaries.has(candidate + 1);
-                const thisLineBlank = lineText !== undefined && lineText.trim() === '';
-                if (nextLineIsBoundary || thisLineBlank) {
-                    bestEnd = candidate;
-                    break;
-                }
-            }
-            // Ø§Ú¯Ø± Ù‡ÛŒÚ† Ù…Ø±Ø² "Ø§ÛŒØ¯Ù‡â€ŒØ¢Ù„" Ø¨Ø§ Ø¹Ù…Ù‚ ØµÙØ± Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ØŒ Ø­Ø¯Ø§Ù‚Ù„ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ†
-            // Ù†Ù‚Ø·Ù‡â€ŒÛŒ Ø¹Ù…Ù‚-ØµÙØ± Ø±Ø§ Ø¯Ø± Ú©Ù„ Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ù…Ø¬Ø§Ø² Ù¾ÛŒØ¯Ø§ Ú©Ù† (Ù†Ù‡ ÙÙ‚Ø· Ù¾Ù†Ø¬Ø±Ù‡â€ŒÛŒ
-            // Û´Û° Ø®Ø·ÛŒ) ØªØ§ Ù…Ø·Ù…Ø¦Ù† Ø´ÙˆÛŒÙ… Ø¨Ù„ÙˆÚ© Ù‡Ø±Ú¯Ø² ÙˆØ³Ø· ØªÚ¯ Ø¨Ø§Ø² Ù‚Ø·Ø¹ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ø­ØªÛŒ
-            // Ø§Ú¯Ø± ØªÚ¯ Ø®ÛŒÙ„ÛŒ Ø·ÙˆÙ„Ø§Ù†ÛŒ (Ú†Ù†Ø¯ ØµØ¯ Ø®Ø·) Ø¨Ø§Ø´Ø¯.
-            if (!bestEnd && tagDepths) {
-                for (let candidate = idealEnd; candidate >= cursor; candidate--) {
-                    if (tagDepths[candidate] === 0) { bestEnd = candidate; break; }
-                }
-                if (!bestEnd) {
-                    for (let candidate = idealEnd + 1; candidate <= totalLines; candidate++) {
-                        if (tagDepths[candidate] === 0) { bestEnd = candidate; break; }
-                    }
-                }
-            }
-            end = bestEnd || idealEnd;
-        }
-
-        const previewLines = lines.slice(cursor - 1, Math.min(end, cursor - 1 + 3));
-        blocks.push({
-            number: blockNumber,
-            startLine: cursor,
-            endLine: end,
-            preview: previewLines.join('\n').slice(0, 200)
-        });
-        blockNumber++;
-        cursor = end + 1;
-    }
-
-    return blocks;
-}
-
-// ÛŒÚ© BlockFileState Ø¨Ø±Ø§ÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯. Ø¨Ø§ÛŒØ¯ ØªÙˆØ³Ø· caller (Ø³Ø·Ø­ HTTP
-// request) Ø³Ø§Ø®ØªÙ‡ Ø´ÙˆØ¯ Ùˆ Ø¨ÛŒÙ† Ù‡Ù…Ù‡â€ŒÛŒ retryÙ‡Ø§ÛŒ Ù‡Ù…Ø§Ù† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø¨Ù‡ runAgentLoop
-// Ù¾Ø§Ø³ Ø¯Ø§Ø¯Ù‡ Ø´ÙˆØ¯ - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ sharedRequestState.
-function createBlockFileState(file) {
-    const lines = String(file.content || '').split(/\r?\n/);
-    return {
-        name: file.name,
-        lines,
-        blocks: computeFileBlocks(file.content || '', file.name),
-        readBlocks: new Set(),
-        editedBlocks: new Set(),
-        verified: false,
-        editedName: null
-    };
-}
-
-// Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒ Ø±Ø§ Ø¨Ø¹Ø¯ Ø§Ø² ØªØºÛŒÛŒØ± Ø·ÙˆÙ„ ÙØ§ÛŒÙ„ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ú†ÙˆÙ† write_block
-// Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø·ÙˆÙ„ Ø¨Ù„ÙˆÚ© Ù†ÙˆØ´ØªÙ‡â€ŒØ´Ø¯Ù‡ Ø±Ø§ Ø¹ÙˆØ¶ Ú©Ù†Ø¯ØŒ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø§ÛŒØ¯ Ø¨Ø§
-// Ø®Ø·ÙˆØ· Ø¬Ø¯ÛŒØ¯ Ù‡Ù…Ø®ÙˆØ§Ù†ÛŒ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯. Ø¨Ø§Ø²Ø³Ø§Ø²ÛŒ Ø§Ø² ØµÙØ± Ø§Ø±Ø²Ø§Ù† Ùˆ Ø¨Ø¯ÙˆÙ† edge-case Ø§Ø³Øª.
-function recomputeBlocksAfterEdit(state) {
-    const content = state.lines.join('\n');
-    state.blocks = computeFileBlocks(content, state.name);
-}
-
-function formatBlockMapForModel(state) {
-    const totalLines = state.lines.length;
-    return {
-        file: state.name,
-        totalLines,
-        totalBlocks: state.blocks.length,
-        readBlocks: [...state.readBlocks].sort((a, b) => a - b),
-        editedBlocks: [...state.editedBlocks].sort((a, b) => a - b),
-        verified: state.verified,
-        blocks: state.blocks.map(b => ({
-            number: b.number,
-            startLine: b.startLine,
-            endLine: b.endLine,
-            lineCount: b.endLine - b.startLine + 1,
-            preview: b.preview,
-            alreadyRead: state.readBlocks.has(b.number),
-            alreadyEdited: state.editedBlocks.has(b.number)
-        }))
-    };
-}
-
-function tryApplyPatch(content, oldStr, newStr) {
-    const firstIndex = content.indexOf(oldStr);
-    const lastIndex = content.lastIndexOf(oldStr);
-
-    if (firstIndex === -1) {
-        return { success: false, reason: 'not_found' };
-    }
-    if (firstIndex !== lastIndex) {
-        return { success: false, reason: 'ambiguous' };
-    }
-    return {
-        success: true,
-        content: content.slice(0, firstIndex) + newStr + content.slice(firstIndex + oldStr.length)
-    };
-}
-
-function buildPatchFailureReport(content, oldStr, reasonText) {
-    const oldLines = String(oldStr || '').split('\n');
-    const firstLine = oldLines[0].trim();
-    const contentLines = content.split('\n');
-
-    const candidates = [];
-    contentLines.forEach((line, idx) => {
-        if (firstLine && line.includes(firstLine.slice(0, Math.min(20, firstLine.length)))) {
-            const start = Math.max(0, idx - 3);
-            const end = Math.min(contentLines.length, idx + 4);
-            candidates.push({
-                lineNumber: idx + 1,
-                context: contentLines.slice(start, end).join('\n')
+            const uName = (localStorage.getItem('virtual_user_custom_name') || '').trim() || 'ناشناس';
+            const res = await fetch(BUG_REPORT_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userName: uName,
+                    message: message,
+                    model: typeof currentModel !== 'undefined' ? currentModel : '',
+                    userAgent: navigator.userAgent,
+                    clientId: getBugClientId()
+                })
             });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || 'bad response');
+            }
+            statusEl.style.color = '#4ade80';
+            statusEl.textContent = 'ارسال شد، ممنون از گزارشت 🙏';
+            textEl.value = '';
+            fetchNotifs();
+            // FIX: خواندن بلافاصله بعد از نوشتن روی Vercel Blob می‌تواند چند
+            // لحظه طول بکشد تا نوشته‌ی تازه واقعاً در خواندن‌ها دیده شود
+            // (نگاه کن به توضیح readReports در api/bugreports.js). یک تلاش
+            // دوم با کمی تاخیر، مطمئن می‌شود گزارش تازه واقعاً و پایدار روی
+            // پنل بنشیند، نه فقط با یک خواندن زودهنگام که ممکن است هنوز آن
+            // را نداشته باشد.
+            setTimeout(fetchNotifs, 2500);
+        } catch (err) {
+            statusEl.style.color = '#f87171';
+            statusEl.textContent = 'ارسال نشد، دوباره امتحان کن';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+</script>
+<script>
+    // =====================================================
+    // سیستم انتخاب مدل
+    // =====================================================
+    let currentModel = localStorage.getItem('virtual_selected_model') || 'gemini-3.7-flash';
+    let currentModelDisplay = {
+        'gemini-3.5-flash-lite': 'Virtual Bot 1.1',
+        'gemini-3.7-flash': 'Virtual Bot 1.6',
+        'gemini-3.1-pro-preview': 'Virtual Bot 1.3'
+    };
+
+    function toggleModelDropdown() {
+        document.getElementById('modelDropdown').classList.toggle('active');
+    }
+
+    // Thinking capabilities are intentionally exposed per model so the UI
+    // can never offer a level that the selected Gemini model rejects.
+    const THINK_LEVELS_BY_MODEL = {
+        'gemini-3.5-flash-lite': ['off'],
+        'gemini-3.7-flash': ['low', 'medium', 'high'],
+        'gemini-3.1-pro-preview': ['low', 'medium', 'high']
+    };
+
+    function normalizeThinkLevelForModel(model, level) {
+        const allowed = THINK_LEVELS_BY_MODEL[model] || ['off'];
+        return allowed.includes(level) ? level : allowed[0];
+    }
+
+    function syncThinkOptionsForModel() {
+        const allowed = THINK_LEVELS_BY_MODEL[currentModel] || ['off'];
+        const normalized = normalizeThinkLevelForModel(currentModel, currentThinkLevel);
+
+        if (currentThinkLevel !== normalized) {
+            currentThinkLevel = normalized;
+            localStorage.setItem('virtual_think_level', currentThinkLevel);
+        }
+
+        document.querySelectorAll('.think-option').forEach(opt => {
+            const isAllowed = allowed.includes(opt.dataset.level);
+            opt.style.display = isAllowed ? '' : 'none';
+            opt.setAttribute('aria-hidden', isAllowed ? 'false' : 'true');
+        });
+    }
+
+    function selectModel(element, displayName, modelValue) {
+        document.getElementById('modelDropdown').classList.remove('active');
+        
+        document.querySelectorAll('.model-dropdown-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        element.classList.add('active');
+        
+        document.getElementById('modelDisplayName').textContent = displayName;
+        currentModel = modelValue;
+        localStorage.setItem('virtual_selected_model', currentModel);
+
+        // Immediately constrain the Think selector to this model's supported
+        // levels. Lite becomes Off; 3.7/3.1 expose Low/Medium/High only.
+        syncThinkOptionsForModel();
+        renderThinkUI();
+    }
+
+    document.addEventListener('click', function(e) {
+        const selector = document.getElementById('modelSelector');
+        const dropdown = document.getElementById('modelDropdown');
+        if (selector && !selector.contains(e.target)) {
+            dropdown.classList.remove('active');
         }
     });
 
-    return {
-        reason: reasonText,
-        candidatesFound: candidates.length,
-        candidates: candidates.slice(0, 5),
-        hint: 'old Ø±Ø§ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø§Ø² ÛŒÚ©ÛŒ Ø§Ø² Ø§ÛŒÙ† context Ù‡Ø§ Ú©Ù¾ÛŒ Ú©Ù† (Ú©Ø§Ø±Ø§Ú©ØªØ± Ø¨Ù‡ Ú©Ø§Ø±Ø§Ú©ØªØ±ØŒ Ø´Ø§Ù…Ù„ ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ) ØªØ§ ÛŒÚ©ØªØ§ Ø´ÙˆØ¯ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ apply_patch Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.'
-    };
-}
+    // =====================================================
+    // حالت تفکر (Think mode) - به‌صورت پیش‌فرض خاموش برای همه‌ی مدل‌ها.
+    // انتخاب کاربر (خاموش/کم/متوسط/زیاد) در localStorage ذخیره می‌شود و
+    // به‌عنوان thinkLevel همراه هر درخواست به بک‌اند فرستاده می‌شود (فقط
+    // وقتی چیزی غیر از 'off' باشد - نگاه کن به fetch('/api/chat') و
+    // THINK_LEVEL_MAP در chat.js).
+    // =====================================================
+    let currentThinkLevel = localStorage.getItem('virtual_think_level') || 'off';
+    const THINK_LEVEL_LABELS = { off: 'خاموش', low: 'کم', medium: 'متوسط', high: 'زیاد' };
 
-function analyzeFileStructure(content, fileName = 'file', query = '') {
-    const text = String(content || '');
-    const lowerName = String(fileName || '').toLowerCase();
-    const language = /\.(html?|htm)$/.test(lowerName) ? 'html'
-        : /\.(css|scss|less)$/.test(lowerName) ? 'css'
-        : /\.(py)$/.test(lowerName) ? 'python'
-        : /\.(json)$/.test(lowerName) ? 'json'
-        : /\.(ts|tsx)$/.test(lowerName) ? 'typescript'
-        : /\.(jsx)$/.test(lowerName) ? 'javascript-react'
-        : 'javascript';
-
-    const lines = text.split(/\r?\n/);
-    const out = {
-        file: fileName,
-        language,
-        lineCount: lines.length,
-        charCount: text.length,
-        sections: [],
-        functions: [],
-        classes: [],
-        variables: [],
-        imports: [],
-        eventHandlers: [],
-        htmlElements: [],
-        cssRules: [],
-        queryMatches: []
-    };
-
-    const add = (arr, item) => { if (item && arr.length < 120) arr.push(item); };
-    const lineOf = index => text.slice(0, index).split(/\r?\n/).length;
-
-    // Section comments are especially valuable in this project because the
-    // existing code uses named section separators extensively.
-    const sectionRe = /(?:\/\/|\/\*+|<!--)\s*={2,}\s*([^\n=*-]+?)\s*={2,}|(?:\/\/|\/\*+|<!--)\s*([^\n]+?)\s*(?:\*\/|-->)?$/gm;
-    let m;
-    while ((m = sectionRe.exec(text)) && out.sections.length < 80) {
-        const title = String(m[1] || m[2] || '').trim();
-        if (title && !/^[-=]+$/.test(title) && title.length < 120) {
-            add(out.sections, { name: title, line: lineOf(m.index) });
-        }
-    }
-
-    if (language === 'html') {
-        const tagRe = /<([a-z][\w:-]*)(?:\s+[^>]*?)?>/gi;
-        const seen = new Map();
-        while ((m = tagRe.exec(text)) && out.htmlElements.length < 120) {
-            const tag = m[1].toLowerCase();
-            const key = tag;
-            const count = (seen.get(key) || 0) + 1;
-            seen.set(key, count);
-            if (['html','head','body','script','style','main','section','header','footer','nav','form','button','input','textarea','div'].includes(tag) || count <= 2) {
-                const attrs = m[0];
-                const id = (attrs.match(/\bid\s*=\s*["']([^"']+)["']/i) || [])[1] || null;
-                const cls = (attrs.match(/\bclass\s*=\s*["']([^"']+)["']/i) || [])[1] || null;
-                add(out.htmlElements, { tag, id, className: cls, line: lineOf(m.index) });
-            }
-        }
-        const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
-        while ((m = scriptRe.exec(text)) && out.sections.length < 120) {
-            add(out.sections, { name: 'script', line: lineOf(m.index) });
-        }
-    } else if (language === 'css') {
-        const cssRe = /([^{}]+)\{/g;
-        while ((m = cssRe.exec(text)) && out.cssRules.length < 120) {
-            const selector = m[1].trim().replace(/\s+/g, ' ');
-            if (selector && selector.length < 180) add(out.cssRules, { selector, line: lineOf(m.index) });
-        }
-    } else if (language === 'python') {
-        const importRe = /^\s*(?:from\s+([^\s]+)\s+)?import\s+(.+)$/gm;
-        while ((m = importRe.exec(text)) && out.imports.length < 100) add(out.imports, { name: (m[1] ? `from ${m[1]} ` : '') + m[2].trim(), line: lineOf(m.index) });
-        const fnRe = /^\s*(?:async\s+)?def\s+([A-Za-z_$][\w$]*)\s*\(/gm;
-        while ((m = fnRe.exec(text)) && out.functions.length < 120) add(out.functions, { name: m[1], line: lineOf(m.index) });
-        const clsRe = /^\s*class\s+([A-Za-z_$][\w$]*)/gm;
-        while ((m = clsRe.exec(text)) && out.classes.length < 80) add(out.classes, { name: m[1], line: lineOf(m.index) });
-    } else {
-        const importRe = /(?:^|\n)\s*(?:import\s+[^;\n]+|const\s+[^;=]+\s*=\s*require\s*\([^\n]+\)|import\s*\([^\n]+\))/g;
-        while ((m = importRe.exec(text)) && out.imports.length < 100) add(out.imports, { text: m[0].trim(), line: lineOf(m.index) });
-        const fnRe = /(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g;
-        while ((m = fnRe.exec(text)) && out.functions.length < 160) add(out.functions, { name: m[1] || m[2], line: lineOf(m.index) });
-        const clsRe = /\bclass\s+([A-Za-z_$][\w$]*)/g;
-        while ((m = clsRe.exec(text)) && out.classes.length < 80) add(out.classes, { name: m[1], line: lineOf(m.index) });
-        const varRe = /(?:^|\n)\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g;
-        while ((m = varRe.exec(text)) && out.variables.length < 160) add(out.variables, { name: m[1], line: lineOf(m.index) });
-        const eventRe = /(?:addEventListener\s*\(\s*["']([^"']+)["']|\.on(?:click|change|submit|input|load)\s*=)/g;
-        while ((m = eventRe.exec(text)) && out.eventHandlers.length < 100) add(out.eventHandlers, { event: m[1] || 'property-handler', line: lineOf(m.index) });
-    }
-
-    if (query) {
-        const q = String(query).trim();
-        if (q) {
-            const terms = q.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
-            lines.forEach((line, i) => {
-                const ll = line.toLowerCase();
-                if (terms.some(t => ll.includes(t)) && out.queryMatches.length < 40) {
-                    add(out.queryMatches, { line: i + 1, text: line.trim().slice(0, 220) });
-                }
-            });
-        }
-    }
-
-    return out;
-}
-
-function formatFileStructureForModel(analysis) {
-    const pick = (arr, key = 'name') => arr.slice(0, 60).map(x => key === 'text' ? x.text : `${x[key] || ''}${x.line ? ` (Ø®Ø· ${x.line})` : ''}`).filter(Boolean);
-    return {
-        file: analysis.file,
-        language: analysis.language,
-        lines: analysis.lineCount,
-        sections: pick(analysis.sections),
-        functions: pick(analysis.functions),
-        classes: pick(analysis.classes),
-        variables: pick(analysis.variables),
-        imports: pick(analysis.imports, analysis.imports.some(x => x.name) ? 'name' : 'text'),
-        eventHandlers: analysis.eventHandlers.slice(0, 60),
-        htmlElements: analysis.htmlElements.slice(0, 80),
-        cssRules: pick(analysis.cssRules, 'selector'),
-        queryMatches: analysis.queryMatches.slice(0, 40)
-    };
-}
-
-
-const GEMINI_TOOLS = [
-    {
-        function_declarations: [
-            {
-                name: 'web_search',
-                description:
-                    'Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ø²Ù†Ø¯Ù‡ Ø¯Ø± ÙˆØ¨ Ø¨Ø±Ø§ÛŒ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø¨Ù‡â€ŒØ±ÙˆØ²ØŒ Ù‚ÛŒÙ…ØªØŒ Ø§Ø®Ø¨Ø§Ø±ØŒ Ø±ÙˆÛŒØ¯Ø§Ø¯Ù‡Ø§ ÛŒØ§ Ù‡Ø± ' +
-                    'Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¨Ø¹Ø¯ Ø§Ø² Ø²Ù…Ø§Ù† Ø¢Ù…ÙˆØ²Ø´ Ù…Ø¯Ù„ ØªØºÛŒÛŒØ± Ú©Ø±Ø¯Ù‡ Ø¨Ø§Ø´Ø¯ ÛŒØ§ Ù…Ø¯Ù„ Ø¨Ù‡ Ø¢Ù† Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³Øª. ' +
-                    'Ø¨Ø±Ø§ÛŒ Ø§Ú©Ø«Ø± Ø³Ø¤Ø§Ù„â€ŒÙ‡Ø§ (Ø­ØªÛŒ Ø³Ø¤Ø§Ù„â€ŒÙ‡Ø§ÛŒ Ø³Ø§Ø¯Ù‡â€ŒÛŒ Â«Ù‚ÛŒÙ…Øª Ø§Ù„Ø§Ù† Ú†Ù†Ø¯Ù‡Â») ÛŒÚ©â€ŒØ¨Ø§Ø± ØµØ¯Ø§ Ø²Ø¯Ù† Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± ' +
-                    'Ø¨Ø§ ÛŒÚ© query Ø®ÙˆØ¨ Ú©Ø§ÙÛŒ Ø§Ø³Øª Ùˆ Ø¨Ø§ÛŒØ¯ Ø¨Ø§ Ù‡Ù…Ø§Ù† Ù†ØªØ§ÛŒØ¬ Ø¬ÙˆØ§Ø¨ Ù†Ù‡Ø§ÛŒÛŒ Ø¯Ø§Ø¯Ù‡ Ø´ÙˆØ¯. ØµØ¯Ø§ Ø²Ø¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡ ' +
-                    'ÙÙ‚Ø· Ø¯Ø± Ù…ÙˆØ§Ø±Ø¯ Ù†Ø§Ø¯Ø± Ùˆ ÙˆØ§Ù‚Ø¹ÛŒ Ù…Ø¬Ø§Ø² Ø§Ø³Øª: ÙˆÙ‚ØªÛŒ Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø¬Ø³ØªØ¬ÙˆÛŒ Ø§ÙˆÙ„ Ú©Ø§Ù…Ù„Ø§Ù‹ Ø¨ÛŒâ€ŒØ±Ø¨Ø·/Ù†Ø§Ù‚Øµ Ø¨ÙˆØ¯ØŒ ' +
-                    'ÛŒØ§ Ø³Ø¤Ø§Ù„ Ú†Ù†Ø¯ Ø¨Ø®Ø´ Ú©Ø§Ù…Ù„Ø§Ù‹ Ø¬Ø¯Ø§ Ø§Ø² Ù‡Ù… Ø¯Ø§Ø±Ø¯ Ú©Ù‡ Ù‡Ø±Ú©Ø¯Ø§Ù… Ù…ÙˆØ¶ÙˆØ¹ Ù…ØªÙØ§ÙˆØªÛŒ Ø§Ø³Øª. Ù‡Ø±Ú¯Ø² Ø¨Ø±Ø§ÛŒ Â«Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± ' +
-                    'Ú©Ø±Ø¯Ù†Â» ÛŒÚ© Ø¬Ø³ØªØ¬ÙˆÛŒ Ù‚Ø¨Ù„Ø§Ù‹ Ù…ÙˆÙÙ‚ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø³Ø±Ú† Ù†Ø²Ù†.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        query: {
-                            type: 'string',
-                            description: 'Ø¹Ø¨Ø§Ø±Øª Ø¬Ø³ØªØ¬Ùˆ - Ú©ÙˆØªØ§Ù‡ØŒ Ø¯Ù‚ÛŒÙ‚ Ùˆ Ù…Ø±ØªØ¨Ø· Ø¨Ø§ Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù„Ø§Ø²Ù… Ø¯Ø§Ø±ÛŒ Ø¨Ø¯Ø§Ù†ÛŒ.'
-                        },
-                        reason: {
-                            type: 'string',
-                            description: 'ÛŒÚ© Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ú©ÙˆØªØ§Ù‡ ÙØ§Ø±Ø³ÛŒ Ú©Ù‡ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù†Ø´Ø§Ù† Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ ØªÙˆØ¶ÛŒØ­ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ Ú†Ø±Ø§ Ø¯Ø§Ø±ÛŒ Ø§ÛŒÙ† Ø±Ø§ Ø³Ø±Ú† Ù…ÛŒâ€ŒÚ©Ù†ÛŒ (Ù…Ø«Ù„Ø§Ù‹ "Ø¯Ø§Ø±Ù… Ø¢Ø®Ø±ÛŒÙ† Ù‚ÛŒÙ…Øª Ø·Ù„Ø§ Ø±Ùˆ Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ù…").'
-                        }
-                    },
-                    required: ['query', 'reason']
-                }
-            },
-            {
-                // FEATURE (persistent file memory): the client keeps a
-                // permanent per-chat archive of every text/code file ever
-                // sent (in IndexedDB, well past the single "current message"
-                // lifetime of codeFilesMemory). The archive's file NAMES are
-                // listed for the model every turn (cheap - just strings),
-                // but the actual CONTENT only gets pulled into context if
-                // the model calls this tool, i.e. only when the user is
-                // actually referring back to that file's content, not just
-                // mentioning its name in passing. This keeps large/long
-                // chats cheap by default while still letting the model
-                // "remember" old files when it genuinely needs them.
-                name: 'get_archived_file',
-                description:
-                    'Ù…Ø­ØªÙˆØ§ÛŒ ÛŒÚ©ÛŒ Ø§Ø² ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù‚Ø¨Ù„Ø§Ù‹ Ø§Ø±Ø³Ø§Ù„â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ø±Ø§ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ ' +
-                    'ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ ØµØ¯Ø§ Ø¨Ø²Ù† Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ù…Ø­ØªÙˆØ§ÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ù‚Ø¨Ù„ÛŒ Ù†ÛŒØ§Ø² Ø¯Ø§Ø±Ø¯ ÛŒØ§ Ø¨Ù‡ Ø¢Ù† Ø§Ø±Ø¬Ø§Ø¹ ' +
-                    'Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ (Ù…Ø«Ù„Ø§Ù‹ Â«Ù‡Ù…ÙˆÙ† ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ ÙØ±Ø³ØªØ§Ø¯Ù… Ø±Ùˆ ÙˆÛŒØ±Ø§ÛŒØ´ Ú©Ù†Â» ÛŒØ§ Â«ØªÙˆÛŒ Ø§ÙˆÙ† ÙØ§ÛŒÙ„ Ø¯Ù†Ø¨Ø§Ù„ X ' +
-                    'Ø¨Ú¯Ø±Ø¯Â») - Ù†Ù‡ ØµØ±ÙØ§Ù‹ ÙˆÙ‚ØªÛŒ Ø§Ø³Ù… ÙØ§ÛŒÙ„ ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± Ú¯ÙØªÚ¯Ùˆ Ø°Ú©Ø± Ø´Ø¯Ù‡. Ø§Ø³Ù… ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± Ø¢Ø±Ø´ÛŒÙˆ ' +
-                    'Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ø¯Ø± Ù¾Ø±Ø§Ù…Ù¾Øª Ø³ÛŒØ³ØªÙ… Ø¨Ù‡ ØªÙˆ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡ Ø§Ø³Øª. Ø§Ú¯Ø± Ù‡Ø¯Ù Ú©Ø§Ø±Ø¨Ø± ÙˆÛŒØ±Ø§ÛŒØ´ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø§Ø³ØªØŒ ' +
-                    'Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø®ÙˆØ¯Ø´ ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ¹Ø§Ù„ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ùˆ Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ø¢Ù† Ø±Ø§ Ø¯Ø± Ù†ØªÛŒØ¬Ù‡ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ - ' +
-                    'Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ù† Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø·Ø¨Ù‚ Ù‡Ù…Ø§Ù† Ù‚ÙˆØ§Ù†ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ (apply_edit Ø¨Ø§ search/replace) Ú©Ù‡ Ø¨Ø±Ø§ÛŒ ' +
-                    'ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ØªØ§Ø²Ù‡â€ŒØ¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ Ø¯Ø§Ø±ÛŒ Ø¹Ù…Ù„ Ú©Ù†.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        name: {
-                            type: 'string',
-                            description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ Ù…Ø­ØªÙˆØ§ÛŒØ´ Ù„Ø§Ø²Ù… Ø§Ø³Øª (Ø¨Ø§ÛŒØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø¨Ø§ ÛŒÚ©ÛŒ Ø§Ø² Ù†Ø§Ù…â€ŒÙ‡Ø§ÛŒ Ø¢Ø±Ø´ÛŒÙˆ Ù…Ø·Ø§Ø¨Ù‚Øª Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯).'
-                        }
-                    },
-                    required: ['name']
-                }
-            },
-            {
-                name: 'ask_user',
-                description:
-                    'ÙˆÙ‚ØªÛŒ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ú©Ø§Ø±Ø¨Ø± Ø´Ø§Ù…Ù„ ÛŒÚ© ØªØºÛŒÛŒØ± Ø§Ø³Ø§Ø³ÛŒ/ØºÛŒØ±Ù‚Ø§Ø¨Ù„â€ŒØ¨Ø±Ú¯Ø´Øª Ø§Ø³Øª (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ø§Ù…Ù„ ' +
-                    'ÛŒÚ© ÙØ§ÛŒÙ„ØŒ Ø­Ø°Ù Ø¨Ø®Ø´ Ø¨Ø²Ø±Ú¯ÛŒ Ø§Ø² Ú©Ø¯ ÛŒØ§ Ø¯Ø§Ø¯Ù‡ØŒ ÛŒØ§ ØªØµÙ…ÛŒÙ…ÛŒ Ú©Ù‡ Ú†Ù†Ø¯ Ø±Ø§Ù‡â€ŒØ­Ù„ Ù…Ø¹Ù‚ÙˆÙ„ Ùˆ Ù…ØªÙØ§ÙˆØª Ø¯Ø§Ø±Ø¯)ØŒ ' +
-                    'Ù‚Ø¨Ù„ Ø§Ø² Ø§Ù†Ø¬Ø§Ù… Ú©Ø§Ø± Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù† Ùˆ Ø§Ø² Ú©Ø§Ø±Ø¨Ø± ØªØ£ÛŒÛŒØ¯ ÛŒØ§ Ø§Ù†ØªØ®Ø§Ø¨ Ø¨Ø®ÙˆØ§Ù‡. Ø¨Ø±Ø§ÛŒ Ø³Ø¤Ø§Ù„Ø§Øª ' +
-                    'Ø³Ø§Ø¯Ù‡ ÛŒØ§ Ú©Ø§Ø±Ù‡Ø§ÛŒ Ú©Ù…â€ŒØ±ÛŒØ³Ú© Ø§Ø² Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù† - ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ØªØµÙ…ÛŒÙ…â€ŒÙ‡Ø§ÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù…Ù‡Ù….',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        question: {
-                            type: 'string',
-                            description: 'Ø³Ø¤Ø§Ù„ Ø¯Ù‚ÛŒÙ‚ Ùˆ Ú©ÙˆØªØ§Ù‡ Ú©Ù‡ Ø§Ø² Ú©Ø§Ø±Ø¨Ø± Ø¨Ø§ÛŒØ¯ Ù¾Ø±Ø³ÛŒØ¯Ù‡ Ø´ÙˆØ¯.'
-                        }
-                    },
-                    required: ['question']
-                }
-            },
-            {
-                // Ø§Ú¯Ø± ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø¨Ø§Ø´Ø¯ Ùˆ Ù…Ø¯Ù„ Ù‚Ø¨Ù„ Ø§Ø² Ù†ÙˆØ´ØªÙ† search Ù†ÛŒØ§Ø² Ø¨Ù‡
-                // Ø¯ÛŒØ¯Ù† Ø¯Ù‚ÛŒÙ‚ ÛŒÚ© Ø¨Ø®Ø´ Ø®Ø§Øµ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯ (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø±Ø§ÛŒ Ú©Ù¾ÛŒ Ø¯Ù‚ÛŒÙ‚
-                // ØªÙˆØ±ÙØªÚ¯ÛŒ/ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ)ØŒ Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± ÛŒÚ© Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø· Ù…Ø´Ø®Øµ Ø±Ø§
-                // Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. Ø§Ú©Ø«Ø± ÙˆÛŒØ±Ø§ÛŒØ´â€ŒÙ‡Ø§ Ø¨Ù‡ Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ù†ÛŒØ§Ø² Ù†Ø¯Ø§Ø±Ù†Ø¯ Ú†ÙˆÙ†
-                // Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ùˆ ØªØ­Ù„ÛŒÙ„ Ø³Ø§Ø®ØªØ§Ø± Ø¢Ù† Ø§Ø² Ù‚Ø¨Ù„ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù…Ø¯Ù„ Ø§Ø³Øª.
-                name: 'read_file_section',
-                description:
-                    'Ø¨Ø®Ø´ÛŒ Ø§Ø² Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ø±Ø§ Ø¨ÛŒÙ† Ø¯Ùˆ Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ù…Ø´Ø®Øµ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ Ø§Ø² Ø§ÛŒÙ† Ø§Ø³ØªÙØ§Ø¯Ù‡ ' +
-                    'Ú©Ù† Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ù†ÙˆØ´ØªÙ† ÛŒÚ© search Ø¯Ù‚ÛŒÙ‚ (Ú©Ø§Ø±Ø§Ú©ØªØ±â€ŒØ¨Ù‡â€ŒÚ©Ø§Ø±Ø§Ú©ØªØ±) Ù†ÛŒØ§Ø² Ø¨Ù‡ Ø¯ÛŒØ¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡â€ŒÛŒ Ù…ØªÙ† ' +
-                    'ÙˆØ§Ù‚Ø¹ÛŒ ÛŒÚ© Ø¨Ø®Ø´ Ø®Ø§Øµ Ø¯Ø§Ø±ÛŒ - Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø±Ø§ÛŒ Ø§Ø·Ù…ÛŒÙ†Ø§Ù† Ø§Ø² ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ/ØªÙˆØ±ÙØªÚ¯ÛŒ Ø¯Ù‚ÛŒÙ‚. Ø§Ú©Ø«Ø± ' +
-                    'ÙˆÛŒØ±Ø§ÛŒØ´â€ŒÙ‡Ø§ Ø¨Ù‡ Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ù†ÛŒØ§Ø² Ù†Ø¯Ø§Ø±Ù†Ø¯ Ú†ÙˆÙ† Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ø§Ø² Ù‚Ø¨Ù„ Ø¯Ø± Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ÛŒÙ‡ Ø¨Ù‡ ØªÙˆ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        file: { type: 'string', description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ Ù‡Ø¯Ù.' },
-                        startLine: { type: 'number', description: 'Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ø´Ø±ÙˆØ¹ (Ø§Ø² Û±).' },
-                        endLine: { type: 'number', description: 'Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ù¾Ø§ÛŒØ§Ù† (Ø´Ø§Ù…Ù„ Ø®ÙˆØ¯Ø´).' }
-                    },
-                    required: ['file', 'startLine', 'endLine']
-                }
-            },
-            {
-                // Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ú©Ø§Ù…Ù„ write_block/apply_patch Ù‚Ø¯ÛŒÙ…ÛŒ: Ù…Ø¯Ù„ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹
-                // ÛŒÚ© Ù‚Ø·Ø¹Ù‡â€ŒÛŒ Ø¯Ù‚ÛŒÙ‚ Ù…ØªÙ† Ù…ÙˆØ¬ÙˆØ¯ (search) Ùˆ Ù…ØªÙ† Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† (replace)
-                // Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ SEARCH/REPLACE Ø¯Ø± Aider. Ù…ÙˆØªÙˆØ± Û´ Ù„Ø§ÛŒÙ‡
-                // fallback (ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‚ÛŒÙ‚ â†’ whitespace-flexible â†’ fuzzy â†’ Ú¯Ø²Ø§Ø±Ø´
-                // Ø®Ø·Ø§ÛŒ Ø¯Ù‚ÛŒÙ‚) Ø±Ø§ Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ù‚Ø¨Ù„ Ø§Ø² Ù¾Ø°ÛŒØ±ÙØªÙ†ØŒ ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„
-                // (Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ±) Ø§Ø² validatePatchedContent Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-                name: 'apply_edit',
-                description:
-                    'ÛŒÚ© Ù‚Ø·Ø¹Ù‡â€ŒÛŒ Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± ÙØ§ÛŒÙ„ (search) Ø±Ø§ Ø¨Ø§ Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯ (replace) Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒÚ©Ù†Ø¯. ' +
-                    'search Ø¨Ø§ÛŒØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù‡Ù…Ø§Ù† Ù…ØªÙ†ÛŒ Ø¨Ø§Ø´Ø¯ Ú©Ù‡ Ø§Ù„Ø§Ù† Ø¯Ø± ÙØ§ÛŒÙ„ Ù‡Ø³Øª (Ø§Ø² Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ú©Ù‡ Ø¯Ø± ' +
-                    'Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ÛŒÙ‡ Ø¯Ø§Ø±ÛŒ Ú©Ù¾ÛŒ Ú©Ù†) - Ø´Ø§Ù…Ù„ Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù ØªØºÛŒÛŒØ± Ø¨Ø±Ø§ÛŒ ÛŒÚ©ØªØ§ Ø¨ÙˆØ¯Ù†ØŒ Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ© Ø®Ø· ' +
-                    'Ú©ÙˆØªØ§Ù‡ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ú†Ù†Ø¯Ø¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯. replace Ø¨Ø§ÛŒØ¯ Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ Ù‡Ù…Ø§Ù† Ø¨Ø®Ø´ ' +
-                    'Ø¨Ø§Ø´Ø¯ (Ø®Ø·ÙˆØ·ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ø¨Ù…Ø§Ù†Ù†Ø¯ Ø±Ø§ Ù‡Ù… Ø§Ú¯Ø± Ø¯Ø§Ø®Ù„ Ø¨Ø§Ø²Ù‡â€ŒÛŒ search Ù‡Ø³ØªÙ†Ø¯ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¯Ø± replace ' +
-                    'Ø¨Ù†ÙˆÛŒØ³). Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø®ÙˆØ¯Ø´ Ú©Ù…ÛŒ Ø§Ù†Ø¹Ø·Ø§Ù Ø¯Ø± ÙØ§ØµÙ„Ù‡â€ŒÚ¯Ø°Ø§Ø±ÛŒ/ØªÙˆØ±ÙØªÚ¯ÛŒ Ø¯Ø§Ø±Ø¯ Ùˆ Ø§Ú¯Ø± search Ø¯Ù‚ÛŒÙ‚ ' +
-                    'Ù¾ÛŒØ¯Ø§ Ù†Ø´ÙˆØ¯ Ú†Ù†Ø¯ Ù„Ø§ÛŒÙ‡ ØªØ·Ø¨ÛŒÙ‚ Ù†Ø±Ù…â€ŒØªØ± Ø±Ø§ Ù‡Ù… Ø§Ù…ØªØ­Ø§Ù† Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ø§Ù…Ø§ Ø§Ú¯Ø± Ø¨Ø§Ø² Ù‡Ù… Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯ ÛŒØ§ ' +
-                    'Ù…Ø¨Ù‡Ù… Ø¨ÙˆØ¯ (Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´Ø¯)ØŒ ÛŒÚ© Ú¯Ø²Ø§Ø±Ø´ Ø¯Ù‚ÛŒÙ‚ Ø¨Ø§ Ù†Ø²Ø¯ÛŒÚ©â€ŒØªØ±ÛŒÙ† context Ù‡Ø§ÛŒ ' +
-                    'ÙˆØ§Ù‚Ø¹ÛŒ ÙØ§ÛŒÙ„ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ - search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø§Ø² Ù‡Ù…Ø§Ù† context Ú©Ù¾ÛŒ Ú©Ù† Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†. ' +
-                    'Ø¨Ø±Ø§ÛŒ Ø­Ø°Ù ÛŒÚ© Ø¨Ø®Ø´ØŒ replace Ø±Ø§ Ø±Ø´ØªÙ‡â€ŒÛŒ Ø®Ø§Ù„ÛŒ Ø¨Ø¯Ù‡. Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø®ÙˆØ¯Ø´ Ø¨Ø¹Ø¯ Ø§Ø² Ù†ÙˆØ´ØªÙ†ØŒ ÙØ§ÛŒÙ„ ' +
-                    'Ú©Ø§Ù…Ù„ Ø±Ø§ Ø§Ø¹ØªØ¨Ø§Ø±Ø³Ù†Ø¬ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ùˆ Ù†ØªÛŒØ¬Ù‡ Ø±Ø§ Ø¯Ø± ÙÛŒÙ„Ø¯ valid Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯ - Ø§Ú¯Ø± Ø§ÛŒÙ† Ø¢Ø®Ø±ÛŒÙ† ' +
-                    'ØªØºÛŒÛŒØ±ÛŒ Ø¨ÙˆØ¯ Ú©Ù‡ Ù†ÛŒØ§Ø² Ø¯Ø§Ø´ØªÛŒ Ùˆ valid:true Ø¨Ø±Ú¯Ø´ØªØŒ Ø¯ÛŒÚ¯Ø± Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ verify_file Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ ' +
-                    'Ù†ÛŒØ³Øª Ùˆ Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ø¯Ù‡ÛŒ.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        file: { type: 'string', description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ Ù‡Ø¯Ù.' },
-                        search: { type: 'string', description: 'Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± ÙØ§ÛŒÙ„ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ø´ÙˆØ¯ (Ú†Ù†Ø¯ Ø®Ø· Ø¨Ø±Ø§ÛŒ ÛŒÚ©ØªØ§ Ø¨ÙˆØ¯Ù†).' },
-                        replace: { type: 'string', description: 'Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† search Ø´ÙˆØ¯ (Ø¨Ø±Ø§ÛŒ Ø­Ø°ÙØŒ Ø±Ø´ØªÙ‡â€ŒÛŒ Ø®Ø§Ù„ÛŒ).' },
-                        occurrence: { type: 'number', description: 'Ø§Ø®ØªÛŒØ§Ø±ÛŒ - Ø§Ú¯Ø± search Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ùˆ Ø¹Ù…Ø¯Ø§Ù‹ Ù‡Ù…Ù‡ ÛŒÚ©Ø³Ø§Ù†â€ŒØ§Ù†Ø¯ØŒ Ø´Ù…Ø§Ø±Ù‡â€ŒÛŒ Ù†Ù…ÙˆÙ†Ù‡â€ŒÛŒ Ù…ÙˆØ±Ø¯Ù†Ø¸Ø± (Ø§Ø² Û± Ø´Ø±ÙˆØ¹) Ø±Ø§ Ø¨Ø¯Ù‡.' }
-                    },
-                    required: ['file', 'search', 'replace']
-                }
-            },
-            {
-                // Ø¨Ø±Ø±Ø³ÛŒ Ù†Ù‡Ø§ÛŒÛŒ Ø§Ø¬Ø¨Ø§Ø±ÛŒ: ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ (Ø¨Ø§ ØªÙ…Ø§Ù… Ø¨Ù„ÙˆÚ©â€ŒÙ‡Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡)
-                // Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ Ùˆ Ø§Ø² Ù‡Ù…Ø§Ù† Ú†Ú© Ø³Ø§Ø®ØªØ§Ø±ÛŒ validatePatchedContent
-                // (Ø¨Ø§Ù„Ø§Ù†Ø³ ØªÚ¯/Ø¨Ø±Ø§Ú©ØªØŒ Ø³Ù†ØªÚ©Ø³ JS) Ø±Ø¯ Ù…ÛŒâ€ŒÚ©Ù†Ø¯. runAgentLoop Ù…Ø¯Ù„ Ø±Ø§
-                // Ù…Ø¬Ø¨ÙˆØ± Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ø§ÛŒÙ† Ø±Ø§ Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ø®Ø±ÛŒÙ† write_block ØµØ¯Ø§ Ø¨Ø²Ù†Ø¯ Ùˆ
-                // Ù¾Ø§Ø³ Ú©Ù†Ø¯ØŒ Ù‚Ø¨Ù„ Ø§Ø² Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¬ÙˆØ§Ø¨ Ù†Ù‡Ø§ÛŒÛŒ (Ø¨Ø¯ÙˆÙ† tool call) Ù¾Ø°ÛŒØ±ÙØªÙ‡
-                // Ø´ÙˆØ¯.
-                name: 'verify_file',
-                description:
-                    'ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø±Ø§ (Ø¨Ø§ ØªÙ…Ø§Ù… ÙˆÛŒØ±Ø§ÛŒØ´â€ŒÙ‡Ø§ÛŒ Ø§Ø¹Ù…Ø§Ù„â€ŒØ´Ø¯Ù‡ ØªØ§ Ø§ÛŒÙ† Ù„Ø­Ø¸Ù‡) Ø§Ø² Ù†Ø¸Ø± Ø³Ø§Ø®ØªØ§Ø±ÛŒ/Ø³Ù†ØªÚ©Ø³ÛŒ ' +
-                    'Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯. Ø¨Ø§ÛŒØ¯ Ø­ØªÙ…Ø§Ù‹ Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ø®Ø±ÛŒÙ† apply_edit Ùˆ Ù‚Ø¨Ù„ Ø§Ø² ØªØ­ÙˆÛŒÙ„ Ù†Ù‡Ø§ÛŒÛŒ ØµØ¯Ø§ Ø²Ø¯Ù‡ ' +
-                    'Ø´ÙˆØ¯. Ø§Ú¯Ø± Ù…Ø´Ú©Ù„ Ù¾ÛŒØ¯Ø§ Ú©Ù†Ø¯ØŒ Ø¨Ø§ apply_edit Ø¯ÛŒÚ¯Ø±ÛŒ Ø¨Ø®Ø´ Ù…Ø´Ú©Ù„â€ŒØ¯Ø§Ø± Ø±Ø§ Ø§ØµÙ„Ø§Ø­ Ú©Ù†ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ' +
-                    'verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        file: {
-                            type: 'string',
-                            description: 'Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ Ù†Ù‡Ø§ÛŒÛŒâ€ŒØ³Ø§Ø²ÛŒ Ùˆ Ø¨Ø±Ø±Ø³ÛŒ Ø´ÙˆØ¯.'
-                        }
-                    },
-                    required: ['file']
-                }
-            }
-        ]
-    }
-];
-
-// FIX (unnecessary web_search slowing down file-edit requests): when the
-// user is editing an attached file, there is normally no reason for the
-// model to reach for web_search - it just adds an extra round-trip (and
-// extra token/quota usage) to a flow that is already the most
-// quota-sensitive one in this file. Exclude web_search specifically (not
-// the file-editing tools) whenever fileEditIntent is true, while still
-// leaving it available for normal chat.
-const GEMINI_TOOLS_NO_SEARCH = [
-    {
-        function_declarations:
-            GEMINI_TOOLS[0].function_declarations.filter(
-                fn => fn.name !== 'web_search'
-            )
-    }
-];
-
-// Human-readable Persian step labels the client shows while a tool runs.
-// Falls back to a generic label if the model didn't provide its own
-// "reason" text (only web_search asks for one).
-function describeToolCall(name, args) {
-    if (name === 'web_search') {
-        return (args && args.reason) || `Ø¯Ø§Ø±Ù… Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Â«${(args && args.query) || ''}Â» ØªÙˆÛŒ ÙˆØ¨ Ø³Ø±Ú† Ù…ÛŒâ€ŒÚ©Ù†Ù…...`;
-    }
-    if (name === 'ask_user') {
-        return 'Ù‚Ø¨Ù„ Ø§Ø² Ø§Ø¯Ø§Ù…Ù‡ØŒ ÛŒÙ‡ Ø³Ø¤Ø§Ù„ Ø¯Ø§Ø±Ù…...';
-    }
-    if (name === 'read_file_section') {
-        return `Ø¯Ø± Ø­Ø§Ù„ Ø®ÙˆØ§Ù†Ø¯Ù† Ø¨Ø®Ø´ÛŒ Ø§Ø² ÙØ§ÛŒÙ„ Â«${(args && args.file) || ''}Â»...`;
-    }
-    if (name === 'apply_edit') {
-        return `Ø¯Ø± Ø­Ø§Ù„ Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ±Ø§Øª Ø±ÙˆÛŒ ÙØ§ÛŒÙ„ Â«${(args && args.file) || ''}Â»...`;
-    }
-    if (name === 'verify_file') {
-        return `Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ Ù†Ù‡Ø§ÛŒÛŒ ÙØ§ÛŒÙ„ Â«${(args && args.file) || ''}Â»...`;
-    }
-    if (name === 'get_archived_file') {
-        return `Ø¯Ø§Ø±Ù… ÙØ§ÛŒÙ„ Â«${(args && args.name) || ''}Â» Ø±Ùˆ Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù…ÛŒâ€ŒØ®ÙˆÙ†Ù…...`;
-    }
-    return 'Ø¯Ø± Ø­Ø§Ù„ Ø§Ù†Ø¬Ø§Ù… ÛŒÚ© Ù…Ø±Ø­Ù„Ù‡...';
-}
-
-function getFileLanguageFromName(fileName) {
-    const lower = String(fileName || '').toLowerCase();
-    if (/\.(html?|htm)$/.test(lower)) return 'html';
-    if (/\.(js|jsx|mjs|cjs)$/.test(lower)) return 'javascript';
-    return 'other';
-}
-
-// FIX (structural safety net for the new line-anchored patch mode): a
-// line-anchored replacement never string-matches, so it CAN produce a
-// broken file (unbalanced tag/brace, cut mid-token) if startLine/endLine
-// were off by a line. This is a fast, dependency-free check - no model
-// round, no API call - run synchronously right after building the
-// candidate content and BEFORE it's accepted, so a broken patch is
-// rejected the same way a failed string-match patch always was.
-function validatePatchedContent(content, fileName) {
-    const language = getFileLanguageFromName(fileName);
-    if (language === 'javascript') {
-        try {
-            new Function(content);
-            return { valid: true };
-        } catch (error) {
-            return { valid: false, reason: `Ø³Ù†ØªÚ©Ø³ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ø¨Ø¹Ø¯ Ø§Ø² Ø§ÛŒÙ† ØªØºÛŒÛŒØ± Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ù…ÛŒâ€ŒØ´ÙˆØ¯: ${error?.message || error}` };
-        }
-    }
-    if (language === 'html') {
-        // FIX (Ø¨Ø§Ú¯ Ø±ÛŒØ´Ù‡â€ŒØ§ÛŒ: </g> Ø¯Ø± ÙˆØ³Ø· ÛŒÚ© regex Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ù…Ø«Ù„
-        // .replace(/</g, '&lt;') Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† ØªÚ¯ HTML Ø¨Ø³ØªÙ‡â€ŒÛŒ Ù†Ø§Ù…ØªÙ†Ø§Ø¸Ø± Ø±Ø¯
-        // Ù…ÛŒâ€ŒØ´Ø¯): ØªÚ¯â€ŒÙ…Ø§Ú†ÛŒÙ†Ú¯ Ø²ÛŒØ± ÛŒÚ© regex Ø³Ø§Ø¯Ù‡ Ø±ÙˆÛŒ Ú©Ù„ Ù…ØªÙ† Ø§Ø³Øª Ùˆ Ù†Ù…ÛŒâ€ŒØ¯Ø§Ù†Ø¯ Ú©Ø¬Ø§
-        // Ø¯Ø§Ø®Ù„ <script>/<style> Ø§Ø³Øª - ÛŒØ¹Ù†ÛŒ Ù‡Ø± Ú©Ø§Ø±Ø§Ú©ØªØ± < Ø¯Ø§Ø®Ù„ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª
-        // (Ú†Ù‡ Ø¯Ø± regex literalØŒ Ú†Ù‡ Ø¯Ø± Ø±Ø´ØªÙ‡ØŒ Ú†Ù‡ Ø¯Ø± Ú©Ø§Ù…Ù†Øª) Ø±Ø§ Ø¨Ø§ ÛŒÚ© ØªÚ¯ HTML
-        // ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ø´ØªØ¨Ø§Ù‡ Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯. Ø±Ø§Ù‡â€ŒØ­Ù„: Ù‚Ø¨Ù„ Ø§Ø² ØªÚ¯â€ŒÙ…Ø§Ú†ÛŒÙ†Ú¯ØŒ Ù…Ø­ØªÙˆØ§ÛŒ Ø¯Ø§Ø®Ù„ Ù‡Ø±
-        // <script>...</script> Ùˆ <style>...</style> (Ø®ÙˆØ¯Ù ØªÚ¯ Ø¨Ø§Ø²/Ø¨Ø³ØªÙ‡ Ø­ÙØ¸
-        // Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ ÙÙ‚Ø· Ù…Ø­ØªÙˆØ§ÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø®Ù†Ø«ÛŒ/Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒØ´ÙˆØ¯) Ø¨Ø§ ÙØ§ØµÙ„Ù‡â€ŒÛŒ Ù‡Ù…â€ŒØ·ÙˆÙ„
-        // (Ø¨Ø±Ø§ÛŒ Ø­ÙØ¸ Ø´Ù…Ø§Ø±Ù‡ Ø®Ø· Ø¯Ø± Ù¾ÛŒØ§Ù… Ø®Ø·Ø§) Ø®Ù†Ø«ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ùˆ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ø¯Ø§Ø®Ù„ Ù‡Ø±
-        // <script> Ø¬Ø¯Ø§ Ùˆ Ù…Ø³ØªÙ‚Ù„ Ø¨Ø§ validatePatchedContent Ù†ÙˆØ¹ javascript
-        // (new Function) Ø¨Ø±Ø±Ø³ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯ - Ù†Ù‡ Ø¨Ø§ Ù¾Ø§Ø±Ø³Ø± ØªÚ¯ HTML.
-        let scriptJsErrors = [];
-        const neutralizedContent = content.replace(
-            /<(script)\b([^>]*)>([\s\S]*?)<\/script>/gi,
-            (full, tagName, attrs, inner) => {
-                const isExternal = /\bsrc\s*=/i.test(attrs);
-                const isNonJs = /\btype\s*=\s*["'](?!(?:text\/javascript|application\/javascript|module)["'])[^"']*["']/i.test(attrs);
-                if (!isExternal && !isNonJs && inner.trim()) {
-                    try {
-                        new Function(inner);
-                    } catch (error) {
-                        scriptJsErrors.push(error?.message || String(error));
-                    }
-                }
-                // Ø®Ù†Ø«ÛŒâ€ŒØ³Ø§Ø²ÛŒ: Ù‡Ø± Ú©Ø§Ø±Ø§Ú©ØªØ± ØºÛŒØ±Ø®Ø·â€ŒØ¬Ø¯ÛŒØ¯ Ø¨Ø§ ÙØ§ØµÙ„Ù‡ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§
-                // Ø·ÙˆÙ„/Ø´Ù…Ø§Ø±Ù‡â€ŒØ®Ø· Ø¹ÙˆØ¶ Ù†Ø´ÙˆØ¯ ÙˆÙ„ÛŒ Ù‡ÛŒÚ† < ÛŒØ§ > Ø¯Ø§Ø®Ù„Ø´ Ø¨Ø±Ø§ÛŒ Ù¾Ø§Ø±Ø³Ø± HTML
-                // Ø¨Ø§Ù‚ÛŒ Ù†Ù…Ø§Ù†Ø¯.
-                const blanked = inner.replace(/[^\n]/g, ' ');
-                return `<${tagName}${attrs}>${blanked}</script>`;
-            }
-        ).replace(
-            /<(style)\b([^>]*)>([\s\S]*?)<\/style>/gi,
-            (full, tagName, attrs, inner) => {
-                const blanked = inner.replace(/[^\n]/g, ' ');
-                return `<${tagName}${attrs}>${blanked}</style>`;
-            }
-        );
-        if (scriptJsErrors.length > 0) {
-            return { valid: false, reason: `Ø³Ù†ØªÚ©Ø³ Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ø¯Ø§Ø®Ù„ ÛŒÚ© ØªÚ¯ <script> Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø§Ø³Øª: ${scriptJsErrors[0]}` };
-        }
-
-        // Balance-check void-aware tag nesting rather than full DOM
-        // parsing - enough to catch the common breakage (an unclosed or
-        // mismatched tag from a bad line range) without a heavy parser.
-        const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-        // FIX (validator too tolerant to actually catch broken HTML):
-        // the previous version popped ANY unclosed tags nested deeper
-        // than the matching one on every closing tag - e.g.
-        // "<div><span></div>" was accepted as valid because the </div>
-        // popped both "span" and "div" off the stack, treating the
-        // missing </span> as if it had implicitly closed. That defeats
-        // the whole point of this check for the block-based editor,
-        // which has no other safety net once apply_patch's string-match
-        // mode is gone. Real HTML DOES have a small set of elements that
-        // are genuinely allowed to auto-close when a sibling/parent
-        // starts or closes (li, td, tr, option, p, ...) - only THOSE are
-        // still popped implicitly. Anything else left on the stack when
-        // its ancestor closes is now a real error, matching what a real
-        // browser's parser would actually do.
-        const implicitlyClosableTags = new Set(['li','td','th','tr','option','p','dt','dd']);
-        const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
-        const stack = [];
-        let m;
-        while ((m = tagRe.exec(neutralizedContent))) {
-            const tag = m[1].toLowerCase();
-            const isClosing = m[0][1] === '/';
-            const isSelfClosing = m[2] === '/' || voidTags.has(tag);
-            if (isClosing) {
-                const idx = stack.lastIndexOf(tag);
-                if (idx === -1) {
-                    return { valid: false, reason: `ØªÚ¯ Ø¨Ø³ØªÙ‡â€ŒÛŒ Â«</${tag}>Â» Ø¨Ø¯ÙˆÙ† ØªÚ¯ Ø¨Ø§Ø² Ù…ØªÙ†Ø§Ø¸Ø± Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨ÙˆØ¯Ù‡.` };
-                }
-                // Anything between idx and the top of the stack must be
-                // implicitly-closable, or this is a real unclosed tag.
-                const skipped = stack.slice(idx + 1);
-                const realGap = skipped.find(t => !implicitlyClosableTags.has(t));
-                if (realGap) {
-                    return { valid: false, reason: `ØªÚ¯ Â«<${realGap}>Â» Ù‚Ø¨Ù„ Ø§Ø² Â«</${tag}>Â» Ø¨Ø³ØªÙ‡ Ù†Ø´Ø¯Ù‡ - Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨ÙˆØ¯Ù‡.` };
-                }
-                stack.length = idx;
-            } else if (!isSelfClosing) {
-                stack.push(tag);
-            }
-        }
-        const remaining = stack.filter(t => !implicitlyClosableTags.has(t));
-        if (remaining.length > 0) {
-            return { valid: false, reason: `ØªÚ¯(Ù‡Ø§ÛŒ) Ø¨Ø§Ø² Ø¨Ø¯ÙˆÙ† Ø¨Ø³ØªÙ‡ Ø´Ø¯Ù† Ø¨Ø§Ù‚ÛŒ Ù…Ø§Ù†Ø¯Ù‡: ${[...new Set(remaining)].slice(0, 5).join(', ')} - Ø§Ø­ØªÙ…Ø§Ù„Ø§Ù‹ Ù…Ø­Ø¯ÙˆØ¯Ù‡â€ŒÛŒ Ø®Ø· Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨ÙˆØ¯Ù‡.` };
-        }
-        return { valid: true };
-    }
-    return { valid: true }; // unknown/other file types: no structural check available, accept as-is
-}
-
-async function executeToolCall(name, args, ctx) {
-    if (name === 'get_archived_file') {
-        const fileName = (args && args.name) || '';
-        const archive = (ctx && Array.isArray(ctx.archivedFiles)) ? ctx.archivedFiles : [];
-        const found = archive.find(f => f && f.name === fileName);
-        if (!found) {
-            return { error: `ÙØ§ÛŒÙ„ÛŒ Ø¨Ø§ Ù†Ø§Ù… Â«${fileName}Â» Ø¯Ø± Ø¢Ø±Ø´ÛŒÙˆ Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
-        }
-
-        // FIX (Ù…Ø¯Ù„ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡â€ŒÛŒ Ø¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ØŒ Ù†Ø³Ø®Ù‡â€ŒÛŒ Ù‚Ø¯ÛŒÙ…ÛŒ Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ Ø±Ø§
-        // ÙˆÛŒØ±Ø§ÛŒØ´ Ù…ÛŒâ€ŒÚ©Ø±Ø¯): ØªØ§ Ù¾ÛŒØ´ Ø§Ø² Ø§ÛŒÙ†ØŒ Ø¬Ù„ÙˆÚ¯ÛŒØ±ÛŒ Ø§Ø² Ø§ÛŒÙ† Ø§Ø´ØªØ¨Ø§Ù‡ ÙÙ‚Ø· ÛŒÚ© Ø¬Ù…Ù„Ù‡
-        // Ø¯Ø± system prompt Ø¨ÙˆØ¯ ("Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÙØ§ÛŒÙ„ÛŒ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ØŒ
-        // get_archived_file Ø±Ø§ ØµØ¯Ø§ Ù†Ø²Ù†") - ÛŒÚ© Ø¯Ø³ØªÙˆØ± ØµØ±ÙØ§Ù‹ Ù…ØªÙ†ÛŒ Ú©Ù‡ Ù…Ø¯Ù„ Ø¨Ù‡
-        // Ø±Ø§Ø­ØªÛŒ Ù†Ø§Ø¯ÛŒØ¯Ù‡ Ù…ÛŒâ€ŒÚ¯Ø±ÙØª (Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù‡Ù…ÛŒÙ† Ø§ØªÙØ§Ù‚ Ø¨Ø±Ø§ÛŒ Ú©Ø§Ø±Ø¨Ø± Ø§ÙØªØ§Ø¯: ÙØ§ÛŒÙ„
-        // ÛµÛ°Û°Û°+ Ø®Ø·ÛŒÙ ØªØ§Ø²Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ Ø¨ÙˆØ¯ØŒ ÙˆÙ„ÛŒ Ù…Ø¯Ù„ Ø±ÙØª Ø³Ø±Ø§Øº get_archived_file
-        // Ùˆ ÛŒÚ© Ù†Ø³Ø®Ù‡â€ŒÛŒ Ù‚Ø¯ÛŒÙ…ÛŒâ€ŒØªØ± Ùˆ Ù‡Ù…â€ŒÙ†Ø§Ù… Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ (Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù‚Ø¨Ù„Ø§Ù‹ Ø¯Ø± Ù‡Ù…ÛŒÙ†
-        // Ú¯ÙØªÚ¯Ùˆ ÙØ±Ø³ØªØ§Ø¯Ù‡ Ø¨ÙˆØ¯) Ø±Ø§ Ù¾ÛŒØ¯Ø§ Ú©Ø±Ø¯ Ùˆ Ø¢Ù† Ø±Ø§ ÙˆÛŒØ±Ø§ÛŒØ´ Ú©Ø±Ø¯ - Ù†ØªÛŒØ¬Ù‡ ÛŒÚ© ÙØ§ÛŒÙ„
-        // Ø§Ø´ØªØ¨Ø§Ù‡ Ø§Ù…Ø§ "Ù…Ø¹ØªØ¨Ø±" Ø¨ÙˆØ¯ Ú©Ù‡ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªØ­ÙˆÛŒÙ„ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯.
-        // Ø§ÛŒÙ†â€ŒØ¬Ø§ ÛŒÚ© Ù‚ÙÙ„ ÙÙ†ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ù…ÛŒâ€ŒÚ¯Ø°Ø§Ø±ÛŒÙ…: Ø§Ú¯Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© ÙØ§ÛŒÙ„
-        // ØªØ§Ø²Ù‡â€ŒÛŒ Ù…ØªÙ†ÛŒ (ctx.textFiles) Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ØŒ ÙØ±Ø§Ø®ÙˆØ§Ù†ÛŒ get_archived_file
-        // Ø±Ø§ Ú©Ù„Ø§Ù‹ Ø±Ø¯ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… Ùˆ Ø¨Ù‡ Ù…Ø¯Ù„ Ù…ÛŒâ€ŒÚ¯ÙˆÛŒÛŒÙ… Ø§Ø² Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ Ø§Ø³ØªÙØ§Ø¯Ù‡
-        // Ú©Ù†Ø¯ - Ù…Ù‡Ù… Ù†ÛŒØ³Øª Ú†Ù‡ Ø§Ø³Ù…ÛŒ Ø®ÙˆØ§Ø³ØªÙ‡ØŒ Ú†ÙˆÙ† Ù‡ÛŒÚ† Ø³Ù†Ø§Ø±ÛŒÙˆÛŒ Ø¯Ø±Ø³ØªÛŒ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯
-        // Ú©Ù‡ Ø¨Ø§ ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ Ø¯Ø± Ø¯Ø³ØªØŒ Ø±ÙØªÙ† Ø³Ø±Ø§Øº Ø¢Ø±Ø´ÛŒÙˆ ØµØ­ÛŒØ­ Ø¨Ø§Ø´Ø¯.
-        const freshTextFiles = (ctx && ctx.originalFreshFileNames instanceof Set) ? [...ctx.originalFreshFileNames] : [];
-        if (freshTextFiles.length > 0) {
-            log.warn('agent.tool.get_archived_file.blocked_fresh_attachment_present', {
-                requestedName: fileName,
-                freshFileNames: freshTextFiles
-            });
-            return {
-                error: `Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø±Ø¯ Ø´Ø¯: Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÙØ§ÛŒÙ„ Â«${freshTextFiles.join('ØŒ ')}Â» Ø±Ø§ ØªØ§Ø²Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ - Ø§ÛŒÙ† Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ÛŒ Ø§Ø³Øª Ú©Ù‡ Ø¨Ø§ÛŒØ¯ ÙˆÛŒØ±Ø§ÛŒØ´ Ø´ÙˆØ¯ØŒ Ù†Ù‡ Â«${fileName}Â» Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ. get_archived_file Ø±Ø§ Ø¯ÛŒÚ¯Ø± ØµØ¯Ø§ Ù†Ø²Ù†Ø› Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ø¨Ø§ apply_edit Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ (Ú©Ù‡ Ø¯Ø± Ø¨Ø®Ø´ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ù…ÙˆØ¬ÙˆØ¯ Ø§Ø³Øª) Ú©Ø§Ø± Ú©Ù†.`
-            };
-        }
-
-        // FIX (archived-file edits silently produced no real edit / no
-        // download card): get_archived_file used to just hand back a
-        // (possibly truncated at 70k chars) text blob for the model to
-        // read and then describe changes to in prose. It was never wired
-        // into the block-map/read_block/write_block/verify_file system,
-        // which only ever looked at `textFiles` (files attached fresh in
-        // THIS message). So a request like "hide the scrollbars in the
-        // file I sent earlier" - with no fresh attachment this turn -
-        // had the model read a truncated archived copy, then just claim
-        // success in text with nothing real to back it up: no write_block
-        // ever ran, editedFiles stayed empty, no card ever reached the
-        // client, even though the user's original file WAS genuinely
-        // valid and the model wasn't lying about intent, just about
-        // outcome.
-        //
-        // Fix: promote the archived file into the SAME live editing
-        // system a freshly-attached file gets. We inject it into
-        // ctx.textFiles (so write_block's `files.find(...)` lookup can
-        // find it, exactly like a fresh attachment) and build/reuse its
-        // FileEditState in ctx.editStates (so apply_edit/
-        // verify_file work on it with full content - not the old 70k-char
-        // truncation, which silently hid anything past that point, e.g.
-        // CSS rules far down a large index.html). One archived file is
-        // promoted per get_archived_file call, so cost only appears when
-        // the model actually asks for it - never for archived files it
-        // doesn't touch.
-        const textFiles = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : null;
-        const editStates = ctx && ctx.editStates;
-        let alreadyPromoted = textFiles && textFiles.some(f => f && f.name === found.name);
-        if (textFiles && editStates && !alreadyPromoted) {
-            const promoted = { name: found.name, content: found.content || '', mode: 'text' };
-            textFiles.push(promoted);
-            if (!editStates.has(promoted.name)) {
-                editStates.set(promoted.name, createFileEditState(promoted));
-            }
-            alreadyPromoted = true;
-        }
-
-        log.info('agent.tool.get_archived_file', {
-            name: fileName,
-            contentLen: (found.content || '').length,
-            promotedToBlockEditing: alreadyPromoted
+    function renderThinkUI() {
+        const btn = document.getElementById('thinkToggleBtn');
+        const label = document.getElementById('thinkBtnLabel');
+        if (!btn || !label) return;
+        const isOn = currentThinkLevel !== 'off';
+        btn.classList.toggle('think-on', isOn);
+        label.textContent = isOn ? `تفکر: ${THINK_LEVEL_LABELS[currentThinkLevel]}` : 'تفکر';
+        document.querySelectorAll('.think-option').forEach(opt => {
+            opt.classList.toggle('active', opt.dataset.level === currentThinkLevel);
         });
+    }
 
-        if (alreadyPromoted && editStates) {
-            const state = editStates.get(found.name);
-            return {
-                name: found.name,
-                promotedToBlockEditing: true,
-                content: state ? state.content : (found.content || ''),
-                note: 'Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¢Ø±Ø´ÛŒÙˆØ´Ø¯Ù‡ Ø­Ø§Ù„Ø§ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ¹Ø§Ù„ Ø´Ø¯Ù‡ - Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ø¢Ù† (Ø¨Ø¯ÙˆÙ† Ø¨Ø±Ø´) Ø¨Ø§Ù„Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ø´Ø¯ØŒ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ ÙØ§ÛŒÙ„ÛŒ Ú©Ù‡ ØªØ§Ø²Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯. Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø®ÙˆØ§Ø³ØªÙ‡ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´ Ø´ÙˆØ¯ØŒ Ø·Ø¨Ù‚ Ù‚ÙˆØ§Ù†ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ (apply_edit Ø¨Ø§ search/replace â†’ Ø¯Ø± ØµÙˆØ±Øª Ù„Ø²ÙˆÙ… verify_file) Ù¾ÛŒØ´ Ø¨Ø±Ùˆ. Ø§Ú¯Ø± ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ù…Ø·Ø§Ù„Ø¹Ù‡/Ù¾Ø§Ø³Ø® Ø¨Ù‡ Ø³Ø¤Ø§Ù„ Ù„Ø§Ø²Ù…Ø´ Ø¯Ø§Ø´ØªÛŒ (Ù†Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´)ØŒ Ù‡Ù…ÛŒÙ† Ù…Ø­ØªÙˆØ§ Ø±Ø§ Ø¨Ø®ÙˆØ§Ù†.'
-            };
+    function toggleThinkPanel(e) {
+        if (e) e.stopPropagation();
+        syncThinkOptionsForModel();
+        renderThinkUI();
+        document.getElementById('thinkPanel').classList.toggle('active');
+    }
+
+    function setThinkLevel(level) {
+        const normalized = normalizeThinkLevelForModel(currentModel, level);
+        currentThinkLevel = normalized;
+        localStorage.setItem('virtual_think_level', normalized);
+        renderThinkUI();
+        document.getElementById('thinkPanel').classList.remove('active');
+    }
+
+    document.addEventListener('click', function(e) {
+        const wrap = document.getElementById('thinkModeBtn');
+        const panel = document.getElementById('thinkPanel');
+        if (wrap && panel && !wrap.contains(e.target)) {
+            panel.classList.remove('active');
+        }
+    });
+
+    syncThinkOptionsForModel();
+    renderThinkUI();
+
+    // =====================================================
+    // بقیه کدها (همه قابلیت‌ها)
+    // =====================================================
+
+    let currentChatId = localStorage.getItem('last_active_chat_id') || Date.now();
+    let currentUser = null;
+    let chats = {};
+    let chatHistoryData = {};
+    let chatFileArchive = {};
+    // FIX (multi-file upload bug): این قبلاً یک آبجکت تکی بود، پس وقتی چند
+    // عکس/ویدیو/PDF با هم انتخاب می‌شدند هر کدوم که آخر پردازش می‌شد بقیه
+    // رو بازنویسی می‌کرد و فقط آخرین فایل واقعاً ارسال می‌شد. حالا آرایه‌ست
+    // تا همه‌ی فایل‌های باینری انتخاب‌شده نگه داشته بشن.
+    let selectedFilesData = [];
+    let lastCodeFilesForEdit = [];
+    let codeFilesMemory = []; // [{name, content}] — فایل‌های کد ضمیمه‌شده که تا وقتی کاربر پاکشون نکنه تو مکالمه می‌مونن
+    let pastedTextFileCounter = 0; // برای نام‌گذاری فایل‌های خودکار (متن-پیوست-۱.txt, ۲.txt, ...)
+    let isFirstMessage = true;
+    let isGenerating = false;
+    let isSearchEnabled = true; // سرچ خودکاره؛ تصمیم نهایی رو shouldSearchWeb() و بک‌اند می‌گیرن
+    let currentAbortController = null;
+    let typeWriterInterval = null;
+    let lastFailedRequest = null;
+    let activeRequestId = 0;
+    let activeLoadingDiv = null;
+
+
+    // ===== Notification bell =====
+    const NOTIF_API_URL = 'https://notify-admin-iota.vercel.app/api/notifications';
+    const NOTIF_SEEN_KEY = 'vc_notif_seen_ids';
+    const BUG_STATUS_SEEN_KEY = 'vc_bug_status_seen';
+
+    let notifItems = [];
+    let myBugReports = [];
+    let activeStatusDot = null;
+
+    function getSeenNotifIds() {
+        try { return JSON.parse(localStorage.getItem(NOTIF_SEEN_KEY) || '[]'); }
+        catch (e) { return []; }
+    }
+
+    function getStatusInfo(statusStr) {
+        const s = String(statusStr || '').toLowerCase().trim();
+        if (s.includes('رفع') || s.includes('حل') || s.includes('resolve') || s.includes('fix') || s.includes('done')) {
+            return { label: 'رفع شده', badgeClass: 'status-green', dotColor: 'green' };
+        }
+        if (s.includes('بررسی') || s.includes('progress') || s.includes('investigat') || s.includes('review')) {
+            return { label: 'درحال بررسی', badgeClass: 'status-yellow', dotColor: 'yellow' };
+        }
+        return { label: 'در انتظار بررسی', badgeClass: 'status-gray', dotColor: null };
+    }
+
+    function checkBugStatusChanges() {
+        let seenMap = {};
+        try { seenMap = JSON.parse(localStorage.getItem(BUG_STATUS_SEEN_KEY) || '{}'); } catch(e){}
+
+        let hasUnseenYellow = false;
+        let hasUnseenGreen = false;
+
+        for (const report of myBugReports) {
+            const reportId = String(report.id || report._id || report.createdAt || report.message);
+            const currentStatus = String(report.status || 'pending');
+            const lastSeenStatus = seenMap[reportId];
+
+            if (currentStatus !== lastSeenStatus) {
+                const info = getStatusInfo(currentStatus);
+                if (info.dotColor === 'green') hasUnseenGreen = true;
+                if (info.dotColor === 'yellow') hasUnseenYellow = true;
+            }
         }
 
-        // Fallback (should be rare: only if textFiles/editStates weren't
-        // supplied to this call, e.g. some other caller path): keep the
-        // old truncated-text behavior so nothing breaks, but this path no
-        // longer supports real edits producing a download card.
-        const MAX_ARCHIVED_FILE_CHARS = 70000;
-        let content = found.content || '';
-        let truncated = false;
-        if (content.length > MAX_ARCHIVED_FILE_CHARS) {
-            content = content.slice(0, MAX_ARCHIVED_FILE_CHARS);
-            truncated = true;
+        if (hasUnseenGreen) activeStatusDot = 'green';
+        else if (hasUnseenYellow) activeStatusDot = 'yellow';
+        else activeStatusDot = null;
+
+        updateStatusDotUI();
+    }
+
+    function updateStatusDotUI() {
+        const dot = document.getElementById('notifStatusDot');
+        if (!dot) return;
+        if (activeStatusDot) {
+            dot.className = 'notif-status-dot ' + activeStatusDot;
+            dot.style.display = 'block';
+        } else {
+            dot.style.display = 'none';
+        }
+    }
+
+    function markAllNotifsSeen() {
+        const ids = notifItems.map(n => n.id);
+        localStorage.setItem(NOTIF_SEEN_KEY, JSON.stringify(ids));
+
+        let seenMap = {};
+        try { seenMap = JSON.parse(localStorage.getItem(BUG_STATUS_SEEN_KEY) || '{}'); } catch(e){}
+        for (const report of myBugReports) {
+            const reportId = String(report.id || report._id || report.createdAt || report.message);
+            if (reportId) {
+                seenMap[reportId] = String(report.status || 'pending');
+            }
+        }
+        localStorage.setItem(BUG_STATUS_SEEN_KEY, JSON.stringify(seenMap));
+
+        activeStatusDot = null;
+        updateStatusDotUI();
+        updateNotifBadge();
+    }
+
+    function updateNotifBadge() {
+        const seen = getSeenNotifIds();
+        const unread = notifItems.filter(n => !seen.includes(n.id)).length;
+        const badge = document.getElementById('notifBadge');
+        if (!badge) return;
+        if (unread > 0) {
+            badge.textContent = unread > 99 ? '99+' : unread;
+            badge.style.display = 'block';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    function renderNotifList() {
+        const list = document.getElementById('notifList');
+        if (!list) return;
+
+        if (!notifItems.length && !myBugReports.length) {
+            list.innerHTML = '<div class="notif-empty">فعلاً اعلانی نیست.</div>';
+            return;
         }
 
-        let structureNote = '';
+        let html = '';
+
+        if (myBugReports.length > 0) {
+            html += '<div class="notif-section-title">گزارش‌های شما</div>';
+            html += myBugReports.map(b => {
+                const info = getStatusInfo(b.status);
+                const dateStr = b.date || (b.createdAt ? new Date(b.createdAt).toLocaleDateString('fa-IR') : '');
+                return `
+                    <div class="notif-item">
+                        <div class="notif-item-header">
+                            <div class="notif-item-title" style="margin-bottom:0;">📋 ${escapeHtmlNotif(b.message || '')}</div>
+                            <span class="notif-status-badge ${info.badgeClass}">${escapeHtmlNotif(info.label)}</span>
+                        </div>
+                        ${dateStr ? `<div class="notif-item-date">${escapeHtmlNotif(dateStr)}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        if (notifItems.length > 0) {
+            if (myBugReports.length > 0) {
+                html += '<div class="notif-section-title">اعلان‌های سیستم</div>';
+            }
+            html += notifItems.map(n => `
+                <div class="notif-item">
+                    <div class="notif-item-title">${escapeHtmlNotif(n.title || '')}</div>
+                    <div class="notif-item-body">${escapeHtmlNotif(n.body || '')}</div>
+                    <div class="notif-item-date">${escapeHtmlNotif(n.date || '')}</div>
+                </div>
+            `).join('');
+        }
+
+        list.innerHTML = html;
+    }
+
+    function escapeHtmlNotif(str) {
+        const div = document.createElement('div');
+        div.textContent = String(str || '');
+        return div.innerHTML;
+    }
+
+    async function fetchNotifs() {
         try {
-            const analysis = analyzeFileStructure(content, found.name || fileName, '');
-            structureNote = `\n\n[ØªØ­Ù„ÛŒÙ„ Ø³Ø§Ø®ØªØ§Ø± Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¢Ø±Ø´ÛŒÙˆØ´Ø¯Ù‡ - Ù‚Ø¨Ù„ Ø§Ø² ØªÙˆÙ„ÛŒØ¯ file-edit Ø§Ø² Ø¢Ù† Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†]\n${formatFileStructureForModel(analysis)}\n`;
-        } catch (error) {
-            log.warn('file.structure.archived_preanalysis_failed', {
-                message: error?.message || String(error)
-            });
-        }
+            const [notifRes, bugRes] = await Promise.allSettled([
+                fetch(NOTIF_API_URL + '?t=' + Date.now(), { cache: 'no-store' }),
+                fetch(BUG_REPORT_ENDPOINT + '?clientId=' + encodeURIComponent(getBugClientId()) + '&t=' + Date.now(), { cache: 'no-store' })
+            ]);
 
-        return {
-            name: found.name,
-            content,
-            ...(truncated ? {
-                note: 'Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø¨ÙˆØ¯ Ùˆ ÙÙ‚Ø· Ø¨Ø®Ø´ Ø§Ø¨ØªØ¯Ø§ÛŒÛŒ Ø¢Ù† (Û·Û° Ù‡Ø²Ø§Ø± Ú©Ø§Ø±Ø§Ú©ØªØ± Ø§ÙˆÙ„) Ø¨Ø§Ø²Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ø´Ø¯. Ø§Ú¯Ø± Ø¨Ø®Ø´ Ø¯ÛŒÚ¯Ø±ÛŒ Ù„Ø§Ø²Ù… Ø§Ø³ØªØŒ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¨Ú¯Ùˆ Ú©Ù‡ ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù†ÛŒØ³Øª Ùˆ Ø¨Ø§ÛŒØ¯ Ø¨Ø®Ø´ Ø®Ø§ØµÛŒ Ø§Ø² Ø¢Ù† Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¨ÙØ±Ø³ØªØ¯.'
-            } : {}),
-            ...(structureNote ? { structure: structureNote } : {})
-        };
+            if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
+                const data = await notifRes.value.json();
+                const raw = Array.isArray(data) ? data : (data.items || data.notifications || []);
+                notifItems = raw.slice(0, 20).map(n => ({
+                    id: n.id,
+                    title: n.title,
+                    body: n.body,
+                    date: n.date || (n.createdAt ? new Date(n.createdAt).toLocaleDateString('fa-IR') : '')
+                }));
+            }
+
+            if (bugRes.status === 'fulfilled' && bugRes.value.ok) {
+                const bugData = await bugRes.value.json();
+                // FIX (لیست گزارش‌های شما همیشه خالی می‌ماند): سرور توی
+                // GET /api/bugreports?clientId=... از قبل فقط گزارش‌های همین
+                // کاربر را فیلتر و برمی‌گرداند، و برای حریم‌خصوصی فیلدهای
+                // clientId/userName را از هر آیتم حذف می‌کند (فقط id/status/
+                // createdAt/message را می‌فرستد - نگاه کن api/bugreports.js).
+                // این خط قبلاً دوباره روی همان آیتم‌های از-قبل-فیلترشده با
+                // b.clientId و b.userName فیلتر می‌کرد؛ چون این دو فیلد دیگر
+                // در پاسخ وجود ندارند (undefined هستند)، هیچ آیتمی هیچ‌وقت رد
+                // این فیلتر نمی‌شد و myBugReports همیشه خالی می‌ماند - همان
+                // چیزی که کاربر گزارش داد. سرور از قبل این فیلتر را انجام
+                // داده، پس اینجا فقط باید آرایه را مستقیم بپذیریم.
+                const allBugs = Array.isArray(bugData) ? bugData : (Array.isArray(bugData.items) ? bugData.items : []);
+                // FIX (گزارش یهو از پنل اعلان‌ها پاک می‌شد): بلافاصله بعد از
+                // ارسال گزارش، sendBugReport() همین fetchNotifs را دوباره صدا
+                // می‌زند تا لیست تازه شود. اما طبق مستندات خودِ Vercel Blob
+                // (نگاه کن به کامنت‌های readReports در api/bugreports.js) حتی
+                // با useCache:false ممکن است تا چند لحظه بعد از نوشتن، خواندن
+                // بعدی هنوز نسخه‌ی قدیمی/ناقص را برگرداند. قبلاً اینجا با
+                // "myBugReports = allBugs" کل لیست قبلی به‌طور کامل جایگزین
+                // می‌شد؛ اگر همین یک fetch به‌خاطر آن تاخیر کوتاه، گزارش
+                // تازه‌ارسال‌شده را هنوز نداشت، آن گزارش از روی صفحه محو
+                // می‌شد تا فچ بعدی (که ممکن بود دیر اتفاق بیفتد، چون فقط روی
+                // لود صفحه/باز کردن پنل صدا زده می‌شد نه به‌صورت دوره‌ای).
+                // راه‌حل: هیچ‌وقت اجازه نده یک نتیجه‌ی جدید با تعداد آیتم
+                // کمتر از چیزی که همین الان روی صفحه است جایگزین شود - فقط
+                // وقتی نتیجه‌ی تازه واقعاً همه‌ی آیتم‌های فعلی را هم دارد
+                // (یعنی کامل و به‌روز است، نه یک خواندن ناقصِ در حال گذار)
+                // آن را می‌پذیریم.
+                const currentIds = new Set(myBugReports.map(b => String(b.id || b._id || b.createdAt || b.message)));
+                const newIds = new Set(allBugs.map(b => String(b.id || b._id || b.createdAt || b.message)));
+                const isStaleOrPartial = myBugReports.length > 0 &&
+                    ![...currentIds].every(id => newIds.has(id));
+                if (!isStaleOrPartial) {
+                    myBugReports = allBugs;
+                }
+            }
+
+            checkBugStatusChanges();
+            renderNotifList();
+            updateNotifBadge();
+        } catch (e) {
+            console.error('fetchNotifs failed:', e);
+            renderNotifList();
+        }
     }
 
-    if (name === 'read_file_section') {
-        const fileName = String((args && args.file) || '').trim();
-        const startLine = Number(args && args.startLine);
-        const endLine = Number(args && args.endLine);
-        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
-        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
-        if (!found) {
-            return { error: `ÙØ§ÛŒÙ„ Â«${fileName}Â» Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
+    function toggleNotifPanel() {
+        const panel = document.getElementById('notifPanel');
+        if (!panel) return;
+        const willOpen = !panel.classList.contains('active');
+        panel.classList.toggle('active', willOpen);
+        if (willOpen) {
+            markAllNotifsSeen();
         }
-        const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
-        if (!state) {
-            return { error: `ÙˆØ¶Ø¹ÛŒØª ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø±Ø§ÛŒ Â«${fileName}Â» Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ - Ø§ÛŒÙ† Ù†Ø¨Ø§ÛŒØ¯ Ø±Ø® Ø¯Ù‡Ø¯.` };
-        }
-        if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
-            return { error: 'startLine/endLine Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø§Ø³Øª.' };
-        }
-        const lines = state.content.split(/\r?\n/);
-        const clampedEnd = Math.min(endLine, lines.length);
-        const content = lines.slice(startLine - 1, clampedEnd).join('\n');
-        log.info('agent.tool.read_file_section', { name: state.name, startLine, endLine: clampedEnd });
-        return { file: state.name, startLine, endLine: clampedEnd, totalLines: lines.length, content };
     }
 
-    if (name === 'apply_edit') {
-        const fileName = String((args && args.file) || '').trim();
-        const search = String((args && args.search) ?? '');
-        const replace = String((args && args.replace) ?? '');
-        const occurrence = Number(args && args.occurrence);
-        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
-        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
-        if (!found) {
-            return { success: false, error: `ÙØ§ÛŒÙ„ Â«${fileName}Â» Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
+    function initNotifSystem() {
+        fetchNotifs();
+        // FIX (وضعیت گزارش‌ها فقط با رفرش صفحه/باز کردن پنل به‌روز می‌شد):
+        // قبلاً هیچ polling دوره‌ای نبود، پس اگر ادمین وضعیت یک گزارش را
+        // عوض می‌کرد، کاربر تا وقتی خودش صفحه را رفرش نمی‌کرد یا پنل را
+        // نمی‌بست و دوباره باز نمی‌کرد، متوجه نمی‌شد. هر ۴۵ ثانیه یک‌بار
+        // به‌روزرسانی خاموش (بدون تغییر ظاهری اگر چیزی عوض نشده باشد).
+        clearInterval(window.__notifPollInterval);
+        window.__notifPollInterval = setInterval(fetchNotifs, 45000);
+        document.addEventListener('click', (e) => {
+            const wrap = document.getElementById('notifWrap');
+            const panel = document.getElementById('notifPanel');
+            if (!wrap || !panel || !panel.classList.contains('active')) return;
+            if (!wrap.contains(e.target)) panel.classList.remove('active');
+        });
+    }
+
+    window.onload = () => {
+        const savedModel = localStorage.getItem('virtual_selected_model');
+        if (!savedModel) {
+            currentModel = 'gemini-3.7-flash';
+            document.getElementById('modelDisplayName').textContent = 'Virtual Bot 1.6';
         }
-        const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
-        if (!state) {
-            return { success: false, error: `ÙˆØ¶Ø¹ÛŒØª ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø±Ø§ÛŒ Â«${fileName}Â» Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ - Ø§ÛŒÙ† Ù†Ø¨Ø§ÛŒØ¯ Ø±Ø® Ø¯Ù‡Ø¯.` };
+        if (savedModel && currentModelDisplay[savedModel]) {
+            currentModel = savedModel;
+            document.getElementById('modelDisplayName').textContent = currentModelDisplay[savedModel];
+            document.querySelectorAll('.model-dropdown-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.model === savedModel) item.classList.add('active');
+            });
+        }
+                syncThinkOptionsForModel();
+        renderThinkUI();
+        
+        // ایمیل/پسورد داخلی: کاربر ذخیره‌شده (اگر session token هنوز
+        // معتبر باشد) یا حالت مهمان را بارگذاری می‌کند.
+        checkSavedUser();
+        updateFaviconStatus(false);
+        loadSettings();
+        initNotifSystem();
+
+        // ===== آیکون‌های Lucide =====
+        // چون خیلی از پیام‌ها/کارت‌ها به‌صورت دینامیک با innerHTML ساخته می‌شن،
+        // به‌جای صدا زدن دستی lucide.createIcons() در هر نقطه، یک ناظر روی
+        // کل صفحه می‌ذاریم که فقط وقتی یه [data-lucide] جدید اضافه می‌شه
+        // (نه با هر تغییر بی‌ربط DOM) آیکون‌ها رو رندر می‌کنه. این باعث
+        // می‌شه دکمه‌هایی که همین الان لود شدن، بدون دلیل دوباره جایگزین
+        // نشن و افکت hover/transition روشون قطع نشه (چشمک زدن دکمه‌ها).
+        function hasNewLucideIcon(mutations) {
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (node.nodeType !== 1) continue;
+                    if (node.hasAttribute?.('data-lucide')) return true;
+                    if (node.querySelector?.('[data-lucide]')) return true;
+                }
+            }
+            return false;
+        }
+        if (window.lucide) {
+            try { lucide.createIcons(); } catch (e) {}
+            const iconObserver = new MutationObserver((mutations) => {
+                if (!hasNewLucideIcon(mutations)) return;
+                clearTimeout(window.__lucideRefreshTimer);
+                window.__lucideRefreshTimer = setTimeout(() => {
+                    try { lucide.createIcons(); } catch (e) {}
+                }, 60);
+            });
+            iconObserver.observe(document.body, { childList: true, subtree: true });
         }
 
-        const editResult = applySearchReplace(state.content, search, replace, Number.isFinite(occurrence) ? occurrence : undefined);
-        if (!editResult.success) {
-            log.warn('agent.tool.apply_edit.no_match', {
-                name: state.name,
-                reason: editResult.reason
+        if (window.innerWidth <= 768) {
+            document.documentElement.style.setProperty('--mobile-close', 'block');
+        }
+        const chatBox = document.getElementById('chatBox');
+        chatBox.addEventListener('scroll', updateScrollLatestButton);
+        updateScrollLatestButton();
+    };
+
+    function autoResizeTextarea(textarea) {
+        checkAutoConvertLongText(textarea);
+        textarea.style.height = 'auto';
+        const newHeight = Math.min(textarea.scrollHeight, 180);
+        textarea.style.height = newHeight + 'px';
+        // FIX (خط اسکرول‌بار ناخواسته کنار دکمه‌ی Think روی تبلت/موبایل):
+        // وقتی جعبه‌ی متن خالیه یا فقط یک خط داره، overflow-y باید hidden
+        // بمونه - چون حتی یک پیکسل اختلاف بین scrollHeight واقعی placeholder
+        // (که گاهی به‌خاطر عرض کم می‌شکنه به دو خط) و max-height باعث می‌شد
+        // مرورگرهای موبایل یک اسکرول‌بار عمودی نازک و همیشگی نشون بدن، با
+        // اینکه چیزی برای اسکرول کردن عملاً وجود نداشت. فقط وقتی واقعاً به
+        // سقف 180px رسیدیم و متن باید داخلی اسکرول بشه، کلاس overflowing
+        // اضافه می‌شه تا overflow-y به auto برگرده.
+        textarea.classList.toggle('overflowing', textarea.scrollHeight > 180);
+        // Keep the caret's line in view: once the box hits its max height
+        // and becomes internally scrollable, always snap to the bottom so
+        // the line currently being typed never gets pushed out of sight.
+        textarea.scrollTop = textarea.scrollHeight;
+    }
+
+    // FEATURE (auto-convert long text to file): وقتی متن نوار چت بیش از ۵۰
+    // خط بشه (چه با تایپ، چه با پیست کردن)، به‌جای این‌که نوار چت رو پر و
+    // دیرحرکت کنه، خودکار به یک "فایل متنی" مثل بقیه‌ی فایل‌های کد تبدیل
+    // می‌شود و به codeFilesMemory اضافه می‌شود - دقیقاً همون مربعی که بالای
+    // نوار چت برای فایل‌های آپلودی نشون داده می‌شه. نوار چت خودش خالی می‌شه
+    // تا کاربر بتونه پیام کوتاه دیگه‌ای هم کنارش بنویسه؛ هر دو با هم به مدل
+    // ارسال می‌شن (رفتار موجود codeFilesMemory دقیقاً همینه).
+    const LONG_TEXT_LINE_THRESHOLD = 50;
+    function checkAutoConvertLongText(textarea) {
+        const value = textarea.value;
+        if (!value) return;
+        const lineCount = value.split('\n').length;
+        if (lineCount <= LONG_TEXT_LINE_THRESHOLD) return;
+
+        pastedTextFileCounter += 1;
+        const name = `متن-پیوست-${pastedTextFileCounter}.txt`;
+        codeFilesMemory.push({ name, content: value, mode: 'text' });
+        renderCodeFilesBar();
+
+        textarea.value = '';
+        textarea.style.height = 'auto';
+        showToast('متن طولانی به یک فایل تبدیل شد — روش کلیک کن تا ویرایشش کنی.', 'info');
+    }
+
+    // FEATURE (ایمیل/پسورد داخلی به‌جای گوگل): پروژه‌ی جدا و مستقل
+    // virtual-chat-sync (api/auth.js + api/chats.js روی Supabase) - نگاه کن
+    // به کامنت‌های همان فایل‌ها. دیگر هیچ وابستگی‌ای به Google OAuth یا
+    // notify-admin برای احراز هویت نیست.
+    const SYNC_API_BASE = 'https://virtual-chat-sync.vercel.app';
+    const AUTH_TOKEN_KEY = 'vc_session_token';
+    let authMode = 'login'; // 'login' | 'register' - toggleAuthMode بینشان سوییچ می‌کند
+
+    function extractNameFromEmail(email, fallbackName = '') {
+        if (fallbackName && fallbackName.trim() && !fallbackName.includes('@')) return fallbackName.trim();
+        if (!email) return 'دوست من';
+        const handle = email.split('@')[0].toLowerCase();
+        const clean = handle.replace(/[0-9_.-]/g, '');
+        return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'دوست من';
+    }
+
+    function toggleAuthMode() {
+        authMode = authMode === 'login' ? 'register' : 'login';
+        document.getElementById('authErrorMsg').textContent = '';
+        if (authMode === 'register') {
+            document.getElementById('authCardTitle').textContent = 'ساخت حساب Virtual Chat';
+            document.getElementById('authCardDesc').textContent = 'یه ایمیل و پسورد دلخواه انتخاب کن (نیازی نیست ایمیل واقعی باشه).';
+            document.getElementById('authSubmitBtn').textContent = 'ثبت‌نام';
+            document.getElementById('authPasswordInput').setAttribute('autocomplete', 'new-password');
+            document.getElementById('authToggleLine').innerHTML = 'حساب داری؟ <a onclick="toggleAuthMode()">وارد شو</a>';
+        } else {
+            document.getElementById('authCardTitle').textContent = 'ورود به Virtual Chat';
+            document.getElementById('authCardDesc').textContent = 'برای sync گفتگوها بین دستگاه‌ها، وارد حساب خودت شو.';
+            document.getElementById('authSubmitBtn').textContent = 'ورود';
+            document.getElementById('authPasswordInput').setAttribute('autocomplete', 'current-password');
+            document.getElementById('authToggleLine').innerHTML = 'حساب نداری؟ <a onclick="toggleAuthMode()">ثبت‌نام کن</a>';
+        }
+    }
+
+    // FEATURE: ورودی اصلی فرم لاگین/ثبت‌نام. سرور (api/auth.js) پسورد را
+    // هرگز خام برنمی‌گرداند، فقط یک session token تصادفی که از این پس در
+    // هر درخواست به api/chats.js در هدر Authorization فرستاده می‌شود.
+    async function handleAuthSubmit(event) {
+        event.preventDefault();
+        const email = document.getElementById('authEmailInput').value.trim();
+        const password = document.getElementById('authPasswordInput').value;
+        const errorEl = document.getElementById('authErrorMsg');
+        const submitBtn = document.getElementById('authSubmitBtn');
+        errorEl.textContent = '';
+
+        if (password.length < 6) {
+            errorEl.textContent = 'پسورد باید حداقل ۶ کاراکتر باشد.';
+            return false;
+        }
+
+        submitBtn.disabled = true;
+        const originalLabel = submitBtn.textContent;
+        submitBtn.textContent = '...';
+
+        try {
+            const resp = await fetch(`${SYNC_API_BASE}/api/auth?action=${authMode}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
             });
-            return {
-                success: false,
-                error: editResult.reason === 'ambiguous' ? 'Ø§ÛŒÙ† search Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ø´Ø¯ - Ù…Ø¨Ù‡Ù… Ø§Ø³Øª.' : 'Ø§ÛŒÙ† search Ø¯Ø± ÙØ§ÛŒÙ„ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.',
-                ...editResult.report
+            const data = await resp.json().catch(() => ({}));
+
+            if (!resp.ok) {
+                errorEl.textContent = data.error || 'خطایی رخ داد. دوباره تلاش کن.';
+                return false;
+            }
+
+            localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+            const autoExtractedName = extractNameFromEmail(data.email);
+            currentUser = {
+                name: autoExtractedName,
+                customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
+                email: data.email,
+                picture: ''
             };
-        }
+            localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
 
-        const validation = validatePatchedContent(editResult.content, state.name);
-        if (!validation.valid) {
-            log.warn('agent.tool.apply_edit.rejected_invalid', {
-                name: state.name,
-                reason: validation.reason
+            document.getElementById('authOverlay').classList.remove('active');
+            document.getElementById('authForm').reset();
+            initUserData();
+        } catch (err) {
+            console.error('[auth] submit failed:', err);
+            errorEl.textContent = 'اتصال به سرور برقرار نشد. اتصال اینترنت رو چک کن.';
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalLabel;
+        }
+        return false;
+    }
+
+    // کاربر می‌تواند اورلی لاگین را رد کند و به‌صورت مهمان ادامه دهد؛
+    // چت‌های مهمان کاملاً جدا (زیر کلید 'guest' در getChatOwnerKey) از
+    // چت‌های هر حساب لاگین‌شده نگه داشته می‌شوند و با هم mix نمی‌شوند.
+    function continueAsGuest() {
+        document.getElementById('authOverlay').classList.remove('active');
+        if (!currentUser) initUserData();
+    }
+
+    // FEATURE: wrapper دور fetch برای هر تماس با api/chats.js - همیشه
+    // Authorization: Bearer <token> را اضافه می‌کند. اگر توکن نداشتیم یا
+    // سرور 401 برگرداند (توکن منقضی/نامعتبر)، خودکار کاربر را لاگ‌اوت
+    // می‌کند تا دوباره وارد شود؛ چون یک توکن قدیمی/باطل نباید بی‌صدا
+    // شکست بخورد و کاربر فکر کند sync دارد کار می‌کند در حالی که نمی‌کند.
+    async function authFetch(path, options = {}) {
+        const token = localStorage.getItem(AUTH_TOKEN_KEY);
+        if (!token) {
+            throw new Error('کاربر لاگین نیست.');
+        }
+        const resp = await fetch(`${SYNC_API_BASE}${path}`, {
+            ...options,
+            headers: {
+                ...(options.headers || {}),
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        if (resp.status === 401) {
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+            localStorage.removeItem('virtual_chat_user');
+            currentUser = null;
+            document.getElementById('authOverlay').classList.add('active');
+            showToast('ورود منقضی شده، دوباره وارد شو.', 'error');
+        }
+        return resp;
+    }
+
+    function checkSavedUser() {
+        const saved = localStorage.getItem('virtual_chat_user');
+        const token = localStorage.getItem(AUTH_TOKEN_KEY);
+        const overlay = document.getElementById('authOverlay');
+        // FIX (پروژه دونفره): سایت هیچ‌وقت لاگین را اجباری نمی‌کند - بدون
+        // حساب هم (guest) کاملاً قابل‌استفاده است. اورلی فقط وقتی که
+        // کاربر خودش از UI اکانت درخواست ورود/ثبت‌نام بدهد باز می‌شود.
+        overlay.classList.remove('active');
+        if (saved && token) {
+            currentUser = JSON.parse(saved);
+            if (!currentUser.customName) {
+                currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email, currentUser.name);
+            }
+        }
+        initUserData(); // اگر currentUser ست شده باشد چت‌های همان حساب، وگرنه چت‌های مهمان لود می‌شوند
+    }
+
+    // ===== Sync گفتگوها با سرور (api/chats.js) - فقط وقتی کاربر لاگین است =====
+    // FEATURE: این توابع علاوه بر IndexedDB محلی (که همیشه انجام می‌شود)،
+    // در پس‌زمینه با سرور هم sync می‌کنند. اگر کاربر لاگین نباشد (مهمان)
+    // یا درخواست شکست بخورد، هیچ خطایی به کاربر نشان داده نمی‌شود و کار
+    // محلی مثل همیشه ادامه پیدا می‌کند - سرور صرفاً یک نسخه‌ی پشتیبان/
+    // sync‌شونده‌ی اضافه است، نه منبع اصلی. (authFetch خودش در صورت ۴۰۱
+    // کاربر را لاگ‌اوت می‌کند.)
+    async function syncSaveChat(chatId) {
+        if (!currentUser) return; // مهمان - چیزی sync نمی‌شود
+        const chat = chats[chatId];
+        if (!chat) return;
+        try {
+            await authFetch(`/api/chats?chatId=${encodeURIComponent(chatId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: chat.title || 'گفتگوی جدید',
+                    html: chat.html || '',
+                    pinned: !!chat.pinned,
+                    updatedAt: Date.now(),
+                    history: chatHistoryData[chatId] || [],
+                    files: chatFileArchive[chatId] || []
+                })
             });
-            // FIX (Ø§Ø¯Ø¹Ø§ÛŒ Ø¯Ø±ÙˆØºÛŒÙ† Ù…ÙˆÙÙ‚ÛŒØª): Ø§ÛŒÙ† Ø±Ø¯ Ø´Ø¯Ù† Ø±Ø§ Ø«Ø¨Øª Ú©Ù† ØªØ§ Ø§Ú¯Ø± Ù…Ø¯Ù„
-            // Ø¨Ø¹Ø¯Ø§Ù‹ - Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† apply_edit Ù…ÙˆÙÙ‚ÛŒ Ø±ÙˆÛŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ - Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ
-            // Ø±Ø§ Ø·ÙˆØ±ÛŒ Ø¨Ù†ÙˆÛŒØ³Ø¯ Ú©Ù‡ Ø§Ù†Ú¯Ø§Ø± ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ØŒ Ø¨ØªÙˆØ§Ù†ÛŒÙ… Ø§ÛŒÙ†
-            // Ù†Ø§Ø³Ø§Ø²Ú¯Ø§Ø±ÛŒ Ø±Ø§ Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† runAgentLoop ØªØ´Ø®ÛŒØµ Ø¯Ù‡ÛŒÙ… Ùˆ Ø¬Ù„ÙˆÛŒ Ø±ÙØªÙ†
-            // Ù¾Ø§Ø³Ø® Ú¯Ù…Ø±Ø§Ù‡â€ŒÚ©Ù†Ù†Ø¯Ù‡ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ Ø¨Ú¯ÛŒØ±ÛŒÙ….
-            if (ctx && ctx.rejectedWriteBlocksByFile) {
-                const key = state.name;
-                const prev = ctx.rejectedWriteBlocksByFile.get(key) || { count: 0, lastReason: null };
-                ctx.rejectedWriteBlocksByFile.set(key, {
-                    count: prev.count + 1,
-                    lastReason: validation.reason
+        } catch (e) {
+            console.error('[sync] save chat failed:', e);
+        }
+    }
+
+    async function syncDeleteChatIds(ids) {
+        if (!currentUser || !ids || !ids.length) return;
+        try {
+            await authFetch(`/api/chats?ids=${ids.map(id => encodeURIComponent(id)).join(',')}`, {
+                method: 'DELETE'
+            });
+        } catch (e) {
+            console.error('[sync] delete chat(s) failed:', e);
+        }
+    }
+
+    // FEATURE: بعد از لاگین/باز شدن اپ (اگر لاگین باشیم)، لیست چت‌های
+    // سرور را می‌گیرد و هر کدام را که محلی (IndexedDB) نداریم یا نسخه‌ی
+    // سرور جدیدتر است، کامل (با history/files) دانلود و در IndexedDB
+    // می‌نویسد. این‌طوری روی هر دستگاهی که لاگین کنی، چت‌های دستگاه‌های
+    // دیگر هم می‌آیند - نه فقط چت‌های خودِ همین دستگاه.
+    async function syncPullFromServer() {
+        if (!currentUser) return;
+        try {
+            const listResp = await authFetch('/api/chats');
+            if (!listResp.ok) return;
+            const listData = await listResp.json().catch(() => ({}));
+            const items = Array.isArray(listData.items) ? listData.items : [];
+            const owner = getChatOwnerKey();
+
+            for (const item of items) {
+                const chatId = String(item.chat_id);
+                const localChat = chats[chatId];
+                const serverUpdatedAt = Number(item.updated_at) || 0;
+                // اگر محلی نداریمش یا نسخه‌ی سرور جدیدتره، کامل بگیر.
+                if (!localChat || serverUpdatedAt > (localChat.updatedAt || 0)) {
+                    const fullResp = await authFetch(`/api/chats?chatId=${encodeURIComponent(chatId)}`);
+                    if (!fullResp.ok) continue;
+                    const full = await fullResp.json().catch(() => null);
+                    if (!full || !full.chat) continue;
+
+                    chats[chatId] = {
+                        title: full.chat.title || 'گفتگوی جدید',
+                        html: full.chat.html || '',
+                        pinned: !!full.chat.pinned,
+                        updatedAt: serverUpdatedAt
+                    };
+                    chatHistoryData[chatId] = Array.isArray(full.history) ? full.history : [];
+                    chatFileArchive[chatId] = Array.isArray(full.files) ? full.files : [];
+
+                    await idbPut(CHAT_STORE, {
+                        id: `${owner}:${chatId}`, owner, chatId,
+                        title: chats[chatId].title, html: chats[chatId].html,
+                        updatedAt: serverUpdatedAt, pinned: chats[chatId].pinned
+                    });
+                    await idbPut(HISTORY_STORE, { id: `${owner}:${chatId}`, owner, chatId, history: chatHistoryData[chatId] });
+                    await idbPut(FILES_STORE, { id: `${owner}:${chatId}`, owner, chatId, files: chatFileArchive[chatId] });
+                }
+            }
+            renderHistoryList();
+        } catch (e) {
+            console.error('[sync] pull from server failed:', e);
+        }
+    }
+
+
+    // IndexedDB storage for conversations: each chat is a separate record,
+    // so adding one message never rewrites the entire history in localStorage.
+    const CHAT_DB_NAME = 'VirtualChatDB';
+    const CHAT_DB_VERSION = 2;
+    const CHAT_STORE = 'chats';
+    const HISTORY_STORE = 'histories';
+    const FILES_STORE = 'chatFiles';
+    let chatDbPromise = null;
+    let chatSaveQueue = Promise.resolve();
+
+    function getChatOwnerKey() {
+        return currentUser?.email ? String(currentUser.email).toLowerCase() : 'guest';
+    }
+
+    function openChatDB() {
+        if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB is not supported'));
+        if (chatDbPromise) return chatDbPromise;
+        chatDbPromise = new Promise((resolve, reject) => {
+            const req = indexedDB.open(CHAT_DB_NAME, CHAT_DB_VERSION);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(CHAT_STORE)) {
+                    const store = db.createObjectStore(CHAT_STORE, { keyPath: 'id' });
+                    store.createIndex('owner', 'owner', { unique: false });
+                }
+                if (!db.objectStoreNames.contains(HISTORY_STORE)) {
+                    const store = db.createObjectStore(HISTORY_STORE, { keyPath: 'id' });
+                    store.createIndex('owner', 'owner', { unique: false });
+                }
+                if (!db.objectStoreNames.contains(FILES_STORE)) {
+                    const store = db.createObjectStore(FILES_STORE, { keyPath: 'id' });
+                    store.createIndex('owner', 'owner', { unique: false });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+        });
+        return chatDbPromise;
+    }
+
+    function idbRequest(req) {
+        return new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error('IndexedDB request failed'));
+        });
+    }
+
+    async function idbGetAllByOwner(storeName, owner) {
+        const db = await openChatDB();
+        const tx = db.transaction(storeName, 'readonly');
+        return idbRequest(tx.objectStore(storeName).index('owner').getAll(IDBKeyRange.only(owner)));
+    }
+
+    async function idbPut(storeName, record) {
+        const db = await openChatDB();
+        const tx = db.transaction(storeName, 'readwrite');
+        await idbRequest(tx.objectStore(storeName).put(record));
+    }
+
+    async function idbDelete(storeName, id) {
+        const db = await openChatDB();
+        const tx = db.transaction(storeName, 'readwrite');
+        await idbRequest(tx.objectStore(storeName).delete(id));
+    }
+
+    async function migrateLegacyChatStorage() {
+        const owner = getChatOwnerKey();
+        const chatKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+        const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+        const migrationKey = `virtual_chat_idb_migrated_${owner}`;
+        if (localStorage.getItem(migrationKey) === '1') return;
+
+        let legacyChats = {}, legacyHistory = {};
+        try { legacyChats = JSON.parse(localStorage.getItem(chatKey) || '{}') || {}; } catch (_) {}
+        try { legacyHistory = JSON.parse(localStorage.getItem(historyKey) || '{}') || {}; } catch (_) {}
+
+        try {
+            for (const [chatId, chat] of Object.entries(legacyChats)) {
+                if (!chat) continue;
+                await idbPut(CHAT_STORE, {
+                    id: `${owner}:${chatId}`, owner, chatId: String(chatId),
+                    title: chat.title || 'گفتگوی جدید', html: chat.html || '',
+                    updatedAt: Number(chatId) || Date.now()
                 });
             }
-            return {
-                success: false,
-                error: `Ø§ÛŒÙ† ØªØºÛŒÛŒØ± Ø±Ø¯ Ø´Ø¯ Ú†ÙˆÙ† ÙØ§ÛŒÙ„ Ø±Ø§ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯: ${validation.reason} search/replace Ø±Ø§ Ø§ØµÙ„Ø§Ø­ Ú©Ù† Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ apply_edit Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.`
-            };
-        }
-
-        // Accept: commit new content, mark this file as edited.
-        state.content = editResult.content;
-        state.editCount += 1;
-        state.verified = true; // validated the exact content now stored, same as before
-
-        found.content = state.content;
-        found._patched = true;
-        found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
-        state.editedName = found._editedName;
-        if (ctx && ctx.rejectedWriteBlocksByFile) {
-            ctx.rejectedWriteBlocksByFile.delete(state.name);
-        }
-
-        log.info('agent.tool.apply_edit.success', {
-            name: state.name,
-            editedName: found._editedName,
-            layer: editResult.layer,
-            editCount: state.editCount
-        });
-
-        return {
-            success: true,
-            valid: true,
-            file: state.name,
-            editedName: found._editedName,
-            note: 'ØªØºÛŒÛŒØ± Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø§Ø¹Ù…Ø§Ù„ Ùˆ Ø¨Ø±Ø±Ø³ÛŒ Ø³Ø§Ø®ØªØ§Ø±ÛŒ Ø´Ø¯ (ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø¨Ø§ Ø§ÛŒÙ† ØªØºÛŒÛŒØ± Ù…Ø¹ØªØ¨Ø± Ø§Ø³Øª). Ø§Ú¯Ø± Ø¨Ø®Ø´ Ø¯ÛŒÚ¯Ø±ÛŒ Ù‡Ù… Ù†ÛŒØ§Ø² Ø¨Ù‡ ØªØºÛŒÛŒØ± Ø¯Ø§Ø±Ø¯ØŒ apply_edit Ø¨Ø¹Ø¯ÛŒ Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. Ø§Ú¯Ø± Ø§ÛŒÙ† Ø¢Ø®Ø±ÛŒÙ† ØªØºÛŒÛŒØ± Ø¨ÙˆØ¯ØŒ Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ø¯Ù‡ÛŒ - Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ ØµØ¯Ø§ Ø²Ø¯Ù† verify_file Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ø¨Ø¹Ø¯ Ø§Ø² ÛŒÚ© apply_edit Ù…ÙˆÙÙ‚ Ù†ÛŒØ³ØªØŒ Ú†ÙˆÙ† Ø§ÛŒÙ† Ù†ØªÛŒØ¬Ù‡ (valid:true) Ø§Ø² Ù‚Ø¨Ù„ Ù…Ø¹Ø§Ø¯Ù„ Ø¢Ù† Ø§Ø³Øª.'
-        };
-    }
-
-    if (name === 'verify_file') {
-        const fileName = String((args && args.file) || '').trim();
-        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
-        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
-        if (!found) {
-            return { valid: false, error: `ÙØ§ÛŒÙ„ Â«${fileName}Â» Ø¯Ø± ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.` };
-        }
-        const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
-        if (!state) {
-            return { valid: false, error: `ÙˆØ¶Ø¹ÛŒØª ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø±Ø§ÛŒ Â«${fileName}Â» Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ - Ø§ÛŒÙ† Ù†Ø¨Ø§ÛŒØ¯ Ø±Ø® Ø¯Ù‡Ø¯.` };
-        }
-
-        const validation = validatePatchedContent(state.content, state.name);
-        state.verified = validation.valid;
-
-        log.info('agent.tool.verify_file', {
-            name: state.name,
-            valid: validation.valid,
-            reason: validation.valid ? null : validation.reason,
-            editCount: state.editCount
-        });
-
-        if (!validation.valid) {
-            return {
-                valid: false,
-                error: `ÙØ§ÛŒÙ„ Ù†Ù‡Ø§ÛŒÛŒ Ù…Ø´Ú©Ù„ Ø³Ø§Ø®ØªØ§Ø±ÛŒ Ø¯Ø§Ø±Ø¯: ${validation.reason} Ø¨Ø§ apply_edit Ø¯ÛŒÚ¯Ø±ÛŒ Ø§ØµÙ„Ø§Ø­ Ú©Ù†ØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. ØªØ§ Ø§ÛŒÙ† verify Ù¾Ø§Ø³ Ù†Ø´ÙˆØ¯ØŒ Ù†Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø¯Ù‡ÛŒ.`
-            };
-        }
-        return {
-            valid: true,
-            file: state.name,
-            editedName: found._editedName || state.name,
-            editCount: state.editCount,
-            note: 'ÙØ§ÛŒÙ„ Ø¨Ø±Ø±Ø³ÛŒ Ø´Ø¯ Ùˆ Ù…Ø´Ú©Ù„ Ø³Ø§Ø®ØªØ§Ø±ÛŒ Ù†Ø¯Ø§Ø±Ø¯. Ø­Ø§Ù„Ø§ Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø¯Ù‡ÛŒ.'
-        };
-    }
-
-
-    if (name === 'web_search') {
-        const query = (args && args.query) || '';
-        if (!query) return { error: 'query Ø®Ø§Ù„ÛŒ Ø¨ÙˆØ¯.' };
-
-        log.info('agent.tool.web_search', { queryPreview: query.slice(0, 100) });
-
-        const search = await fetchTavilyResults(
-            query,
-            ctx.tavilyKeys,
-            ctx.searchCache
-        );
-
-        if (!search?.ok) {
-            return {
-                result:
-                    `[Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯ | ${search?.code || 'search_error'}] ` +
-                    `${search?.message || 'Ø³Ø±ÙˆÛŒØ³ Ø¬Ø³ØªØ¬Ùˆ Ù†ØªÙˆØ§Ù†Ø³Øª Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯.'}`,
-                searchError: {
-                    code: search?.code || 'search_error',
-                    status: search?.status ?? null,
-                    retryable: !!search?.retryable
-                }
-            };
-        }
-
-        return {
-            result: search.result,
-            searchError: null
-        };
-    }
-
-    if (name === 'ask_user') {
-        // There's no synchronous "wait for the user" channel in a single
-        // HTTP request/response cycle, so ask_user ends the agent loop
-        // early: the question is streamed to the client as the final
-        // reply (clearly marked), and the user's next message continues
-        // the conversation normally via existing history.
-        return { askUser: (args && args.question) || 'Ù…ÛŒâ€ŒØ®ÙˆØ§ÛŒ Ù‡Ù…ÛŒÙ†â€ŒØ·ÙˆØ± Ø§Ø¯Ø§Ù…Ù‡ Ø¨Ø¯Ù…ØŸ' };
-    }
-
-    return { error: `Ø§Ø¨Ø²Ø§Ø± Ù†Ø§Ø´Ù†Ø§Ø®ØªÙ‡: ${name}` };
-}
-
-// Runs the model <-> tool loop. Each round now calls Gemini's real
-// streamGenerateContent endpoint (Server-Sent-Events of JSON chunks) instead
-// of generateContent, and forwards text chunks to the client live via
-// onChunk() AS THEY ARRIVE from Google - not batched into one write at the
-// end. functionCall parts can still show up in a streamed response (Gemini
-// sends them as a complete part inside one of the chunks, same shape as the
-// non-streaming response), so tool-calling keeps working exactly as before;
-// we just no longer throw away real token-by-token streaming to get it.
-// Every tool call along the way is still narrated via onStep(label) before
-// it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, sharedRequestState, thinkLevel }) {
-    // FIX (ØªØ´Ø®ÛŒØµ ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡â€ŒÛŒ Ø¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ø¨Ø±Ø§Ø¨Ø± ÙØ§ÛŒÙ„ promote-Ø´Ø¯Ù‡ Ø§Ø² Ø¢Ø±Ø´ÛŒÙˆ):
-    // textFiles ÛŒÚ© Ø¢Ø±Ø§ÛŒÙ‡â€ŒÛŒ mutable Ø§Ø³Øª Ú©Ù‡ get_archived_file Ù‡Ù… Ø¨Ù‡ Ø¢Ù†
-    // ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¢Ø±Ø´ÛŒÙˆÛŒ Ø±Ø§ push Ù…ÛŒâ€ŒÚ©Ù†Ø¯ (Ø¨Ø¨ÛŒÙ† Â«promoted.pushÂ» Ø¯Ø± Ø¢Ù† Ù‡Ù†Ø¯Ù„Ø±).
-    // Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¨Ø¹Ø¯Ø§Ù‹ Ø¨ØªÙˆØ§Ù†ÛŒÙ… ÙØ±Ù‚ Ø¨Ú¯Ø°Ø§Ø±ÛŒÙ… Â«Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ú†ÛŒØ²ÛŒ
-    // Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ Ø¨ÙˆØ¯Â» Ø§Ø² Â«Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¨Ø¹Ø¯Ø§Ù‹ ØªÙˆØ³Ø· Ø®ÙˆØ¯Ù get_archived_file Ø¨Ù‡
-    // textFiles Ø§Ø¶Ø§ÙÙ‡ Ø´Ø¯Â»ØŒ Ù†Ø§Ù… ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ØªØ§Ø²Ù‡â€ŒÛŒ *ÙˆØ§Ù‚Ø¹ÛŒ* (Ù‚Ø¨Ù„ Ø§Ø² Ù‡Ø± promote)
-    // Ø±Ø§ Ù‡Ù…ÛŒÙ† Ø§Ø¨ØªØ¯Ø§ØŒ Ù‚Ø¨Ù„ Ø§Ø² Ù‡Ø± ØªØºÛŒÛŒØ±ØŒ Ø§Ø³Ù†Ù¾â€ŒØ´Ø§Øª Ù…ÛŒâ€ŒÚ¯ÛŒØ±ÛŒÙ….
-    const originalFreshFileNames = new Set((Array.isArray(textFiles) ? textFiles : []).map(f => f && f.name).filter(Boolean));
-    // FIX (ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÛµÛ°Û°Û°+ Ø®Ø·ÛŒ): Ø¨Ø§ MAX_CHUNK_REQUEST_LINES=900ØŒ ÛŒÚ© ÙØ§ÛŒÙ„
-    // ÛµÛ°Û°Û° Ø®Ø·ÛŒ Ø­Ø¯Ø§Ù‚Ù„ Ø¨Ù‡ Û¶-Û· Ø¨Ø§Ø± get_file_chunk Ù†ÛŒØ§Ø² Ø¯Ø§Ø±Ø¯ Ø§Ú¯Ø± Ù…Ø¯Ù„ Ù…Ø¬Ø¨ÙˆØ±
-    // Ø´ÙˆØ¯ Ù‡Ù…Ù‡â€ŒÛŒ ÙØ§ÛŒÙ„ Ø±Ø§ Ù¾ÛŒÙ…Ø§ÛŒØ´ Ú©Ù†Ø¯ØŒ Ø¨Ù‡â€ŒØ¹Ù„Ø§ÙˆÙ‡â€ŒÛŒ inspect_file Ùˆ apply_patch Ùˆ
-    // Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ. Ø³Ù‚Ù Ù‚Ø¨Ù„ÛŒ (Û·) Ø¹Ù…Ù„Ø§Ù‹ Ù‡Ù…Ø§Ù† Ù„Ø­Ø¸Ù‡ Ú©Ù‡ Ù…Ø¯Ù„ Ø¨Ù‡ Ø¯ÙˆÙ…ÛŒÙ†/Ø³ÙˆÙ…ÛŒÙ†
-    // get_file_chunk Ù…ÛŒâ€ŒØ±Ø³ÛŒØ¯ ØªÙ…Ø§Ù… Ù…ÛŒâ€ŒØ´Ø¯. Ø¨Ø§Ù„Ø§ Ø¨Ø±Ø¯Ù†Ø´ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ù¾Ø±ÙˆÙØ§ÛŒÙ„ Ú©Ø§Ø±ÛŒ
-    // Ø¶Ø±ÙˆØ±ÛŒ Ø§Ø³Øª - Ù†Ù‡ ÛŒÚ© "Ù…Ù‚Ø¯Ø§Ø± Ø§Ù…Ù† Ø¯Ù„Ø®ÙˆØ§Ù‡"ØŒ Ø¨Ù„Ú©Ù‡ Ø­Ø¯Ø§Ù‚Ù„ ÙØ¶Ø§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ù„Ø§Ø²Ù….
-    // FIX (worst-case stall math): with the block map given upfront in the
-    // system prompt (no inspect_file round needed anymore), a realistic
-    // file-edit turn is read_block + write_block per target block (rarely
-    // more than 2-3 blocks) + the final answer - well under 10 rounds. 16
-    // was sized for the old chunk-based flow's worse case and, combined
-    // with the fileEditIntent-blanket timeout fix above, produced a
-    // ~45min worst-case stall on a single key before quota even
-    // triggered. Lowered to 10 originally, and now write_block auto-
-    // verifies itself (see write_block above), so a single-block edit no
-    // longer needs a dedicated verify_file round at all.
-    //
-    // FIX (quota burn: fixed 10-round ceiling too generous for small
-    // files, too tight for huge multi-block ones): a fixed cap either
-    // wastes quota headroom letting a trivial 1-block edit theoretically
-    // run 10 rounds if the model dithers, or forces a legitimately large
-    // multi-block edit (e.g. a 5000-line file needing 8 separate blocks
-    // touched) to hit the ceiling and get cut off mid-edit, which then
-    // burns an entire extra key-attempt just to resume. Instead of a
-    // fixed number, size the round budget off how many blocks THIS
-    // file/request actually has to work with - Gemini decides how many
-    // of those rounds it actually needs, this only sets the ceiling so a
-    // genuinely stuck loop still can't run away.
-    //
-    // Budget model: read_block + write_block per block actually touched
-    // (worst case: every block in the file, though a real edit only
-    // touches a handful), plus a small fixed overhead for the initial
-    // "figure out which blocks" rounds and the final answer round, plus
-    // slack for one round of re-read+re-write per block in case a
-    // write_block gets rejected by validation and needs a retry.
-    // Clamped so tiny files don't get an absurdly small ceiling (a model
-    // still needs room to read before it writes) and huge files don't
-    // get an unbounded one (still a hard outer limit against a genuinely
-    // looping model).
-    const MIN_TOOL_ROUNDS = 6;
-    const MAX_TOOL_ROUNDS_CEILING = 40;
-    const ROUNDS_PER_EDITABLE_FILE = 6; // Ú†Ù†Ø¯ apply_edit + ÛŒÚ© Ø§Ø­ØªÙ…Ø§Ù„ retry Ø¨Ù‡â€ŒØ§Ø²Ø§ÛŒ Ù‡Ø± ÙØ§ÛŒÙ„ Ù‚Ø§Ø¨Ù„â€ŒÙˆÛŒØ±Ø§ÛŒØ´
-    const FIXED_ROUND_OVERHEAD = 4; // initial orientation + final answer + margin
-    let MAX_TOOL_ROUNDS;
-    if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
-        // Ø¨Ø¯ÙˆÙ† Ø¨Ù„ÙˆÚ©â€ŒØ¨Ù†Ø¯ÛŒØŒ Ø¨ÙˆØ¯Ø¬Ù‡ Ø¯ÛŒÚ¯Ø± Ø¨Ù‡ ØªØ¹Ø¯Ø§Ø¯ Ø¨Ù„ÙˆÚ© ÙˆØ§Ø¨Ø³ØªÙ‡ Ù†ÛŒØ³Øª - Ø¨Ù‡ ØªØ¹Ø¯Ø§Ø¯
-        // ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù‚Ø§Ø¨Ù„â€ŒÙˆÛŒØ±Ø§ÛŒØ´ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª (Ú†Ù†Ø¯ apply_edit Ù…Ù…Ú©Ù† Ø±ÙˆÛŒ Ù‡Ø±Ú©Ø¯Ø§Ù…)
-        // ÙˆØ§Ø¨Ø³ØªÙ‡ Ø§Ø³Øª.
-        const estimatedRounds = Math.ceil(textFiles.length * ROUNDS_PER_EDITABLE_FILE) + FIXED_ROUND_OVERHEAD;
-        MAX_TOOL_ROUNDS = Math.min(MAX_TOOL_ROUNDS_CEILING, Math.max(MIN_TOOL_ROUNDS, estimatedRounds));
-        log.info('agent.rounds.dynamic', {
-            editableFiles: textFiles.length,
-            estimatedRounds,
-            finalMaxToolRounds: MAX_TOOL_ROUNDS
-        });
-    } else {
-        // Non-file-edit turns (plain chat, web_search) never needed a
-        // large budget - keep the old modest fixed cap for those.
-        MAX_TOOL_ROUNDS = MIN_TOOL_ROUNDS;
-    }
-    // FIX (Ø±ÙˆÙ†Ø¯/tool call Ù‡Ø§ÛŒ Ú†Ù†Ø¯Ù…Ø±Ø­Ù„Ù‡â€ŒØ§ÛŒ Ú©Ù‡ ÙˆØ³Ø· Ú©Ø§Ø± throw Ù…ÛŒâ€ŒÚ©Ø±Ø¯Ù†Ø¯ Ø§Ø² ØµÙØ±
-    // Ø´Ø±ÙˆØ¹ Ù…ÛŒâ€ŒØ´Ø¯Ù†Ø¯): Ù‚Ø¨Ù„Ø§Ù‹ Ø§ÛŒÙ†Ø¬Ø§ `[...contents]` ÛŒÚ© Ú©Ù¾ÛŒ Ù…Ø­Ù„ÛŒ Ù…ÛŒâ€ŒØ³Ø§Ø®Øª. ØªÙ…Ø§Ù…
-    // push Ù‡Ø§ÛŒ Ø¨Ø¹Ø¯ÛŒ (Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆØŒ Ù†ØªÛŒØ¬Ù‡ tool callØŒ Ù¾Ø§Ø³Ø® Ù…Ø¯Ù„) ÙÙ‚Ø· Ø±ÙˆÛŒ Ù‡Ù…ÛŒÙ†
-    // Ú©Ù¾ÛŒ Ø§Ø¹Ù…Ø§Ù„ Ù…ÛŒâ€ŒØ´Ø¯Ù†Ø¯. Ø§Ú¯Ø± throw ÙˆØ³Ø· ÛŒÚ©ÛŒ Ø§Ø² round Ù‡Ø§ Ø§ØªÙØ§Ù‚ Ù…ÛŒâ€ŒØ§ÙØªØ§Ø¯ (Ù…Ø«Ù„Ø§Ù‹
-    // Ø®Ø·Ø§ÛŒ Ù…ÙˆÙ‚ØªÛŒ Ø´Ø¨Ú©Ù‡ Ø¯Ø± round 5 Ø§Ø² 10)ØŒ caller Ø¨Ø§ catch Ø´Ø¯Ù† throwØŒ Ù‡Ù…Ø§Ù†
-    // `contents` Ø§ØµÙ„ÛŒ Ùˆ Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡ Ø±Ø§ Ø¨Ø±Ø§ÛŒ attempt Ø¨Ø¹Ø¯ÛŒ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù…ÛŒâ€ŒÙØ±Ø³ØªØ§Ø¯ -
-    // ÛŒØ¹Ù†ÛŒ Ù‡Ù…Ù‡â€ŒÛŒ Ù¾ÛŒØ´Ø±ÙØª Ø¢Ù† Ûµ round Ø¯ÙˆØ± Ø±ÛŒØ®ØªÙ‡ Ù…ÛŒâ€ŒØ´Ø¯.
-    // Ø¨Ø§ mutate Ú©Ø±Ø¯Ù† Ù…Ø³ØªÙ‚ÛŒÙ… Ø±ÙˆÛŒ Ø®ÙˆØ¯Ù Ø¢Ø±Ø§ÛŒÙ‡â€ŒÛŒ `contents` (Ú©Ù‡ Ø¯Ø± Ø¬Ø§ÙˆØ§Ø§Ø³Ú©Ø±ÛŒÙ¾Øª
-    // by-reference Ù¾Ø§Ø³ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯)ØŒ Ù‡Ø± push Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† Ø¢Ø±Ø§ÛŒÙ‡â€ŒØ§ÛŒ Ø§Ø¹Ù…Ø§Ù„ Ù…ÛŒâ€ŒØ´ÙˆØ¯
-    // Ú©Ù‡ caller (Ø®Ø·â€ŒÙ‡Ø§ÛŒ runAgentLoop call site) Ù†Ú¯Ù‡ Ø¯Ø§Ø´ØªÙ‡. Ù¾Ø³ Ø¨Ø§ throw Ø´Ø¯Ù†ØŒ
-    // caller Ù‡Ù…Ø§Ù† contents Ø±Ø§ - Ø­Ø§Ù„Ø§ Ø´Ø§Ù…Ù„ ØªÙ…Ø§Ù… round Ù‡Ø§ÛŒ Ù…ÙˆÙÙ‚Ù Ù‚Ø¨Ù„ Ø§Ø² Ø®Ø·Ø§ -
-    // Ø¨Ù‡ Ø¹Ù†ÙˆØ§Ù† ÙˆØ±ÙˆØ¯ÛŒ attempt Ø¨Ø¹Ø¯ÛŒ Ù¾Ø§Ø³ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ Ùˆ Ø§Ø¯Ø§Ù…Ù‡ Ø§Ø² Ù‡Ù…Ø§Ù†â€ŒØ¬Ø§ Ø´Ø±ÙˆØ¹ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ
-    // Ù†Ù‡ Ø§Ø² ØµÙØ±.
-    let workingContents = contents;
-    // If the outer handler is retrying Gemini after a search already happened,
-    // keep the first search result available to the replacement model without
-    // exposing web_search (or any other tool) again. This preserves key/model
-    // fallback while enforcing one logical search for the whole HTTP request.
-    if (searchState?.used && searchState?.result?.result) {
-        systemText = `${systemText}\n\n[Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ø¯Ø± Ù‡Ù…ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ Ø§Ø³Øª â€” Ø§Ø² Ø¬Ø³ØªØ¬ÙˆÛŒ Ù…Ø¬Ø¯Ø¯ Ø®ÙˆØ¯Ø¯Ø§Ø±ÛŒ Ú©Ù†]:\n${searchState.result.result}`;
-    }
-    let lastUsage = null;
-    // Question-scoped search lock: after one web_search, no tool is exposed
-    // for the remainder of this request, including Gemini key/model retries.
-    // Request-scoped search lock. This object is shared across Gemini key/model
-    // retries, so a retry can NEVER start a second logical web_search for the
-    // same incoming user question.
-    const scopedSearchState = searchState || { used: false, result: null };
-
-    // EDIT STATE SETUP: build (or reuse, if this is a retry of the same
-    // HTTP request) one FileEditState per text file, and inject the full
-    // current content of each into the system prompt. editStates lives on
-    // sharedRequestState so a key/model retry within the same request
-    // reuses the exact same in-progress content instead of rebuilding
-    // from the original file.
-    const editStates = sharedRequestState?.editStates || new Map();
-    if (fileEditIntent && Array.isArray(textFiles) && textFiles.length > 0) {
-        try {
-            if (onStep) onStep('Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ ÙØ§ÛŒÙ„...', 'apply_edit');
-            const fileDumps = textFiles.map((f) => {
-                const key = f.name || 'file';
-                let state = editStates.get(key);
-                if (!state) {
-                    state = createFileEditState(f);
-                    editStates.set(key, state);
-                }
-                return { file: state.name, totalLines: state.content.split(/\r?\n/).length, content: state.content };
-            });
-            systemText += `\n\n[Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„(Ù‡Ø§ÛŒ) Ù‚Ø§Ø¨Ù„ ÙˆÛŒØ±Ø§ÛŒØ´ - Ø§ÛŒÙ† Ù…Ø­ØªÙˆØ§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ ÙØ¹Ù„ÛŒ Ø§Ø³Øª]\n${JSON.stringify(fileDumps, null, 2)}\n\n` +
-                'Ù‚ÙˆØ§Ù†ÛŒÙ† ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„:\n' +
-                'Û±. Ø¨Ø±Ø§ÛŒ ØªØºÛŒÛŒØ±ØŒ apply_edit Ø±Ø§ Ø¨Ø§ search (Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ Ø¯Ø± Ù…Ø­ØªÙˆØ§ÛŒ Ø¨Ø§Ù„Ø§) Ùˆ replace (Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯) ØµØ¯Ø§ Ø¨Ø²Ù†. search Ø¨Ø§ÛŒØ¯ Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù ØªØºÛŒÛŒØ± Ø±Ø§ Ù‡Ù… Ø´Ø§Ù…Ù„ Ø´ÙˆØ¯ ØªØ§ Ø¯Ø± Ú©Ù„ ÙØ§ÛŒÙ„ ÛŒÚ©ØªØ§ Ø¨Ø§Ø´Ø¯.\n' +
-                'Û². Ù‡Ø± apply_edit Ù…ÙˆÙÙ‚ Ø®ÙˆØ¯Ø´ Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø§Ø¹ØªØ¨Ø§Ø±Ø³Ù†Ø¬ÛŒ ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø±Ø§ Ø¯Ø± ÙÛŒÙ„Ø¯ valid Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯. Ø§Ú¯Ø± Ø¢Ø®Ø±ÛŒÙ† ØªØºÛŒÛŒØ± Ù„Ø§Ø²Ù… Ø±Ø§ Ø²Ø¯ÛŒ Ùˆ valid:true Ú¯Ø±ÙØªÛŒØŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ø¯Ù‡ÛŒ - Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ verify_file Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ù†ÛŒØ³Øª Ù…Ú¯Ø± Ø¨Ø®ÙˆØ§Ù‡ÛŒ Ø¨Ø¯ÙˆÙ† ØªØºÛŒÛŒØ± Ø¬Ø¯ÛŒØ¯ ÛŒÚ© Ø¨Ø§Ø± Ø¯ÛŒÚ¯Ø± ÙˆØ¶Ø¹ÛŒØª ÙØ¹Ù„ÛŒ Ø±Ø§ Ú†Ú© Ú©Ù†ÛŒ.\n' +
-                'Û³. Ø§Ú¯Ø± apply_edit Ø¨Ù‡ Ø¯Ù„ÛŒÙ„ Â«Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯Ù†Â» ÛŒØ§ Â«Ø§Ø¨Ù‡Ø§Ù…Â» Ø±Ø¯ Ø´Ø¯ØŒ Ø§Ø² context Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ø¯Ø± Ù¾Ø§Ø³Ø® Ø®Ø·Ø§ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø¯ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù† ØªØ§ search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ± Ùˆ ÛŒÚ©ØªØ§ Ú©Ù†ÛŒØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†.\n' +
-                'Û´. Ø§Ú¯Ø± ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø§Ø³Øª Ùˆ Ø¨Ø±Ø§ÛŒ Ù†ÙˆØ´ØªÙ† search Ø¯Ù‚ÛŒÙ‚ Ù†ÛŒØ§Ø² Ø¨Ù‡ Ø¯ÛŒØ¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡â€ŒÛŒ ÛŒÚ© Ø¨Ø®Ø´ Ø®Ø§Øµ Ø¯Ø§Ø±ÛŒ (Ù†Ù‡ Ù…Ø­ØªÙˆØ§ÛŒ Ø¨Ø§Ù„Ø§ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ú©ÙˆØªØ§Ù‡â€ŒØ´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯)ØŒ Ø§Ø² read_file_section Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†.\n' +
-                'Ûµ. Ø¨Ø¹Ø¯ Ø§Ø² Ù‡Ø± apply_edit Ù…ÙˆÙÙ‚ØŒ Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ø¹ÙˆØ¶ Ø´Ø¯Ù‡ - Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ Ø¨Ø¹Ø¯ÛŒ Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ØŒ search Ø±Ø§ Ø§Ø² Ù…ØªÙ† Ø¬Ø¯ÛŒØ¯ (Ù†Ù‡ Ù…ØªÙ† Ø§ÙˆÙ„ÛŒÙ‡â€ŒÛŒ Ø¨Ø§Ù„Ø§) Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ØŒ Ù…Ú¯Ø± Ø¨Ø®Ø´ Ù…ÙˆØ±Ø¯Ù†Ø¸Ø± Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡ Ù…Ø§Ù†Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.\n';
-            log.info('file.edit_state.mapped', {
-                files: fileDumps.length,
-                names: fileDumps.map(x => x.file),
-                totalLines: fileDumps.map(x => x.totalLines)
-            });
-        } catch (error) {
-            log.warn('file.edit_state.mapping_failed', {
-                message: error?.message || String(error)
-            });
-            // Do not fail the whole chat because a best-effort dump
-            // could not be produced. The model still has the original file.
-        }
-    }
-
-
-    // FIX (root cause of "video reads extremely slowly / times out"):
-    // Gemini has to ingest and effectively transcode/sample the whole video
-    // (extracting frames at ~1fps) before it can emit the first output
-    // token, which routinely takes well past 60s for anything more than a
-    // few seconds of footage - even after client-side compression. The old
-    // fixed 60s per-round timeout aborted these requests before Gemini ever
-    // got a chance to respond, which is exactly the "Ù¾Ø§Ø³Ø® Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ø·ÙˆÙ„
-    // Ú©Ø´ÛŒØ¯" error being seen. Video attachments now get a longer per-round
-    // budget; everything else (text/image/PDF-only turns, which really do
-    // answer fast) keeps the original tight 60s so a genuinely stuck
-    // request still fails fast instead of hanging the connection.
-    //
-    // FIX (persistent-file-memory follow-up): a round that comes right
-    // after a get_archived_file tool response has up to ~40,000 extra
-    // characters of dense code/HTML freshly added to context - genuinely
-    // more for Gemini to read and reason about than a normal turn, and it
-    // can legitimately take longer than the standard 60s to produce a real
-    // answer. The old fixed timeout aborted that round via AbortError,
-    // which the outer per-attempt catch treated exactly like a real key
-    // failure (markKeyResult(..., false)) and moved to the NEXT key -
-    // repeating the same slow "read this same big file from scratch" work
-    // on every single one of the 12 keys in a row, burning through all of
-    // them on what was never actually a quota problem, and only then
-    // surfacing the generic "quota exhausted" message. Rounds that follow a
-    // get_archived_file call now get the same longer budget as video.
-    // FIX (large-file chunk-edit flow, Ø±ÙØ¹ ÙˆØ§Ù‚Ø¹ÛŒ Ø¨Ø±Ø§ÛŒ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÛµÛ°Û°Û°+ Ø®Ø·):
-    // Ù…Ù†Ø·Ù‚ Ù‚Ø¨Ù„ÛŒ ÙÙ‚Ø· Ø¨Ù‡ Ø±ÙˆÙ†Ø¯Ù "Ø¨Ø¹Ø¯ Ø§Ø²" ÛŒÚ© get_file_chunk/get_archived_file
-    // Ù…Ù‡Ù„Øª Ø¨ÛŒØ´ØªØ± Ù…ÛŒâ€ŒØ¯Ø§Ø¯ - ÛŒØ¹Ù†ÛŒ Ø®ÙˆØ¯Ù Ø±ÙˆÙ†Ø¯ÛŒ Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ø§ÙˆÙ„ÛŒÙ† Ø¨Ø§Ø± ÛŒÚ© chunk Ø¨Ø²Ø±Ú¯
-    // Ø±Ø§ Ù…ÛŒâ€ŒØ®ÙˆØ§Ù†Ø¯ Ùˆ Ù¾Ø±Ø¯Ø§Ø²Ø´ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ (ÛŒØ§ Ø±ÙˆÙ†Ø¯ inspect_file Ø±ÙˆÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ú†Ù†Ø¯
-    // Ù‡Ø²Ø§Ø± Ø®Ø·ÛŒ) Ù‡Ù…Ú†Ù†Ø§Ù† Ø¨Ø§ Ù…Ù‡Ù„Øª Ø§Ø³ØªØ§Ù†Ø¯Ø§Ø±Ø¯ Û¶Û° Ø«Ø§Ù†ÛŒÙ‡ Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´Ø¯ Ùˆ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹
-    // Ù‡Ù…ÛŒÙ†â€ŒØ¬Ø§ (Ø®Ø· Û±Û±Û°Û° ØªØ§ Û±Û¸Û¹Û° Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªØ³Øª Ú©Ø±Ø¯) timeout Ù…ÛŒâ€ŒØ®ÙˆØ±Ø¯. Ø¨Ø±Ø§ÛŒ
-    // ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¨Ø²Ø±Ú¯ØŒ ØªÙ‚Ø±ÛŒØ¨Ø§Ù‹ Ù‡Ø± round Ø§ÛŒÙ† Ø¬Ø±ÛŒØ§Ù† Ø¨Ù‡ Ù‡Ù…Ø§Ù† Ø§Ù†Ø¯Ø§Ø²Ù‡ Ø³Ù†Ú¯ÛŒÙ† Ø§Ø³Øª -
-    // Ù¾Ø³ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø­Ø¯Ø³ Ø²Ø¯Ù† "Ú©Ø¯Ø§Ù… round Ø³Ù†Ú¯ÛŒÙ†â€ŒØªØ±Ù‡"ØŒ ÙˆÙ‚ØªÛŒ fileEditIntent ÙØ¹Ø§Ù„
-    // Ø§Ø³ØªØŒ Ù‡Ù…Ù‡â€ŒÛŒ round Ù‡Ø§ Ù…Ù‡Ù„Øª Ø¨Ù„Ù†Ø¯ Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ù†Ø¯.
-    // FIX (10+ minute stall before quota error): fileEditIntent alone was
-    // added to this condition to fix one real timeout, but fileEditIntent
-    // is now true for EVERY turn with an attached file (see the fix that
-    // dropped the keyword-regex gate) - not just turns that are actually
-    // mid-edit. That made EVERY round (even a plain question about an
-    // attached file, or round 0 before any tool has even been called) get
-    // the full 170s budget, and with MAX_TOOL_ROUNDS now 16, the worst case
-    // became 16 * 170s = ~45 minutes on a SINGLE key before even reaching
-    // the quota-exhausted error - which then repeats the whole climb on
-    // the next key. Scope the long budget back down to rounds that
-    // genuinely follow a heavy read (archive/block/chunk) or carry video,
-    // same as before fileEditIntent was blanket-added.
-    const roundNeedsMoreTime = (round) =>
-        hasVideoAttachment ||
-        (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasSectionRead));
-    let lastToolCallWasArchiveRead = false;
-    // FIX (dead flag): lastToolCallWasChunkRead tracked get_file_chunk,
-    // which no longer exists in the block-based system - it was declared
-    // and reset every round but never re-armed anywhere, so it was always
-    // false. read_block is this system's equivalent heavy read and gets
-    // the same "give the NEXT round more time" treatment archive reads do.
-    let lastToolCallWasSectionRead = false;
-
-    // DIAGNOSTICS (Ø±Ø¯Ù Ú©Ø§Ù…Ù„ Ø§Ø¬Ø±Ø§ÛŒ Ø¹Ø§Ù…Ù„): Ø¨Ø±Ø§ÛŒ Ù‡Ø± roundØŒ ÛŒÚ© Ø±Ú©ÙˆØ±Ø¯ Ø³Ø§Ø®ØªØ§Ø±ÛŒØ§ÙØªÙ‡
-    // Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±ÛŒÙ… - Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ© Ù¾ÛŒØ§Ù… Ø®Ø·Ø§ÛŒ Ú©Ù„ÛŒ Ø¯Ø± Ø§Ù†ØªÙ‡Ø§. Ø§ÛŒÙ† Ø¢Ø±Ø§ÛŒÙ‡ Ù‡Ù…ÛŒØ´Ù‡ (Ú†Ù‡
-    // Ø¯Ø± Ù…ÙˆÙÙ‚ÛŒØª Ú†Ù‡ Ø¯Ø± Ø®Ø·Ø§) Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§ Ø¨Ø´ÙˆØ¯ Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ø¯ÛŒØ¯ Ù‡Ø± round
-    // Ú†Ù‚Ø¯Ø± Ø·ÙˆÙ„ Ú©Ø´ÛŒØ¯ØŒ Ú©Ø¯Ø§Ù… Ø§Ø¨Ø²Ø§Ø± Ø¨Ø§ Ú†Ù‡ Ø¢Ø±Ú¯ÙˆÙ…Ø§Ù†ÛŒ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø´Ø¯ØŒ Ù‡Ø± Ø§Ø¨Ø²Ø§Ø± Ú†Ù†Ø¯ Ø¨Ø§Ø±
-    // ØªÚ©Ø±Ø§Ø± Ø´Ø¯ØŒ Ú†Ù†Ø¯ apply_patch Ù…ÙˆÙÙ‚ Ø´Ø¯ØŒ Ùˆ Ø¯Ø± Ù†Ù‡Ø§ÛŒØª Ø¨Ø§ Ú†Ù‡ finishReason Ùˆ
-    // Ú†Ù†Ø¯ Ú©Ø§Ø±Ø§Ú©ØªØ± Ù…ØªÙ† Ù…ØªÙˆÙ‚Ù Ø´Ø¯.
-    const roundTrace = [];
-    const toolCallTally = {}; // name -> Ø´Ù…Ø§Ø±Ù†Ø¯Ù‡â€ŒÛŒ Ú©Ù„ Ø¯Ø± Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª
-    const agentLoopStartedAt = Date.now();
-    // FIX (Ø§Ø¯Ø¹Ø§ÛŒ Ø¯Ø±ÙˆØºÛŒÙ† Ù…ÙˆÙÙ‚ÛŒØª Ø¨Ø¹Ø¯ Ø§Ø² write_block Ø±Ø¯Ø´Ø¯Ù‡): ÙˆÙ‚ØªÛŒ write_block
-    // Ø¨Ù‡ Ø¯Ù„ÛŒÙ„ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø´Ø¯Ù† ÙØ§ÛŒÙ„ Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆØ¯ (validatePatchedContent) Ùˆ Ù…Ø¯Ù„ Ø¨Ù‡
-    // Ø¬Ø§ÛŒ Ø§ØµÙ„Ø§Ø­ newContentØŒ Ø³Ø±Ø§Øº Ù…Ù†Ø§Ø¨Ø¹ Ø¯ÛŒÚ¯Ø± Ù…ÛŒâ€ŒØ±ÙˆØ¯ Ùˆ Ø¯Ø± Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ ÙˆØ§Ù†Ù…ÙˆØ¯
-    // Ù…ÛŒâ€ŒÚ©Ù†Ø¯ ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ØŒ Ù‡ÛŒÚ† _patched Ø§ÛŒ Ø±ÙˆÛŒ ÙØ§ÛŒÙ„ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ - Ø§ÛŒÙ†
-    // Map Ø¨Ø±Ø§ÛŒ Ù‡Ø± ÙØ§ÛŒÙ„ØŒ ØªØ¹Ø¯Ø§Ø¯ write_block Ù‡Ø§ÛŒ Ø±Ø¯Ø´Ø¯Ù‡ Ùˆ Ø¢Ø®Ø±ÛŒÙ† Ø¯Ù„ÛŒÙ„ Ø±Ø¯ Ø´Ø¯Ù† Ø±Ø§
-    // Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±Ø¯ ØªØ§ Ø¯Ø± Ù¾Ø§ÛŒØ§Ù† Ø¨ØªÙˆØ§Ù†ÛŒÙ… Ø§ÛŒÙ† Ù†Ø§Ø³Ø§Ø²Ú¯Ø§Ø±ÛŒ Ø±Ø§ ØªØ´Ø®ÛŒØµ Ø¯Ù‡ÛŒÙ….
-    const rejectedWriteBlocksByFile = new Map(); // fileName -> { count, lastReason }
-
-    // NOTE (block-based rewrite): inspectedFilesThisRequest and
-    // chunkReadsPerFile (repeat-guards for the old inspect_file/
-    // get_file_chunk tools) were removed - those tools no longer exist.
-    // Their job (persisting file-editing progress across key/model
-    // retries within one HTTP request) is now done by editStates, read
-    // from sharedRequestState at the top of this function.
-
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-        const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
-        lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
-        lastToolCallWasSectionRead = false; // consumed for this round; re-armed below only if this round's own tool call is a section read
-        const roundStartedAt = Date.now();
-        const roundEntry = {
-            round: round + 1,
-            toolCalls: [],       // [{ name, argsSummary, resultSummary }]
-            finishReason: null,
-            textChars: 0,
-            durationMs: null,
-            timedOut: false
-        };
-        roundTrace.push(roundEntry);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), ROUND_TIMEOUT_MS);
-        // Also abort this round if the caller's own signal (client disconnect
-        // / overall deadline) fires.
-        const onAbort = () => controller.abort();
-        if (signal) signal.addEventListener('abort', onAbort);
-
-        let upstream;
-        try {
-            upstream = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-goog-api-key': currentKey
-                    },
-                    body: JSON.stringify({
-                        system_instruction: { parts: [{ text: systemText }] },
-                        contents: workingContents,
-                        // FIX (silent empty reply with no SAFETY label): no
-                        // safetySettings were ever sent, so Gemini used its
-                        // own default (often stricter) thresholds. When the
-                        // default filter blocks a response, some Gemini API
-                        // versions return it as a plain empty response
-                        // (finishReason null/NONE, 0 chars) rather than
-                        // explicitly labeling it SAFETY - which is exactly
-                        // what agent.empty_after_tool_call was seeing on
-                        // round 0, no tool calls, ~1s duration. Explicitly
-                        // setting the least-restrictive commonly-supported
-                        // threshold here reduces false-positive blocks
-                        // without disabling safety entirely.
-                        safetySettings: [
-                            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
-                            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
-                            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
-                            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' }
-                        ],
-                        // FIX (Ú©Ù†Ø¯ÛŒ Ù…Ø­Ø³ÙˆØ³ Ø¨Ø§ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒ ØºÛŒØ± Ø§Ø² flash-lite): ØªØ§
-                        // Ø§ÛŒÙ†Ø¬Ø§ Ù‡ÛŒÚ† generationConfig/thinkingConfig Ø§Ø±Ø³Ø§Ù„
-                        // Ù†Ù…ÛŒâ€ŒØ´Ø¯ØŒ Ù¾Ø³ gemini-3.7-flash Ùˆ gemini-3.1-pro-preview
-                        // Ø¨Ø§ Ø³Ø·Ø­ ØªÙÚ©Ø± Ù¾ÛŒØ´â€ŒÙØ±Ø¶ Ø®ÙˆØ¯Ø´Ø§Ù† (Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø®Ø§Ù†ÙˆØ§Ø¯Ù‡ Ø§Ø²
-                        // Ù…Ø¯Ù„â€ŒÙ‡Ø§ Ù…Ø¹Ù…ÙˆÙ„Ø§Ù‹ medium/high Ø§Ø³Øª) Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´Ø¯Ù†Ø¯ - ÛŒØ¹Ù†ÛŒ
-                        // Ù‚Ø¨Ù„ Ø§Ø² Ø´Ø±ÙˆØ¹ Ø§Ø³ØªØ±ÛŒÙ… Ù¾Ø§Ø³Ø®ØŒ Ù…Ø¯Ù„ Ù…Ø¯Øª Ù‚Ø§Ø¨Ù„â€ŒØªÙˆØ¬Ù‡ÛŒ ØµØ±Ù
-                        // Â«ÙÚ©Ø± Ú©Ø±Ø¯Ù†Â» Ø¯Ø§Ø®Ù„ÛŒ Ù…ÛŒâ€ŒÚ©Ø±Ø¯. flash-lite Ø§ÛŒÙ† Ù…Ø´Ú©Ù„ Ø±Ø§
-                        // Ù†Ø¯Ø§Ø´Øª Ú†ÙˆÙ† Ø§ØµÙ„Ø§Ù‹ Ø§Ø² Ø§ÛŒÙ† Ø®Ø§Ù†ÙˆØ§Ø¯Ù‡â€ŒÛŒ thinking Ù†ÛŒØ³Øª.
-                        // ÛŒÚ© Ø³Ø·Ø­ ØªÙÚ©Ø± Ù¾Ø§ÛŒÛŒÙ† (Ù†Ù‡ ØµÙØ±ØŒ Ú†ÙˆÙ† Ø§ÛŒÙ† Ù…Ø¯Ù„â€ŒÙ‡Ø§ Ø§ØµÙ„Ø§Ù‹
-                        // Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø§Ù…ÙˆØ´ Ú©Ø§Ù…Ù„ ØªÙÚ©Ø± Ø±Ø§ Ù†Ù…ÛŒâ€ŒØ¯Ù‡Ù†Ø¯) ØªØ§Ø®ÛŒØ± Ù‚Ø¨Ù„ Ø§Ø²
-                        // Ø´Ø±ÙˆØ¹ Ù¾Ø§Ø³Ø® Ø±Ø§ Ø¨Ù‡â€ŒØ´Ø¯Øª Ú©Ù… Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ú©ÛŒÙÛŒØª
-                        // Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ÛŒ Ù…Ø¹Ù…ÙˆÙ„ÛŒ Ø§ÙØª Ù…Ø­Ø³ÙˆØ³ÛŒ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯.
-                        // FEATURE (Think mode toggle): thinkLevel comes from
-                        // the client's "Ø­Ø§Ù„Øª ØªÙÚ©Ø±" control (off by default -
-                        // see index.html). 'off' keeps the original speed-fix
-                        // behavior (minimal/low per model); when the user
-                        // explicitly turns Think on and picks low/medium/high,
-                        // that overrides the default for every model.
-                        // Model-specific thinking configuration:
-                        // - 3.5 Flash-Lite: omit thinkingConfig entirely.
-                        // - 3.7 Flash / 3.1 Pro: use low as the default when
-                        //   the UI value is 'off' or otherwise invalid.
-                        // This prevents the unsupported MINIMAL value from
-                        // ever reaching models that reject it.
-                        generationConfig: (() => {
-                            if (currentModel === 'gemini-3.5-flash-lite') return {};
-
-                            const requestedLevel = THINK_LEVEL_MAP[thinkLevel];
-                            const defaultLevel = THINKING_MODEL_DEFAULTS[currentModel] || 'low';
-
-                            return {
-                                thinkingConfig: {
-                                    thinkingLevel: requestedLevel || defaultLevel
-                                }
-                            };
-                        })(),
-                        // See hasVideoAttachment / disableTools comment above
-                        // runAgentLoop's call sites: omitted entirely (not
-                        // just emptied) when a video is attached, since some
-                        // Gemini versions treat an empty tools array
-                        // differently from no tools key at all.
-                        ...((disableTools || scopedSearchState.used) ? {} : { tools: fileEditIntent ? GEMINI_TOOLS_NO_SEARCH : GEMINI_TOOLS })
-                    }),
-                    signal: controller.signal
-                }
-            );
-            await recordGoogleAttempt(currentKey, upstream.status, keyIndex);
-        } finally {
-            clearTimeout(timeoutId);
-            if (signal) signal.removeEventListener('abort', onAbort);
-        }
-
-        if (!upstream.ok) {
-            let errorBody = null;
-            try { errorBody = await upstream.json(); } catch (_) {}
-            const err = new Error('agent_upstream_failed');
-            err.status = upstream.status;
-            err.body = errorBody;
-            throw err;
-        }
-
-        // Read the upstream SSE stream chunk-by-chunk.
-        //
-        // IMPORTANT latency fix: the previous implementation buffered the
-        // ENTIRE first round whenever tools were enabled. That meant even a
-        // normal answer which never used a tool had to finish upstream before
-        // the user saw its first token. We now stream tool-enabled text as it
-        // arrives, while the system prompt explicitly requires Gemini to emit
-        // a functionCall before any narration when it decides to use a tool.
-        // This keeps normal answers truly live without re-introducing the old
-        // "I'm going to search..." preamble in the common tool-call path.
-        const reader = upstream.body.getReader();
-        const decoder = new TextDecoder();
-        let sseBuffer = '';
-        let accumulatedParts = [];
-        let finishReason = null;
-        // Only hold obvious greeting/preamble text on turns that look like a
-        // search request. Normal answers remain fully live. If Gemini follows
-        // its tool-calling instruction and emits a functionCall next, the
-        // buffered preamble is discarded; if it turns out not to need a tool,
-        // the buffer is released as soon as substantive text arrives.
-        let pendingToolPreamble = '';
-        let sawFunctionCall = false;
-
-        const emitStreamText = (text) => {
-            if (!onChunk || !text) return;
-            try { onChunk(text); } catch (_) {}
-        };
-
-        // FIX (Ú©Ù†Ø¯ÛŒ Ù…Ø­Ø³ÙˆØ³ ÙÙ‚Ø· Ø±ÙˆÛŒ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒ thinking-capable Ø¨Ø§ Ø³ÙˆØ§Ù„Ø§Øª
-        // Ø´Ø¨Ù‡â€ŒØ³Ø±Ú†): Ù‚Ø¨Ù„Ø§Ù‹ pendingToolPreamble ØªØ§ Ù¾Ø§ÛŒØ§Ù† Ú©Ø§Ù…Ù„ Ù‡Ù…Ø§Ù† round
-        // (ÛŒØ¹Ù†ÛŒ ØªØ§ Ø¬Ø§ÛŒÛŒ Ú©Ù‡ Ù…Ø´Ø®Øµ Ø´ÙˆØ¯ functionCall Ø¢Ù…Ø¯Ù‡ ÛŒØ§ Ù†Ù‡) Ù‡ÛŒÚ† Ø®Ø±ÙˆØ¬ÛŒâ€ŒØ§ÛŒ
-        // Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù†Ù…ÛŒâ€ŒØ¯Ø§Ø¯. Ø¨Ø±Ø§ÛŒ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒÛŒ Ú©Ù‡ Ù¾ÛŒØ´ Ø§Ø² ØªØµÙ…ÛŒÙ…â€ŒÚ¯ÛŒØ±ÛŒ Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ
-        // tool call ÛŒÚ© Ù…Ø±Ø­Ù„Ù‡â€ŒÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø·ÙˆÙ„Ø§Ù†ÛŒâ€ŒØªØ± Â«ÙÚ©Ø± Ú©Ø±Ø¯Ù†Â» Ø¯Ø§Ø±Ù†Ø¯ (Ù‡Ø± Ú†ÛŒØ²ÛŒ
-        // ØºÛŒØ± Ø§Ø² flash-lite)ØŒ Ø§ÛŒÙ† ÛŒØ¹Ù†ÛŒ Ø³Ú©ÙˆØª Ú©Ø§Ù…Ù„ ØªØ§ Ù¾Ø§ÛŒØ§Ù† Ù‡Ù…Ø§Ù† Ù…Ø±Ø­Ù„Ù‡.
-        // Ø§ÛŒÙ† ØªØ§ÛŒÙ…Ø± ÛŒÚ© Ø³Ù‚Ù Ø²Ù…Ø§Ù†ÛŒ Ú©ÙˆØªØ§Ù‡ Ù…ÛŒâ€ŒÚ¯Ø°Ø§Ø±Ø¯: Ø§Ú¯Ø± ØªØ§ PREAMBLE_HOLD_MS
-        // Ù‡Ù†ÙˆØ² Ù†Ù‡ functionCall Ø¯ÛŒØ¯Ù‡ Ø´Ø¯Ù‡ Ù†Ù‡ round ØªÙ…Ø§Ù… Ø´Ø¯Ù‡ØŒ Ù‡Ø± Ú†Ù‡ ØªØ§ Ø§ÛŒÙ†
-        // Ù„Ø­Ø¸Ù‡ Ø¨Ø§ÙØ± Ø´Ø¯Ù‡ Ø±Ø§ Ù‡Ù…ÛŒÙ† Ø§Ù„Ø§Ù† flush Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… Ùˆ Ø§Ø² Ù‡Ù…Ø§Ù† Ù„Ø­Ø¸Ù‡ Ø¨Ù‡ Ø¨Ø¹Ø¯
-        // Ø§Ø³ØªØ±ÛŒÙ… Ø±Ø§ Ø²Ù†Ø¯Ù‡ (live) Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù…Ø«Ù„ Ø­Ø§Ù„ØªÛŒ Ú©Ù‡ Ø§Ø² Ø§ÙˆÙ„
-        // sawFunctionCall Ù†Ù…ÛŒâ€ŒØ´Ø¯. Ù…Ù†Ø·Ù‚ ØªØ´Ø®ÛŒØµ Ø³Ø±Ú†/tool call Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡
-        // Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯: Ø§Ú¯Ø± functionCall ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ø±Ø³Ø¯ØŒ Ù‡Ù†ÙˆØ² Ø·Ø¨Ù‚ Ù‡Ù…Ø§Ù† Ù…Ø³ÛŒØ± Ù‚Ø¨Ù„ÛŒ
-        // discard Ù…ÛŒâ€ŒØ´ÙˆØ¯ (Ú†ÙˆÙ† preambleTimedOut ÙÙ‚Ø· Ø¬Ù„ÙˆÛŒ Ù†Ú¯Ù‡â€ŒØ¯Ø§Ø´ØªÙ† Ø¨Ø§ÙØ± Ø±Ø§
-        // Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ØŒ Ù†Ù‡ Ù…Ù†Ø·Ù‚ eventHasFunctionCall Ø±Ø§). ØªÙ†Ù‡Ø§ Ø±ÛŒØ³Ú© Ø§ÛŒÙ† Ø§Ø³Øª Ú©Ù‡
-        // Ø¯Ø± Ù…ÙˆØ§Ø±Ø¯ Ù†Ø§Ø¯Ø± ÛŒÚ© preamble Ú©ÙˆØªØ§Ù‡ (Â«Ø¨Ø§Ø´Ù‡ Ø¨Ø°Ø§Ø± Ú†Ú© Ú©Ù†Ù…...Â») Ù‚Ø¨Ù„ Ø§Ø²
-        // Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø³Ø±Ú† Ù†Ø´Ø§Ù† Ø¯Ø§Ø¯Ù‡ Ø´ÙˆØ¯ - Ú©Ù‡ Ø®ÛŒÙ„ÛŒ Ø¨Ù‡ØªØ± Ø§Ø² Ú†Ù†Ø¯ Ø«Ø§Ù†ÛŒÙ‡ Ø³Ú©ÙˆØª Ø§Ø³Øª.
-        const PREAMBLE_HOLD_MS = 1500;
-        let preambleTimedOut = false;
-        let preambleHoldTimer = null;
-        const armPreambleHoldTimer = () => {
-            if (preambleHoldTimer || preambleTimedOut) return;
-            preambleHoldTimer = setTimeout(() => {
-                preambleTimedOut = true;
-                if (pendingToolPreamble) {
-                    emitStreamText(pendingToolPreamble);
-                    pendingToolPreamble = '';
-                }
-            }, PREAMBLE_HOLD_MS);
-        };
-        const clearPreambleHoldTimer = () => {
-            if (preambleHoldTimer) {
-                clearTimeout(preambleHoldTimer);
-                preambleHoldTimer = null;
+            for (const [chatId, history] of Object.entries(legacyHistory)) {
+                if (!Array.isArray(history)) continue;
+                await idbPut(HISTORY_STORE, {
+                    id: `${owner}:${chatId}`, owner, chatId: String(chatId), history
+                });
             }
-        };
+            // Remove the old large localStorage blobs first; this also works when
+            // the browser is already at its localStorage quota.
+            localStorage.removeItem(chatKey);
+            localStorage.removeItem(historyKey);
+            try { localStorage.setItem(migrationKey, '1'); } catch (_) {}
+        } catch (e) {
+            console.error('Legacy chat migration failed:', e);
+        }
+    }
 
-        const handleStreamText = (text) => {
-            if (!searchIntent || disableTools || scopedSearchState.used || sawFunctionCall || preambleTimedOut) {
-                emitStreamText(text);
+    async function loadChatsFromIndexedDB() {
+        const owner = getChatOwnerKey();
+        const [chatRecords, historyRecords, fileRecords] = await Promise.all([
+            idbGetAllByOwner(CHAT_STORE, owner), idbGetAllByOwner(HISTORY_STORE, owner), idbGetAllByOwner(FILES_STORE, owner)
+        ]);
+        chats = {}; chatHistoryData = {}; chatFileArchive = {};
+        chatRecords.forEach(r => { chats[r.chatId] = { title: r.title || 'گفتگوی جدید', html: r.html || '', pinned: !!r.pinned }; });
+        historyRecords.forEach(r => { chatHistoryData[r.chatId] = Array.isArray(r.history) ? r.history : []; });
+        fileRecords.forEach(r => { chatFileArchive[r.chatId] = Array.isArray(r.files) ? r.files : []; });
+    }
+
+    async function saveFileToArchive(chatId, name, content) {
+        if (!chatId || !name || typeof content !== 'string') return;
+        const owner = getChatOwnerKey();
+        if (!chatFileArchive[chatId]) chatFileArchive[chatId] = [];
+        const list = chatFileArchive[chatId];
+        const idx = list.findIndex(f => f.name === name);
+        const entry = { name, content, savedAt: Date.now() };
+        if (idx >= 0) list[idx] = entry; else list.push(entry);
+        try {
+            await idbPut(FILES_STORE, { id: `${owner}:${chatId}`, owner, chatId: String(chatId), files: list });
+        } catch (e) {
+            console.error('saveFileToArchive failed:', e);
+        }
+    }
+
+    async function deleteFileArchive(chatId) {
+        delete chatFileArchive[chatId];
+        const owner = getChatOwnerKey();
+        try { await idbDelete(FILES_STORE, `${owner}:${chatId}`); } catch (_) {}
+    }
+
+    const MAX_MODEL_VISIBLE_ARCHIVED_FILES = 3;
+    function recentArchivedFiles(chatId) {
+        const list = chatFileArchive[chatId] || [];
+        return [...list]
+            .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+            .slice(0, MAX_MODEL_VISIBLE_ARCHIVED_FILES);
+    }
+
+    function queueChatSave(chatId) {
+        const owner = getChatOwnerKey();
+        const chat = chats[chatId];
+        if (!chat) return;
+        const history = chatHistoryData[chatId] || [];
+        chatSaveQueue = chatSaveQueue.catch(() => {}).then(async () => {
+            await idbPut(CHAT_STORE, {
+                id: `${owner}:${chatId}`, owner, chatId: String(chatId),
+                title: chat.title || 'گفتگوی جدید', html: chat.html || '', updatedAt: Date.now(),
+                pinned: !!chat.pinned
+            });
+            await idbPut(HISTORY_STORE, {
+                id: `${owner}:${chatId}`, owner, chatId: String(chatId), history
+            });
+            // Sync با سرور در پس‌زمینه - منتظرش نمی‌مانیم تا ذخیره‌ی محلی
+            // (که همیشه اولویت دارد) کند نشود.
+            syncSaveChat(chatId);
+        }).catch(e => {
+            console.error('IndexedDB chat save failed:', e);
+            if (typeof showToast === 'function') showToast('ذخیره‌ی گفتگو با مشکل روبه‌رو شد؛ اطلاعات فعلی در صفحه باقی مانده است.', 'error', 5000);
+        });
+    }
+
+    async function initUserData() {
+        updateUserUI();
+        try {
+            await migrateLegacyChatStorage();
+            await loadChatsFromIndexedDB();
+        } catch (e) {
+            console.error('IndexedDB initialization failed:', e);
+            const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
+            const historyKey = currentUser ? `virtual_history_${currentUser.email}` : 'virtual_history_data';
+            try { chats = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch (_) { chats = {}; }
+            try { chatHistoryData = JSON.parse(localStorage.getItem(historyKey) || '{}') || {}; } catch (_) { chatHistoryData = {}; }
+        }
+        renderHistoryList();
+        if (chats[currentChatId]) loadChat(currentChatId, true);
+        // اگر لاگین باشیم، در پس‌زمینه با سرور sync می‌کنیم تا چت‌های
+        // دستگاه‌های دیگر هم بیایند؛ چت‌های مهمان اصلاً به سرور نمی‌روند.
+        if (currentUser) syncPullFromServer();
+    }
+
+
+    function updateUserUI() {
+        if (!currentUser) return;
+        const profileDiv = document.getElementById('userProfile');
+        const nameToDisplay = currentUser.customName || currentUser.name;
+        // FIX (عکس شکسته کنار اسم کاربر): چون دیگه از گوگل عکس پروفایل
+        // نمی‌گیریم، currentUser.picture همیشه خالیه و تگ <img> قدیمی
+        // آیکون شکسته‌ی مرورگر + alt="User" رو نشون می‌داد. حالا به‌جاش
+        // یه آواتار حرفی (حرف اول اسم/ایمیل) بدون وابستگی به عکس می‌سازیم.
+        const avatarLetter = (nameToDisplay || currentUser.email || '?').trim().charAt(0).toUpperCase();
+        profileDiv.innerHTML = `
+            <div class="user-avatar user-avatar-letter">${avatarLetter}</div>
+            <div class="user-info"><div class="user-name">${nameToDisplay}</div></div>
+            <div class="user-actions">
+                <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="ph-bold ph-arrows-clockwise"></i></button>
+                <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="lucide-icon" data-lucide="log-out" style="color:var(--danger);"></i></button>
+            </div>
+        `;
+        const titleEl = document.getElementById('welcomeHomeTitle');
+        if (titleEl) titleEl.innerText = `سلام ${nameToDisplay}! امروز چطور می‌تونم کمکت کنم؟`;
+        document.getElementById('customUserNameInput').value = nameToDisplay;
+    }
+
+    function logoutUser() {
+        if (confirm('آیا می‌خواهی از حساب کاربری خارج بشی؟')) {
+            localStorage.removeItem('virtual_chat_user');
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+            currentUser = null;
+            if (authMode !== 'login') toggleAuthMode();
+            document.getElementById('authOverlay').classList.add('active');
+            initUserData(); // برمی‌گردد به چت‌های مهمان (guest) - کاملاً جدا از هر حساب
+        }
+    }
+
+    function switchAccount() {
+        localStorage.removeItem('virtual_chat_user');
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        currentUser = null;
+        if (authMode !== 'login') toggleAuthMode();
+        document.getElementById('authOverlay').classList.add('active');
+        initUserData();
+    }
+
+    function updateCustomName(val) {
+        if (!val.trim()) return;
+        const name = val.trim();
+        if (currentUser) {
+            currentUser.customName = name;
+            localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
+        }
+        localStorage.setItem('virtual_user_custom_name', name);
+        updateUserUI();
+    }
+
+    const defaultSettings = { theme: 'auto', c1: '#6366f1', c2: '#a855f7', fontSize: 'normal', uiPalette: 'flat' };
+
+    // FIX (stale palette stuck forever): کاربرهایی که قبل از این آپدیت از
+    // اپ استفاده کرده بودند، تنظیمات قدیمی (uiPalette: 'charcoal' و رنگ‌های
+    // خاکستری/بنفش c1/c2) را از قبل در localStorage ذخیره داشتند. چون
+    // getSettings() همیشه {...defaultSettings, ...stored} می‌کرد، مقدار
+    // ذخیره‌شده‌ی قدیمی همیشه روی دیفالت جدید غالب می‌شد - و هر بار که
+    // saveSettings() یا تغییر تم/فونت obscurely دوباره همان مقدار قدیمی را
+    // در localStorage می‌نوشت، این مشکل هرگز خودش را پاک نمی‌کرد؛ فقط با
+    // پاک کردن دستی کش/localStorage از بین می‌رفت. حالا یک migration
+    // یک‌باره: اگر مقدار ذخیره‌شده هنوز به پالت منسوخ 'charcoal' اشاره
+    // می‌کند، همان‌جا آن را به پالت جدید مهاجرت می‌دهیم و بلافاصله در
+    // localStorage می‌نویسیم - برای همه‌ی کاربرها، بدون نیاز به پاک کردن کش.
+    function migrateStaleSettings(stored) {
+        if (stored.uiPalette === 'charcoal') {
+            stored.uiPalette = 'flat';
+            delete stored.c1;
+            delete stored.c2;
+            try { localStorage.setItem('virtual_settings', JSON.stringify(stored)); } catch (e) {}
+        }
+        return stored;
+    }
+
+    function getSettings() {
+        try {
+            const stored = { ...defaultSettings, ...JSON.parse(localStorage.getItem('virtual_settings') || '{}') };
+            return migrateStaleSettings(stored);
+        }
+        catch (e) { return { ...defaultSettings }; }
+    }
+
+    function hexToRgb(hex) {
+        const value = String(hex || '').replace('#', '');
+        const normalized = value.length === 3 ? value.split('').map(x => x + x).join('') : value;
+        const n = parseInt(normalized || '000000', 16);
+        return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    }
+
+    function mixHex(a, b, amount) {
+        const x = hexToRgb(a), y = hexToRgb(b);
+        const mix = (p, q) => Math.round(p + (q - p) * amount);
+        return '#' + [mix(x.r, y.r), mix(x.g, y.g), mix(x.b, y.b)]
+            .map(v => v.toString(16).padStart(2, '0')).join('');
+    }
+
+    function applyWholeUiPalette(s, resolvedTheme) {
+        const root = document.documentElement;
+        const isFlat = s.uiPalette === 'flat' || !s.uiPalette;
+        const light = resolvedTheme === 'light';
+
+        // FIX (FOUC): این تابع قبلاً یک حالت "charcoal" اجباری داشت که دقیقاً
+        // همان پالت خاکستری/بنفش قدیمی را بعد از اجرای اسکریپت اولیه‌ی
+        // head دوباره روی صفحه سوار می‌کرد و باعث می‌شد یک لحظه مشکی خالص
+        // دیده شود و بلافاصله برگردد به رنگ‌های قدیمی. حالا این تابع همان
+        // پالت صاف مشکی/سفید را اعمال می‌کند - دقیقاً هماهنگ با مقادیر
+        // پیش‌فرض :root در CSS و با اسکریپت applyFlatPalette در <head>.
+        if (isFlat && light) {
+            root.style.setProperty('--bg-main', '#ffffff');
+            root.style.setProperty('--bg-sidebar', '#f9f9f9');
+            root.style.setProperty('--bg-card', '#f2f2f2');
+            root.style.setProperty('--bg-card-hover', '#e8e8e8');
+            root.style.setProperty('--bg-input', '#f2f2f2');
+            root.style.setProperty('--border', '#e5e5e5');
+            root.style.setProperty('--border-soft', 'rgba(15,23,42,0.08)');
+            root.style.setProperty('--text-main', '#0d0d0d');
+            root.style.setProperty('--text-muted', '#6b6b6b');
+            root.style.setProperty('--code-bg', '#f2f2f2');
+            root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
+            root.style.setProperty('--code-text', '#0d0d0d');
+            root.style.setProperty('--shadow-a', 'rgba(30,41,59,0.08)');
+            root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
+            root.style.setProperty('--accent-1', '#6366f1');
+            root.style.setProperty('--accent-2', '#a855f7');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6366f1, #a855f7)');
+            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%), radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%)');
+            return;
+        }
+        if (isFlat) {
+            root.style.setProperty('--bg-main', '#000000');
+            root.style.setProperty('--bg-sidebar', '#0a0a0a');
+            root.style.setProperty('--bg-card', '#171717');
+            root.style.setProperty('--bg-card-hover', '#212121');
+            root.style.setProperty('--bg-input', '#171717');
+            root.style.setProperty('--border', '#262626');
+            root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
+            root.style.setProperty('--text-main', '#f4f6fb');
+            root.style.setProperty('--text-muted', '#8a8a8a');
+            root.style.setProperty('--code-bg', '#0d0d0d');
+            root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.04)');
+            root.style.setProperty('--code-text', '#f4f6fb');
+            root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.3)');
+            root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
+            root.style.setProperty('--accent-1', '#6366f1');
+            root.style.setProperty('--accent-2', '#a855f7');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6366f1, #a855f7)');
+            root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%), radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%)');
+            return;
+        }
+
+        const c1 = s.c1 || defaultSettings.c1;
+        const c2 = s.c2 || defaultSettings.c2;
+        root.style.setProperty('--accent-1', c1);
+        root.style.setProperty('--accent-2', c2);
+        root.style.setProperty('--accent-grad', `linear-gradient(135deg, ${c1}, ${c2})`);
+        root.style.setProperty('--bg-main', mixHex(light ? '#f6f7fb' : '#0a0c12', c1, light ? 0.055 : 0.16));
+        root.style.setProperty('--bg-sidebar', mixHex(light ? '#ffffff' : '#10131c', c1, light ? 0.045 : 0.18));
+        root.style.setProperty('--bg-card', mixHex(light ? '#f0f2f8' : '#161a24', c2, light ? 0.05 : 0.13));
+        root.style.setProperty('--bg-card-hover', mixHex(light ? '#e6e9f3' : '#1c2130', c1, light ? 0.06 : 0.18));
+        root.style.setProperty('--bg-input', mixHex(light ? '#ffffff' : '#191e29', c1, light ? 0.035 : 0.15));
+        root.style.setProperty('--border', mixHex(light ? '#e2e5ef' : '#232838', c1, light ? 0.10 : 0.18));
+        root.style.setProperty('--app-bg-image',
+            `radial-gradient(circle at 85% -10%, ${c1}33, transparent 45%), radial-gradient(circle at -10% 110%, ${c2}26, transparent 40%)`
+        );
+    }
+
+    function loadSettings() {
+        const s = getSettings();
+        applySettings(s);
+        renderSettingsUI(s);
+        if (window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+                const current = getSettings();
+                if (current.theme === 'auto') applySettings(current);
+            });
+        }
+    }
+
+    function applySettings(s) {
+        const resolvedTheme = s.theme === 'auto'
+            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+            : s.theme;
+        document.documentElement.setAttribute('data-theme', resolvedTheme);
+        applyWholeUiPalette(s, resolvedTheme);
+        const sizes = { small: '0.85rem', normal: '0.92rem', large: '1.02rem' };
+        document.documentElement.style.setProperty('--msg-font-size', sizes[s.fontSize] || sizes.normal);
+    }
+
+    function renderSettingsUI(s) {
+        document.querySelectorAll('#themeSegmented .segmented-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.value === s.theme);
+        });
+        document.querySelectorAll('#fontSegmented .segmented-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.value === s.fontSize);
+        });
+    }
+
+    function saveSettings() {
+        const s = getSettings();
+        localStorage.setItem('virtual_settings', JSON.stringify(s));
+        applySettings(s);
+    }
+
+    document.getElementById('themeSegmented').addEventListener('click', (e) => {
+        const btn = e.target.closest('.segmented-btn');
+        if (!btn) return;
+        const s = getSettings();
+        s.theme = btn.dataset.value;
+        localStorage.setItem('virtual_settings', JSON.stringify(s));
+        applySettings(s);
+        renderSettingsUI(s);
+    });
+
+    document.getElementById('fontSegmented').addEventListener('click', (e) => {
+        const btn = e.target.closest('.segmented-btn');
+        if (!btn) return;
+        const s = getSettings();
+        s.fontSize = btn.dataset.value;
+        localStorage.setItem('virtual_settings', JSON.stringify(s));
+        applySettings(s);
+        renderSettingsUI(s);
+    });
+
+    function openSettings() {
+        document.getElementById('chatSearchPanel')?.classList.remove('active');
+        renderSettingsUI(getSettings());
+        document.getElementById('settingsOverlay').classList.add('active');
+        document.getElementById('settingsModal').classList.add('active');
+    }
+
+    function closeSettings() {
+        document.getElementById('settingsOverlay').classList.remove('active');
+        document.getElementById('settingsModal').classList.remove('active');
+    }
+
+    function useSuggestion(el) {
+        if (isGenerating) return;
+        document.getElementById('userInput').value = el.innerText;
+        autoResizeTextarea(document.getElementById('userInput'));
+        sendMessage();
+    }
+
+    // FIX: this used to guess (via the same fixed keyword list as the old
+    // backend logic) whether a search was probably about to happen, just to
+    // show a "searching" loader animation early. Now that the backend
+    // reports real tool-call steps over SSE (see the {step} event handling
+    // in sendMessage), we don't need to guess anymore - the loader switches
+    // to "searching" mode only when the server actually calls web_search.
+
+    function toggleSearch() {
+        // دکمه‌ی دستی سرچ حذف شده؛ سرچ همیشه خودکاره. این تابع فقط برای
+        // سازگاری با فرمان /web نگه داشته شده و کاری نمی‌کنه.
+        isSearchEnabled = true;
+    }
+
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        if (window.innerWidth <= 768) {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('active');
+        } else {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+        }
+    }
+
+    function handleKeyDown(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!isGenerating) sendMessage();
+        }
+    }
+
+    function compressImage(file, maxDimension = 1024, quality = 0.7) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            // FIX/§2: a corrupted image file, or one whose FileReader/Image
+            // decode simply fails, used to leave this Promise pending
+            // forever — the upload UI would show "در حال پردازش..." with no
+            // way to recover short of removing the file and reloading.
+            reader.onerror = () => reject(new Error('FileReader failed to read image'));
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onerror = () => reject(new Error('Corrupted or unsupported image file'));
+                img.src = event.target.result;
+                img.onload = () => {
+                    let width = img.width, height = img.height;
+                    if (width > height) {
+                        if (width > maxDimension) { height = Math.round((height * maxDimension) / width); width = maxDimension; }
+                    } else {
+                        if (height > maxDimension) { width = Math.round((width * maxDimension) / height); height = maxDimension; }
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width; canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+            };
+        });
+    }
+
+    // ===== فشرده‌سازی ویدیو (بازطراحی‌شده) =====
+    //
+    // نسخه‌ی قبلی روی canvas.captureStream + requestAnimationFrame کار می‌کرد:
+    // یعنی ویدیو باید واقعاً از اول تا آخر "پخش" می‌شد تا فریم‌به‌فریم روی
+    // canvas کشیده و ضبط بشه. این یعنی:
+    //   ۱) فشرده‌سازی به اندازه‌ی خودِ طول ویدیو زمان می‌بره (ویدیوی ۲ دقیقه‌ای
+    //      = ۲ دقیقه پردازش)، بدون هیچ timeout ای -> اگر تب پس‌زمینه بشه یا
+    //      rAF محدود بشه، Promise برای همیشه معلق می‌مونه.
+    //   ۲) صدا کاملاً حذف می‌شد (captureStream روی canvas فقط تصویره).
+    //   ۳) videoBitsPerSecond فقط "پیشنهادی" است و خیلی مرورگرها نادیده‌ش
+    //      می‌گیرن -> گاهی هیچ کاهش حجمی هم اتفاق نمی‌افتاد.
+    //
+    // راه‌حل جدید: از HTMLVideoElement.captureStream() مستقیم استفاده می‌کنیم
+    // (نه از canvas) که هم تصویر و هم صدا رو با هم می‌ده و مرورگر خودش
+    // decode/encode رو به‌صورت داخلی و معمولاً سریع‌تر از real-time انجام
+    // می‌ده (خصوصاً وقتی video.muted=true و در background قابل پخش بمونه).
+    // اگر HTMLVideoElement.captureStream در دسترس نبود (مرورگرهای قدیمی/
+    // بعضی نسخه‌های iOS Safari)، fallback به همون روش canvas قبلی است، اما
+    // این بار با timeout و مدیریت خطای کامل.
+    //
+    // محدودیت‌های سخت‌گیرانه‌ی جدید که باعث می‌شه "پردازش نشدن" دیگه تکرار نشه:
+    //   - MAX_VIDEO_DURATION_SEC: ویدیوهای خیلی طولانی رد می‌شن با پیام واضح،
+    //     به‌جای اینکه دقیقه‌ها بی‌نتیجه پردازش بشن.
+    //   - COMPRESSION_TIMEOUT_MS: اگر فشرده‌سازی در این مدت تموم نشه، به‌جای
+    //      گیر کردن ابدی، خطای صریح می‌ده.
+    //   - METADATA_TIMEOUT_MS: فایل خراب/ناسازگار که loadedmetadata براش
+    //     هیچ‌وقت fire نمی‌شه هم دیگه گیر نمی‌کنه.
+
+    const MAX_VIDEO_DURATION_SEC = 120;       // ویدیوهای بلندتر از ۲ دقیقه رد می‌شوند
+    const METADATA_TIMEOUT_MS = 10000;        // ۱۰ ثانیه برای خواندن متادیتای ویدیو
+    const COMPRESSION_TIMEOUT_MS = 45000;     // ۴۵ ثانیه سقف زمان فشرده‌سازی
+
+    function pickSupportedVideoMime() {
+        const candidates = [
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp8',
+            'video/webm'
+        ];
+        for (const c of candidates) {
+            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) {
+                return c;
+            }
+        }
+        return 'video/webm';
+    }
+
+    function loadVideoMetadata(file) {
+        return new Promise((resolve, reject) => {
+            const video = document.createElement('video');
+            const url = URL.createObjectURL(file);
+            video.src = url;
+            video.muted = true;
+            video.playsInline = true;
+            video.preload = 'metadata';
+
+            const timer = setTimeout(() => {
+                cleanup();
+                reject(new Error('METADATA_TIMEOUT'));
+            }, METADATA_TIMEOUT_MS);
+
+            function cleanup() {
+                clearTimeout(timer);
+                video.onloadedmetadata = null;
+                video.onerror = null;
+            }
+
+            video.onloadedmetadata = () => {
+                cleanup();
+                resolve({ video, url });
+            };
+            video.onerror = () => {
+                cleanup();
+                URL.revokeObjectURL(url);
+                reject(new Error('CORRUPT_OR_UNSUPPORTED_VIDEO'));
+            };
+        });
+    }
+
+    function recordViaVideoElementStream(video, targetWidth, bitrate) {
+        return new Promise((resolve, reject) => {
+            let width = video.videoWidth || targetWidth;
+            let height = video.videoHeight || Math.round(targetWidth * 9 / 16);
+            if (width > targetWidth) {
+                height = Math.round((height * targetWidth) / width);
+                width = targetWidth;
+            }
+
+            let stream;
+            try {
+                // Direct element capture: includes audio track(s), and the
+                // browser decodes/encodes internally rather than us drawing
+                // frames one at a time - much faster and audio-preserving.
+                stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+            } catch (e) {
+                reject(e);
                 return;
             }
 
-            // This is an explicit/current-info search turn. Keep the entire
-            // pre-tool stream off the wire until Gemini either emits the
-            // functionCall (then the buffer is discarded) or finishes without
-            // a tool (then the buffer is flushed below). This is intentionally
-            // scoped ONLY to likely search requests, so ordinary chat keeps the
-            // zero-buffer live streaming path. Bounded by PREAMBLE_HOLD_MS
-            // above so a slow-to-decide model never blocks the UI for long.
-            pendingToolPreamble += text;
-            armPreambleHoldTimer();
-        };
-
-        const handleEventPayload = (jsonStr) => {
-            let evt;
-            try { evt = JSON.parse(jsonStr); } catch (_) { return; }
-            const candidate = evt?.candidates?.[0];
-            if (!candidate) return;
-            if (evt.usageMetadata) lastUsage = evt.usageMetadata;
-            if (candidate.finishReason) finishReason = candidate.finishReason;
-
-            const parts = candidate?.content?.parts || [];
-            const eventHasFunctionCall = parts.some(part => !!part?.functionCall);
-            if (eventHasFunctionCall) {
-                sawFunctionCall = true;
-                clearPreambleHoldTimer();
-                // Anything held so far was pre-tool narration. Do NOT flush it.
-                // (If preambleTimedOut already flushed some of it live, that
-                // small preamble is left as-is â€” the discard only applies to
-                // whatever is still sitting in the buffer at this point.)
-                pendingToolPreamble = '';
+            const mimeType = pickSupportedVideoMime();
+            let mediaRecorder;
+            try {
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType,
+                    videoBitsPerSecond: bitrate,
+                    audioBitsPerSecond: 96000
+                });
+            } catch (constructErr) {
+                reject(constructErr);
+                return;
             }
 
-            for (const part of parts) {
-                if (typeof part.text === 'string') {
-                    // FIX (root cause of "Function call is missing a
-                    // thought_signature"): in the generateContent API,
-                    // Gemini can attach `thoughtSignature` metadata to ANY
-                    // part - not only functionCall parts, a text part right
-                    // before a functionCall can carry it too. This must be
-                    // preserved and resent unmodified on every later turn
-                    // (stateless multi-turn requirement per Google's docs),
-                    // so it is copied through here rather than dropped.
-                    const textPart = { text: part.text };
-                    if (part.thoughtSignature) textPart.thoughtSignature = part.thoughtSignature;
-                    accumulatedParts.push(textPart);
-                    // If this event also contains the tool call, its text is
-                    // not a valid user-facing preamble. Otherwise use the
-                    // selective guard above: normal turns stream immediately,
-                    // search-intent turns suppress only obvious preambles.
-                    if (!eventHasFunctionCall) {
-                        handleStreamText(part.text);
-                    }
-                } else if (part.functionCall) {
-                    // FIX (root cause of "Function call is missing a
-                    // thought_signature in functionCall parts"): previously
-                    // only `{ functionCall: part.functionCall }` was kept,
-                    // silently dropping any `thoughtSignature` Gemini
-                    // attached to this same part. That stripped part was
-                    // then resent as the model's turn on the NEXT round
-                    // (e.g. right after get_archived_file), and Gemini
-                    // rejects a functionCall that is missing its required
-                    // signature with a 400 INVALID_ARGUMENT. Now the
-                    // signature is copied through untouched, exactly as
-                    // received, so the resent turn is byte-for-byte valid.
-                    const fcPart = { functionCall: part.functionCall };
-                    if (part.thoughtSignature) fcPart.thoughtSignature = part.thoughtSignature;
-                    accumulatedParts.push(fcPart);
+            const chunks = [];
+            let settled = false;
+
+            const finish = (fn, arg) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(hardTimeout);
+                fn(arg);
+            };
+
+            const hardTimeout = setTimeout(() => {
+                try { if (mediaRecorder.state === 'recording') mediaRecorder.stop(); } catch (_) {}
+                finish(reject, new Error('COMPRESSION_TIMEOUT'));
+            }, COMPRESSION_TIMEOUT_MS);
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+            mediaRecorder.onerror = (err) => {
+                finish(reject, err?.error || err || new Error('MediaRecorder error'));
+            };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                if (blob.size === 0) {
+                    finish(reject, new Error('EMPTY_OUTPUT'));
+                    return;
                 }
+                const reader = new FileReader();
+                reader.onloadend = () => finish(resolve, reader.result);
+                reader.onerror = () => finish(reject, new Error('Failed to read compressed video blob'));
+                reader.readAsDataURL(blob);
+            };
+
+            video.currentTime = 0;
+            video.onended = () => {
+                if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+            };
+
+            video.play().then(() => {
+                mediaRecorder.start(250); // collect data in chunks, not just at the end
+            }).catch((playErr) => {
+                finish(reject, playErr);
+            });
+        });
+    }
+
+    // Fallback for browsers without HTMLVideoElement.captureStream support:
+    // same canvas-drawing approach as before, but now with a hard timeout so
+    // it can never hang forever, and audio is still lost (unavoidable with
+    // a canvas-only stream) - this path is a last resort, not the default.
+    function recordViaCanvasFallback(video, targetWidth, bitrate) {
+        return new Promise((resolve, reject) => {
+            let width = video.videoWidth;
+            let height = video.videoHeight;
+            if (width > targetWidth) {
+                height = Math.round((height * targetWidth) / width);
+                width = targetWidth;
             }
-        };
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            const stream = canvas.captureStream(25);
+            const mimeType = pickSupportedVideoMime();
+
+            let mediaRecorder;
+            try {
+                mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
+            } catch (constructErr) {
+                reject(constructErr);
+                return;
+            }
+
+            const chunks = [];
+            let settled = false;
+            const finish = (fn, arg) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(hardTimeout);
+                fn(arg);
+            };
+
+            const hardTimeout = setTimeout(() => {
+                try { if (mediaRecorder.state === 'recording') mediaRecorder.stop(); } catch (_) {}
+                finish(reject, new Error('COMPRESSION_TIMEOUT'));
+            }, COMPRESSION_TIMEOUT_MS);
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+            mediaRecorder.onerror = (err) => finish(reject, err?.error || err || new Error('MediaRecorder error'));
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                if (blob.size === 0) { finish(reject, new Error('EMPTY_OUTPUT')); return; }
+                const reader = new FileReader();
+                reader.onloadend = () => finish(resolve, reader.result);
+                reader.onerror = () => finish(reject, new Error('Failed to read compressed video blob'));
+                reader.readAsDataURL(blob);
+            };
+
+            video.play().then(() => {
+                mediaRecorder.start();
+                function drawFrame() {
+                    if (settled) return;
+                    if (video.paused || video.ended) {
+                        if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+                        return;
+                    }
+                    ctx.drawImage(video, 0, 0, width, height);
+                    requestAnimationFrame(drawFrame);
+                }
+                drawFrame();
+            }).catch((playErr) => finish(reject, playErr));
+        });
+    }
+
+    // Public entry point. Resolves to a base64 data URL of a compressed
+    // webm, or rejects with an Error whose .message is one of the specific
+    // codes above (METADATA_TIMEOUT / CORRUPT_OR_UNSUPPORTED_VIDEO /
+    // DURATION_TOO_LONG / COMPRESSION_TIMEOUT / EMPTY_OUTPUT) so the caller
+    // can show a precise, actionable message instead of a generic failure.
+    async function compressVideo(file, targetWidth = 480, bitrate = 700000, onProgress) {
+        let meta;
+        try {
+            meta = await loadVideoMetadata(file);
+        } catch (e) {
+            throw e;
+        }
+
+        const { video, url } = meta;
 
         try {
+            if (video.duration && video.duration > MAX_VIDEO_DURATION_SEC) {
+                throw new Error('DURATION_TOO_LONG');
+            }
+
+            if (onProgress) onProgress('compressing');
+
+            let resultPromise;
+            if (typeof video.captureStream === 'function' || typeof video.mozCaptureStream === 'function') {
+                resultPromise = recordViaVideoElementStream(video, targetWidth, bitrate);
+            } else {
+                resultPromise = recordViaCanvasFallback(video, targetWidth, bitrate);
+            }
+
+            const result = await resultPromise;
+            return result;
+        } finally {
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    function guessMimeType(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const mimeMap = {
+            'mp4': 'video/mp4', 'mov': 'video/quicktime', 'webm': 'video/webm',
+            'avi': 'video/x-msvideo', 'mpeg': 'video/mpeg', 'wmv': 'video/x-ms-wmv',
+            '3gpp': 'video/3gpp', 'flv': 'video/x-flv', 'mkv': 'video/x-matroska',
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+            'gif': 'image/gif', 'webp': 'image/webp', 'pdf': 'application/pdf',
+            'txt': 'text/plain', 'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'zip': 'application/zip'
+        };
+        return mimeMap[ext] || 'application/octet-stream';
+    }
+
+    // §3: extension list expanded to also cover hpp/bash/csv/log, which
+    // were requested but previously fell through to the generic binary
+    // branch (base64-only, no text extraction) even though they're plain
+    // text and should get the same "Reading -> Ready" text pipeline as
+    // other code/text files.
+    const CODE_TEXT_EXTENSIONS = ['js', 'jsx', 'ts', 'tsx', 'html', 'htm', 'css', 'scss', 'json', 'py',
+        'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'php', 'rb', 'go', 'rs', 'sql', 'sh', 'bash', 'yml', 'yaml', 'xml',
+        'md', 'txt', 'vue', 'svelte', 'kt', 'swift', 'ini', 'env', 'conf', 'csv', 'log'];
+
+    function isCodeOrTextFile(file) {
+        if (!file || !file.name) return false;
+        // FIX/§3: don't trust file.type alone (it can be empty or wrong for
+        // renamed files, and some browsers report text/plain or "" for code
+        // files with recognizable extensions like .py or .yml). Check both
+        // the MIME type AND the extension, and let the extension win when
+        // it's a known code/text extension even if the MIME type disagrees.
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (CODE_TEXT_EXTENSIONS.includes(ext)) return true;
+        if (file.type && file.type.startsWith('text/')) return true;
+        if (file.type === 'application/json' || file.type === 'application/xml') return true;
+        return false;
+    }
+
+    function renderCodeFilesBar() {
+        const bar = document.getElementById('codeFilesBar');
+        if (!bar) return;
+        if (!codeFilesMemory.length) {
+            bar.classList.remove('has-items');
+            bar.innerHTML = '';
+            return;
+        }
+        bar.classList.add('has-items');
+        bar.innerHTML = codeFilesMemory.map(f => `
+            <span class="file-preview" style="display:inline-flex;position:relative;" onclick="openTextFileEditor('${f.name.replace(/'/g, "\\'")}')">
+                <button class="fp-remove" type="button" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="lucide-icon" data-lucide="x"></i></button>
+                <span class="fp-icon-wrap"><i class="lucide-icon fp-type-icon" data-lucide="file-code-2"></i></span>
+                <span class="fp-text">
+                    <span class="fp-name">${escapeHtml(f.name)}</span>
+                    <span class="file-status">${getFileTypeLabel(f.name)}</span>
+                </span>
+            </span>
+        `).join('');
+        if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (_) {} }
+    }
+
+    // FEATURE (auto-convert long text to file): کلیک روی چیپِ فایل متنی
+    // (چه فایل واقعی آپلودشده، چه متن طولانی‌ای که خودکار تبدیل شده) یک
+    // مودال ادیتور ساده باز می‌کند تا کاربر بتواند محتوا را بدون محدودیت
+    // ۵۰ خط ویرایش کند - همون الگوی showPrompt ولی با textarea بزرگ.
+    function openTextFileEditor(name) {
+        const file = codeFilesMemory.find(f => f.name === name);
+        if (!file) return;
+
+        const overlay = document.getElementById('textFileEditorOverlay');
+        const titleEl = document.getElementById('textFileEditorTitle');
+        const area = document.getElementById('textFileEditorArea');
+        const saveBtn = document.getElementById('textFileEditorSaveBtn');
+        const cancelBtn = document.getElementById('textFileEditorCancelBtn');
+        if (!overlay || !titleEl || !area || !saveBtn || !cancelBtn) return;
+
+        titleEl.textContent = `ویرایش «${name}»`;
+        area.value = file.content;
+        overlay.classList.add('active');
+        setTimeout(() => area.focus(), 30);
+
+        const cleanup = () => {
+            overlay.classList.remove('active');
+            saveBtn.removeEventListener('click', onSave);
+            cancelBtn.removeEventListener('click', onCancel);
+            overlay.removeEventListener('click', onOverlayClick);
+        };
+        const onSave = () => {
+            const idx = codeFilesMemory.findIndex(f => f.name === name);
+            if (idx >= 0) codeFilesMemory[idx] = { ...codeFilesMemory[idx], content: area.value };
+            renderCodeFilesBar();
+            cleanup();
+        };
+        const onCancel = () => cleanup();
+        const onOverlayClick = (e) => { if (e.target === overlay) cleanup(); };
+
+        saveBtn.addEventListener('click', onSave);
+        cancelBtn.addEventListener('click', onCancel);
+        overlay.addEventListener('click', onOverlayClick);
+    }
+
+    function removeCodeFile(name) {
+        codeFilesMemory = codeFilesMemory.filter(f => f.name !== name);
+        renderCodeFilesBar();
+    }
+
+    function clearCodeFilesMemory() {
+        codeFilesMemory = [];
+        renderCodeFilesBar();
+    }
+
+    // فقط نوار پیش‌نمایش پایین رو مخفی می‌کنه؛ خود codeFilesMemory دست‌نخورده می‌مونه
+    // تا مدل بتونه برای ادیت‌های بعدی بدون نیاز به آپلود دوباره بهش رجوع کنه
+    function hideCodeFilesBar() {
+        const bar = document.getElementById('codeFilesBar');
+        if (bar) {
+            bar.classList.remove('has-items');
+        }
+    }
+
+    async function handleFileSelect(event) {
+        const files = Array.from(event?.target?.files || []);
+        if (!files.length) return;
+        for (const file of files) {
+            await processIncomingFile(file);
+        }
+        event.target.value = '';
+    }
+
+    // یک آیتم موقت با وضعیت "در حال پردازش" به لیست پیش‌نمایش اضافه می‌کند و
+    // شناسه‌ی یکتای همان آیتم رو برمی‌گردونه تا بعداً بشه وضعیتش رو آپدیت کرد.
+    // این‌طوری وقتی چند فایل با هم انتخاب میشن، هر کدوم ردیف/وضعیت جدای خودشو
+    // داره و پردازش موازی یکی، وضعیت بقیه رو خراب نمی‌کنه.
+    let __filePreviewSeq = 0;
+    function getFileTypeIcon(name) {
+        const ext = String(name || '').split('.').pop().toLowerCase();
+        if (['pdf'].includes(ext)) return 'file-text';
+        if (['doc', 'docx'].includes(ext)) return 'file-text';
+        if (['xls', 'xlsx', 'csv'].includes(ext)) return 'file-spreadsheet';
+        if (['zip', 'rar', '7z'].includes(ext)) return 'file-archive';
+        if (['mp4', 'webm', 'mov', 'mkv'].includes(ext)) return 'file-video';
+        if (['mp3', 'wav', 'ogg'].includes(ext)) return 'file-audio';
+        if (['js', 'ts', 'py', 'html', 'css', 'json', 'jsx', 'tsx', 'java', 'c', 'cpp', 'php'].includes(ext)) return 'file-code';
+        return 'file';
+    }
+    function getFileTypeLabel(name) {
+        const ext = (name || '').split('.').pop()?.toUpperCase() || '';
+        const map = { PDF: 'PDF', DOC: 'Word', DOCX: 'Word', XLS: 'Excel', XLSX: 'Excel', PPT: 'PowerPoint', PPTX: 'PowerPoint', TXT: 'متن', HTML: 'File', CSS: 'File', JS: 'File', JSON: 'File', PY: 'File', MP4: 'ویدیو', WEBM: 'ویدیو', MOV: 'ویدیو' };
+        return map[ext] || (ext ? ext : 'فایل');
+    }
+
+    function addFilePreviewItem(name) {
+        const id = 'fp' + (++__filePreviewSeq);
+        const list = document.getElementById('filePreviewList');
+        list.classList.add('has-items');
+        const row = document.createElement('div');
+        row.className = 'file-preview';
+        row.style.display = 'flex';
+        row.id = id;
+        row.innerHTML = `
+            <button class="fp-remove" type="button" onclick="removeFileItem('${id}')" title="حذف"><i class="lucide-icon" data-lucide="x"></i></button>
+            <img class="fp-thumb" src="" alt="" style="display:none;">
+            <div class="fp-icon-wrap">
+                <i class="lucide-icon fp-type-icon" data-lucide="${getFileTypeIcon(name)}"></i>
+            </div>
+            <div class="fp-text">
+                <span class="fp-name">${escapeHtml(name || 'فایل بدون‌نام')}</span>
+                <span class="file-status loading fp-status">${getFileTypeLabel(name)}</span>
+            </div>
+        `;
+        list.appendChild(row);
+        if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (_) {} }
+        return id;
+    }
+
+    function updateFilePreviewItem(id, { status, statusClass, thumbSrc }) {
+        const row = document.getElementById(id);
+        if (!row) return;
+        const statusEl = row.querySelector('.fp-status');
+        // FIX (ظاهر مطابق نمونه‌ی ChatGPT): وقتی status «تصویر آماده» است،
+        // یعنی این پیش‌نمایش یک عکس واقعی است، نه یک فایل عمومی. در آن
+        // حالت متن دو-خطی (اسم/نوع) را مخفی می‌کنیم و فقط thumbnail بزرگ
+        // مربعی نمایش داده می‌شود - دقیقاً مثل تصاویری که کاربر در چت
+        // ChatGPT ضمیمه می‌کند. برای بقیه‌ی فایل‌ها (PDF, HTML, ویدیو و…)
+        // همان چیپ دو-خطی با آیکون دایره‌ای می‌ماند.
+        if (statusClass === 'success' && /تصویر/.test(status || '')) {
+            row.classList.add('is-image');
+        }
+        if (statusEl && status !== undefined) {
+            statusEl.textContent = status;
+            statusEl.className = 'file-status fp-status ' + (statusClass || '');
+        }
+        if (thumbSrc) {
+            const img = row.querySelector('.fp-thumb');
+            const typeIcon = row.querySelector('.fp-type-icon');
+            if (img) { img.src = thumbSrc; img.style.display = 'block'; }
+            if (typeIcon) { typeIcon.style.display = 'none'; }
+        }
+    }
+
+    function removeFileItem(id) {
+        const row = document.getElementById(id);
+        if (row) row.remove();
+        selectedFilesData = selectedFilesData.filter(f => f.__previewId !== id);
+        // FIX (zombie-file bug): if this file is still being compressed/read
+        // in the background, mark it cancelled so the in-flight
+        // processIncomingFile() call knows not to push its result into
+        // selectedFilesData once it finishes — otherwise a file the user
+        // just removed silently reappears in the send payload a moment later.
+        cancelledPreviewIds.add(id);
+        const list = document.getElementById('filePreviewList');
+        if (list && !list.children.length) list.classList.remove('has-items');
+    }
+
+    let filesProcessingCount = 0;
+    const cancelledPreviewIds = new Set();
+
+    // ===== ZIP text/code extraction =====
+    // .zip is a container, not a model-readable text file. Extract supported
+    // text/code entries locally and feed them into the normal multi-file memory.
+    async function readZipEntries(file) {
+        const buffer = await file.arrayBuffer();
+        const view = new DataView(buffer);
+        const bytes = new Uint8Array(buffer);
+        const utf8 = new TextDecoder('utf-8', { fatal: false });
+        const u16 = o => view.getUint16(o, true);
+        const u32 = o => view.getUint32(o, true);
+
+        let eocd = -1;
+        const start = Math.max(0, bytes.length - 65557);
+        for (let i = bytes.length - 22; i >= start; i--) {
+            if (u32(i) === 0x06054b50) { eocd = i; break; }
+        }
+        if (eocd < 0) throw new Error('ZIP_EOCD_NOT_FOUND');
+
+        const totalEntries = u16(eocd + 10);
+        const centralSize = u32(eocd + 12);
+        const centralOffset = u32(eocd + 16);
+        if (totalEntries === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
+            throw new Error('ZIP64_UNSUPPORTED');
+        }
+
+        const entries = [];
+        let p = centralOffset;
+        const MAX_ZIP_ENTRIES = 100;
+        const MAX_TOTAL_TEXT_BYTES = 2 * 1024 * 1024;
+
+        for (let i = 0; i < totalEntries && i < MAX_ZIP_ENTRIES; i++) {
+            if (p + 46 > bytes.length || u32(p) !== 0x02014b50) throw new Error('ZIP_CENTRAL_INVALID');
+
+            const flags = u16(p + 8);
+            const method = u16(p + 10);
+            const compressedSize = u32(p + 20);
+            const uncompressedSize = u32(p + 24);
+            const nameLen = u16(p + 28);
+            const extraLen = u16(p + 30);
+            const commentLen = u16(p + 32);
+            const localOffset = u32(p + 42);
+            const nameBytes = bytes.slice(p + 46, p + 46 + nameLen);
+            const name = (flags & 0x0800)
+                ? utf8.decode(nameBytes)
+                : new TextDecoder('windows-1252').decode(nameBytes);
+            p += 46 + nameLen + extraLen + commentLen;
+
+            if (!name || name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
+            if (flags & 0x0001) continue;
+            if (compressedSize > 8 * 1024 * 1024 || uncompressedSize > 2 * 1024 * 1024) continue;
+            if (localOffset + 30 > bytes.length || u32(localOffset) !== 0x04034b50) continue;
+
+            const localNameLen = u16(localOffset + 26);
+            const localExtraLen = u16(localOffset + 28);
+            const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+            const dataEnd = dataStart + compressedSize;
+            if (dataEnd > bytes.length) continue;
+            if (!isCodeOrTextFile({ name, type: '' })) continue;
+
+            let raw;
+            if (method === 0) {
+                raw = bytes.slice(dataStart, dataEnd);
+            } else if (method === 8) {
+                if (typeof DecompressionStream !== 'function') throw new Error('ZIP_DEFLATE_UNSUPPORTED');
+                const ds = new DecompressionStream('deflate-raw');
+                const stream = new Blob([bytes.slice(dataStart, dataEnd)]).stream().pipeThrough(ds);
+                raw = new Uint8Array(await new Response(stream).arrayBuffer());
+            } else {
+                continue;
+            }
+
+            if (raw.length > 2 * 1024 * 1024) continue;
+            entries.push({ name, content: utf8.decode(raw), size: raw.length });
+        }
+
+        if (!entries.length) throw new Error('ZIP_NO_TEXT_FILES');
+        if (entries.reduce((n, e) => n + e.size, 0) > MAX_TOTAL_TEXT_BYTES) {
+            throw new Error('ZIP_TEXT_TOO_LARGE');
+        }
+        return entries;
+    }
+
+    const MAX_ATTACHED_FILES = 10;
+
+    async function processIncomingFile(file) {
+        if (isGenerating || !file) return;
+
+        // FEATURE (سقف تعداد فایل هر ارسال): کاربر نباید بتواند بیشتر از
+        // MAX_ATTACHED_FILES فایل هم‌زمان (چه با انتخاب دستی، چه drag&drop،
+        // چه paste - هر سه مسیر از همین یک تابع رد می‌شوند) به یک پیام ضمیمه
+        // کند. هم فایل‌های تازه انتخاب‌شده (selectedFilesData) و هم فایل‌های
+        // متنی از قبل در حافظه‌ی همین چت (codeFilesMemory) در این سقف حساب
+        // می‌شوند، چون هر دو با هم در همان درخواست به مدل فرستاده می‌شوند.
+        const currentFileCount = selectedFilesData.length + (Array.isArray(codeFilesMemory) ? codeFilesMemory.length : 0);
+        if (currentFileCount >= MAX_ATTACHED_FILES) {
+            showToast(`حداکثر ${MAX_ATTACHED_FILES} فایل در هر ارسال مجاز است.`, 'warning');
+            return;
+        }
+
+        const previewId = addFilePreviewItem(file.name);
+        filesProcessingCount++;
+
+        // FIX/§2: a genuinely empty (0-byte) file used to sail through every
+        // branch below as if it were valid content — for a text file that
+        // means codeFilesMemory silently gets an empty string, and the model
+        // later "reads" a file that has nothing in it without ever being
+        // told so. Reject it explicitly and don't pretend it was processed.
+        if (file.size === 0) {
+            updateFilePreviewItem(previewId, { status: 'فایل خالی است', statusClass: 'error' });
+            showToast('این فایل خالی است و قابل پردازش نیست.', 'warning');
+            filesProcessingCount = Math.max(0, filesProcessingCount - 1);
+            return;
+        }
+
+        const MAX_DIRECT_SIZE = 4 * 1024 * 1024;
+
+        try {
+            // FIX: file.type can be undefined on some File-like objects
+            // (certain clipboard/drag sources), which previously threw on
+            // .startsWith(). Coerce to a string first.
+            const mimeType = file.type || '';
+            const isZip = mimeType === 'application/zip' || /\.zip$/i.test(file.name || '');
+            const isVideo = mimeType.startsWith('video/') || /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i.test(file.name || '');
+            const isImage = mimeType.startsWith('image/');
+
+            if (isZip) {
+                updateFilePreviewItem(previewId, { status: 'در حال باز کردن ZIP...', statusClass: 'loading' });
+                try {
+                    const entries = await readZipEntries(file);
+                    if (cancelledPreviewIds.has(previewId)) return;
+                    for (const entry of entries) {
+                        const idx = codeFilesMemory.findIndex(f => f.name === entry.name);
+                        const item = { name: entry.name, content: entry.content, mode: 'text', sourceArchive: file.name };
+                        if (idx >= 0) codeFilesMemory[idx] = item;
+                        else codeFilesMemory.push(item);
+                    }
+                    renderCodeFilesBar();
+                    removeFileItem(previewId);
+                    showToast(`${entries.length} فایل متنی/کدی از «${file.name}» استخراج و آماده شد.`, 'success');
+                } catch (zipErr) {
+                    const messages = {
+                        ZIP_EOCD_NOT_FOUND: 'ZIP معتبر یا کامل نیست.',
+                        ZIP64_UNSUPPORTED: 'ZIP64 پشتیبانی نمی‌شود؛ یک ZIP معمولی امتحان کن.',
+                        ZIP_CENTRAL_INVALID: 'ساختار ZIP قابل خواندن نیست.',
+                        ZIP_DEFLATE_UNSUPPORTED: 'مرورگر فعلی فشرده‌سازی ZIP را پشتیبانی نمی‌کند.',
+                        ZIP_NO_TEXT_FILES: 'داخل ZIP فایل متنی/کدی قابل ویرایش پیدا نشد.',
+                        ZIP_TEXT_TOO_LARGE: 'حجم مجموع فایل‌های متنی داخل ZIP زیاد است.'
+                    };
+                    const msg = messages[zipErr?.message] || 'خواندن فایل ZIP با خطا مواجه شد.';
+                    updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                    showToast(msg, 'error');
+                }
+            } else if (isImage) {
+                const compressedBase64 = await compressImage(file, 1024, 0.7);
+                // FIX (zombie-file bug): user may have clicked the ✕ while
+                // this compression was still running — check before pushing.
+                if (cancelledPreviewIds.has(previewId)) return;
+                // FIX (multi-file bug): push a new entry instead of
+                // overwriting the single selectedFileData object, so
+                // multiple images selected/pasted/dropped together are all
+                // kept and all sent to the backend.
+                selectedFilesData.push({ __previewId: previewId, name: file.name, type: 'image/jpeg', base64: compressedBase64 });
+                updateFilePreviewItem(previewId, { status: 'تصویر آماده', statusClass: 'success', thumbSrc: compressedBase64 });
+            } else if (isVideo) {
+                // Backend's hard limit on a single binary attachment's
+                // base64 length (kept in sync with MAX_BINARY_BASE64_CHARS
+                // in pages/api/chat.js). Checking against this BEFORE
+                // accepting a "successfully compressed" result means we
+                // never show the user a green "ویدیو آماده" for a file the
+                // server is just going to reject anyway.
+                const MAX_BACKEND_BASE64_CHARS = 15 * 1024 * 1024;
+
+                let videoBase64 = '';
+
+                if (file.size > MAX_DIRECT_SIZE) {
+                    updateFilePreviewItem(previewId, { status: 'در حال بررسی ویدیو...', statusClass: 'loading' });
+
+                    try {
+                        videoBase64 = await compressVideo(file, 480, 700000, (stage) => {
+                            if (stage === 'compressing') {
+                                updateFilePreviewItem(previewId, { status: 'در حال فشرده‌سازی ویدیو...', statusClass: 'loading' });
+                            }
+                        });
+                    } catch (compressErr) {
+                        const code = compressErr && compressErr.message;
+                        const messages = {
+                            'METADATA_TIMEOUT': 'فایل ویدیویی قابل خواندن نبود (فرمت پشتیبانی نمی‌شود).',
+                            'CORRUPT_OR_UNSUPPORTED_VIDEO': 'ویدیو خراب است یا فرمت آن پشتیبانی نمی‌شود.',
+                            'DURATION_TOO_LONG': `ویدیو خیلی طولانی است (حداکثر ${MAX_VIDEO_DURATION_SEC} ثانیه).`,
+                            'COMPRESSION_TIMEOUT': 'فشرده‌سازی ویدیو خیلی طول کشید — لطفاً فایل کوتاه‌تری امتحان کن.',
+                            'EMPTY_OUTPUT': 'فشرده‌سازی ویدیو نتیجه‌ای نداد — لطفاً دوباره امتحان کن.'
+                        };
+                        const msg = messages[code] || 'پردازش ویدیو با خطا مواجه شد.';
+                        updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                        showToast(msg, 'error');
+                        return;
+                    }
+
+                    if (videoBase64.length > MAX_BACKEND_BASE64_CHARS) {
+                        const msg = 'حتی بعد از فشرده‌سازی، ویدیو خیلی بزرگ است برای ارسال.';
+                        updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                        showToast(msg, 'error');
+                        return;
+                    }
+                } else {
+                    videoBase64 = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = () => reject(new Error('READ_FAILED'));
+                        reader.readAsDataURL(file);
+                    }).catch(() => {
+                        const msg = 'خواندن فایل ویدیو با خطا مواجه شد.';
+                        updateFilePreviewItem(previewId, { status: msg, statusClass: 'error' });
+                        showToast(msg, 'error');
+                        return '';
+                    });
+                    if (!videoBase64) return;
+                }
+
+                if (cancelledPreviewIds.has(previewId)) return;
+                selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.size > MAX_DIRECT_SIZE ? 'video/webm' : (file.type || guessMimeType(file.name)), base64: videoBase64 });
+                updateFilePreviewItem(previewId, { status: 'ویدیو آماده', statusClass: 'success' });
+            } else if (isCodeOrTextFile(file)) {
+                const MAX_TEXT_SIZE = 650 * 1024;
+                if (file.size > MAX_TEXT_SIZE) {
+                    updateFilePreviewItem(previewId, { status: 'فایل خیلی بزرگ است (حداکثر ۶۵۰ کیلوبایت)', statusClass: 'error' });
+                    showToast('فایل خیلی بزرگه — حداکثر ۶۵۰ کیلوبایت برای فایل متنی/کد.', 'warning');
+                } else {
+                    const text = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(String(e.target.result || ''));
+                        reader.onerror = reject;
+                        reader.readAsText(file);
+                    });
+                    const existingIndex = codeFilesMemory.findIndex(f => f.name === file.name);
+                    if (existingIndex >= 0) codeFilesMemory[existingIndex] = { name: file.name, content: text, mode: 'text' };
+                    else codeFilesMemory.push({ name: file.name, content: text, mode: 'text' });
+                    renderCodeFilesBar();
+                    // Text/code files show up in the codeFilesBar, not the
+                    // binary-file preview list, so remove this row.
+                    removeFileItem(previewId);
+                }
+            } else {
+                // Covers PDFs and any other binary file type. PDFs get an explicit
+                // size cap here since a large PDF becomes a very large base64
+                // payload; the backend enforces its own hard limit too, but failing
+                // fast client-side avoids a pointless upload+round-trip.
+                const isPdf = mimeType === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+                const MAX_PDF_SIZE = 8 * 1024 * 1024; // 8MB
+                if (isPdf && file.size > MAX_PDF_SIZE) {
+                    updateFilePreviewItem(previewId, { status: 'فایل PDF خیلی بزرگ است (حداکثر ۸ مگابایت)', statusClass: 'error' });
+                    showToast('فایل PDF خیلی بزرگه — حداکثر ۸ مگابایت.', 'warning');
+                } else {
+                    // FIX: converted from an onload/onerror callback pair to
+                    // an awaited Promise. Previously this function returned
+                    // (and decremented filesProcessingCount) before the file
+                    // was actually finished reading, so "در حال آپلود" state
+                    // ended early and the send button unblocked while a PDF
+                    // was still being read into memory.
+                    await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const base64 = e.target.result;
+                            if (cancelledPreviewIds.has(previewId)) { resolve(); return; }
+                            selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.type || guessMimeType(file.name), base64: base64 });
+                            updateFilePreviewItem(previewId, { status: isPdf ? 'PDF آماده' : 'فایل آماده', statusClass: 'success' });
+                            resolve();
+                        };
+                        reader.onerror = () => {
+                            updateFilePreviewItem(previewId, { status: 'خطا در خواندن فایل', statusClass: 'error' });
+                            showToast('فایل خراب است یا خوانده نشد.', 'error');
+                            resolve();
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                }
+            }
+        } catch (e) {
+            updateFilePreviewItem(previewId, { status: 'خطا', statusClass: 'error' });
+            showToast('پردازش فایل با خطا مواجه شد.', 'error');
+        } finally {
+            filesProcessingCount = Math.max(0, filesProcessingCount - 1);
+        }
+    }
+
+    function removeFile() {
+        // Clears every pending binary attachment (images/videos/PDFs/etc).
+        // FIX (zombie-file bug): also cancel any in-flight processing for
+        // files currently shown in the preview list, so a compression/read
+        // that finishes after this doesn't silently re-add itself.
+        document.querySelectorAll('#filePreviewList .file-preview').forEach(row => {
+            if (row.id) cancelledPreviewIds.add(row.id);
+        });
+        selectedFilesData = [];
+        document.getElementById('fileInput').value = '';
+        const list = document.getElementById('filePreviewList');
+        if (list) { list.innerHTML = ''; list.classList.remove('has-items'); }
+    }
+
+    function setupFileDropAndPaste() {
+        const wrapper = document.body;
+        const input = document.getElementById('userInput');
+        if (!wrapper || !input || wrapper.dataset.fileDnDReady) return;
+        wrapper.dataset.fileDnDReady = '1';
+
+        ['dragenter', 'dragover'].forEach(type => wrapper.addEventListener(type, (e) => {
+            if (isGenerating) return;
+            if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            wrapper.classList.add('drag-over');
+        }));
+        ['dragleave', 'drop'].forEach(type => wrapper.addEventListener(type, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (type === 'dragleave' && e.relatedTarget) return; // still inside the page
+            wrapper.classList.remove('drag-over');
+        }));
+        wrapper.addEventListener('drop', async (e) => {
+            if (isGenerating) return;
+            const files = Array.from(e.dataTransfer?.files || []);
+            for (const file of files) {
+                await processIncomingFile(file);
+            }
+        });
+
+        input.addEventListener('paste', async (e) => {
+            if (isGenerating) return;
+            const files = Array.from(e.clipboardData?.files || []);
+            let file = files[0];
+            if (!file) {
+                const item = Array.from(e.clipboardData?.items || []).find(i => i.kind === 'file');
+                file = item?.getAsFile?.() || null;
+            }
+            if (!file) return; // normal text paste
+            e.preventDefault();
+            await processIncomingFile(file);
+        });
+    }
+
+    function handleActionClick() {
+        if (isGenerating) stopGeneration();
+        else sendMessage();
+    }
+
+    function setGeneratingState(generating) {
+        isGenerating = generating;
+        const inputField = document.getElementById("userInput");
+        const actionBtn = document.getElementById("actionBtn");
+        const actionIcon = document.getElementById("actionIcon");
+        const attachBtn = document.getElementById("attachBtn");
+
+        inputField.disabled = generating;
+        attachBtn.disabled = generating;
+
+        if (generating) {
+            actionBtn.classList.add("stop-mode");
+            actionIcon.className = "ph-fill ph-stop";
+            actionBtn.title = "توقف";
+        } else {
+            actionBtn.classList.remove("stop-mode");
+            actionIcon.className = "ph-fill ph-paper-plane-tilt";
+            actionBtn.title = "ارسال";
+        }
+
+        document.querySelectorAll('.brand-mark').forEach(el => el.classList.toggle('generating', generating));
+        updateFaviconStatus(generating);
+    }
+
+    // ===== نقطه‌ی وضعیت روی آیکون تب مرورگر =====
+    // موقع تولید پاسخ قرمز، بعد از اتمام سبز — با کشیدن نسخه‌ی جدید
+    // favicon روی یک canvas مخفی و جایگزین کردن href لینک آیکون.
+    let __faviconBaseImg = null;
+    function updateFaviconStatus(generating) {
+        try {
+            const link = document.getElementById('favicon');
+            if (!link) return;
+            if (!__faviconBaseImg) {
+                __faviconBaseImg = new Image();
+                __faviconBaseImg.onload = () => updateFaviconStatus(generating);
+                __faviconBaseImg.src = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%236b7078%22/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2248%25%22%20stop-color%3D%22%233a3c42%22/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231d1f24%22/%3E%0A%20%20%20%20%3C/linearGradient%3E%0A%20%20%3C/defs%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22url%28%23g%29%22/%3E%0A%20%20%3Cpath%20d%3D%22M32%2014%20L36.2%2027.8%20L50%2032%20L36.2%2036.2%20L32%2050%20L27.8%2036.2%20L14%2032%20L27.8%2027.8%20Z%22%20fill%3D%22%23f1f3f5%22/%3E%0A%20%20%3Ccircle%20cx%3D%2249%22%20cy%3D%2215%22%20r%3D%224%22%20fill%3D%22%23b6bac1%22/%3E%0A%3C/svg%3E%0A';
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(__faviconBaseImg, 0, 0, 64, 64);
+            ctx.beginPath();
+            ctx.arc(50, 50, 9, 0, Math.PI * 2);
+            ctx.fillStyle = '#1d1f24';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(50, 50, 6.5, 0, Math.PI * 2);
+            ctx.fillStyle = generating ? '#ef4444' : '#22c55e';
+            ctx.fill();
+            link.href = canvas.toDataURL('image/png');
+        } catch (e) {}
+    }
+
+    function stopGeneration() {
+        // Immediately invalidate the active request so a late response cannot restore
+        // "در حال پاسخ..." after the user has pressed Stop.
+        activeRequestId++;
+        if (currentAbortController) {
+            try { currentAbortController.abort(); } catch (e) {}
+        }
+        currentAbortController = null;
+        if (typeWriterInterval) {
+            clearInterval(typeWriterInterval);
+            typeWriterInterval = null;
+        }
+
+        if (activeLoadingDiv && activeLoadingDiv.isConnected) {
+            activeLoadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
+        }
+
+        setGeneratingState(false);
+        activeLoadingDiv = null;
+        saveCurrentChat();
+        updateScrollLatestButton();
+    }
+
+    async function sendMessage() {
+        // FIX (double-submit race condition): setGeneratingState(true) only
+        // runs later, inside sendToGemini(), after several async steps
+        // (appendMessage, building payloadFiles, etc). If the send button/
+        // Enter key fires twice in very quick succession (double-click,
+        // duplicate touch events, a fast double-tap), a second sendMessage()
+        // call could start and run through this function BEFORE the first
+        // call's setGeneratingState(true) had landed — isGenerating was
+        // still false, so the `isGenerating` guards elsewhere didn't stop
+        // it. Two concurrent sendMessage() calls each read/clear the SAME
+        // codeFilesMemory: whichever one reached clearCodeFilesMemory()
+        // first could wipe out the attached file's content before the other
+        // call's sendToGemini() had a chance to read it — so the model only
+        // ever saw the '[فایل ارسال شده]' placeholder with no real content,
+        // intermittently, with no clear repro. This synchronous flag closes
+        // that gap: it's set immediately, before any `await`, so a second
+        // call arriving microtasks later is rejected here regardless of
+        // where the first call currently is.
+        if (sendMessage.__inFlight) return;
+        sendMessage.__inFlight = true;
+        try {
+            await sendMessageInner();
+        } finally {
+            sendMessage.__inFlight = false;
+        }
+    }
+
+    async function sendMessageInner() {
+        const inputField = document.getElementById("userInput");
+        const text = inputField.value.trim();
+        if (!text && selectedFilesData.length === 0 && codeFilesMemory.length === 0) return;
+
+        // FIX (compression bug): previously, if the user hit send while a
+        // file was still being compressed/read (it hadn't been pushed into
+        // selectedFilesData yet), the length checks above and below saw an
+        // "empty" state and sendMessage silently no-op'd — nothing sent, no
+        // feedback. Now we explicitly block send and tell the user to wait.
+        if (filesProcessingCount > 0) {
+            showToast('صبر کن فایل آماده بشه، بعد ارسال کن.', 'warning');
+            return;
+        }
+
+        if (isFirstMessage) {
+            document.getElementById("homeScreen").style.display = 'none';
+            document.getElementById("chatBox").style.display = 'flex';
+            isFirstMessage = false;
+        }
+
+        // FIX (edit-does-nothing bug): the pencil/edit button previously
+        // only copied text into the input box — dataset.editingWrapper was
+        // set but never read anywhere, .editing class was never used by any
+        // CSS/JS, so hitting send just appended a brand-new message below
+        // the old one instead of replacing it. Now: if we're editing, remove
+        // the old user message (and its immediate bot reply, if any) from
+        // both the DOM and chatHistoryData before appending the new one.
+        const editingWrapper = document.querySelector('.message-wrapper.user.editing');
+        if (inputField.dataset.editingWrapper === '1' && editingWrapper) {
+            const allWrappers = [...document.querySelectorAll('#chatBox .message-wrapper')];
+            const editIndex = allWrappers.indexOf(editingWrapper);
+            const nextWrapper = allWrappers[editIndex + 1];
+            const removesBotReply = nextWrapper && nextWrapper.classList.contains('bot');
+
+            const hist = chatHistoryData[currentChatId] || [];
+            // Find the matching user entry from the end (most recent edit target)
+            // and drop it plus the model reply that immediately follows it.
+            for (let i = hist.length - 1; i >= 0; i--) {
+                if (hist[i].role === 'user') {
+                    const deleteCount = (removesBotReply && hist[i + 1] && hist[i + 1].role === 'model') ? 2 : 1;
+                    hist.splice(i, deleteCount);
+                    break;
+                }
+            }
+
+            if (removesBotReply) nextWrapper.remove();
+            editingWrapper.remove();
+        }
+        delete inputField.dataset.editingWrapper;
+        document.querySelectorAll('.message-wrapper.user.editing').forEach(w => w.classList.remove('editing'));
+
+        let userContentHtml = text || '';
+        // FIX (multi-file bug): loop over every attached binary file instead
+        // of only ever showing/sending the single last one.
+        for (const f of selectedFilesData) {
+            if (f.type && f.type.startsWith('image/')) {
+                userContentHtml += `<br><img src="${f.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
+            } else if (f.type && f.type.startsWith('video/')) {
+                userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${f.base64}" type="${f.type}"></video>`;
+            } else {
+                userContentHtml += `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="lucide-icon" data-lucide="file"></i> ${escapeHtml(f.name)}</span>`;
+            }
+        }
+        if (codeFilesMemory.length > 0) {
+            userContentHtml += codeFilesMemory.map(f =>
+                `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}</span>`
+            ).join('');
+        }
+
+        appendMessage('user', userContentHtml);
+        inputField.value = "";
+        inputField.style.height = '24px';
+
+        // FIX (multi-file bug): pass the whole array along, not one file.
+        const payloadFiles = selectedFilesData.map(({ __previewId, ...rest }) => rest);
+        removeFile();
+        hideCodeFilesBar();
+        // FIX (lost-file-content bug): clearCodeFilesMemory() used to run
+        // BEFORE sendToGemini() — but sendToGemini reads codeFilesMemory
+        // internally (to build mergedTextFiles/lastCodeFilesForEdit) to
+        // decide what file content actually gets sent to the model. Clearing
+        // it first meant that any code/text file (html/js/css/etc — the ones
+        // that go through codeFilesMemory instead of selectedFilesData) was
+        // wiped from memory before sendToGemini ever got a chance to read it.
+        // The model then only ever saw the '[فایل ارسال شده]' placeholder
+        // text with no actual file content attached, and correctly reported
+        // back that it couldn't see any content. Binary attachments (image/
+        // video/pdf) were never affected, since those flow through
+        // payloadFiles/selectedFilesData, which is captured above BEFORE
+        // this point. Fix: only clear codeFilesMemory AFTER sendToGemini has
+        // finished reading it (i.e. after the await below), same as the
+        // comment above originally intended.
+        await sendToGemini(text, payloadFiles);
+        clearCodeFilesMemory();
+    }
+
+    // NOTE: kept in sync with the persona set server-side in chat.js's
+    // systemText and with upgradedPersona above - three copies existed
+    // before with drifting/conflicting tone instructions.
+    const virtualPersona = `تو Virtual Bot 1.6 هستی؛ دستیار فارسی‌زبان اختصاصی Virtual Chat. یک دستیار هوش مصنوعی گرم، صمیمی، طبیعی و جذاب هستی؛ گفتگو باید شبیه صحبت با یک دوست باهوش و خوش‌برخورد باشد، نه یک متن خشک و رسمی.
+
+قوانین مهم هویت: وقتی از مدل، هویت یا سازنده پرسیده شد، بگو «من Virtual Bot 1.6 هستم.» درباره سازنده، نام شخص یا شرکت خاصی حدس نزن و هیچ نامی مثل «اکبر» نساز؛ اگر اطلاعات سازنده در اختیار تو نیست، صادقانه بگو «اطلاعات سازنده در اختیارم نیست». هیچ‌وقت کاربر را سازنده خودت معرفی نکن.
+
+لحن: لحن کاربر را تشخیص بده و متناسب با آن پاسخ بده - رسمی بود محترمانه باش، دوستانه بود صمیمی و خودمانی باش، شوخی کرد در حد مناسب همراهی کن، ناراحت/نگران بود آرام و همدلانه باش و شوخی نکن. پاسخ را با واکنش مناسب به حرف کاربر شروع کن، بعد سراغ اصل مطلب برو. از اصطلاحات محاوره‌ای فارسی طبیعی استفاده کن، زیاده‌روی نکن.
+
+سبک پاسخ: برای جواب‌های طولانی از تیترهای کوتاه، پاراگراف‌های کوتاه، فاصله مناسب، بولت‌پوینت و در صورت نیاز شماره‌گذاری استفاده کن. سؤال ساده را کوتاه جواب بده. از تکرار بی‌دلیل مقدمه‌های کلیشه‌ای مثل «حتماً، با کمال میل» خودداری کن. ایموجی را متناسب با فضا و به‌اندازه استفاده کن (نه در هر جمله)، هرگز از ایموجی 🤖 استفاده نکن؛ هنگام سلام یک ایموجی گرم مثل 😊 یا 👋 بیاور.
+
+دقت: اگر اطلاعاتی مثل قیمت، مشخصات، اخبار یا هر چیز وابسته به زمان مطرح شد و جستجوی وب در دسترس بود، از آن استفاده کن. قیمت و مشخصات را حدس نزن؛ اگر مطمئن نیستی صادقانه بگو. برای کدنویسی کد کامل و تمیز بده و توضیح را از کد جدا نگه دار. هدف این است که جواب‌ها هم مفید و دقیق باشند و هم شخصیت گرم و طبیعی داشته باشند.`
+
+    function ensureVirtualPersona() {
+        if (!chatHistoryData[currentChatId]) chatHistoryData[currentChatId] = [];
+        if (chatHistoryData[currentChatId].some(item => item.__virtualPersona)) return;
+        chatHistoryData[currentChatId].unshift(
+            { role: 'user', text: virtualPersona, __virtualPersona: true },
+            { role: 'model', text: 'متوجه شدم؛ از این به بعد با شخصیت گرم، طبیعی و خودمونی پاسخ می‌دهم.', __virtualPersona: true }
+        );
+    }
+
+    // ===== FEATURE: خلاصه‌ی چت‌های اخیر (برای تشخیص لحن/سبک کاربر از پیام اول) =====
+    // هدف: بدون کند کردن ارسال پیام، یک خلاصه‌ی کوتاه از ۵ گفتگوی اخیر کاربر
+    // در localStorage نگه داریم و همراه هر درخواست به بک‌اند بفرستیم تا مدل
+    // از همون اول بفهمه کاربر چطور صحبت می‌کنه، شوخه یا جدی، دنبال چیه.
+    //
+    // نحوه کار (بدون افت سرعت):
+    // ۱. هیچ‌وقت جلوی ارسال پیام رو نمی‌گیره - همیشه از یک مقدار کش‌شده در
+    //    localStorage خونده می‌شه که ساختنش هیچ هزینه‌ای به درخواست فعلی نمی‌زنه.
+    // ۲. ساخت/به‌روزرسانی خلاصه به‌صورت async و در پس‌زمینه انجام می‌شه: یک
+    //    درخواست سبک و غیر-استریم به همون /api/chat می‌زنیم، نتیجه رو کش
+    //    می‌کنیم، و کار کاربر (تایپ/دریافت پاسخ فعلی) اصلاً منتظرش نمی‌مونه.
+    // ۳. فقط وقتی که چت‌ها واقعاً عوض شده باشن (بر اساس تعداد پیام‌ها) دوباره
+    //    خلاصه می‌سازیم، نه هر بار.
+    const RECENT_SUMMARY_KEY = 'virtual_recent_chats_summary';
+    const RECENT_SUMMARY_MAX_CHATS = 5;
+    const RECENT_SUMMARY_MAX_MSGS_PER_CHAT = 6;
+
+    function getRecentChatsSummaryCache() {
+        try { return JSON.parse(localStorage.getItem(RECENT_SUMMARY_KEY) || 'null'); } catch (_) { return null; }
+    }
+
+    function setRecentChatsSummaryCache(entry) {
+        try { localStorage.setItem(RECENT_SUMMARY_KEY, JSON.stringify(entry)); } catch (_) {}
+    }
+
+    // یک امضای سبک از وضعیت فعلی چت‌ها می‌سازه (شناسه + تعداد پیام هرکدام)
+    // تا بفهمیم از دفعه‌ی قبل چیزی عوض شده یا نه - بدون نیاز به مقایسه‌ی متن کامل.
+    function buildRecentChatsFingerprint() {
+        const ids = Object.keys(chats || {})
+            .filter(id => id !== String(currentChatId))
+            .sort((a, b) => (chats[b]?.updatedAt || 0) - (chats[a]?.updatedAt || 0))
+            .slice(0, RECENT_SUMMARY_MAX_CHATS);
+        return ids.map(id => `${id}:${(chatHistoryData[id] || []).length}`).join('|');
+    }
+
+    // متن خام چند پیام آخر ۵ چت اخیر رو (کوتاه‌شده) برای درخواست خلاصه‌سازی آماده می‌کنه.
+    function collectRecentChatsRawText() {
+        const ids = Object.keys(chats || {})
+            .filter(id => id !== String(currentChatId))
+            .sort((a, b) => (chats[b]?.updatedAt || 0) - (chats[a]?.updatedAt || 0))
+            .slice(0, RECENT_SUMMARY_MAX_CHATS);
+        if (!ids.length) return '';
+        return ids.map(id => {
+            const title = chats[id]?.title || 'گفتگو';
+            const msgs = (chatHistoryData[id] || [])
+                .filter(m => !m.__virtualPersona && m.text)
+                .slice(-RECENT_SUMMARY_MAX_MSGS_PER_CHAT)
+                .map(m => `${m.role === 'user' ? 'کاربر' : 'ربات'}: ${String(m.text).slice(0, 200)}`)
+                .join('\n');
+            return `### ${title}\n${msgs}`;
+        }).join('\n\n');
+    }
+
+    let recentChatsSummaryInFlight = false;
+
+    // خلاصه رو در پس‌زمینه (بدون بلاک کردن ارسال پیام فعلی) به‌روز می‌کنه.
+    // fire-and-forget است؛ عمداً await نمی‌شود جایی که صدا زده می‌شود.
+    async function refreshRecentChatsSummaryInBackground() {
+        if (recentChatsSummaryInFlight) return;
+        const fingerprint = buildRecentChatsFingerprint();
+        if (!fingerprint) return;
+        const cached = getRecentChatsSummaryCache();
+        if (cached && cached.fingerprint === fingerprint) return; // چیزی عوض نشده
+
+        const rawText = collectRecentChatsRawText();
+        if (!rawText.trim()) return;
+
+        recentChatsSummaryInFlight = true;
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userName: uName,
+                    text: `در حد ۲ تا ۳ جمله‌ی کوتاه فارسی خلاصه کن که این کاربر معمولاً چطور صحبت می‌کند (رسمی/شوخ/خودمانی)، بیشتر دنبال چه موضوعاتی است و چه سبک پاسخی را دوست دارد. فقط خلاصه را بنویس، بدون مقدمه:\n\n${rawText}`,
+                    rawText: '',
+                    file: null,
+                    files: [],
+                    archivedFileNames: [],
+                    archivedFiles: [],
+                    webSearch: false,
+                    history: [],
+                    model: 'gemini-3.5-flash-lite',
+                    stream: false
+                })
+            });
+            if (!res.ok) return;
+            const data = await res.json().catch(() => null);
+            const summaryText = (data?.text || data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+            if (summaryText) {
+                setRecentChatsSummaryCache({ fingerprint, summary: summaryText, updatedAt: Date.now() });
+            }
+        } catch (_) {
+            // شکست بی‌سروصدا - خلاصه صرفاً یک کمک جانبی است، نه چیزی که باید
+            // جلوی ارسال پیام اصلی را بگیرد یا خطا نشان دهد.
+        } finally {
+            recentChatsSummaryInFlight = false;
+        }
+    }
+
+    function getCachedRecentChatsSummaryText() {
+        const cached = getRecentChatsSummaryCache();
+        return cached?.summary || '';
+    }
+
+    function updateScrollLatestButton() {
+        const chatBox = document.getElementById('chatBox');
+        const btn = document.getElementById('scrollLatestBtn');
+        if (!chatBox || !btn) return;
+        const distance = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+        btn.classList.toggle('show', distance > 140);
+    }
+
+    function scrollToLatest() {
+        const chatBox = document.getElementById('chatBox');
+        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+    }
+
+    function makeRetryError(loadingDiv, message, request, errorDetail = null) {
+        const saved = {
+            textPrompt: request?.textPrompt || '',
+            payloadFiles: request?.payloadFiles || [],
+            webSearch: isSearchEnabled,
+            model: currentModel
+        };
+        const retryData = encodeURIComponent(JSON.stringify(saved));
+
+        // FIX / §8: errors used to be a single generic line with no way to
+        // see what actually happened. When the backend sends a structured
+        // error object ({message,type,stage,detail}), show a real
+        // "جزئیات بیشتر" (More Details) toggle with the technical info —
+        // never raw secrets/keys, since the backend log module already
+        // strips those before anything reaches this payload.
+        let detailsHtml = '';
+        if (errorDetail && typeof errorDetail === 'object') {
+            const detailId = 'errdetail-' + Math.random().toString(36).slice(2, 9);
+            const errorLabels = {
+                rate_limit: 'محدودیت سرعت درخواست',
+                quota_exhausted: 'سهمیه مصرف تمام/محدود شده',
+                invalid_api_key: 'کلید API نامعتبر',
+                permission_denied: 'دسترسی رد شد',
+                model_not_found: 'مدل پیدا نشد',
+                invalid_request: 'درخواست نامعتبر',
+                request_too_large: 'حجم درخواست بیش از حد مجاز',
+                timeout: 'پایان زمان انتظار',
+                provider_unavailable: 'سرویس هوش مصنوعی موقتاً در دسترس نیست',
+                network_error: 'خطای ارتباط شبکه',
+                empty_response: 'پاسخ خالی از مدل',
+                child_safety_block: 'محتوای نامناسب برای کودکان',
+                configuration_error: 'خطای پیکربندی',
+                internal_error: 'خطای داخلی Virtual Bot',
+                missing_api_keys: 'کلید Gemini تنظیم نشده',
+                unknown_error: 'خطای ناشناخته'
+            };
+            const category = errorDetail.category || errorDetail.type || '';
+            const categoryLabel = errorLabels[category] || category || 'نامشخص';
+            const rows = [];
+            if (categoryLabel) rows.push(`<div><span class="err-detail-label">نوع خطا:</span> ${escapeHtml(String(categoryLabel))}</div>`);
+            if (errorDetail.type && errorDetail.type !== category) rows.push(`<div><span class="err-detail-label">کد:</span> ${escapeHtml(String(errorDetail.type))}</div>`);
+            if (errorDetail.stage) rows.push(`<div><span class="err-detail-label">مرحله:</span> ${escapeHtml(String(errorDetail.stage))}</div>`);
+            if (errorDetail.detail) rows.push(`<div><span class="err-detail-label">جزئیات فنی:</span> ${escapeHtml(String(errorDetail.detail))}</div>`);
+            const detailText = [
+                categoryLabel ? `نوع: ${categoryLabel}` : '',
+                errorDetail.type && errorDetail.type !== category ? `کد: ${errorDetail.type}` : '',
+                errorDetail.stage ? `مرحله: ${errorDetail.stage}` : '',
+                errorDetail.detail ? `جزئیات: ${errorDetail.detail}` : ''
+            ].filter(Boolean).join('\n');
+            const encodedDetail = encodeURIComponent(detailText);
+            detailsHtml = `
+                <button class="more-details-btn" type="button" onclick="toggleErrorDetails('${detailId}')">جزئیات بیشتر</button>
+                <div class="error-details" id="${detailId}" style="display:none;">
+                    ${rows.join('')}
+                    <button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedDetail}">کپی جزئیات</button>
+                </div>`;
+        }
+
+        const encodedMessage = encodeURIComponent(message);
+        const canRetry = !(errorDetail && typeof errorDetail === 'object' && errorDetail.retryable === false);
+        const retryButtonHtml = canRetry
+            ? `<button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button>`
+            : `<span class="retry-disabled-note">این خطا قابل تکرار خودکار نیست.</span>`;
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
+        if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
+        lastFailedRequest = request;
+        if (typeof showToast === 'function') showToast(message, 'error');
+    }
+
+    function toggleErrorDetails(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function copyErrorDetails(btn) {
+        const text = decodeURIComponent(btn.dataset.detail || '');
+        try { await navigator.clipboard.writeText(text); }
+        catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        const old = btn.textContent; btn.textContent = 'کپی شد'; setTimeout(() => btn.textContent = old, 1200);
+        if (typeof showToast === 'function') showToast('جزئیات خطا کپی شد', 'success');
+    }
+
+    async function retryFromButton(btn) {
+        if (isGenerating) return;
+        let request = lastFailedRequest;
+        if (!request) {
+            try {
+                const saved = JSON.parse(decodeURIComponent(btn.dataset.retry || ''));
+                request = { textPrompt: saved.textPrompt || '', payloadFiles: saved.payloadFiles || [] };
+            } catch (_) {}
+        }
+        if (!request) return;
+        await retryRequest(request);
+    }
+
+    async function retryRequest(request = lastFailedRequest) {
+        if (!request || isGenerating) return;
+        // FIX (retry button broken): the object handed to retryRequest can
+        // come from two different places — the in-memory lastFailedRequest
+        // (which has real wrapper/loadingDiv DOM nodes attached) OR the
+        // JSON decoded from the button's data-retry attribute after a page
+        // reload (which only ever has textPrompt/payloadFiles - no DOM
+        // nodes, since those can't survive being saved to disk). Blindly
+        // passing request.wrapper / request.loadingDiv through as retry:true
+        // meant that in the second case sendToGemini received `undefined`
+        // for both, tried to reuse a non-existent loadingDiv, and silently
+        // failed to show anything. Only take the "reuse existing bubble"
+        // path when both nodes are real and still attached to the page;
+        // otherwise fall back to a normal new message bubble.
+        const canReuseBubble =
+            request.wrapper && request.wrapper.isConnected &&
+            request.loadingDiv && request.loadingDiv.isConnected;
+
+        if (canReuseBubble) {
+            await sendToGemini(request.textPrompt, request.payloadFiles, {
+                retry: true,
+                wrapper: request.wrapper,
+                loadingDiv: request.loadingDiv
+            });
+        } else {
+            await sendToGemini(request.textPrompt, request.payloadFiles);
+        }
+    }
+
+    async function sendToGemini(textPrompt, payloadFiles = [], retryContext = null) {
+        // Backward-compat: earlier code paths might still call this with a
+        // single file object instead of an array.
+        if (payloadFiles && !Array.isArray(payloadFiles)) payloadFiles = [payloadFiles];
+        if (!payloadFiles) payloadFiles = [];
+        const requestId = ++activeRequestId;
+        setGeneratingState(true);
+
+        // ===== FIX: safety-net watchdog. Some rare network failures (e.g. the
+        // server process restarting mid-stream during a deploy) don't surface as a
+        // clean fetch rejection or AbortError — the promise can simply never
+        // settle. Without this, isGenerating stays stuck true forever and the
+        // composer (#userInput / send button) stays disabled in that chat until
+        // the page is reloaded. This timer force-resets the UI after 210s no matter
+        // what went wrong upstream, so the user is never permanently locked out.
+        //
+        // BUGFIX (mismatched timeout - "took too long" fires while the server
+        // is still legitimately working): this used to be 90000 (90s), but the
+        // backend's own overall deadline is 180s, and a reply that needs the
+        // get_archived_file tool (e.g. re-reading a large saved file) genuinely
+        // takes two full Gemini rounds - each with up to a 60s budget - plus
+        // the tool call itself. 90s could (and did) fire WHILE the server was
+        // still mid-request, killing the client-side UI first; the user would
+        // then see "took too long", but the original request kept running
+        // server-side and its (unretrieved) result, or the key-rotation state
+        // it touched, could surface confusingly on the next manual retry. Set
+        // this comfortably above the server's real 180s ceiling so the server
+        // always gets to finish (and return its OWN specific error) first. =====
+        const watchdogId = setTimeout(() => {
+            if (requestId === activeRequestId && isGenerating) {
+                console.warn('[watchdog] Request took too long — resetting UI so input is usable again.');
+                // FIX: same dangling-history bug as Stop/error - the watchdog
+                // firing means this turn never got a real reply, so the
+                // pushed user turn must be removed here too, or the next
+                // message gets answered as a continuation of this one.
+                removePushedUserTurnIfUnanswered();
+                if (activeLoadingDiv && activeLoadingDiv.isConnected) {
+                    makeRetryError(activeLoadingDiv, 'پاسخ خیلی طول کشید و متوقف شد.', { textPrompt, payloadFiles });
+                }
+                activeRequestId++; // invalidate this request so any late response is ignored
+                setGeneratingState(false);
+                currentAbortController = null;
+                activeLoadingDiv = null;
+                saveCurrentChat();
+            }
+        }, 210000);
+
+        const chatBox = document.getElementById("chatBox");
+        const isRetry = !!retryContext?.retry;
+        const wrapperDiv = isRetry ? retryContext.wrapper : document.createElement("div");
+        const loadingDiv = isRetry ? retryContext.loadingDiv : document.createElement("div");
+        const request = { textPrompt, payloadFiles, wrapper: wrapperDiv, loadingDiv };
+        wrapperDiv.__virtualRequestFiles = [
+            ...payloadFiles.map(f => ({ ...f })),
+            ...codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text' }))
+        ];
+        activeLoadingDiv = loadingDiv;
+
+        // FIX (multi-file bug): previously only a single text-mode
+        // payloadFile OR codeFilesMemory was used (never both, never more
+        // than one binary text file), so multi-file edit requests silently
+        // lost every file after the first. Now every text-mode file from
+        // payloadFiles AND every file already in codeFilesMemory are merged
+        // (de-duplicated by name) into what actually gets sent as `files`.
+        const textPayloadFiles = payloadFiles
+            .filter(f => f && f.mode === 'text' && typeof f.content === 'string')
+            .map(f => ({ name: f.name, content: f.content, mode: 'text' }));
+        const mergedTextFiles = [...codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text' }))];
+        for (const f of textPayloadFiles) {
+            const idx = mergedTextFiles.findIndex(m => m.name === f.name);
+            if (idx >= 0) mergedTextFiles[idx] = f; else mergedTextFiles.push(f);
+        }
+        lastCodeFilesForEdit = mergedTextFiles;
+
+        // FEATURE (persistent file memory): every text/code file actually
+        // being sent this turn also gets saved into this chat's permanent
+        // archive (IndexedDB), independent of codeFilesMemory which gets
+        // wiped right after send. This is what makes a file's content still
+        // findable many messages later.
+        for (const f of mergedTextFiles) {
+            saveFileToArchive(currentChatId, f.name, f.content);
+        }
+
+        // Binary attachments (images/videos/PDFs/etc) go through separately,
+        // all of them — not just the last one selected.
+        const binaryPayloadFiles = payloadFiles.filter(f => f && f.base64);
+
+        if (!isRetry) {
+            wrapperDiv.className = "message-wrapper bot";
+            loadingDiv.className = "message bot";
+            wrapperDiv.appendChild(loadingDiv);
+            chatBox.appendChild(wrapperDiv);
+            try { addMessageActions(wrapperDiv, 'bot'); } catch (_) {}
+        }
+
+        loadingDiv.innerHTML = `<span class="loader-dots"><span></span><span></span><span></span></span>`;
+        scrollToLatest();
+
+        const uName = (currentUser && (currentUser.customName || currentUser.name)) ? (currentUser.customName || currentUser.name) : 'کاربر';
+        // FIX (stop → next message gets answered as if it were the old one):
+        // this used to push the user's turn into chatHistoryData immediately,
+        // before the request even started. If the user then pressed Stop (or
+        // the request errored/timed out) before any model reply came back,
+        // nothing ever removed that turn - so history ended up with two
+        // consecutive 'user' turns and no 'model' turn between them. Gemini
+        // then had no clear signal about which user turn was the "current"
+        // one to answer, and would often reply to the first (stopped) one
+        // instead of the new message. Track exactly which index this turn
+        // lives at, so it can be cleanly removed if the request doesn't
+        // finish with a real reply (stopped, errored, or empty).
+        let pushedHistoryIndex = -1;
+        if (!isRetry) {
+            ensureVirtualPersona();
+            chatHistoryData[currentChatId].push({ role: 'user', text: textPrompt || '[فایل ارسال شده]' });
+            pushedHistoryIndex = chatHistoryData[currentChatId].length - 1;
+        }
+        const removePushedUserTurnIfUnanswered = () => {
+            if (pushedHistoryIndex === -1) return;
+            const hist = chatHistoryData[currentChatId];
+            const entry = hist && hist[pushedHistoryIndex];
+            // Only remove if it's still exactly the turn we pushed (still a
+            // 'user' turn at that index, nothing else appended after it that
+            // would shift things) - keeps this safe even if something else
+            // touched history in the meantime.
+            if (entry && entry.role === 'user' && hist.length === pushedHistoryIndex + 1) {
+                hist.splice(pushedHistoryIndex, 1);
+            }
+            pushedHistoryIndex = -1;
+        };
+        currentAbortController = new AbortController();
+
+        try {
+            const response = await fetch('/api/chat', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    userName: uName,
+                    text: textPrompt,
+                    rawText: textPrompt,
+                    file: null,
+                    // FIX (multi-file bug): send ALL attached files —
+                    // text/code files plus every binary file (images,
+                    // videos, PDFs) — through the same array the backend
+                    // already knows how to fan out (see incomingFiles in
+                    // pages/api/chat.js). Previously only one binary file
+                    // (the last one selected) ever made it into the request.
+                    files: [...lastCodeFilesForEdit, ...binaryPayloadFiles],
+                    // FEATURE (persistent file memory): let the backend know
+                    // WHICH files exist in this chat's permanent archive
+                    // (names only - cheap, always sent) plus their full
+                    // content (archivedFiles) so that if the model decides
+                    // via the get_archived_file tool that it actually needs
+                    // an old file's content, the server already has it in
+                    // this same request and can hand it back with zero
+                    // extra round-trips. Content isn't put in the prompt
+                    // itself, so it costs no tokens unless actually used.
+                    //
+                    // FIX (unbounded archive growth -> token/quota risk):
+                    // ALL files are still kept forever in IndexedDB (never
+                    // deleted here), but only the 3 MOST RECENTLY SENT ones
+                    // are exposed to the model each turn - both as names it
+                    // sees in the prompt and as candidates get_archived_file
+                    // can actually return. Older files fall out of the
+                    // model's visibility automatically as new ones come in;
+                    // if the user re-sends an old file, it becomes "recent"
+                    // again like normal. This caps the model's own working
+                    // set instead of letting an ever-growing archive quietly
+                    // increase what a single request costs over the life of
+                    // a long chat.
+                    //
+                    // FIX (redundant get_archived_file call on the file just
+                    // sent): a file attached to THIS message already gets
+                    // its full content embedded directly in the prompt text
+                    // (see the backend's textFiles/[محتوای فایل] block), but
+                    // saveFileToArchive() also just saved that same file
+                    // into chatFileArchive - so it was showing up a SECOND
+                    // time in the "archived files" list the model sees,
+                    // with no way for the model to know it's the exact same
+                    // content already right in front of it. That's exactly
+                    // why the model sometimes called get_archived_file on
+                    // index.html right after being GIVEN index.html: it had
+                    // no signal they were the same file. Excluding this
+                    // turn's own attached file names from what's sent as
+                    // archived removes that ambiguity entirely - older
+                    // *different* files are unaffected.
+                    archivedFileNames: recentArchivedFiles(currentChatId)
+                        .map(f => f.name)
+                        .filter(n => !mergedTextFiles.some(mf => mf.name === n)),
+                    archivedFiles: recentArchivedFiles(currentChatId)
+                        .filter(f => !mergedTextFiles.some(mf => mf.name === f.name)),
+                    webSearch: isSearchEnabled,
+                    thinkLevel: currentThinkLevel,
+                    history: chatHistoryData[currentChatId],
+                    model: currentModel,
+                    styleHint: virtualPersona,
+                    // FEATURE (recent-chats summary): همیشه از نسخه‌ی کش‌شده
+                    // خونده می‌شه - هیچ‌وقت منتظر ساخته‌شدنش نمی‌مونیم تا
+                    // سرعت ارسال پیام فعلی افت نکنه. به‌روزرسانی خودش جدا و
+                    // در پس‌زمینه (بعد از پایان همین درخواست) انجام می‌شود.
+                    recentChatsSummary: getCachedRecentChatsSummaryText(),
+                    stream: true
+                }),
+                signal: currentAbortController.signal
+            });
+
+            // خلاصه‌ی چت‌های اخیر رو در پس‌زمینه به‌روز می‌کنیم - fire-and-forget،
+            // بعد از شروع درخواست اصلی، تا هیچ تاخیری به پاسخ فعلی اضافه نشه.
+            refreshRecentChatsSummaryInBackground();
+
+            if (requestId !== activeRequestId) return;
+
+            if (response.status === 429) {
+                removePushedUserTurnIfUnanswered();
+                makeRetryError(loadingDiv, 'محدودیت درخواست — کمی صبر کن و دوباره تلاش کن.', request, { type: 'timeout', stage: 'request', detail: 'HTTP 429' });
+                setGeneratingState(false); saveCurrentChat(); return;
+            }
+            if (!response.ok || !response.body) {
+                let bodyDetail = null;
+                try { const j = await response.clone().json(); bodyDetail = j?.error || null; } catch (_) {}
+                removePushedUserTurnIfUnanswered();
+                makeRetryError(loadingDiv, bodyDetail?.message || `خطای سرور (${response.status})`, request, bodyDetail || { type: 'network_error', stage: 'request', detail: `HTTP ${response.status}` });
+                setGeneratingState(false); saveCurrentChat(); return;
+            }
+
+            // Stream the reply in as it arrives from the backend (SSE). Rendering the
+            // whole accumulated reply on every tiny chunk makes formatReply + innerHTML
+            // grow quadratically on long answers, so coalesce visual updates to ~64ms.
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let sseBuffer = '';
+            let fullReply = '';
+            let streamError = null;
+            let streamErrorDetail = null;
+            let gotAnyText = false;
+            // FIX (block-rewrite delivery gap): the backend's block-based
+            // edit flow no longer emits a ```file-edit``` JSON block in the
+            // reply text (see server-side comment on the new write_block/
+            // verify_file tools) - the patched file content now arrives
+            // instead as `editedFiles` on the final `done: true` SSE event.
+            // Capture it here so the success handler below can render the
+            // same edited-file card the old file-edit-block path used to.
+            let streamEditedFiles = null;
+            let liveRenderTimer = null;
+            let streamEnded = false;
+
+            const flushLiveRender = () => {
+                liveRenderTimer = null;
+                if (requestId !== activeRequestId) return;
+                const liveView = stripFileEditBlock(fullReply).displayText;
+                let html = formatReply(sanitizeVirtualIdentity(liveView));
+                // Cursor is pure CSS (no JS timers, no extra reflow work),
+                // so it doesn't slow down rendering — it's just appended to
+                // whatever HTML was already going to be written, and removed
+                // automatically once streaming ends (see below).
+                if (!streamEnded) html += '<span class="stream-cursor"></span>';
+                loadingDiv.innerHTML = html;
+                scrollToLatest();
+            };
+
+            const queueLiveRender = (force = false) => {
+                if (force) {
+                    if (liveRenderTimer) clearTimeout(liveRenderTimer);
+                    flushLiveRender();
+                    return;
+                }
+                if (liveRenderTimer) return;
+                liveRenderTimer = setTimeout(flushLiveRender, 64);
+            };
+
             while (true) {
                 const { done, value } = await reader.read();
+                if (requestId !== activeRequestId) return;
                 if (done) break;
+
                 sseBuffer += decoder.decode(value, { stream: true });
                 const lines = sseBuffer.split('\n');
                 sseBuffer = lines.pop();
+
                 for (const line of lines) {
                     if (!line.startsWith('data:')) continue;
                     const jsonStr = line.slice(5).trim();
                     if (!jsonStr) continue;
-                    handleEventPayload(jsonStr);
+                    let parsed;
+                    try { parsed = JSON.parse(jsonStr); } catch (_) { continue; }
+
+                    if (parsed.step) {
+                        // Real, model-driven progress narration (e.g. "دارم
+                        // توی وب سرچ می‌کنم..." or "در حال نوشتن کد...") sent
+                        // right before the backend does something that would
+                        // otherwise look like a pause. FIX: this used to
+                        // always replace the ENTIRE loadingDiv, which wiped
+                        // out any prose text already streamed in before a
+                        // code block started. Now, if there's no reply text
+                        // yet, it behaves as before (full loading state);
+                        // once real text exists, the step note is appended
+                        // below what's already rendered instead of erasing it.
+                        if (requestId === activeRequestId) {
+                            loadingDiv.classList.add('loader-searching');
+                            const stepHtml =
+                                `<div class="agent-step-label"><span class="agent-step-dot"></span>${escapeHtml(parsed.step)}</div>` +
+                                `<span class="loader-dots"><span></span><span></span><span></span></span>`;
+                            if (fullReply) {
+                                const liveView = stripFileEditBlock(fullReply).displayText;
+                                loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView)) + stepHtml;
+                            } else {
+                                loadingDiv.innerHTML = stepHtml;
+                            }
+                            scrollToLatest();
+                        }
+                    }
+                    if (parsed.text) {
+                        gotAnyText = true;
+                        fullReply += parsed.text;
+                        loadingDiv.classList.remove('loader-searching');
+                        queueLiveRender();
+                    } else if (parsed.error) {
+                        if (typeof parsed.error === 'string') {
+                            streamError = parsed.error;
+                        } else {
+                            streamError = parsed.error.message || 'خطای نامشخص';
+                            streamErrorDetail = parsed.error;
+                        }
+                    }
+                    if (parsed.done && Array.isArray(parsed.editedFiles) && parsed.editedFiles.length) {
+                        streamEditedFiles = parsed.editedFiles;
+                    }
                 }
             }
+
             if (sseBuffer.trim().startsWith('data:')) {
-                handleEventPayload(sseBuffer.trim().slice(5).trim());
-            }
-            clearPreambleHoldTimer();
-        } catch (streamErr) {
-            clearPreambleHoldTimer();
-            roundEntry.durationMs = Date.now() - roundStartedAt;
-            if (streamErr?.name === 'AbortError') {
-                roundEntry.timedOut = true;
-                roundEntry.finishReason = 'CLIENT_TIMEOUT';
-                const err = new Error('agent_stream_read_failed');
-                err.body = { message: 'timeout', roundTrace };
-                err.roundTrace = roundTrace;
-                streamErr.roundTrace = roundTrace;
-                throw streamErr;
-            }
-            roundEntry.finishReason = 'STREAM_READ_ERROR';
-            const err = new Error('agent_stream_read_failed');
-            err.body = { message: streamErr?.message || String(streamErr), roundTrace };
-            err.roundTrace = roundTrace;
-            throw err;
-        }
-
-        const parts = accumulatedParts;
-        const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
-        const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
-
-        // DIAGNOSTICS: Ø«Ø¨Øª ÙˆØ¶Ø¹ÛŒØª Ù¾Ø§ÛŒØ§Ù†ÛŒ Ø§ÛŒÙ† roundØŒ ØµØ±Ùâ€ŒÙ†Ø¸Ø± Ø§Ø² Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¯Ø±
-        // Ù†Ù‡Ø§ÛŒØª Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø§Ø´Ø¯ ÛŒØ§ Ø¨Ø±ÙˆØ¯ Ø³Ø±Ø§Øº round Ø¨Ø¹Ø¯ÛŒ Ø¨Ø±Ø§ÛŒ Ø§Ø¬Ø±Ø§ÛŒ Ø§Ø¨Ø²Ø§Ø±.
-        roundEntry.durationMs = Date.now() - roundStartedAt;
-        roundEntry.finishReason = finishReason || 'NONE';
-        roundEntry.textChars = textParts.reduce((sum, t) => sum + (t ? t.length : 0), 0);
-        roundEntry.functionCallCount = functionCalls.length;
-        roundEntry.usage = lastUsage ? {
-            promptTokens: lastUsage.promptTokenCount ?? null,
-            candidateTokens: lastUsage.candidatesTokenCount ?? null,
-            totalTokens: lastUsage.totalTokenCount ?? null
-        } : null;
-
-        // ENFORCEMENT (must verify before final answer): if any file has
-        // edited blocks but was not (re-)verified since the last
-        // write_block (state.verified === false), the model is not
-        // allowed to end the turn here even though it returned zero
-        // function calls this round. Instead of returning, force one more
-        // round by injecting a synthetic functionCall for verify_file - a
-        // real tool round, not just a text nudge, so the actual
-        // validatePatchedContent check runs and the model gets a real
-        // valid/invalid result to react to (it might still be wrong about
-        // "I'm done" even if verify_file itself passes, but at minimum the
-        // structural check always runs before delivery).
-        if (functionCalls.length === 0 && editStates && editStates.size > 0) {
-            const unverified = [...editStates.values()].find(s => s.editCount > 0 && !s.verified);
-            if (unverified) {
-                log.info('agent.verify_gate.forced', {
-                    file: unverified.name,
-                    editedBlockCount: unverified.editedBlocks.size,
-                    round
-                });
-                functionCalls.push({ name: 'verify_file', args: { file: unverified.name } });
-                // Keep any text the model produced this round (e.g. "Ø§Ù„Ø§Ù†
-                // ÙØ§ÛŒÙ„ Ø±Ùˆ Ù†Ù‡Ø§ÛŒÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ù…") - it will be followed by the
-                // verify_file round's own text, both streamed normally.
-            }
-        }
-
-        if (functionCalls.length === 0) {
-            clearPreambleHoldTimer();
-            // No tool call arrived after all. Release any selectively held
-            // preamble so the final answer is not lost.
-            if (pendingToolPreamble) {
-                emitStreamText(pendingToolPreamble);
-                pendingToolPreamble = '';
-            }
-            // Final answer. Text is already streamed live above. There is
-            // normally nothing left to flush here; keep a fallback for any
-            // unusual provider event that was not emitted incrementally.
-            if (onChunk && textParts.length && !disableTools && !scopedSearchState.used) {
-                // The normal path has already emitted these chunks. Do not
-                // emit them again; this branch intentionally remains empty.
-            }
-            //
-            // BUGFIX (silent empty reply after a tool call): if Gemini's
-            // very next turn after a functionResponse (e.g. get_archived_file
-            // handing back a large file's content) comes back with NO text
-            // parts and a finishReason other than a normal stop (MAX_TOKENS,
-            // SAFETY, RECITATION, OTHER...), this used to be returned as a
-            // seemingly-successful empty finalText - the client then shows
-            // the tool's "step" label for a moment, gets zero text chunks,
-            // and finally falls into its generic retry-error path. That's
-            // exactly the "Ù¾ÛŒØ§Ù… ÛŒÙ‡ Ù„Ø­Ø¸Ù‡ Ù…ÛŒØ§Ø¯ Ø¨Ø¹Ø¯ ØºÛŒØ¨ Ù…ÛŒØ´Ù‡" symptom. Detect
-            // that specific case and surface a real, explained error instead
-            // of a silent empty success.
-            // BUGFIX (silent empty reply after a tool call, "Ù¾Ø§Ø³Ø®ÛŒ Ø¯Ø±ÛŒØ§ÙØª
-            // Ù†Ø´Ø¯"): the check below used to require finishReason to be
-            // something abnormal (MAX_TOKENS, SAFETY, ...) before treating
-            // an empty reply as an error. But Gemini can also finish with a
-            // perfectly normal STOP right after a tool call (e.g. right
-            // after apply_patch succeeds) while producing zero text - no
-            // final answer, no file-edit block, nothing. That used to be
-            // returned as a "successful" empty finalText, which the client
-            // then shows as a blank bubble and falls back to its own
-            // generic "Ù¾Ø§Ø³Ø®ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯" message with no real error to
-            // retry against. Treat ANY empty reply after at least one tool
-            // round (round > 0) as the same real, explained error,
-            // regardless of finishReason, so the outer key/model retry
-            // loop actually kicks in instead of silently succeeding with
-            // nothing.
-            const normalStop = !finishReason || finishReason === 'STOP';
-            if (textParts.length === 0) {
-                log.warn('agent.empty_after_tool_call', {
-                    finishReason,
-                    round,
-                    normalStop,
-                    toolCallTally,
-                    roundTrace
-                });
-                const err = new Error('agent_empty_after_tool_call');
-                err.status = 502;
-                // FEATURE (Continue button): if apply_patch already
-                // succeeded one or more times before the model went silent,
-                // found.content on the matching textFiles entry was mutated
-                // in-place to the partially-edited version (see
-                // apply_patch's "found.content = ..." above). Surface that
-                // partial progress here so the client can offer a "Continue"
-                // action that resumes editing from the already-patched
-                // content instead of starting the whole edit over from the
-                // original file.
-                const partialFiles = (Array.isArray(textFiles) ? textFiles : [])
-                    .filter(f => f && f._patched)
-                    .map(f => ({
-                        name: f.name,
-                        editedName: f._editedName || f.name,
-                        content: f.content || ''
-                    }));
-                // DIAGNOSTICS: Ø®Ù„Ø§ØµÙ‡â€ŒÛŒ Ù‚Ø§Ø¨Ù„â€ŒÙÙ‡Ù… Ø¨Ø±Ø§ÛŒ Ø§Ù†Ø³Ø§Ù† (ÙØ§Ø±Ø³ÛŒ) Ú©Ù‡ Ù…Ø³ØªÙ‚ÛŒÙ…
-                // Ø¯Ø± "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ú©Ø§Ø±Ø¨Ø± Ù†Ø´Ø§Ù† Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ - Ù†Ù‡ ÙÙ‚Ø· Ø¯ÛŒØªØ§ÛŒ Ø®Ø§Ù…
-                // Ø¨Ø±Ø§ÛŒ Ù„Ø§Ú¯ Ø³Ø±ÙˆØ±. summarizeAgentTrace Ù‡Ø± Ø¯Ùˆ Ø±Ø§ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯.
-                const traceSummary = summarizeAgentTrace(roundTrace, toolCallTally, {
-                    stoppedReason: 'silent_after_tool',
-                    round
-                });
-                err.body = {
-                    message: round > 0
-                        ? 'Ù…Ø¯Ù„ Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø³ØªÙØ§Ø¯Ù‡ Ø§Ø² Ø§Ø¨Ø²Ø§Ø± Ø¬ÙˆØ§Ø¨ Ø®Ø§Ù„ÛŒ Ø¨Ø±Ú¯Ø±Ø¯ÙˆÙ†Ø¯. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.'
-                        : 'ÙØ¯Ù Ø¬ÙØ§Ø¨ Ø®Ø§ÙÛ Ø¨Ø±Ú¯Ø±Ø¯ÙÙØ¯ (Ø§Ø­ØªÙØ§ÙØ§Ù ÙÛÙØªØ± Ø§ÛÙÙÛ ÛØ§ ÙØ´Ú©Ù ÙÙÙØª). ÙØ·ÙØ§Ù Ø¯ÙØ¨Ø§Ø±Ù Ø§ÙØªØ­Ø§Ù Ú©Ù.',
-                    type: 'empty_after_tool_call',
-                    finishReason,
-                    round,
-                    diagnostics: traceSummary,
-                    ...(partialFiles.length ? { partialFiles, canContinue: true } : {})
-                };
-                throw err;
-            }
-            // FEATURE (Continue button, MAX_TOKENS case): same idea as the
-            // empty_after_tool_call case above, but here the model DID
-            // produce text and finished with MAX_TOKENS (cut off by its own
-            // output limit) instead of going silent. Any apply_patch calls
-            // that already succeeded before the cutoff are still reflected
-            // in-place on the matching textFiles entry, so surface them the
-            // same way.
-            const partialFilesOnCutoff = finishReason === 'MAX_TOKENS'
-                ? (Array.isArray(textFiles) ? textFiles : [])
-                    .filter(f => f && f._patched)
-                    .map(f => ({
-                        name: f.name,
-                        editedName: f._editedName || f.name,
-                        content: f.content || ''
-                    }))
-                : [];
-            // FIX (verified edit never reached the client): write_block
-            // mirrors its patched content onto the matching textFiles entry
-            // (found.content/_patched/_editedName - see write_block above),
-            // and partialFilesOnCutoff already reads exactly that on the
-            // MAX_TOKENS path. But on a CLEAN success (normal STOP, the
-            // common case after verify_file passes), no equivalent existed -
-            // the block-editing system prompt tells the model not to print
-            // a file-edit JSON block itself, so there was no other path left
-            // for the real patched content to ever reach the client on a
-            // normal, fully-verified success. The edit was correct and
-            // verified server-side but the user could never see or download
-            // it. Send it here under editedFiles whenever any file was
-            // patched, regardless of finishReason.
-            const editedFiles = (Array.isArray(textFiles) ? textFiles : [])
-                .filter(f => f && f._patched)
-                .map(f => ({
-                    name: f.name,
-                    editedName: f._editedName || f.name,
-                    content: f.content || ''
-                }));
-
-            // FIX (Ø§Ø¯Ø¹Ø§ÛŒ Ø¯Ø±ÙˆØºÛŒÙ† Ù…ÙˆÙÙ‚ÛŒØª): Ø§Ú¯Ø± Ø±ÙˆÛŒ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ©
-            // write_block Ø±Ø¯ Ø´Ø¯Ù‡ (ÙØ§ÛŒÙ„ Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù¾Ú† Ù†Ø´Ø¯Ù‡ - Ù†Ù‡ Ø¯Ø±
-            // editedFiles Ùˆ Ù†Ù‡ Ø¯Ø± partialFiles) Ùˆ Ù…Ø¯Ù„ Ø¨Ø§ Ø§ÛŒÙ† Ø­Ø§Ù„ Ø¯Ø§Ø±Ø¯
-            // Ù…ØªÙ†ÛŒ Ù…ÛŒâ€ŒÙØ±Ø³ØªØ¯ Ú©Ù‡ Ø¨Ù‡ Ù†Ø¸Ø± Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ÙˆÛŒØ±Ø§ÛŒØ´ Ø±Ø§ Ø¯Ø§Ø±Ø¯ØŒ
-            // Ø§ÛŒÙ† Ø­Ø§Ù„Øª Ø±Ø§ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ ØµØ±ÛŒØ­ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø±/Ú©Ù„Ø§ÛŒÙ†Øª Ø§Ø·Ù„Ø§Ø¹ Ø¨Ø¯Ù‡ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ
-            // Ø±Ù‡Ø§ Ú©Ø±Ø¯Ù† Ù…ØªÙ† Ú¯Ù…Ø±Ø§Ù‡â€ŒÚ©Ù†Ù†Ø¯Ù‡â€ŒÛŒ Ù…Ø¯Ù„ Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† Ù†Ø´Ø§Ù†Ù‡â€ŒØ§ÛŒ. Ø§ÛŒÙ† ÙÙ‚Ø·
-            // ÛŒÚ© ÙÙ„Ú¯ Ø§Ø·Ù„Ø§Ø¹Ø§ØªÛŒ Ø§Ø³Øª - finalText Ù…Ø¯Ù„ Ø¯Ø³Øªâ€ŒÙ†Ø®ÙˆØ±Ø¯Ù‡ Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯ØŒ
-            // Ú†ÙˆÙ† Ù…Ù…Ú©Ù† Ø§Ø³Øª Ù…ØªÙ† ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¯Ø±Ø³Øª Ø¨Ø§Ø´Ø¯ (Ù…Ø«Ù„Ø§Ù‹ Ù…Ø¯Ù„ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ú¯ÙØªÙ‡
-            // "Ù†ØªÙˆÙ†Ø³ØªÙ… ÙˆÛŒØ±Ø§ÛŒØ´ Ú©Ù†Ù…")Ø› Ø§ÛŒÙ†Ø¬Ø§ ÙÙ‚Ø· Ø¯Ø§Ø¯Ù‡â€ŒÛŒ ØªØ´Ø®ÛŒØµÛŒ Ø§Ø¶Ø§ÙÙ‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯
-            // ØªØ§ Ú©Ù„Ø§ÛŒÙ†Øª Ø¨ØªÙˆØ§Ù†Ø¯ Ø¯Ø± ØµÙˆØ±Øª Ù†ÛŒØ§Ø² Ù‡Ø´Ø¯Ø§Ø± Ù†Ø´Ø§Ù† Ø¯Ù‡Ø¯.
-            //
-            // FIX Û² (Ø­Ø§Ù„Øª Ø¨Ø¯ØªØ±: write_block Ø§ØµÙ„Ø§Ù‹ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ù†Ø´Ø¯Ù‡): Ø­Ø§Ù„Øª Ø¨Ø§Ù„Ø§
-            // ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ ÙØ¹Ø§Ù„ Ù…ÛŒâ€ŒØ´Ø¯ Ú©Ù‡ write_block Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ø¨Ø§Ø± Ø±Ø¯ Ø´Ø¯Ù‡
-            // Ø¨Ø§Ø´Ø¯. Ø§Ù…Ø§ ÛŒÚ© Ø­Ø§Ù„Øª Ø¨Ø¯ØªØ± Ù‡Ù… ÙˆØ¬ÙˆØ¯ Ø¯Ø§Ø±Ø¯ - ÙˆÙ‚ØªÛŒ Ú©Ø§Ø±Ø¨Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ ÛŒÚ©
-            // ÙØ§ÛŒÙ„ ØªØ§Ø²Ù‡ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ (fileEditIntent === trueØŒ
-            // ÛŒØ¹Ù†ÛŒ editStates Ø³Ø§Ø®ØªÙ‡ Ø´Ø¯Ù‡) ÙˆÙ„ÛŒ Ù…Ø¯Ù„ Ú©Ù„Ø§Ù‹ Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª apply_edit
-            // Ø±Ø§ Ø±ÙˆÛŒ Ù‡ÛŒÚ† Ø¨Ù„ÙˆÚ©ÛŒ ØµØ¯Ø§ Ù†Ø²Ø¯Ù‡ (Ù†Ù‡ Ù…ÙˆÙÙ‚ØŒ Ù†Ù‡ Ø±Ø¯ Ø´Ø¯Ù‡) Ùˆ Ù…Ø³ØªÙ‚ÛŒÙ… Ø¨Ø§
-            // Ù…ØªÙ†ÛŒ Ú©Ù‡ Ø¨Ù‡ Ù†Ø¸Ø± Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ØªØºÛŒÛŒØ± Ø¯Ø§Ø±Ø¯ Ø¨Ù‡ Ù¾Ø§ÛŒØ§Ù† Ø±Ø³ÛŒØ¯Ù‡. Ø§ÛŒÙ†
-            // Ø±Ø§ Ù‡Ù… Ø¨Ø§ Ø´Ù…Ø§Ø±Ø´ Ú©Ù„ ÙØ±Ø§Ø®ÙˆØ§Ù†ÛŒâ€ŒÙ‡Ø§ÛŒ write_block (Ø§Ø² toolCallTally)
-            // ØªØ´Ø®ÛŒØµ Ù…ÛŒâ€ŒØ¯Ù‡ÛŒÙ…: Ø§Ú¯Ø± Ø¨Ù„ÙˆÚ©â€ŒØ§Ø³ØªÛŒØªâ€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙˆØ¬ÙˆØ¯ Ø¯Ø§Ø´Øª Ø§Ù…Ø§
-            // write_block Ø§ØµÙ„Ø§Ù‹ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ù†Ø´Ø¯ Ùˆ Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ÛŒ patch Ù†Ø´Ø¯ØŒ Ø§ÛŒÙ† Ù‡Ù…
-            // Ù‡Ù…Ø§Ù† Ú©Ù„Ø§Ø³ Ù…Ø´Ú©Ù„ Ø§Ø³Øª.
-            const writeBlockCallCount = toolCallTally['write_block'] || 0;
-            const hadEditableFiles = editStates && editStates.size > 0;
-            let unresolvedEditFailure = null;
-            if (rejectedWriteBlocksByFile && rejectedWriteBlocksByFile.size > 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
-                const entries = [...rejectedWriteBlocksByFile.entries()];
-                unresolvedEditFailure = {
-                    files: entries.map(([name, info]) => ({ name, rejectedAttempts: info.count, lastReason: info.lastReason })),
-                    note: 'Ù…Ø¯Ù„ Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ø¨Ø§Ø± write_block Ø±ÙˆÛŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„(Ù‡Ø§) Ø±Ø§ Ø§Ù…ØªØ­Ø§Ù† Ú©Ø±Ø¯ Ùˆ Ø±Ø¯ Ø´Ø¯ (ÙØ§ÛŒÙ„ Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ù…ÛŒâ€ŒØ´Ø¯)ØŒ Ùˆ Ø¯Ø± Ù†Ù‡Ø§ÛŒØª Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† ÙˆÛŒØ±Ø§ÛŒØ´ Ù…ÙˆÙÙ‚ÛŒ Ø¨Ù‡ Ù¾Ø§ÛŒØ§Ù† Ø±Ø³ÛŒØ¯. Ø§Ú¯Ø± Ù…ØªÙ† Ù¾Ø§Ø³Ø® Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ØªØºÛŒÛŒØ± Ø±Ø§ Ø¯Ø§Ø±Ø¯ØŒ Ø¢Ù† Ø§Ø¯Ø¹Ø§ Ù…Ø±Ø¨ÙˆØ· Ø¨Ù‡ Ø§ÛŒÙ† ÙØ§ÛŒÙ„(Ù‡Ø§) Ù†ÛŒØ³Øª - Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯.'
-                };
-            } else if (hadEditableFiles && writeBlockCallCount === 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
-                unresolvedEditFailure = {
-                    files: [...editStates.keys()].map(name => ({ name, rejectedAttempts: 0, lastReason: null })),
-                    note: 'Ú©Ø§Ø±Ø¨Ø± ÙØ§ÛŒÙ„ÛŒ Ø¨Ø±Ø§ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù…Ø¯Ù„ Ù‚Ø±Ø§Ø± Ø¯Ø§Ø¯Ù‡ Ø¨ÙˆØ¯ØŒ Ø§Ù…Ø§ Ù…Ø¯Ù„ Ø­ØªÛŒ ÛŒÚ©â€ŒØ¨Ø§Ø± Ù‡Ù… write_block Ø±Ø§ Ø±ÙˆÛŒ Ø¢Ù† ØµØ¯Ø§ Ù†Ø²Ø¯ - ÛŒØ¹Ù†ÛŒ Ù‡ÛŒÚ† ØªÙ„Ø§Ø´ÛŒ Ø¨Ø±Ø§ÛŒ Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ± ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ù†Ø¬Ø§Ù… Ù†Ø´Ø¯Ù‡. Ø§Ú¯Ø± Ù…ØªÙ† Ù¾Ø§Ø³Ø® Ø§Ø¯Ø¹Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù…â€ŒØ´Ø¯Ù† ØªØºÛŒÛŒØ± Ø±Ø§ Ø¯Ø§Ø±Ø¯ØŒ Ø§ÛŒÙ† Ø§Ø¯Ø¹Ø§ Ù†Ø§Ø¯Ø±Ø³Øª Ø§Ø³Øª - Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡â€ŒØ§ÛŒ Ø¨Ø±Ø§ÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯.'
-                };
-            }
-            if (unresolvedEditFailure) {
-                log.warn('agent.unresolved_edit_failure', {
-                    files: unresolvedEditFailure.files,
-                    writeBlockCallCount,
-                    finishReason,
-                    round
-                });
-            }
-
-            return {
-                finalText: textParts.join(''),
-                finishReason: finishReason,
-                usage: lastUsage,
-                askUser: null,
-                ...(partialFilesOnCutoff.length ? { partialFiles: partialFilesOnCutoff } : {}),
-                ...(editedFiles.length ? { editedFiles } : {}),
-                ...(unresolvedEditFailure ? { unresolvedEditFailure } : {})
-            };
-        }
-
-        // Search is intentionally handled differently from the other tools.
-        // After web_search we disable tools for the rest of this question.
-        // Sending Gemini's functionCall + functionResponse pair into a second
-        // request with the `tools` field removed can make some Gemini models
-        // reject the follow-up as HTTP 400. Instead, convert the successful
-        // search result into ordinary user context for round 2. This preserves
-        // the one-search rule while keeping get_archived_file/ask_user on the
-        // normal function-calling protocol.
-        const webSearchCall = functionCalls.find(call => call.name === 'web_search');
-        if (webSearchCall) {
-            let searchResult = null;
-            let earlySearchAskUser = null;
-
-            if (onStep) {
-                try { onStep(describeToolCall(webSearchCall.name, webSearchCall.args), webSearchCall.name); } catch (_) {}
-            }
-
-            scopedSearchState.used = true;
-            const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache, editStates });
-            scopedSearchState.result = result;
-            searchResult = result;
-            if (result.askUser) earlySearchAskUser = result.askUser;
-
-            if (earlySearchAskUser) {
-                return {
-                    finalText: earlySearchAskUser,
-                    finishReason: 'ASK_USER',
-                    usage: lastUsage,
-                    askUser: earlySearchAskUser
-                };
-            }
-
-            const resultText = searchResult?.result || searchResult?.message || 'Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ Ø§Ø² Ø¬Ø³ØªØ¬Ùˆ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯.';
-            // FIX (silent empty reply on long chats after web_search): a
-            // Tavily result had no size cap before being pushed into the
-            // model's next-round context. On an already-long conversation
-            // (history can be up to MAX_HISTORY_CHARS on its own), adding an
-            // uncapped search result on top could push the combined payload
-            // past what the model handles cleanly - Gemini would then return
-            // an empty round (finishReason NONE/STOP, 0 chars) instead of a
-            // clean error. Cap it here so this can't happen.
-            const cappedResultText = resultText.length > MAX_SEARCH_RESULT_CHARS
-                ? resultText.slice(0, MAX_SEARCH_RESULT_CHARS) + '\n\n[... \u0646\u062a\u06cc\u062c\u0647 \u0637\u0648\u0644\u0627\u0646\u06cc \u0628\u0648\u062f \u0648 \u06a9\u0648\u062a\u0627\u0647 \u0634\u062f ...]'
-                : resultText;
-            workingContents.push({
-                role: 'user',
-                parts: [{
-                    text: `[Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ â€” Ø¬Ø³ØªØ¬Ùˆ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ ØªÙ…Ø§Ù… Ø´Ø¯Ù‡ Ùˆ Ø¯ÛŒÚ¯Ø± Ù‡ÛŒÚ† Ø§Ø¨Ø²Ø§Ø±ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†]:\n${cappedResultText}`
-                }]
-            });
-
-            // If Gemini emitted parallel calls in the same streamed turn, none
-            // of the additional calls are executed. One logical search owns
-            // the question, and the next round is tools-free.
-            continue;
-        }
-
-        // For non-search tools keep the native Gemini function-calling
-        // protocol intact (this is required by get_archived_file / ask_user).
-        workingContents.push({
-            role: 'model',
-            parts: parts
-        });
-
-        const responseParts = [];
-        let earlyAskUser = null;
-
-        // FIX (root cause of "Ø¨Ø±Ø±Ø³ÛŒ Ø³Ø§Ø®ØªØ§Ø± ÙØ§ÛŒÙ„" Ú†Ù†Ø¯Ø¨Ø§Ø± ØªÚ©Ø±Ø§Ø± Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ
-        // Rate limit Ù‡Ù…Ù‡â€ŒÛŒ Ú©Ù„ÛŒØ¯Ù‡Ø§ Ø±Ø§ Ù…ÛŒâ€ŒØªØ±Ú©Ø§Ù†Ø¯): Ø¨Ø§ Ù‡Ø± Ø¨Ø§Ø± inspect_fileØŒ
-        // computeLogicalChunks Ú©Ù„ Ù†Ù‚Ø´Ù‡â€ŒÛŒ chunk Ø±Ø§ Ø§Ø² ØµÙØ± Ùˆ Ø¨Ø§ Ù…Ø±Ø²Ù‡Ø§ÛŒ
-        // Ù…ØªÙØ§ÙˆØª Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯ (Ú†ÙˆÙ† Ù‡ÛŒÚ† Ø­Ø§Ù„ØªÛŒ Ø¨ÛŒÙ† ØµØ¯Ø§Ù‡Ø§ Ù†Ú¯Ù‡ Ø¯Ø§Ø´ØªÙ‡ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯).
-        // Ù‡ÛŒÚ†â€ŒØ¬Ø§ÛŒ system prompt Ù‡Ù… Ù…Ø¯Ù„ Ø±Ø§ Ø§Ø² ØµØ¯Ø§ Ø²Ø¯Ù† Ø¯ÙˆØ¨Ø§Ø±Ù‡â€ŒÛŒ inspect_file
-        // Ù…Ù†Ø¹ Ù†Ù…ÛŒâ€ŒÚ©Ø±Ø¯ØŒ Ù¾Ø³ ÙˆÙ‚ØªÛŒ Ù…Ø¯Ù„ Ø±ÙˆÛŒ ÛŒÚ© ÙØ§ÛŒÙ„ Ø¨Ø²Ø±Ú¯ Ú¯ÛŒØ¬ Ù…ÛŒâ€ŒØ´Ø¯ØŒ Ø±Ø§Ù‡â€ŒØ­Ù„Ø´
-        // "Ø§Ø² Ø§ÙˆÙ„ Ù†Ú¯Ø§Ù‡ Ú©Ù†" Ø¨ÙˆØ¯ - Ø¯Ù‚ÛŒÙ‚Ø§Ù‹ Ù‡Ù…Ø§Ù† Ø±ÙØªØ§Ø± "Ù…ÛŒâ€ŒØ±Ù‡ Û²Û°Û°ØŒ Ø¨Ø¹Ø¯ Û±Û°Û°Û°ØŒ
-        // Ø¨Ø¹Ø¯ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ù‡ Û±Û°Û°" Ú©Ù‡ Ø¨Ø§Ø¹Ø« Ø´Ø¯ Ù‡Ø± Û±Û² Ú©Ù„ÛŒØ¯ Ø¨Ø§ 429 ØªÙ…Ø§Ù… Ø´ÙˆÙ†Ø¯.
-        // Ø§ÛŒÙ† Ø­Ø§Ù„Øª Ø±Ø§ Ø¨Ù‡â€ŒØ§Ø²Ø§ÛŒ Ù‡Ø± ÙØ§ÛŒÙ„ØŒ Ø¯Ø± Ø·ÙˆÙ„ Ú©Ù„ Ø¯Ø±Ø®ÙˆØ§Ø³Øª (Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ©
-        // round)ØŒ ÛŒÚ©â€ŒØ¨Ø§Ø± Ù…Ø­Ø¯ÙˆØ¯ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…Ø› ØµØ¯Ø§Ù‡Ø§ÛŒ Ø¨Ø¹Ø¯ÛŒ Ø¨Ø¯ÙˆÙ† ØªÙ…Ø§Ø³ Ø¨Ø§ Gemini
-        // Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ Ùˆ Ù…Ø¯Ù„ Ø¨Ù‡ get_file_chunk (Ú©Ù‡ ÙÙ‚Ø· Ù…ÛŒâ€ŒØ®ÙˆØ§Ù†Ø¯ØŒ Ú†ÛŒØ²ÛŒ Ø±Ø§
-        // Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù†Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯) Ù‡Ø¯Ø§ÛŒØª Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-        // (inspectedFilesThisRequest Ùˆ chunkReadsPerFile Ø¨ÛŒØ±ÙˆÙ† Ø­Ù„Ù‚Ù‡â€ŒÛŒ round
-        // ØªØ¹Ø±ÛŒÙ Ø´Ø¯Ù‡â€ŒØ§Ù†Ø¯ ØªØ§ Ø¨ÛŒÙ† round Ù‡Ø§ Ù¾Ø§Ú© Ù†Ø´ÙˆÙ†Ø¯.)
-
-        // FIX (root cause of "searches many sites for one simple question"):
-        // Gemini's function-calling can return SEVERAL functionCall parts in
-        // a single model turn (parallel calling) - e.g. 3-4 different
-        // web_search calls with slightly reworded queries, all at once. That
-        // happened entirely within ONE round, so MAX_TOOL_ROUNDS never even
-        // saw it as more than one step. The runtime therefore enforces both
-        // one search per round and, more importantly, one search per question.
-        let webSearchesThisRound = 0;
-        const MAX_WEB_SEARCHES_PER_ROUND = 1;
-        let searchTriggeredThisRound = false;
-
-        for (const call of functionCalls) {
-            const label = describeToolCall(call.name, call.args);
-
-            // NOTE (block-based rewrite): the old inspect_file/get_file_chunk
-            // repeat-guards (inspectedFilesThisRequest, chunkReadsPerFile,
-            // backward-jump detection, MAX_CHUNK_READS_PER_FILE) lived here.
-            // They no longer apply - those two tools were removed from
-            // GEMINI_TOOLS entirely, replaced by read_block/write_block/
-            // verify_file, which use fixed block numbers instead of
-            // freeform line ranges. See the executeToolCall handlers for
-            // read_block/write_block/verify_file and the block-map
-            // injection near the top of runAgentLoop for the new approach.
-
-            if (call.name === 'web_search') {
-                webSearchesThisRound++;
-                if (webSearchesThisRound > MAX_WEB_SEARCHES_PER_ROUND || scopedSearchState.used) {
-                    responseParts.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: { error: 'Ø¬Ø³ØªØ¬Ùˆ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ Ù‚Ø¨Ù„Ø§Ù‹ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡Ø› Ø¨Ø§ Ù‡Ù…Ø§Ù† Ù†ØªÛŒØ¬Ù‡ Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡ Ùˆ Ø¬Ø³ØªØ¬ÙˆÛŒ Ø¯ÛŒÚ¯Ø±ÛŒ Ø§Ù†Ø¬Ø§Ù… Ù†Ø¯Ù‡.' }
+                try {
+                    const parsed = JSON.parse(sseBuffer.trim().slice(5).trim());
+                    if (parsed.text) {
+                        gotAnyText = true;
+                        fullReply += parsed.text;
+                    } else if (parsed.error) {
+                        if (typeof parsed.error === 'string') {
+                            streamError = parsed.error;
+                        } else {
+                            streamError = parsed.error.message || 'خطای نامشخص';
+                            streamErrorDetail = parsed.error;
                         }
-                    });
+                    }
+                    // FIX (missing download card on large/heavy edited files):
+                    // when the last SSE chunk (the one carrying done:true and
+                    // editedFiles) doesn't end with a newline before the
+                    // stream closes, it never gets pushed through the main
+                    // parsing loop above and instead ends up here as a
+                    // leftover fragment in sseBuffer. This branch used to only
+                    // pull `text`/`error` out of it and silently drop
+                    // `editedFiles`, so on a verified, successfully-patched
+                    // heavy file the user would see no download box at all -
+                    // exactly like the light-file path (line ~4014) but
+                    // missing here. Mirror that same extraction here.
+                    if (parsed.done && Array.isArray(parsed.editedFiles) && parsed.editedFiles.length) {
+                        streamEditedFiles = parsed.editedFiles;
+                    }
+                } catch (_) {}
+            }
+
+            streamEnded = true;
+            queueLiveRender(true);
+
+            if (requestId !== activeRequestId) return;
+
+            const reply = sanitizeVirtualIdentity(fullReply);
+            if (gotAnyText && reply) {
+                const historyText = reply;
+                if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
+                else {
+                    const last = chatHistoryData[currentChatId]?.at(-1);
+                    if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
+                }
+                // Reply arrived and was saved right after the user turn -
+                // nothing left to clean up.
+                pushedHistoryIndex = -1;
+                lastFailedRequest = null;
+
+                const { displayText, edits } = stripFileEditBlock(reply);
+                let finalHtml = displayText ? formatReply(displayText) : '';
+                finalHtml += buildFileEditResultHtml(edits);
+                finalHtml += buildEditedFilesHtml(streamEditedFiles);
+                if (!finalHtml) finalHtml = formatReply('');
+
+                // FIX (false "saved successfully" claim with no real edit):
+                // the model can hallucinate success language in prose (e.g.
+                // "با موفقیت ذخیره شد") while never actually calling
+                // write_block/verify_file - it just prints the whole file in
+                // a ```html fence instead (which formatReply then renders as
+                // a generic, non-downloadable code-card that looks similar
+                // but isn't the real edited-file card). This check used to
+                // look at `edits` (the legacy file-edit JSON block), which
+                // the block-based write_block/verify_file system never
+                // produces - so it never fired for this exact failure mode.
+                // Check the real block-based delivery channel instead.
+                // FIX (false positive on plain chat with no attached file):
+                // this check used to fire on ANY message containing success-
+                // sounding phrases (\u0630\u062e\u06cc\u0631\u0647/\u062b\u0628\u062a/\u0627\u0639\u0645\u0627\u0644 \u0634\u062f), even when the user
+                // never attached an editable file at all (e.g. casual chat
+                // that happens to mention "settings are saved"). The warning
+                // only makes sense when this specific request actually had
+                // at least one editable text file attached - otherwise there
+                // was never any real edit to have failed. mergedTextFiles is
+                // this exact request's attached/merged text files (captured
+                // above, before the request was sent).
+                const hadEditableFileThisRequest = Array.isArray(mergedTextFiles) && mergedTextFiles.length > 0;
+                const claimsSuccess = hadEditableFileThisRequest && /با موفقیت (ذخیره|ویرایش|اعمال)|تغییرات? (اعمال|ذخیره) شد|فایل .* (ذخیره|ویرایش) شد/.test(displayText || '');
+                if (claimsSuccess && (!edits || !edits.length) && (!streamEditedFiles || !streamEditedFiles.length)) {
+                    finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">احتمالاً مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده.</div></div>`;
+                }
+
+                loadingDiv.innerHTML = finalHtml;
+                loadingDiv.classList.remove('msg-content-in');
+                void loadingDiv.offsetWidth; // restart animation
+                loadingDiv.classList.add('msg-content-in');
+                setGeneratingState(false); saveCurrentChat(); scrollToLatest();
+            } else {
+                removePushedUserTurnIfUnanswered();
+                makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request, streamErrorDetail);
+                setGeneratingState(false); saveCurrentChat();
+            }
+        } catch (error) {
+            // If Stop was pressed, the request id changed and the UI was already updated.
+            if (requestId !== activeRequestId) return;
+
+            if (error.name === 'AbortError') {
+                // FIX: the user's turn was already pushed to history before the
+                // request started - stopping the request must remove it, or
+                // the NEXT message sent will be answered as if it were a
+                // continuation of this stopped/unanswered turn (see fix above).
+                removePushedUserTurnIfUnanswered();
+                loadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
+            } else {
+                removePushedUserTurnIfUnanswered();
+                makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request, { type: 'network_error', stage: 'fetch', detail: error?.message || String(error) });
+            }
+            setGeneratingState(false);
+            saveCurrentChat();
+        } finally {
+            clearTimeout(watchdogId);
+            if (requestId === activeRequestId) {
+                currentAbortController = null;
+                activeLoadingDiv = null;
+            }
+            updateScrollLatestButton();
+        }
+    }
+
+    // Note: the artificial typewriter effect was removed — replies now render
+    // live from the real SSE stream in sendToGemini(), chunk by chunk.
+
+    function appendMessage(sender, content) {
+        const chatBox = document.getElementById("chatBox");
+        const wrapperDiv = document.createElement("div");
+        wrapperDiv.className = `message-wrapper ${sender}`;
+        const msgDiv = document.createElement("div");
+        msgDiv.className = `message ${sender}`;
+        msgDiv.innerHTML = content;
+        wrapperDiv.appendChild(msgDiv);
+
+        chatBox.appendChild(wrapperDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        updateScrollLatestButton();
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function formatInline(value) {
+        return value
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            // لینک مارک‌داون [متن](URL) -> لینک واقعی قابل کلیک، باز شونده در تب جدید
+            .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="msg-link">$1</a>')
+            // URL خام هم به لینک تبدیل شود (وقتی داخل [] () نیامده)
+            .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="msg-link">$2</a>')
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+            // FEATURE: کارت/چیپ Entity - نحو ویژه {{entity:نام}} یک بج کوچک
+            // با آیکون پازل رندر می‌کند (برای اشاره به یک مفهوم/محصول/شخص مهم).
+            .replace(/\{\{entity:([^}]+)\}\}/g, '<span class="entity-chip"><i class="lucide-icon" data-lucide="puzzle"></i>$1</span>')
+            // ایتالیک: تک‌ستاره/تک‌آندرلاین (بعد از بولد پردازش می‌شود که با ** تداخل نکند)
+            .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
+            .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>')
+            // خط‌خورده: ~~متن~~
+            .replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    }
+
+    function sanitizeVirtualIdentity(text) {
+        if (!text) return text;
+        return String(text)
+            .replace(/سازنده(?:ات|ی)?\s*(?:اکبر|اکبر است|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست')
+            .replace(/سازنده\s*من\s*(?:اکبر|شخصی به نام اکبر)[^.!؟\n]*/gi, 'اطلاعات سازنده در اختیارم نیست');
+    }
+
+    // توجه: formatReply واقعی پایین‌تر در فایل تعریف شده (نسخه‌ی نهایی و
+    // به‌روزتر). این‌جا قبلاً یک تعریف تکراری و قدیمی‌تر از همین تابع بود که
+    // حذف شد، چون وجود دو تعریف با منطق parsing متفاوت باعث رفتار ناسازگار
+    // بین دستگاه‌ها/مرورگرها در تشخیص بلاک کد و دکمه‌های کپی/پیش‌نمایش می‌شد.
+
+    async function copyCode(btn) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        try { await navigator.clipboard.writeText(code); } catch { const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        const old=btn.textContent; btn.textContent='کپی شد'; setTimeout(()=>btn.textContent=old,1200);
+    }
+
+    // FIX (requested): previously only HTML/"runnable" code blocks had a
+    // download button - any other language (Python, plain JS/CSS files,
+    // JSON, etc.) only ever rendered as inline <pre><code> text, which is
+    // what made long code replies look messy in the chat. This adds a
+    // generic "دانلود فایل" button to EVERY code block, picking a sensible
+    // file extension from the fenced language tag so the user gets an
+    // actual file to save/open in an editor instead of scrolling raw code
+    // in the chat.
+    const CODE_LANG_EXTENSIONS = {
+        python: 'py', py: 'py', javascript: 'js', js: 'js', jsx: 'jsx',
+        typescript: 'ts', ts: 'ts', tsx: 'tsx', html: 'html', htm: 'html',
+        css: 'css', json: 'json', java: 'java', c: 'c', cpp: 'cpp', 'c++': 'cpp',
+        csharp: 'cs', 'c#': 'cs', cs: 'cs', php: 'php', ruby: 'rb', rb: 'rb',
+        go: 'go', rust: 'rs', rs: 'rs', swift: 'swift', kotlin: 'kt',
+        sql: 'sql', sh: 'sh', bash: 'sh', shell: 'sh', yaml: 'yaml', yml: 'yaml',
+        xml: 'xml', markdown: 'md', md: 'md', dart: 'dart'
+    };
+
+    function downloadCodeAsFile(btn) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        const lang = (btn.dataset.lang || '').toLowerCase();
+        const ext = CODE_LANG_EXTENSIONS[lang] || 'txt';
+        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `virtual-bot-code.${ext}`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    // ===== قابلیت ویرایش فایل کد =====
+    // یک بلاک ```file-edit ...``` را از متن پاسخ جدا می‌کند (اگر باشد) و
+    // آرایه JSON تغییرات {old,new} را برمی‌گرداند. متن نمایشی بدون آن بلاک است.
+    function stripFileEditBlock(text) {
+        const match = /```file-edit\s*([\s\S]*?)```/.exec(text || '');
+        if (!match) return { displayText: text || '', edits: null };
+        let edits = null;
+        try {
+            const parsed = JSON.parse(match[1].trim());
+            if (Array.isArray(parsed)) edits = parsed;
+        } catch (_) { edits = null; }
+        const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+        return { displayText, edits };
+    }
+
+    // هر {old,new} را با یک زنجیره‌ی چند مرحله‌ای (از دقیق‌ترین به مسامحه‌کارترین)
+    // اعمال می‌کند، تا وقتی مدل متن old را حرف‌به‌حرف کپی نکرده (که برای فایل‌های
+    // بزرگ خیلی رایج است) هم ویرایش بی‌جهت رد نشود:
+    //   ۱) تطابق دقیق و یکتا (بدون تغییر - رفتار قبلی)
+    //   ۲) تطابق پس از نرمال‌سازی CRLF/CR (رفتار قبلی)
+    //   ۳) تطابق پس از نرمال‌سازی فاصله/تورفتگی (فاصله‌های ابتدای خط و فاصله‌های
+    //      پیاپی را برابر می‌گیرد - بیشترین علت "مطابقت نداشت" روی فایل‌های
+    //      بزرگ همین اختلاف فاصله/تب است، نه اختلاف محتوایی واقعی)
+    //   ۴) نزدیک‌ترین تطابق فازی روی خطوط (similarity-based)، فقط وقتی یک
+    //      کاندیدای برنده‌ی واضح وجود دارد (فاصله‌ی امتیاز با کاندیدای بعدی
+    //      به‌اندازه‌ی کافی زیاد است) - تا هرگز به‌جای بخش اشتباه چیزی جایگزین
+    //      نشود. اگر بیش از یک کاندیدای نزدیک به‌هم باشد، همچنان رد می‌شود.
+    // هر مرحله فقط وقتی به مرحله‌ی بعد می‌رود که مرحله‌ی قبل matchی پیدا نکرده
+    // باشد؛ به محض یک تطابق یکتا، همان اعمال و از بقیه مراحل صرف‌نظر می‌شود.
+    function normalizeLineEndings(str) {
+        return typeof str === 'string' ? str.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : str;
+    }
+
+    // Collapses leading indentation and repeated inner whitespace to single
+    // spaces per line, keeping line breaks intact, so "  const x = 1;" and
+    // "    const x = 1;" (or "const x  =  1;") compare as equal without
+    // touching actual code tokens.
+    function normalizeWhitespace(str) {
+        return typeof str === 'string'
+            ? normalizeLineEndings(str)
+                .split('\n')
+                .map(line => line.trim().replace(/[ \t]+/g, ' '))
+                .join('\n')
+            : str;
+    }
+
+    // Simple line-based similarity: fraction of the shorter text's lines
+    // that appear (in order, allowing gaps) in the longer text, weighted by
+    // exact line equality after whitespace normalization. Cheap, dependency
+    // free, and good enough to rank candidate windows - this never needs to
+    // be a real diff algorithm since it only breaks ties between a handful
+    // of candidate windows of near-identical length.
+    function lineSimilarity(a, b) {
+        const linesA = normalizeWhitespace(a).split('\n');
+        const linesB = normalizeWhitespace(b).split('\n');
+        const setB = new Map();
+        linesB.forEach(l => setB.set(l, (setB.get(l) || 0) + 1));
+        let matched = 0;
+        for (const l of linesA) {
+            if (setB.get(l) > 0) {
+                matched++;
+                setB.set(l, setB.get(l) - 1);
+            }
+        }
+        const denom = Math.max(linesA.length, linesB.length, 1);
+        return matched / denom;
+    }
+
+    // Slides a window of edit.old's line-length over content and returns the
+    // best-scoring window(s) by lineSimilarity. Only used as a last resort,
+    // and only ever applied when there is a single clear winner.
+    function findBestFuzzyWindow(content, oldText) {
+        const contentLines = content.split('\n');
+        const oldLineCount = oldText.split('\n').length;
+        if (oldLineCount < 2 || contentLines.length < oldLineCount) return null;
+
+        // Cap scan cost on very large files: only worth trying fuzzy match
+        // for reasonably sized targets, and this is already a fallback path
+        // that only runs after exact/normalized matching failed.
+        if (contentLines.length > 20000) return null;
+
+        let best = null; // { score, startLine, endLine, text }
+        let secondBestScore = -1;
+
+        for (let start = 0; start <= contentLines.length - oldLineCount; start++) {
+            const windowLines = contentLines.slice(start, start + oldLineCount);
+            const windowText = windowLines.join('\n');
+            const score = lineSimilarity(oldText, windowText);
+            if (!best || score > best.score) {
+                secondBestScore = best ? best.score : -1;
+                best = { score, startLine: start, endLine: start + oldLineCount, text: windowText };
+            } else if (score > secondBestScore) {
+                secondBestScore = score;
+            }
+        }
+
+        // Require a strong, unambiguous winner: high absolute similarity AND
+        // a meaningful margin over the runner-up, so a fuzzy match never
+        // silently replaces the wrong section when several similar blocks
+        // exist (e.g. repeated boilerplate).
+        if (best && best.score >= 0.72 && (best.score - secondBestScore) >= 0.12) {
+            return best;
+        }
+        return null;
+    }
+
+    function applyFileEdits(originalContent, edits) {
+        let content = originalContent;
+        let appliedCount = 0, failedCount = 0, fuzzyCount = 0;
+        for (const edit of (edits || [])) {
+            // Line-anchored edit: startLine/endLine + new. No string
+            // matching at all - the range was read directly from
+            // get_file_chunk on the backend, so it's authoritative as long
+            // as the file hasn't changed since. Always applied against the
+            // CURRENT `content` (not originalContent), so multiple
+            // line-anchored edits in one batch still stack correctly as
+            // long as they're given in descending line order by the model
+            // (system prompt asks for that); as a safety net we re-split
+            // fresh each iteration rather than caching stale line arrays.
+            if (edit && Number.isFinite(edit.startLine) && Number.isFinite(edit.endLine) && typeof edit.new === 'string') {
+                const lines = content.split(/\r?\n/);
+                const s = edit.startLine, e = edit.endLine;
+                if (s >= 1 && e >= s && e <= lines.length) {
+                    const before = lines.slice(0, s - 1);
+                    const after = lines.slice(e);
+                    content = [...before, ...edit.new.split(/\r?\n/), ...after].join('\n');
+                    appliedCount++;
                     continue;
                 }
-                searchTriggeredThisRound = true;
-            } else if (searchTriggeredThisRound || scopedSearchState.used) {
-                responseParts.push({
-                    functionResponse: {
-                        name: call.name,
-                        response: { error: 'Ø¨Ø¹Ø¯ Ø§Ø² web_search Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ ØºÛŒØ±ÙØ¹Ø§Ù„ Ø´Ø¯Ù‡â€ŒØ§Ù†Ø¯Ø› Ø¨Ø§ Ù†ØªÛŒØ¬Ù‡Ù” Ø¬Ø³ØªØ¬Ùˆ Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡.' }
-                    }
-                });
+                failedCount++;
                 continue;
             }
 
-            if (onStep) {
-                try { onStep(label, call.name); } catch (_) {}
-            }
-
-            // Lock BEFORE executing the request. This matters if the model
-            // emits multiple web_search calls in the same turn or if the
-            // surrounding request later retries on another Gemini key.
-            // The first logical search owns the question for the rest of the
-            // request; all later model rounds receive no tools at all.
-            if (call.name === 'web_search') {
-                scopedSearchState.used = true;
-            }
-
-            const toolCallStartedAt = Date.now();
-            const result = await executeToolCall(call.name, call.args, { tavilyKeys, archivedFiles, textFiles, searchCache, editStates, rejectedWriteBlocksByFile, originalFreshFileNames });
-            const toolCallDurationMs = Date.now() - toolCallStartedAt;
-
-            if (call.name === 'web_search') scopedSearchState.result = result;
-            if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
-            if (call.name === 'read_file_section') lastToolCallWasSectionRead = true;
-
-            // DIAGNOSTICS: Ù‡Ø± ØµØ¯Ø§ Ø²Ø¯Ù† Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ Ø¨Ø§ Ø¢Ø±Ú¯ÙˆÙ…Ø§Ù†â€ŒÙ‡Ø§ÛŒ Ú©Ù„ÛŒØ¯ÛŒ (Ù†Ù‡ Ú©Ù„
-            // Ù…Ø­ØªÙˆØ§ - ÙÙ‚Ø· Ø§Ø³Ù… ÙØ§ÛŒÙ„/Ø¨Ø§Ø²Ù‡â€ŒÛŒ Ø®Ø·/Ø·ÙˆÙ„ queryØŒ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø±Ø¯Ù
-            // Ø®Ø·Ø§ Ø®ÙˆØ¯Ø´ Ø­Ø¬ÛŒÙ… Ù†Ø´ÙˆØ¯) Ùˆ Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ù†ØªÛŒØ¬Ù‡ Ø«Ø¨Øª Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…. ØªØ¹Ø¯Ø§Ø¯ Ú©Ù„
-            // Ù‡Ø± Ø§Ø¨Ø²Ø§Ø± Ø¯Ø± toolCallTally Ø¬Ù…Ø¹ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ØªØ§ ØªÚ©Ø±Ø§Ø± ØºÛŒØ±Ø¹Ø§Ø¯ÛŒ (Ù…Ø«Ù„Ø§Ù‹
-            // inspect_file Ú†Ù†Ø¯Ø¨Ø§Ø± Ù¾Ø´Øªâ€ŒØ³Ø±Ù‡Ù…) ÙÙˆØ±Ø§Ù‹ Ù‚Ø§Ø¨Ù„ Ù…Ø´Ø§Ù‡Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.
-            toolCallTally[call.name] = (toolCallTally[call.name] || 0) + 1;
-            roundEntry.toolCalls.push({
-                name: call.name,
-                file: (call.args && (call.args.file || call.args.name)) || null,
-                lineRange: (call.args && call.args.startLine != null)
-                    ? `${call.args.startLine}-${call.args.endLine ?? '?'}`
-                    : null,
-                durationMs: toolCallDurationMs,
-                ok: !(result && result.error),
-                error: (result && result.error) || null,
-                patched: !!(result && result.success && (call.name === 'apply_edit')),
-                callIndexForThisTool: toolCallTally[call.name]
-            });
-
-            if (result.askUser) earlyAskUser = result.askUser;
-
-            // FINAL AGENT CONTINUATION GUARD:
-// After reading a block, explicitly tell the model that context is
-// already loaded. This prevents restarting file inspection from zero.
-let responseForModel = result;
-if (call.name === 'read_file_section' && result && !result.error) {
-    responseForModel = {
-        ...result,
-        agentInstruction:
-            'Section content loaded successfully. Continue from this context - use it to build an exact search for apply_edit.'
-    };
-}
-
-responseParts.push({
-                functionResponse: {
-                    name: call.name,
-                    response: responseForModel
-                }
-            });
-        }
-
-        if (earlyAskUser) {
-            return {
-                finalText: earlyAskUser,
-                finishReason: 'ASK_USER',
-                usage: lastUsage,
-                askUser: earlyAskUser
-            };
-        }
-
-        workingContents.push({
-            role: 'user',
-            parts: responseParts
-        });
-        // loop continues: send the tool result(s) back to the model for round 2+
-    }
-
-    // Safety net: too many tool rounds without a final answer.
-    // DIAGNOSTICS: Ø§ÛŒÙ† ÛŒÚ©ÛŒ Ø§Ø² Ø¯Ùˆ Ø­Ø§Ù„ØªÛŒ Ø§Ø³Øª Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ù‡ÛŒÚ† Ø§Ø·Ù„Ø§Ø¹ÛŒ Ø§Ø² "Ú†Ø±Ø§"
-    // Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù†Ù…ÛŒâ€ŒØ±Ø³ÛŒØ¯ - ÙÙ‚Ø· Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… Ø«Ø§Ø¨Øª. Ø­Ø§Ù„Ø§ diagnostics Ù‡Ù… Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø¯
-    // ØªØ§ Ø¯Ø± "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ù…Ø¹Ù„ÙˆÙ… Ø¨Ø§Ø´Ø¯ Ú©Ø¯Ø§Ù… Ø§Ø¨Ø²Ø§Ø± Ú†Ù†Ø¯Ø¨Ø§Ø± ØªÚ©Ø±Ø§Ø± Ø´Ø¯Ù‡ Ø¨ÙˆØ¯.
-    const loopLimitTrace = summarizeAgentTrace(roundTrace, toolCallTally, {
-        stoppedReason: 'round_limit',
-        round: MAX_TOOL_ROUNDS
-    });
-    log.warn('agent.tool_loop_limit_hit', { toolCallTally, roundTrace });
-    return {
-        finalText: 'Ù…ØªØ£Ø³ÙÙ…ØŒ Ø¯Ø± Ù¾Ø±Ø¯Ø§Ø²Ø´ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø¨Ù‡ Ù…Ø´Ú©Ù„ Ø®ÙˆØ±Ø¯Ù… (ØªØ¹Ø¯Ø§Ø¯ Ù…Ø±Ø§Ø­Ù„ Ø²ÛŒØ§Ø¯ Ø´Ø¯). Ù…ÛŒâ€ŒØªÙˆÙ†ÛŒ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ÛŒØ§ ÙˆØ§Ø¶Ø­â€ŒØªØ± Ø¨Ù¾Ø±Ø³ÛŒØŸ',
-        finishReason: 'TOOL_LOOP_LIMIT',
-        usage: lastUsage,
-        askUser: null,
-        diagnostics: loopLimitTrace
-    };
-}
-
-// DIAGNOSTICS: Ø§Ø² ÛŒÚ© roundTrace Ø®Ø§Ù… ÛŒÚ© Ø®Ù„Ø§ØµÙ‡â€ŒÛŒ Ø¯ÙˆØ¨Ø®Ø´ÛŒ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯:
-//  - humanSummary: Ú†Ù†Ø¯ Ø®Ø· ÙØ§Ø±Ø³ÛŒ Ø³Ø§Ø¯Ù‡ØŒ Ù‡Ù…Ø§Ù† Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªÙˆÛŒ "Ø¬Ø²Ø¦ÛŒØ§Øª
-//    Ø¨ÛŒØ´ØªØ±" Ù…ÛŒâ€ŒØ¨ÛŒÙ†Ø¯ (Ø¨Ø¯ÙˆÙ† Ø§ØµØ·Ù„Ø§Ø­ ÙÙ†ÛŒ Ø²ÛŒØ§Ø¯)
-//  - raw: Ø®ÙˆØ¯Ù roundTrace + toolCallTallyØŒ Ø¨Ø±Ø§ÛŒ Ù„Ø§Ú¯ Ø³Ø±ÙˆØ± Ùˆ Ø¯ÛŒØ¨Ø§Ú¯ Ø¹Ù…ÛŒÙ‚â€ŒØªØ±
-// Ø§ÛŒÙ† ØªØ§Ø¨Ø¹ Ù‡ÛŒÚ† ØªØµÙ…ÛŒÙ…ÛŒ Ù†Ù…ÛŒâ€ŒÚ¯ÛŒØ±Ø¯ Ùˆ Ú†ÛŒØ²ÛŒ Ø±Ø§ silent Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯Ø› ÙÙ‚Ø· Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ø¯Ø±
-// Ø·ÙˆÙ„ Ø§Ø¬Ø±Ø§ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø§ØªÙØ§Ù‚ Ø§ÙØªØ§Ø¯Ù‡ Ø±Ø§ Ø¨Ù‡ ÙØ§Ø±Ø³ÛŒÙ Ù‚Ø§Ø¨Ù„â€ŒØ®ÙˆØ§Ù†Ø¯Ù† ØªØ±Ø¬Ù…Ù‡ Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
-function summarizeAgentTrace(roundTrace, toolCallTally, meta) {
-    const totalRounds = roundTrace.length;
-    const totalDurationMs = roundTrace.reduce((sum, r) => sum + (r.durationMs || 0), 0);
-    const repeatedTools = Object.entries(toolCallTally || {}).filter(([, count]) => count > 1);
-    const patchedFiles = [];
-    for (const r of roundTrace) {
-        for (const tc of r.toolCalls) {
-            if (tc.patched && tc.file && !patchedFiles.includes(tc.file)) patchedFiles.push(tc.file);
-        }
-    }
-    const lastRound = roundTrace[roundTrace.length - 1] || null;
-
-    const lines = [];
-    lines.push(`ØªØ¹Ø¯Ø§Ø¯ Ù…Ø±Ø§Ø­Ù„ Ø·ÛŒâ€ŒØ´Ø¯Ù‡: ${totalRounds} Ø§Ø² Ø³Ù‚Ù Ù…Ø¬Ø§Ø²`);
-    lines.push(`Ø²Ù…Ø§Ù† Ú©Ù„ ØµØ±Ùâ€ŒØ´Ø¯Ù‡: ${(totalDurationMs / 1000).toFixed(1)} Ø«Ø§Ù†ÛŒÙ‡`);
-    if (repeatedTools.length) {
-        lines.push('Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ø¨ÛŒØ´ Ø§Ø² ÛŒÚ©â€ŒØ¨Ø§Ø± ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø´Ø¯Ù†Ø¯: ' +
-            repeatedTools.map(([name, count]) => `${name} (${count} Ø¨Ø§Ø±)`).join('ØŒ '));
-    }
-    if (patchedFiles.length) {
-        lines.push(`Ù‚Ø¨Ù„ Ø§Ø² ØªÙˆÙ‚ÙØŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ù¾Ú† Ø®ÙˆØ±Ø¯Ù‡ Ø¨ÙˆØ¯Ù†Ø¯: ${patchedFiles.join('ØŒ ')}`);
-    } else {
-        lines.push('Ù‚Ø¨Ù„ Ø§Ø² ØªÙˆÙ‚ÙØŒ Ù‡ÛŒÚ† Ø¨Ù„ÙˆÚ©ÛŒ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù†Ø´Ø¯Ù‡ Ø¨ÙˆØ¯.');
-    }
-    if (lastRound) {
-        lines.push(`Ø¢Ø®Ø±ÛŒÙ† Ù…Ø±Ø­Ù„Ù‡ (round ${lastRound.round}): finishReason=${lastRound.finishReason || 'Ù†Ø§Ù…Ø´Ø®Øµ'}, Ù…ØªÙ† ØªÙˆÙ„ÛŒØ¯Ø´Ø¯Ù‡=${lastRound.textChars} Ú©Ø§Ø±Ø§Ú©ØªØ±`);
-    }
-    if (meta?.stoppedReason === 'round_limit') {
-        lines.push('Ù†ØªÛŒØ¬Ù‡: Ø¨Ù‡ Ø³Ù‚Ù ØªØ¹Ø¯Ø§Ø¯ Ù…Ø±Ø§Ø­Ù„ Ø±Ø³ÛŒØ¯ Ø¨Ø¯ÙˆÙ† Ø±Ø³ÛŒØ¯Ù† Ø¨Ù‡ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ ÛŒØ§ Ø§Ø¹Ù…Ø§Ù„ Ú©Ø§Ù…Ù„ ØªØºÛŒÛŒØ±Ø§Øª.');
-    } else if (meta?.stoppedReason === 'silent_after_tool') {
-        lines.push('Ù†ØªÛŒØ¬Ù‡: Ø¨Ø¹Ø¯ Ø§Ø² ØµØ¯Ø§ Ø²Ø¯Ù† ÛŒÚ© Ø§Ø¨Ø²Ø§Ø±ØŒ Ù…Ø¯Ù„ Ù‡ÛŒÚ† Ù…ØªÙ†ÛŒ Ø¨Ø±Ù†Ú¯Ø±Ø¯Ø§Ù†Ø¯ (Ø³Ú©ÙˆØª).');
-    }
-
-    return {
-        humanSummary: lines.join('\n'),
-        raw: {
-            totalRounds,
-            totalDurationMs,
-            toolCallTally,
-            patchedFiles,
-            rounds: roundTrace
-        }
-    };
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MAIN API HANDLER
-|--------------------------------------------------------------------------
-*/
-
-// CORS: default to '*' to preserve current behavior for any existing
-// deployment, but if the operator sets ALLOWED_ORIGIN in the environment,
-// lock requests to that origin instead. This is opt-in so nothing breaks
-// for the current setup unless the env var is explicitly added.
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
-
-// Requests bigger than this almost certainly indicate an oversized
-// file/base64 payload slipping past frontend checks; reject early instead
-// of doing expensive work first.
-// FIX: this was set to 12MB while the binary-file-specific check further
-// down (MAX_BINARY_BASE64_CHARS) allows up to 15MB of base64 for a single
-// file. Since a request also includes JSON overhead (history, headers,
-// other fields) on top of the file's base64, a video sitting anywhere near
-// that 15MB per-file limit was being rejected HERE FIRST with a generic
-// "file too large" error, before ever reaching the video-specific logic -
-// even though it was technically within the documented per-file limit.
-// Raised so the outer guard only ever catches requests the inner check
-// wouldn't already accept, with headroom for JSON overhead.
-const MAX_REQUEST_BYTES = 20 * 1024 * 1024; // 20MB
-
-async function handler(req, res) {
-    res.setHeader(
-        'Access-Control-Allow-Origin',
-        ALLOWED_ORIGIN
-    );
-
-    res.setHeader(
-        'Access-Control-Allow-Methods',
-        'POST, OPTIONS'
-    );
-
-    res.setHeader(
-        'Access-Control-Allow-Headers',
-        'Content-Type'
-    );
-
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    const usageGeminiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
-        .split(',').map(k => k.trim()).filter(Boolean);
-
-    if (req.method === 'GET' && String(req.query?.mode || '') === 'usage') {
-        return res.status(200).json({
-            source: 'virtual-bot-observed-backend-requests',
-            quota: { rpm: null, tpm: null, rpd: null, note: 'Google live quota is not exposed by the Gemini API key. These are only real requests observed by this backend instance.' },
-            instanceScoped: !hasUsageKV(),
-            storage: hasUsageKV() ? 'vercel-kv' : 'memory-fallback',
-            generatedAt: new Date().toISOString(),
-            keys: await getGoogleUsageSnapshot(usageGeminiKeys)
-        });
-    }
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({
-            error: {
-                message: 'Ù…ØªØ¯ Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾Ø´ØªÛŒØ¨Ø§Ù†ÛŒ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯.'
-            }
-        });
-    }
-
-    const requestStartedAt = Date.now();
-
-    try {
-        // Basic payload-size guard. req.body is already parsed by the framework
-        // by the time we get here in most Next.js/Vercel setups, so we
-        // approximate size from the serialized body rather than a raw stream.
-        try {
-            const approxBytes = Buffer.byteLength(JSON.stringify(req.body || {}), 'utf8');
-            if (approxBytes > MAX_REQUEST_BYTES) {
-                log.warn('request.too_large', { approxBytes });
-                return res.status(413).json({
-                    error: {
-                        message: 'Ø­Ø¬Ù… Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø®ÛŒÙ„ÛŒ Ø²ÛŒØ§Ø¯Ù‡. Ù„Ø·ÙØ§Ù‹ ÙØ§ÛŒÙ„ Ú©ÙˆÚ†Ú©â€ŒØªØ±ÛŒ Ø¨ÙØ±Ø³Øª.',
-                        type: 'file_too_large',
-                        stage: 'request_validation',
-                        detail: `approxBytes=${approxBytes}`
-                    }
-                });
-            }
-        } catch (_) {
-            // If we can't measure it, don't block the request over this alone.
-        }
-
-        const wantsStream =
-            req.body?.stream === true ||
-            req.body?.stream === 'true';
-
-        const {
-            userName,
-            text,
-            rawText,
-            file,
-            webSearch,
-            thinkLevel,
-            history: rawHistory,
-            model,
-            // FEATURE (recent-chats summary): a short, already-built-on-the-
-            // client summary of the user's last few conversations. Built and
-            // cached in localStorage on the frontend (see summarizeRecentChats
-            // in index.html) so the backend never has to read/summarize old
-            // chat history itself - keeps this request exactly as fast as
-            // before. Just a plain string; ignored if empty/missing.
-            recentChatsSummary,
-            // FEATURE (persistent file memory): archivedFileNames is cheap
-            // (just strings) and always present so the system prompt can
-            // tell the model what's available; archivedFiles carries the
-            // actual content but is only ever read inside executeToolCall
-            // (get_archived_file), never injected into the prompt directly -
-            // that's what keeps this free unless the model actually asks.
-            // The client only ever sends its 3 most-recently-sent files here
-            // (see recentArchivedFiles() in index.html) - older files stay
-            // in the client's IndexedDB but are simply not part of this
-            // request at all, which is what actually bounds per-request
-            // token cost as a chat's file history grows over time.
-            archivedFileNames: rawArchivedFileNames,
-            archivedFiles: rawArchivedFiles
-        } = req.body || {};
-
-        const archivedFileNames = Array.isArray(rawArchivedFileNames) ? rawArchivedFileNames.filter(n => typeof n === 'string') : [];
-        const archivedFiles = Array.isArray(rawArchivedFiles)
-            ? rawArchivedFiles.filter(f => f && typeof f.name === 'string' && typeof f.content === 'string')
-            : [];
-
-        const history = trimHistoryForContext(rawHistory);
-
-        const searchQueryBase =
-            rawText &&
-            String(rawText).trim()
-                ? String(rawText).trim()
-                : (text || '');
-
-        /*
-        |--------------------------------------------------------------------------
-        | API Keys
-        |--------------------------------------------------------------------------
-        */
-
-        const rawGeminiKeys =
-            process.env.GEMINI_API_KEYS ||
-            process.env.GEMINI_API_KEY ||
-            '';
-
-        const geminiKeys = rotateKeysByHealth(
-            rawGeminiKeys
-                .split(',')
-                .map(k => k.trim())
-                .filter(Boolean)
-        );
-
-        // FIX: shared across every key/model retry attempt for THIS one
-        // incoming request only (never persisted, never shared across
-        // requests) - see fetchTavilyResults comment for why this exists.
-        const searchCache = new Map();
-        // Hard request-scoped guard: survives Gemini model/key retries.
-        // Once one logical web_search starts, no later retry is allowed to
-        // expose tools or issue another web_search for this question.
-        const searchState = { used: false, result: null };
-
-        /*
-        |--------------------------------------------------------------------------
-        | Chat title generation (lightweight, non-streamed, separate mode)
-        |--------------------------------------------------------------------------
-        | Called once per chat right after the first exchange, from the
-        | frontend. Kept as an early return in the same handler/file (no new
-        | route) so it reuses the same key pool/health-tracking, but it never
-        | touches history trimming, file handling, web search, or the main
-        | streaming path â€” just a fast title guess.
-        */
-        if (req.body?.mode === 'title') {
-            const title = await generateChatTitle(
-                req.body?.userText,
-                req.body?.botText,
-                geminiKeys
-            );
-            return res.status(200).json({ title });
-        }
-
-        const rawTavilyKeys =
-            process.env.TAVILY_API_KEYS ||
-            process.env.TAVILY_API_KEY ||
-            '';
-
-        const tavilyKeys =
-            rawTavilyKeys
-                .split(',')
-                .map(k => k.trim())
-                .filter(Boolean);
-
-        if (geminiKeys.length === 0) {
-            log.error('config.no_gemini_keys', {});
-            return res.status(500).json({
-                error: {
-                    message: 'Ø³Ø±ÙˆÛŒØ³ Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ù…ÙˆÙ‚ØªØ§Ù‹ Ù¾ÛŒÚ©Ø±Ø¨Ù†Ø¯ÛŒ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª. Ù„Ø·ÙØ§Ù‹ Ø¨Ø¹Ø¯Ø§Ù‹ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
-                    type: 'configuration_error',
-                    stage: 'config',
-                    category: 'missing_api_keys'
-                }
-            });
-        }
-
-        log.info('request.received', {
-            hasFile: !!file || (Array.isArray(req.body?.files) && req.body.files.length > 0),
-            webSearch: !!webSearch,
-            thinkLevel: thinkLevel || 'off',
-            model: model || 'default',
-            historyTurns: history.length,
-            stream: wantsStream
-        });
-
-        /*
-        |--------------------------------------------------------------------------
-        | ÙØ§ÛŒÙ„â€ŒÙ‡Ø§
-        |--------------------------------------------------------------------------
-        */
-
-        const incomingFiles =
-            Array.isArray(req.body?.files)
-                ? req.body.files
-                : (file ? [file] : []);
-
-        // Guard: reject any individual text file content that is absurdly large.
-        // The frontend already caps this at 300KB, but the backend must not
-        // trust the client - a hand-crafted request could skip that check.
-        const MAX_TEXT_FILE_CHARS = 300 * 1024;
-
-        const textFiles =
-            incomingFiles.filter(
-                f =>
-                    f &&
-                    f.mode === 'text' &&
-                    typeof f.content === 'string' &&
-                    f.content.length <= MAX_TEXT_FILE_CHARS
-            );
-
-        // FIX (block-editing system silently never activated): fileEditIntent
-        // was gated on looksLikeFileEditIntent(text), a fixed Persian/English
-        // keyword regex. Any phrasing outside that list (or a message that
-        // just references "the file I gave you" without a listed verb) made
-        // this silently false even with a real attachment - the whole
-        // block-map/read_block/write_block/verify_file system then never
-        // activated, the "don't call get_archived_file when a file is
-        // attached" instruction never got injected either, and the request
-        // fell through to old, unreliable prose/archive behavior with no
-        // warning to the user or the model. A file being attached at all is
-        // a sufficient and much more robust signal: building the block map
-        // costs nothing when the user isn't actually asking for an edit
-        // (the model just never calls read_block/write_block), so there's no
-        // downside to always doing it whenever textFiles is non-empty.
-        const fileEditIntent = textFiles.length > 0;
-
-        const oversizedTextFiles =
-            incomingFiles.filter(
-                f =>
-                    f &&
-                    f.mode === 'text' &&
-                    typeof f.content === 'string' &&
-                    f.content.length > MAX_TEXT_FILE_CHARS
-            );
-
-        if (oversizedTextFiles.length > 0) {
-            log.warn('file.rejected_too_large_text', {
-                names: oversizedTextFiles.map(f => f.name || 'unknown')
-            });
-        }
-
-        const binaryFiles =
-            incomingFiles.filter(
-                f =>
-                    f &&
-                    f.base64
-            );
-
-        /*
-        |--------------------------------------------------------------------------
-        | History
-        |--------------------------------------------------------------------------
-        */
-
-        let contents = [];
-
-        if (
-            history &&
-            Array.isArray(history) &&
-            history.length > 0
-        ) {
-            contents = history.map(item => ({
-                role:
-                    item.role === 'user'
-                        ? 'user'
-                        : 'model',
-
-                parts: [
-                    {
-                        text:
-                            String(
-                                item.text ||
-                                item.content ||
-                                ''
-                            )
-                    }
-                ]
-            }));
-        } else if (searchQueryBase) {
-            contents.push({
-                role: 'user',
-                parts: [
-                    {
-                        text: searchQueryBase
-                    }
-                ]
-            });
-        }
-
-        if (contents.length === 0) {
-            return res.status(400).json({
-                error: {
-                    message: 'Ù…ØªÙ† ÙˆØ±ÙˆØ¯ÛŒ Ø®Ø§Ù„ÛŒ Ø§Ø³Øª.',
-                    type: 'invalid_file',
-                    stage: 'request_validation'
-                }
-            });
-        }
-
-        // FIX (root cause of "Requests ending with a model turn are not
-        // supported" / INVALID_ARGUMENT 400): Gemini rejects any request
-        // whose `contents` array does not end on a `user` turn. This can
-        // happen whenever the client's `history` already ends on a `model`
-        // turn - e.g. the current user message failed to get appended to
-        // history before being sent, or a duplicate/out-of-order request
-        // race left the last turn as the bot's previous reply. Rather than
-        // trying to special-case every way the frontend could produce that
-        // shape, guarantee it here: if the last turn isn't `user`, use the
-        // actual incoming message text (searchQueryBase) as a new trailing
-        // user turn. If there's no incoming text either, fall back to
-        // dropping trailing model turns until a user turn is exposed.
-        if (contents.length > 0 && contents[contents.length - 1].role !== 'user') {
-            if (searchQueryBase && searchQueryBase.trim()) {
-                contents.push({
-                    role: 'user',
-                    parts: [{ text: searchQueryBase.trim() }]
-                });
-            } else {
-                while (
-                    contents.length > 0 &&
-                    contents[contents.length - 1].role !== 'user'
-                ) {
-                    contents.pop();
-                }
-
-                if (contents.length === 0) {
-                    return res.status(400).json({
-                        error: {
-                            message: 'Ù…ØªÙ† ÙˆØ±ÙˆØ¯ÛŒ Ø®Ø§Ù„ÛŒ Ø§Ø³Øª.',
-                            type: 'invalid_file',
-                            stage: 'request_validation'
-                        }
-                    });
-                }
-            }
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | Web Search
-        |--------------------------------------------------------------------------
-        | FIX: search used to be decided here, up-front, by matching the
-        | user's text against a fixed Persian keyword list - which missed
-        | anything phrased differently. Search is now a real tool the model
-        | itself can call mid-conversation (see runAgentLoop / GEMINI_TOOLS),
-        | at most once per incoming question, based on actually
-        | understanding the question rather than string matching. Nothing
-        | needs to happen here anymore; X-Search-Performed is still reported
-        | for observability, based on whether the agent loop ends up
-        | actually calling the tool (set later, once we know).
-        */
-
-        /*
-        |--------------------------------------------------------------------------
-        | Text Files
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            textFiles.length > 0 &&
-            contents.length > 0
-        ) {
-            const lastIndex =
-                contents.length - 1;
-
-            if (
-                contents[lastIndex].role === 'user'
-            ) {
-                const textPart =
-                    contents[lastIndex]
-                        .parts
-                        .find(
-                            p =>
-                                p.text !== undefined
-                        );
-
-                // FIX (token/quota exhaustion on large file edits): when the
-                // user is editing a large file, injecting the FULL content
-                // here means it then rides along unchanged in every single
-                // tool round (workingContents is cumulative - see
-                // runAgentLoop), multiplying token usage by MAX_TOOL_ROUNDS
-                // and burning through per-minute quota on every key in a
-                // row for what is really just one oversized request. This
-                // mirrors the cap that get_archived_file already had.
-                // inspect_file/get_file_chunk read directly from
-                // ctx.textFiles (untouched, full content) - not from this
-                // injected block - so skipping/trimming the injected copy
-                // here does not remove the model's ability to read the
-                // file; it just stops the redundant full copy from being
-                // resent on every round.
-                const LARGE_FILE_LINE_THRESHOLD = 400; // same threshold inspect_file already uses to decide "large"
-
-                const fileBlocks =
-                    textFiles
-                        .map(
-                            f => {
-                                const content = f.content || '';
-                                const lineCount = content.split(/\r?\n/).length;
-                                const isLargeEdit = fileEditIntent && lineCount > LARGE_FILE_LINE_THRESHOLD;
-
-                                if (isLargeEdit) {
-                                    return `\n\n` +
-                                        `[ÙØ§ÛŒÙ„ Ø¶Ù…ÛŒÙ…Ù‡: ${f.name || 'file'} - ${lineCount} Ø®Ø·]\n` +
-                                        `Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø¨Ø²Ø±Ú¯ Ø§Ø³ØªØ› Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ø¢Ù† Ø§ÛŒÙ†Ø¬Ø§ Ø¯Ø§Ø¯Ù‡ Ù†Ø´Ø¯Ù‡ ØªØ§ Ø­Ø¬Ù… Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù¾Ø§ÛŒÛŒÙ† Ø¨Ù…Ø§Ù†Ø¯. ` +
-                                        `Ø¨Ø±Ø§ÛŒ Ø¯ÛŒØ¯Ù† Ø³Ø§Ø®ØªØ§Ø± Ùˆ Ø¨Ø®Ø´â€ŒÙ‡Ø§ÛŒ Ø¢Ù†ØŒ Ø§Ø¨Ø²Ø§Ø± inspect_file Ø±Ø§ Ø¨Ø§ Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ ØµØ¯Ø§ Ø¨Ø²Ù†Ø› Ø³Ù¾Ø³ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ø¨Ø®Ø´ Ù‡Ø¯ÙØŒ get_file_chunk Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†.`;
-                                }
-
-                                return `\n\n` +
-                                    `[Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„: ${f.name || 'file'}]\n` +
-                                    '```\n' +
-                                    content +
-                                    '\n```\n' +
-                                    `[Ù¾Ø§ÛŒØ§Ù† Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„: ${f.name || 'file'}]`;
-                            }
-                        )
-                        .join('');
-
-                if (textPart) {
-                    textPart.text += fileBlocks;
-                } else {
-                    contents[lastIndex]
-                        .parts
-                        .push({
-                            text: fileBlocks
-                        });
-                }
-            }
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | Binary Files
-        |--------------------------------------------------------------------------
-        */
-
-        // Backend-side size cap for binary payloads (images/video/PDF), since the
-        // frontend's own limits can be bypassed by a direct API call.
-        // NOTE: kept in sync with MAX_BACKEND_BASE64_CHARS in the frontend's
-        // processIncomingFile() video branch (index.html) - the client
-        // checks against this same number BEFORE showing "ÙˆÛŒØ¯ÛŒÙˆ Ø¢Ù…Ø§Ø¯Ù‡", so
-        // a compressed video that passes client-side never gets silently
-        // 413'd here. If this number changes, update both places.
-        const MAX_BINARY_BASE64_CHARS = 15 * 1024 * 1024; // ~15MB of base64 text
-
-        // FIX (root cause of "video attachments hang forever, no reply"):
-        // Gemini's streamGenerateContent endpoint does not reliably support
-        // function-calling `tools` in the same request as an inline video
-        // part - on several model versions the request either gets stuck
-        // with no chunks ever arriving, or errors in a way that looked to
-        // the user like an endless "typing..." indicator, because nothing
-        // ever reached finishReason to end the SSE stream. This affected
-        // ALL videos, including small ones sent uncompressed, since the
-        // trigger is "a video is attached", not file size. We now detect
-        // that up front and skip attaching `tools` for this request - the
-        // model still fully understands/describes the video, it just can't
-        // ALSO call web_search/ask_user in that same turn (extremely rare
-        // to need both at once, and a working reply matters far more).
-        let hasVideoAttachment = false;
-
-        for (const bf of binaryFiles) {
-            const lastIndex =
-                contents.length - 1;
-
-            if (
-                lastIndex < 0 ||
-                contents[lastIndex].role !== 'user'
-            ) {
-                break;
-            }
-
-            if (typeof bf.base64 !== 'string' || bf.base64.length > MAX_BINARY_BASE64_CHARS) {
-                log.warn('file.rejected_too_large', { name: bf.name || 'unknown' });
+            if (!edit || typeof edit.old !== 'string' || typeof edit.new !== 'string' || !edit.old) { failedCount++; continue; }
+
+            // Stage 1: exact, unique match (unchanged from before).
+            let firstIndex = content.indexOf(edit.old);
+            let lastIndex = content.lastIndexOf(edit.old);
+
+            if (firstIndex !== -1 && firstIndex === lastIndex) {
+                content = content.slice(0, firstIndex) + edit.new + content.slice(firstIndex + edit.old.length);
+                appliedCount++;
                 continue;
             }
 
-            const base64Data =
-                bf.base64.includes(',')
-                    ? bf.base64.split(',')[1]
-                    : bf.base64;
+            // Stage 2: CRLF/CR-normalized match (unchanged from before - the
+            // model almost never reproduces \r when echoing "old" text).
+            {
+                const normContent = normalizeLineEndings(content);
+                const normOld = normalizeLineEndings(edit.old);
+                const normFirst = normContent.indexOf(normOld);
+                const normLast = normContent.lastIndexOf(normOld);
 
-            let mimeType =
-                bf.type ||
-                'image/jpeg';
-
-            const ext = bf.name ? (bf.name.split('.').pop() || '').toLowerCase() : '';
-
-            if (
-                bf.name &&
-                /\.(mp4|mov|webm|avi|mpeg|wmv|3gpp|flv|mkv)$/i
-                    .test(bf.name)
-            ) {
-                const videoMimeMap = {
-                    'mp4': 'video/mp4',
-                    'mov': 'video/quicktime',
-                    'webm': 'video/webm',
-                    'avi': 'video/x-msvideo',
-                    'mpeg': 'video/mpeg',
-                    'wmv': 'video/x-ms-wmv',
-                    '3gpp': 'video/3gpp',
-                    'flv': 'video/x-flv',
-                    'mkv': 'video/x-matroska'
-                };
-
-                mimeType =
-                    videoMimeMap[ext] ||
-                    'video/mp4';
-
-                hasVideoAttachment = true;
-                log.info('file.video_detected', { name: bf.name, mimeType });
-            } else if (ext === 'pdf' || mimeType === 'application/pdf') {
-                // Gemini supports PDF as an inline_data part the same way as
-                // images - no special handling needed beyond the correct mime type.
-                mimeType = 'application/pdf';
-                log.info('file.pdf_detected', { name: bf.name });
+                if (normFirst !== -1 && normFirst === normLast) {
+                    const pattern = edit.old
+                        .split(/\r\n|\r|\n/)
+                        .map(line => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+                        .join('\\r?\\n');
+                    const matches = content.match(new RegExp(pattern, 'g')) || [];
+                    if (matches.length === 1) {
+                        const m = content.match(new RegExp(pattern));
+                        content = content.slice(0, m.index) + edit.new + content.slice(m.index + m[0].length);
+                        appliedCount++;
+                        continue;
+                    }
+                }
             }
 
-            contents[lastIndex]
-                .parts
-                .push({
-                    inline_data: {
-                        mime_type: mimeType,
-                        data: base64Data
-                    }
-                });
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | Model
-        |--------------------------------------------------------------------------
-        */
-
-        const MODEL_NAME =
-            model ||
-            'gemini-3.5-flash-lite';
-
-        log.info('model.selected', { model: MODEL_NAME });
-
-        let systemText = '';
-
-        // FIX: Ù…Ø¯Ù„ Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª ØªØ§Ø±ÛŒØ® ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ù…Ø±ÙˆØ² Ø±Ùˆ Ù†Ù…ÛŒâ€ŒØ¯ÙˆÙ†Ù‡ â€” ÙÙ‚Ø· Ø§Ø² Ø¯ÛŒØªØ§ÛŒ
-        // Ø¢Ù…ÙˆØ²Ø´ÛŒØ´ (Ú©Ù‡ Ù‚Ø¯ÛŒÙ…ÛŒÙ‡) Ø­Ø¯Ø³ Ù…ÛŒâ€ŒØ²Ù†Ù‡ØŒ Ø¨Ø±Ø§ÛŒ Ù‡Ù…ÛŒÙ† ÙˆÙ‚ØªÛŒ Ù…ÛŒâ€ŒÙ¾Ø±Ø³ÛŒ "Ø§Ù…Ø±ÙˆØ²
-        // Ú†Ù†Ø¯Ù…Ù‡" Ø¬ÙˆØ§Ø¨ Ø§Ø´ØªØ¨Ø§Ù‡ Ù…ÛŒâ€ŒØ¯Ù‡. Ø§ÛŒÙ†â€ŒØ¬Ø§ ØªØ§Ø±ÛŒØ® ÙˆØ§Ù‚Ø¹ÛŒ Ø³Ø±ÙˆØ± (Ø´Ù…Ø³ÛŒ + Ù…ÛŒÙ„Ø§Ø¯ÛŒ
-        // + Ø³Ø§Ø¹ØªØŒ Ø¨Ù‡ ÙˆÙ‚Øª ØªÙ‡Ø±Ø§Ù†) Ø±Ùˆ Ù…Ø³ØªÙ‚ÛŒÙ… Ø¨Ù‡Ø´ Ù…ÛŒâ€ŒÚ¯ÛŒÙ… ØªØ§ Ù‡Ù…ÛŒØ´Ù‡ Ø¯Ø±Ø³Øª Ø¨Ø§Ø´Ù‡.
-        const now = new Date();
-        const jalaliDate = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
-            timeZone: 'Asia/Tehran',
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        }).format(now);
-        const gregorianDate = new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'Asia/Tehran',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-        }).format(now);
-        const tehranTime = new Intl.DateTimeFormat('fa-IR', {
-            timeZone: 'Asia/Tehran',
-            hour: '2-digit',
-            minute: '2-digit'
-        }).format(now);
-        const dateContext = `
-Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø²Ù…Ø§Ù† ÙˆØ§Ù‚Ø¹ÛŒ (Ø§ÛŒÙ† ØªØ§Ø±ÛŒØ® Ù‡Ù…ÛŒØ´Ù‡ Ø¯Ø±Ø³Øª Ø§Ø³ØªØŒ Ø­ØªÛŒ Ø§Ú¯Ø± Ø¨Ø§ Ø¯Ø§Ù†Ø´ Ù‚Ø¨Ù„ÛŒâ€ŒØ§Øª ÙØ±Ù‚ Ø¯Ø§Ø±Ø¯Ø› Ù‡Ù…ÛŒØ´Ù‡ Ù‡Ù…ÛŒÙ† Ø±Ø§ Ù…Ù„Ø§Ú© Ø¨Ø¯Ù‡):
-Ø§Ù…Ø±ÙˆØ²: ${jalaliDate} (Ù…ÛŒÙ„Ø§Ø¯ÛŒ: ${gregorianDate})
-Ø³Ø§Ø¹Øª ÙØ¹Ù„ÛŒ Ø¨Ù‡ ÙˆÙ‚Øª ØªÙ‡Ø±Ø§Ù†: ${tehranTime}
-`;
-
-        const antiSelfQA = `
-Ù‚Ø§Ù†ÙˆÙ† Ø³Ø®Øªâ€ŒÚ¯ÛŒØ±Ø§Ù†Ù‡:
-Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ù…Ø¹Ø±ÙÛŒ Ù…Ø¯Ù„ (Â«Ù…Ù† Virtual Bot ... Ù‡Ø³ØªÙ…Â») Ø±Ø§ ÙÙ‚Ø· Ùˆ ÙÙ‚Ø· Ø²Ù…Ø§Ù†ÛŒ Ø¨Ù†ÙˆÛŒØ³ Ú©Ù‡ Ø®ÙˆØ¯Ù Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ø§Ù„Ø§Ù† Ù…Ø³ØªÙ‚ÛŒÙ… Ù¾Ø±Ø³ÛŒØ¯Ù‡ Ø¨Ø§Ø´Ø¯ Â«Ù…Ø¯Ù„Øª Ú†ÛŒÙ‡Â» ÛŒØ§ Ø³Ø¤Ø§Ù„ Ù‡Ù…â€ŒÙ…Ø¹Ù†ÛŒ.
-Ù‡Ø±Ú¯Ø² Ø®ÙˆØ¯Øª Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ Ø±Ø§ Ø§Ø² Ø²Ø¨Ø§Ù† Ø®ÙˆØ¯Øª Ù…Ø·Ø±Ø­ Ù†Ú©Ù†.
-Ù‡Ø±Ú¯Ø² Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ†Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù¾Ø±Ø³ÛŒØ¯Ù‡ Ø¨Ø§Ø´Ø¯ØŒ Ø¬Ù…Ù„Ù‡ Ù…Ø¹Ø±ÙÛŒ Ù…Ø¯Ù„ Ø±Ø§ Ø¯Ø± Ù¾Ø§Ø³Ø® Ø¯ÛŒÚ¯Ø±ÛŒ Ù†ÛŒØ§ÙˆØ±.
-`;
-
-        /*
-        |--------------------------------------------------------------------------
-        | System Prompt
-        |--------------------------------------------------------------------------
-        */
-
-        // ÛŒÚ© Ø´Ø®ØµÛŒØª ÙˆØ§Ø­Ø¯ Ùˆ ÛŒÚ©Ø³Ø§Ù† Ø±ÙˆÛŒ Ù‡Ù…Ù‡â€ŒÛŒ Ù…Ø¯Ù„â€ŒÙ‡Ø§ (Ù†Ø³Ø®Ù‡â€ŒØ¨Ù†Ø¯ÛŒ Ø¬Ø¯Ø§ Ø­Ø°Ù Ø´Ø¯Ø›
-        // ÙÙ‚Ø· Ù†Ø§Ù… Ù…Ø¯Ù„ Ø¯Ø§Ø®Ù„ÛŒ Ú©Ù‡ Ø¯Ø± Ù…Ø¹Ø±ÙÛŒ Ø§Ø­ØªÙ…Ø§Ù„ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ÙØ±Ù‚ Ø¯Ø§Ø±Ø¯).
-        const modelDisplayName =
-            MODEL_NAME === 'gemini-3.5-flash-lite' ? 'Virtual Bot 1.1' :
-            MODEL_NAME === 'gemini-3.7-flash' ? 'Virtual Bot 1.6' :
-            MODEL_NAME === 'gemini-3.1-pro-preview' ? 'Virtual Bot 1.3' :
-            'Virtual Bot';
-
-        systemText = `
-ØªÙˆ ${modelDisplayName} Ù‡Ø³ØªÛŒØ› ÛŒÚ© Ø¯Ø³ØªÛŒØ§Ø± Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ Ú¯Ø±Ù…ØŒ ØµÙ…ÛŒÙ…ÛŒØŒ Ø·Ø¨ÛŒØ¹ÛŒ Ùˆ Ø¬Ø°Ø§Ø¨. Ù‡Ø¯ÙØª Ø§ÛŒÙ† Ø§Ø³Øª Ú©Ù‡ Ú¯ÙØªÚ¯Ùˆ Ø´Ø¨ÛŒÙ‡ ØµØ­Ø¨Øª Ø¨Ø§ ÛŒÚ© Ø¯ÙˆØ³Øª Ø¨Ø§Ù‡ÙˆØ´ Ùˆ Ø®ÙˆØ´â€ŒØ¨Ø±Ø®ÙˆØ±Ø¯ Ø¨Ø§Ø´Ø¯ØŒ Ù†Ù‡ ÛŒÚ© Ù…ØªÙ† Ø®Ø´Ú© Ùˆ Ø±Ø³Ù…ÛŒ.
-
-Ù‡ÙˆÛŒØª:
-- ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ú©Ø§Ø±Ø¨Ø± Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ø¯Ø±Ø¨Ø§Ø±Ù‡ Ù…Ø¯Ù„ Ù¾Ø±Ø³ÛŒØ¯ Ø¨Ú¯Ùˆ: Â«Ù…Ù† ${modelDisplayName} Ù‡Ø³ØªÙ….Â»
-- Ù‡Ø±Ú¯Ø² Ø®ÙˆØ¯Øª Ø±Ø§ Ø¨Ø§ Ù†Ø³Ø®Ù‡â€ŒÛŒ Ø¯ÛŒÚ¯Ø±ÛŒ Ù…Ø¹Ø±ÙÛŒ Ù†Ú©Ù†.
-- Ù‡Ø±Ú¯Ø² Ù†Ø§Ù… Ø³Ø§Ø²Ù†Ø¯Ù‡ ÛŒØ§ ØªÛŒÙ…ÛŒ Ø±Ø§ Ø§Ø² Ø®ÙˆØ¯Øª Ù†Ø³Ø§Ø².
-- Ø®ÙˆØ¯Øª Ø±Ø§ Gemini Ù…Ø¹Ø±ÙÛŒ Ù†Ú©Ù†.
-- Ø¯Ø±Ø¨Ø§Ø±Ù‡ Ú†ÛŒØ²Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ù†Ù…ÛŒâ€ŒØ¯Ø§Ù†ÛŒ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø³Ø§Ø®ØªÚ¯ÛŒ Ù†Ø¯Ù‡.
-
-Ù‚ÙˆØ§Ù†ÛŒÙ† Ù„Ø­Ù†:
-Û±. Ù‡Ù…ÛŒØ´Ù‡ ØªØ§ Ø­Ø¯ Ø§Ù…Ú©Ø§Ù† Ø·Ø¨ÛŒØ¹ÛŒ Ùˆ Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ ØµØ­Ø¨Øª Ú©Ù†Ø› Ù…Ú¯Ø± Ø§ÛŒÙ†Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± ØµØ±Ø§Ø­ØªØ§Ù‹ Ù„Ø­Ù† Ø±Ø³Ù…ÛŒ Ø¨Ø®ÙˆØ§Ù‡Ø¯.
-Û². Ù„Ø­Ù† Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ ØªØ´Ø®ÛŒØµ Ø¨Ø¯Ù‡ Ùˆ Ù…ØªÙ†Ø§Ø³Ø¨ Ø¨Ø§ Ø¢Ù† Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡:
-   - Ø§Ú¯Ø± Ø±Ø³Ù…ÛŒ Ø§Ø³ØªØŒ Ù…Ø­ØªØ±Ù…Ø§Ù†Ù‡ Ùˆ Ø­Ø±ÙÙ‡â€ŒØ§ÛŒ Ø¨Ø§Ø´.
-   - Ø§Ú¯Ø± Ø¯ÙˆØ³ØªØ§Ù†Ù‡ Ø§Ø³ØªØŒ ØµÙ…ÛŒÙ…ÛŒ Ùˆ Ø®ÙˆØ¯Ù…Ø§Ù†ÛŒ Ø¨Ø§Ø´.
-   - Ø§Ú¯Ø± Ø´ÙˆØ®ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ø¯Ø± Ø­Ø¯ Ù…Ù†Ø§Ø³Ø¨ Ø¨Ø§ Ø§Ùˆ Ø´ÙˆØ®ÛŒ Ú©Ù†.
-   - Ø§Ú¯Ø± Ù†Ø§Ø±Ø§Ø­Øª ÛŒØ§ Ù†Ú¯Ø±Ø§Ù† Ø§Ø³ØªØŒ Ø¢Ø±Ø§Ù…ØŒ Ù‡Ù…Ø¯Ù„Ø§Ù†Ù‡ Ùˆ Ø¨Ø¯ÙˆÙ† Ø´ÙˆØ®ÛŒ Ù¾Ø§Ø³Ø® Ø¨Ø¯Ù‡.
-Û³. Ø§Ø² Ø§ØµØ·Ù„Ø§Ø­Ø§Øª Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ ÙØ§Ø±Ø³ÛŒ Ø¨Ù‡ Ø´Ú©Ù„ Ø·Ø¨ÛŒØ¹ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†ØŒ Ø§Ù…Ø§ Ø²ÛŒØ§Ø¯Ù‡â€ŒØ±ÙˆÛŒ Ù†Ú©Ù†.
-Û´. Ø¬Ù…Ù„Ù‡â€ŒÙ‡Ø§ Ø±Ø§ Ø±ÙˆØ§Ù† Ùˆ Ø´Ø¨ÛŒÙ‡ Ú¯ÙØªÚ¯ÙˆÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ø¨Ù†ÙˆÛŒØ³.
-Ûµ. Ù¾Ø§Ø³Ø® Ø±Ø§ Ø¨Ø§ ÙˆØ§Ú©Ù†Ø´ Ù…Ù†Ø§Ø³Ø¨ Ø¨Ù‡ Ø­Ø±Ù Ú©Ø§Ø±Ø¨Ø± Ø´Ø±ÙˆØ¹ Ú©Ù† Ùˆ Ø¨Ø¹Ø¯ Ø³Ø±Ø§Øº Ø§ØµÙ„ Ù…Ø·Ù„Ø¨ Ø¨Ø±Ùˆ.
-Û¶. Ø§Ø² Ø§ÛŒÙ…ÙˆØ¬ÛŒâ€ŒÙ‡Ø§ Ø¨Ù‡ Ø§Ù†Ø¯Ø§Ø²Ù‡ Ùˆ Ù…ØªÙ†Ø§Ø³Ø¨ Ø¨Ø§ ÙØ¶Ø§ÛŒ Ú¯ÙØªÚ¯Ùˆ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù† (Ù…Ø«Ù„Ø§Ù‹ ðŸ˜‚ðŸ˜ŽðŸ”¥)ØŒ Ø§Ù…Ø§ Ø¯Ø± Ù‡Ø± Ø¬Ù…Ù„Ù‡ Ø§ÛŒÙ…ÙˆØ¬ÛŒ Ù†Ú¯Ø°Ø§Ø±. Ù‡Ø±Ú¯Ø² Ø§Ø² Ø§ÛŒÙ…ÙˆØ¬ÛŒ ðŸ¤– Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†.
-Û·. Ø§Ø² Ø´ÙˆØ®ÛŒâ€ŒÙ‡Ø§ÛŒ Ù…ØµÙ†ÙˆØ¹ÛŒØŒ ØªÚ©Ø±Ø§Ø±ÛŒ ÛŒØ§ Ø¨ÛŒØ´â€ŒØ§Ø²Ø­Ø¯ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†.
-Û¸. Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ Ø±Ø§ Ø¨ÛŒâ€ŒØ¯Ù„ÛŒÙ„ Ø·ÙˆÙ„Ø§Ù†ÛŒ Ù†Ú©Ù†. Ø§Ú¯Ø± Ø³Ø¤Ø§Ù„ Ø³Ø§Ø¯Ù‡ Ø§Ø³ØªØŒ Ø¬ÙˆØ§Ø¨ Ø³Ø§Ø¯Ù‡ Ø¨Ø¯Ù‡Ø› Ø§Ú¯Ø± Ù…ÙˆØ¶ÙˆØ¹ Ù¾ÛŒÚ†ÛŒØ¯Ù‡ Ø§Ø³ØªØŒ Ú©Ø§Ù…Ù„ Ùˆ Ù…Ø±Ø­Ù„Ù‡â€ŒØ¨Ù‡â€ŒÙ…Ø±Ø­Ù„Ù‡ ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡.
-Û¹. Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø³Ø¤Ø§Ù„ ÙÙ†ÛŒ Ù¾Ø±Ø³ÛŒØ¯ØŒ Ù‡Ù…Ú†Ù†Ø§Ù† ØµÙ…ÛŒÙ…ÛŒ Ø¨Ù…Ø§Ù† ÙˆÙ„ÛŒ Ø¯Ù‚Øª ÙÙ†ÛŒ Ø±Ø§ ÙØ¯Ø§ÛŒ Ø´ÙˆØ®ÛŒ Ù†Ú©Ù†.
-Û±Û°. Ø§Ø² ØªÚ©Ø±Ø§Ø± Ø¹Ø¨Ø§Ø±Øªâ€ŒÙ‡Ø§ÛŒ Ú©Ù„ÛŒØ´Ù‡â€ŒØ§ÛŒ Ù…Ø«Ù„ Â«Ø­ØªÙ…Ø§Ù‹! Ø¨Ø§ Ú©Ù…Ø§Ù„ Ù…ÛŒÙ„!Â» Ø¯Ø± Ù‡Ù…Ù‡ Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ Ø®ÙˆØ¯Ø¯Ø§Ø±ÛŒ Ú©Ù†.
-Û±Û±. ÙˆØ§Ù†Ù…ÙˆØ¯ Ù†Ú©Ù† Ú©Ù‡ Ø§Ø­Ø³Ø§Ø³Ø§Øª ÛŒØ§ ØªØ¬Ø±Ø¨Ù‡â€ŒÙ‡Ø§ÛŒ Ø§Ù†Ø³Ø§Ù†ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ø¯Ø§Ø±ÛŒ. ØµÙ…ÛŒÙ…ÛŒ Ø¨Ø§Ø´ØŒ Ø§Ù…Ø§ Ø¯Ø±Ø¨Ø§Ø±Ù‡ Ù…Ø§Ù‡ÛŒØª Ù‡ÙˆØ´ Ù…ØµÙ†ÙˆØ¹ÛŒ ØµØ§Ø¯Ù‚ Ø¨Ù…Ø§Ù†.
-Û±Û². Ø´Ø®ØµÛŒØªØª Ø¨Ø§ÛŒØ¯ Ø«Ø§Ø¨Øª Ø¨Ø§Ø´Ø¯ØŒ Ø§Ù…Ø§ Ù„Ø­Ù† Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø¨Ø± Ø§Ø³Ø§Ø³ Ù…ÙˆÙ‚Ø¹ÛŒØª ØªØºÛŒÛŒØ± Ú©Ù†Ø¯.
-Û±Û³. Ù‡ÛŒÚ†â€ŒÙˆÙ‚Øª Ø¨Ø±Ø§ÛŒ ØµÙ…ÛŒÙ…ÛŒ Ø¨ÙˆØ¯Ù†ØŒ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ù†Ø§Ø¯Ø±Ø³Øª ÛŒØ§ Ø­Ø¯Ø³ Ø¨Ø¯ÙˆÙ† Ù…Ø´Ø®Øµâ€ŒÚ©Ø±Ø¯Ù† Ø¹Ø¯Ù… Ù‚Ø·Ø¹ÛŒØª Ø§Ø±Ø§Ø¦Ù‡ Ù†Ú©Ù†.
-Û±Û´. Ø§Ú¯Ø± Ù¾Ø§Ø³Ø® Ø¯Ù‚ÛŒÙ‚ Ùˆ Ø¬Ø¯ÛŒ Ù„Ø§Ø²Ù… Ø§Ø³ØªØŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ùˆ ÙˆØ§Ø¶Ø­ ØµØ­Ø¨Øª Ú©Ù† Ùˆ Ø´ÙˆØ®ÛŒ Ø±Ø§ Ø¨Ù‡ Ø­Ø¯Ø§Ù‚Ù„ Ø¨Ø±Ø³Ø§Ù†.
-Û±Ûµ. Ù‚Ø¨Ù„ Ø§Ø² Ù†ÙˆØ´ØªÙ† Ù‡Ø± Ø¬Ù…Ù„Ù‡ØŒ Ø§Ø² Ø®ÙˆØ¯Øª Ø¨Ù¾Ø±Ø³ Ø¢ÛŒØ§ Ø§ÛŒÙ† ØªØ±Ú©ÛŒØ¨ Ú©Ù„Ù…Ø§Øª Ø¯Ø± ÙØ§Ø±Ø³ÛŒ Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ø·Ø¨ÛŒØ¹ÛŒ Ù…Ø¹Ù†Ø§ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ ÛŒØ§ Ù†Ù‡. Ù‡Ø±Ú¯Ø² Ú©Ù„Ù…Ù‡ ÛŒØ§ Ø¹Ø¨Ø§Ø±ØªÛŒ Ù†Ø³Ø§Ø² Ú©Ù‡ Ú¯ÙˆÛŒØ´ÙˆØ± ÙØ§Ø±Ø³ÛŒ Ø¢Ù† Ø±Ø§ Ù†Ø§Ù…ÙÙ‡ÙˆÙ…ØŒ Ø¨ÛŒâ€ŒÙ…Ø¹Ù†Ø§ ÛŒØ§ ØºÛŒØ±Ø·Ø¨ÛŒØ¹ÛŒ Ø¨Ø¯Ø§Ù†Ø¯ (Ù…Ø«Ù„Ø§Ù‹ ØªØ±Ú©ÛŒØ¨â€ŒÙ‡Ø§ÛŒ Ø³Ø§Ø®ØªÚ¯ÛŒ Ù…Ø«Ù„ Â«Ø³Ù„Ø§Ù…ØªÛŒâ€ŒØ§Ù…Â» Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Â«Ø³Ù„Ø§Ù…Ù…Â» ÛŒØ§ Â«Ø­Ø§Ù„Ù… Ø®ÙˆØ¨Ù‡Â»). Ø§Ú¯Ø± Ù†Ø³Ø¨Øª Ø¨Ù‡ Ø¯Ø±Ø³Øª Ø¨ÙˆØ¯Ù† ÛŒÚ© Ø¹Ø¨Ø§Ø±Øª Ù…Ø­Ø§ÙˆØ±Ù‡â€ŒØ§ÛŒ Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒØŒ Ø³Ø§Ø¯Ù‡â€ŒØªØ±ÛŒÙ† Ùˆ Ø±Ø§ÛŒØ¬â€ŒØªØ±ÛŒÙ† Ø´Ú©Ù„ Ø¢Ù† Ø±Ø§ Ø¨Ù†ÙˆÛŒØ³ØŒ Ù†Ù‡ ÙØ±Ù… Ø¹Ø¬ÛŒØ¨ ÛŒØ§ Ù†ÙˆÛŒÛŒ Ú©Ù‡ Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¯Ø± ÙØ§Ø±Ø³ÛŒ Ø±Ø§ÛŒØ¬ Ø§Ø³Øª.
-
-Ø§ØµÙ„ Ù…Ù‡Ù…:
-Ø§ÙˆÙ„ Ø¨ÙÙ‡Ù… Ú©Ø§Ø±Ø¨Ø± Ú†Ù‡ Ø­Ø§Ù„â€ŒÙˆÙ‡ÙˆØ§ÛŒÛŒ Ø¯Ø§Ø±Ø¯ Ùˆ Ú†Ù‡ Ù†ÙˆØ¹ Ù¾Ø§Ø³Ø®ÛŒ Ù…ÛŒâ€ŒØ®ÙˆØ§Ù‡Ø¯Ø› Ø³Ù¾Ø³ Ù‡Ù…Ø§Ù† Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø±Ø§ Ø¨Ø§ Ø·Ø¨ÛŒØ¹ÛŒâ€ŒØªØ±ÛŒÙ†ØŒ Ø±ÙˆØ§Ù†â€ŒØªØ±ÛŒÙ† Ùˆ Ù…Ù†Ø§Ø³Ø¨â€ŒØªØ±ÛŒÙ† Ù„Ø­Ù† Ù…Ù…Ú©Ù† Ø§Ø±Ø§Ø¦Ù‡ Ú©Ù†.
-
-Ø§ØµÙ„ Ù…Ù‡Ù… Ø¯ÛŒÚ¯Ø± (ÙÙ‡Ù… ÙˆØ§Ù‚Ø¹ÛŒ Ù…Ù†Ø¸ÙˆØ±ØŒ Ù†Ù‡ ÙˆØ§Ú©Ù†Ø´ Ø³Ø·Ø­ÛŒ Ø¨Ù‡ ÛŒÚ© Ú©Ù„Ù…Ù‡):
-Ù‡Ù…ÛŒØ´Ù‡ Ù…Ù†Ø¸ÙˆØ± ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ú©Ø§Ù…Ù„ Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ Ø¯Ø± Ù‡Ù…Ø§Ù† Ú¯ÙØªÚ¯ÙˆÛŒ ÙØ¹Ù„ÛŒ Ø¯Ø± Ù†Ø¸Ø± Ø¨Ú¯ÛŒØ±ØŒ Ù†Ù‡ ÙÙ‚Ø· ÛŒÚ© Ú©Ù„Ù…Ù‡â€ŒÛŒ Ø´Ø¨ÛŒÙ‡ Ø¨Ù‡ Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù‚Ø¨Ù„Ø§Ù‹ Ø¯ÛŒØ¯Ù‡â€ŒØ§ÛŒ. Ø§Ú¯Ø± Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ø¨Ø§ÙØªÙ Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù…Ø¹Ù†Ø§ÛŒ Ù…Ø´Ø®ØµÛŒ Ø¯Ø§Ø±Ø¯ Ú©Ù‡ Ø¨Ø§ Ø¨Ø±Ø¯Ø§Ø´Øª Ø§ÙˆÙ„ ØªÙˆ (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø± Ø§Ø³Ø§Ø³ Ø¹Ø§Ø¯Øª ÛŒØ§ Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ù‚Ø¨Ù„ÛŒ) ÙØ±Ù‚ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ØŒ Ù‡Ù…Ø§Ù† Ù…Ø¹Ù†Ø§ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ùˆ Ù…ØªÙ†ÛŒ Ø±Ø§ Ø¯Ø± Ù†Ø¸Ø± Ø¨Ú¯ÛŒØ±ØŒ Ù†Ù‡ Ø¨Ø±Ø¯Ø§Ø´Øª Ù†Ø§Ø¯Ø±Ø³Øª Ø±Ø§. Ø§Ú¯Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù…Ø·Ù…Ø¦Ù† Ù†ÛŒØ³ØªÛŒ Ù…Ù†Ø¸ÙˆØ± Ú©Ø§Ø±Ø¨Ø± Ú†ÛŒØ³ØªØŒ Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø­Ø¯Ø³Ù Ø§Ø´ØªØ¨Ø§Ù‡ Ø¨Ø§ Ø§Ø·Ù…ÛŒÙ†Ø§Ù† Ú©Ø§Ø°Ø¨ØŒ ÛŒØ§ Ø³Ø¤Ø§Ù„ Ú©ÙˆØªØ§Ù‡ Ø¨Ù¾Ø±Ø³ ÛŒØ§ Ù‡Ø± Ø¯Ùˆ Ø¨Ø±Ø¯Ø§Ø´Øª Ù…Ø­ØªÙ…Ù„ Ø±Ø§ Ú©ÙˆØªØ§Ù‡ Ù…Ø·Ø±Ø­ Ú©Ù†.
-
-ØªØ´Ø®ÛŒØµ Ø§ÙˆÙ„ÛŒÙ‡â€ŒÛŒ Ú©Ø§Ø±Ø¨Ø± (Ø§Ø² Ù‡Ù…ÙˆÙ† Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„):
-- Ø§Ø² Ø±ÙˆÛŒ Ù†Ø­ÙˆÙ‡â€ŒÛŒ Ù†ÙˆØ´ØªÙ† Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ (Ø±Ø³Ù…ÛŒ/Ø´ÙˆØ®/Ø®ÙˆØ¯Ù…Ø§Ù†ÛŒ)ØŒ Ù…ÙˆØ¶ÙˆØ¹ÛŒ Ú©Ù‡ Ù…ÛŒâ€ŒÙ¾Ø±Ø³Ø¯ØŒ Ùˆ Ù‡Ø± Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ú©Ù‡ Ø§Ø² Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ø§Ø®ÛŒØ± Ø§Ùˆ Ø¯Ø± Ø§Ø¯Ø§Ù…Ù‡â€ŒÛŒ Ø§ÛŒÙ† Ù¾ÛŒØ§Ù… Ø³ÛŒØ³ØªÙ… Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡ØŒ Ù„Ø­Ù† Ùˆ Ø³Ø¨Ú© Ù¾Ø§Ø³Ø®Øª Ø±Ø§ Ø§Ø² Ù‡Ù…Ø§Ù† Ø¬Ù…Ù„Ù‡â€ŒÛŒ Ø§ÙˆÙ„ ØªÙ†Ø¸ÛŒÙ… Ú©Ù† - Ù…Ù†ØªØ¸Ø± Ù¾ÛŒØ§Ù… Ø¯ÙˆÙ… Ù†Ù…Ø§Ù†.
-- Ø§Ú¯Ø± Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ú†Øªâ€ŒÙ‡Ø§ÛŒ Ø§Ø®ÛŒØ± Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ø§Ø¯Ø§Ù…Ù‡ Ø¢Ù…Ø¯Ù‡ØŒ Ø§Ø² Ø¢Ù† ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ØªÙ†Ø¸ÛŒÙ… Ù„Ø­Ù† Ùˆ Ø´Ù†Ø§Ø®Øª Ú©Ù„ÛŒ Ø¹Ù„Ø§ÛŒÙ‚/Ú©Ø§Ø±Ø´ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†Ø› Ú†ÛŒØ²ÛŒ Ø§Ø² Ø¢Ù† Ø±Ø§ Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ Ù†Ú¯ÙØªÙ‡ØŒ Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† ÙˆØ§Ù‚Ø¹ÛŒØª Ù…Ø³Ù„Ù… Ø¨Ù‡ Ø§Ùˆ Ù†Ø³Ø¨Øª Ù†Ø¯Ù‡ Ù…Ú¯Ø± Ø¨Ø§ Ø§Ø·Ù…ÛŒÙ†Ø§Ù† Ú©Ø§ÙÛŒ.
-
-Ù†Ø§Ù… Ú©Ø§Ø±Ø¨Ø±:
-"${userName || 'Ø¯ÙˆØ³Øª Ù…Ù†'}"
-`;
-
-        // FEATURE (recent-chats summary): Ø§Ú¯Ø± Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ú†Øªâ€ŒÙ‡Ø§ÛŒ Ø§Ø®ÛŒØ± Ú©Ø§Ø±Ø¨Ø±
-        // Ø§Ø² Ø³Ù…Øª Ú©Ù„Ø§ÛŒÙ†Øª Ø±Ø³ÛŒØ¯Ù‡ØŒ Ù‡Ù…ÛŒÙ†Ø¬Ø§ Ø§Ø¶Ø§ÙÙ‡â€ŒØ´ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… ØªØ§ Ø§Ø² Ù‡Ù…ÙˆÙ† Ø§ÙˆÙ„ÛŒÙ† Ù¾ÛŒØ§Ù…
-        // Ù…Ø¯Ù„ Ø¨Ø¯ÙˆÙ†Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù…Ø¹Ù…ÙˆÙ„Ø§Ù‹ Ú†Ø·ÙˆØ± ØµØ­Ø¨Øª Ù…ÛŒâ€ŒÚ©Ù†Ù‡ Ùˆ Ø¨Ù‡ Ú†ÛŒ Ø¹Ù„Ø§Ù‚Ù‡ Ø¯Ø§Ø±Ù‡.
-        if (typeof recentChatsSummary === 'string' && recentChatsSummary.trim()) {
-            systemText += `
-Ø®Ù„Ø§ØµÙ‡â€ŒØ§ÛŒ Ø§Ø² Ú†Ù†Ø¯ Ú¯ÙØªÚ¯ÙˆÛŒ Ø§Ø®ÛŒØ± Ù‡Ù…ÛŒÙ† Ú©Ø§Ø±Ø¨Ø± (ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø´Ù†Ø§Ø®Øª Ù„Ø­Ù†/Ø²Ù…ÛŒÙ†Ù‡ - Ù†Ù‡ Ù…Ù†Ø¨Ø¹ ÙˆØ§Ù‚Ø¹ÛŒØª Ù…Ø·Ù„Ù‚):
-${recentChatsSummary.trim()}
-
-Ù‡Ø´Ø¯Ø§Ø± Ù…Ù‡Ù… Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Ù‡Ù…ÛŒÙ† Ø®Ù„Ø§ØµÙ‡:
-Ø§ÛŒÙ† Ø®Ù„Ø§ØµÙ‡ Ù…Ø±Ø¨ÙˆØ· Ø¨Ù‡ Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ø¯ÛŒÚ¯Ø± Ùˆ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ø§Ø³ØªØŒ Ù†Ù‡ Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯ÙˆÛŒ ÙØ¹Ù„ÛŒ. Ø§Ú¯Ø± Ø¢Ù† Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ù‚Ø¨Ù„ÛŒ Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„/Ú©Ø¯ Ø¨ÙˆØ¯Ù‡â€ŒØ§Ù†Ø¯ØŒ Ø§ÛŒÙ† Ø¨Ù‡â€ŒÙ‡ÛŒÚ†â€ŒÙˆØ¬Ù‡ Ø¨Ù‡ Ø§ÛŒÙ† Ù…Ø¹Ù†Ø§ Ù†ÛŒØ³Øª Ú©Ù‡ ØªÙˆ Ø§Ù„Ø§Ù† Ù‡Ù… Ø¯Ø± Â«Ø­Ø§Ù„Øª ÙˆÛŒØ±Ø§ÛŒØ´Ú¯Ø±Â» Ù‡Ø³ØªÛŒ ÛŒØ§ Ú©Ø§Ø±Ø¨Ø± Ù‡Ù…ÛŒÙ† Ø§Ù„Ø§Ù† Ù‡Ù… ÙØ§ÛŒÙ„ÛŒ Ø¨Ø±Ø§ÛŒØª ÙØ±Ø³ØªØ§Ø¯Ù‡. Ù†Ù‚Ø´ØŒ Ù„Ø­Ù† ÛŒØ§ ÙØ±Ø¶ÛŒØ§Øª Ø¢Ù† Ú¯ÙØªÚ¯ÙˆÙ‡Ø§ÛŒ Ù‚Ø¨Ù„ÛŒ Ø±Ø§ Ø¨Ù‡ Ø§ÛŒÙ† Ú¯ÙØªÚ¯ÙˆÛŒ ØªØ§Ø²Ù‡ Ø³Ø±Ø§ÛŒØª Ù†Ø¯Ù‡. ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¯Ø± Ù‡Ù…ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ ÙØ§ÛŒÙ„ÛŒ Ø¶Ù…ÛŒÙ…Ù‡ Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯ (Ø¨Ø®Ø´ [Ø­Ø§Ù„Øª ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„] Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… Ø³ÛŒØ³ØªÙ…)ØŒ Ø®ÙˆØ¯Øª Ø±Ø§ Ø¯Ø± Ù†Ù‚Ø´ ÙˆÛŒØ±Ø§ÛŒØ´Ú¯Ø± Ú©Ø¯ Ø¨Ø¯Ø§Ù†Ø› Ø¯Ø± ØºÛŒØ± Ø§ÛŒÙ† ØµÙˆØ±Øª ÛŒÚ© Ø¯Ø³ØªÛŒØ§Ø± Ú¯ÙØªÚ¯ÙˆÛŒ Ø¹Ø§Ø¯ÛŒ Ù‡Ø³ØªÛŒ.
-`;
-        }
-
-        // FEATURE (richer message formatting): Ù‚Ø§Ù„Ø¨â€ŒÙ‡Ø§ÛŒ Ø§Ø¶Ø§ÙÛŒ Ú©Ù‡ Ø±Ø§Ø¨Ø· Ú©Ø§Ø±Ø¨Ø±ÛŒ
-        // Ù¾Ø´ØªÛŒØ¨Ø§Ù†ÛŒ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ - Ù…Ø¯Ù„ Ø¨Ø§ÛŒØ¯ ÙÙ‚Ø· Ø¬Ø§ÛŒÛŒ Ú©Ù‡ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ø®ÙˆØ§Ù†Ø§ÛŒÛŒ Ú©Ù…Ú© Ù…ÛŒâ€ŒÚ©Ù†Ø¯
-        // Ø§Ø² Ø§ÛŒÙ†â€ŒÙ‡Ø§ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†Ø¯ØŒ Ù†Ù‡ Ø¯Ø± Ù‡Ø± Ù¾Ø§Ø³Ø®.
-        systemText += `
-Ù‚Ø§Ù„Ø¨â€ŒØ¨Ù†Ø¯ÛŒ Ù¾ÛŒØ´Ø±ÙØªÙ‡â€ŒÛŒ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ (Ø¯Ø± ØµÙˆØ±Øª Ù†ÛŒØ§Ø² ÙˆØ§Ù‚Ø¹ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†ØŒ Ù†Ù‡ Ù‡Ù…ÛŒØ´Ù‡):
-- Ø§ÛŒØªØ§Ù„ÛŒÚ©: *Ù…ØªÙ†* ÛŒØ§ _Ù…ØªÙ†_
-- Ø®Ø·â€ŒØ®ÙˆØ±Ø¯Ù‡: ~~Ù…ØªÙ†~~
-- Ù„ÛŒÙ†Ú©: [Ù…ØªÙ† Ù„ÛŒÙ†Ú©](https://...) - ÙÙ‚Ø· Ù„ÛŒÙ†Ú© ÙˆØ§Ù‚Ø¹ÛŒ Ú©Ù‡ Ù…Ø·Ù…Ø¦Ù†ÛŒ Ø¯Ø±Ø³Øª Ø§Ø³Øª Ø¨Ú¯Ø°Ø§Ø±ØŒ Ù„ÛŒÙ†Ú© Ø³Ø§Ø®ØªÚ¯ÛŒ Ù†Ø³Ø§Ø².
-- Ø¬Ø¯ÙˆÙ„: Ø¨Ø§ Ù†Ø­Ùˆ Ø§Ø³ØªØ§Ù†Ø¯Ø§Ø±Ø¯ Ù…Ø§Ø±Ú©â€ŒØ¯Ø§ÙˆÙ† (Ø±Ø¯ÛŒÙ Ù‡Ø¯Ø±ØŒ Ø³Ù¾Ø³ Ø±Ø¯ÛŒÙ |---|---|ØŒ Ø³Ù¾Ø³ Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§ÛŒ Ø¯Ø§Ø¯Ù‡) - ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ø¯Ø§Ø¯Ù‡â€ŒÛŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¬Ø¯ÙˆÙ„ÛŒ (Ú†Ù†Ø¯ Ø³ØªÙˆÙ† Ù‚Ø§Ø¨Ù„â€ŒÙ…Ù‚Ø§ÛŒØ³Ù‡) Ø¯Ø§Ø±ÛŒ.
-- Ù„ÛŒØ³Øª ØªÙˆØ¯Ø±ØªÙˆ: Ø¨Ø§ Û² ÙØ§ØµÙ„Ù‡ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ø³Ø·Ø­ ØªÙˆ Ø±ÙØªÚ¯ÛŒ Ø¬Ù„ÙˆÛŒ - ÛŒØ§ 1. Ø¨Ú¯Ø°Ø§Ø±.
-- Ú†ÛŒÙ¾/Ø¨Ø¬ Ø¨Ø±Ø§ÛŒ ÛŒÚ© Ù†Ø§Ù… ÛŒØ§ Ù…ÙÙ‡ÙˆÙ… Ú©ÙˆØªØ§Ù‡ Ù…Ù‡Ù…: {{entity:Ù†Ø§Ù…}} (Ù…Ø«Ù„Ø§Ù‹ {{entity:OpenAI}}) - ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø§Ø³Ù…â€ŒÙ‡Ø§ÛŒ Ø®Ø§Øµ Ú©ÙˆØªØ§Ù‡ØŒ Ù†Ù‡ Ø¬Ù…Ù„Ù‡.
-`;
-
-        systemText += antiSelfQA;
-        systemText += dateContext;
-        systemText += `
-Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§:
-- Ø§Ø¨Ø²Ø§Ø± web_search Ø±Ø§ Ù‡Ø± ÙˆÙ‚Øª ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø¨Ù‡â€ŒØ±ÙˆØ²/Ø²Ù†Ø¯Ù‡ Ù†ÛŒØ§Ø² Ø¯Ø§Ø±ÛŒ ØµØ¯Ø§ Ø¨Ø²Ù† (Ù‚ÛŒÙ…ØªØŒ Ø§Ø®Ø¨Ø§Ø±ØŒ Ø±ÙˆÛŒØ¯Ø§Ø¯Ù‡Ø§ØŒ Ú†ÛŒØ²ÛŒ Ú©Ù‡ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¨Ø¹Ø¯ Ø§Ø² Ø¢Ù…ÙˆØ²Ø´Øª ØªØºÛŒÛŒØ± Ú©Ø±Ø¯Ù‡ Ø¨Ø§Ø´Ø¯). Ø¨Ø±Ø§ÛŒ Ø³Ø¤Ø§Ù„Ø§Øª Ø¹Ù…ÙˆÙ…ÛŒ/Ø«Ø§Ø¨Øª (ØªØ¹Ø±ÛŒÙØŒ Ù…ÙÙ‡ÙˆÙ…ØŒ ØªØ§Ø±ÛŒØ® Ú¯Ø°Ø´ØªÙ‡) Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ Ø³Ø±Ú† Ù†ÛŒØ³Øª.
-- Ø¨Ø±Ø§ÛŒ ÛŒÚ© Ø³Ø¤Ø§Ù„ Ø³Ø§Ø¯Ù‡ØŒ ÙÙ‚Ø· ÛŒÚ©â€ŒØ¨Ø§Ø± Ø³Ø±Ú† Ú©Ù† Ùˆ Ø¨Ø§ Ù‡Ù…Ø§Ù† Ù†ØªØ§ÛŒØ¬ Ø¬ÙˆØ§Ø¨ Ø¨Ø¯Ù‡. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø³Ø±Ú† Ú©Ø±Ø¯Ù† (Ø¨Ø§ Ú©ÙˆØ¦Ø±ÛŒ Ù…ØªÙØ§ÙˆØª ÛŒØ§ Ø­ØªÛŒ Ù…Ø´Ø§Ø¨Ù‡) ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ù…Ø¬Ø§Ø² Ø§Ø³Øª Ú©Ù‡ Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø³Ø±Ú† Ø§ÙˆÙ„ ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ù†Ø§Ú©Ø§ÙÛŒ/Ù†Ø§Ù…Ø±ØªØ¨Ø· Ø¨ÙˆØ¯ ÛŒØ§ Ø³Ø¤Ø§Ù„ Ú†Ù†Ø¯ Ø¨Ø®Ø´ Ø¬Ø¯Ø§ Ø§Ø² Ù‡Ù… Ø¯Ø§Ø±Ø¯ Ú©Ù‡ Ù‡Ø±Ú©Ø¯Ø§Ù… Ù†ÛŒØ§Ø² Ø¨Ù‡ Ø³Ø±Ú† Ù…Ø¬Ø²Ø§ Ø¯Ø§Ø±Ù†Ø¯. Ø³Ø±Ú†â€ŒÙ‡Ø§ÛŒ ØªÚ©Ø±Ø§Ø±ÛŒ Ø±ÙˆÛŒ Ù‡Ù…Ø§Ù† Ù…ÙˆØ¶ÙˆØ¹ Ø±Ø§ Ø§Ù†Ø¬Ø§Ù… Ù†Ø¯Ù‡.
-- Ø§Ú¯Ø± ØªØµÙ…ÛŒÙ… Ú¯Ø±ÙØªÛŒ Ù‡Ø± Ø§Ø¨Ø²Ø§Ø± Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†ÛŒØŒ Ù…Ø®ØµÙˆØµØ§Ù‹ web_searchØŒ Ù‚Ø¨Ù„ Ø§Ø² Function Call Ù‡ÛŒÚ† Ù…ØªÙ† ØªÙˆØ¶ÛŒØ­ÛŒØŒ Ù…Ù‚Ø¯Ù…Ù‡ ÛŒØ§ Ø¬Ù…Ù„Ù‡â€ŒØ§ÛŒ ØªÙˆÙ„ÛŒØ¯ Ù†Ú©Ù†Ø› Function Call Ø¨Ø§ÛŒØ¯ Ø§ÙˆÙ„ÛŒÙ† Ø®Ø±ÙˆØ¬ÛŒ Ù…Ø¯Ù„ Ø¯Ø± Ø¢Ù† Ù†ÙˆØ¨Øª Ø¨Ø§Ø´Ø¯. Ø¨Ø¹Ø¯ Ø§Ø² Ø¯Ø±ÛŒØ§ÙØª Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ Ø§Ø¨Ø²Ø§Ø±ØŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ø¨Ù‡â€ŒØµÙˆØ±Øª Ø¹Ø§Ø¯ÛŒ Ùˆ streaming ØªÙˆÙ„ÛŒØ¯ Ú©Ù†.
-- Ø§Ø¨Ø²Ø§Ø± ask_user Ø±Ø§ ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ØªØºÛŒÛŒØ±Ø§Øª Ø§Ø³Ø§Ø³ÛŒ/ØºÛŒØ±Ù‚Ø§Ø¨Ù„â€ŒØ¨Ø±Ú¯Ø´Øª ÛŒØ§ ØªØµÙ…ÛŒÙ…â€ŒÙ‡Ø§ÛŒÛŒ Ø¨Ø§ Ú†Ù†Ø¯ Ø±Ø§Ù‡â€ŒØ­Ù„ Ù…ØªÙØ§ÙˆØª ØµØ¯Ø§ Ø¨Ø²Ù† (Ù…Ø«Ù„Ø§Ù‹ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ø§Ù…Ù„ ÛŒÚ© ÙØ§ÛŒÙ„ØŒ Ø­Ø°Ù Ø¨Ø®Ø´ Ø¨Ø²Ø±Ú¯ Ú©Ø¯). Ø¨Ø±Ø§ÛŒ Ú©Ø§Ø±Ù‡Ø§ÛŒ Ú©ÙˆÚ†Ú© ÛŒØ§ ÙˆØ§Ø¶Ø­ØŒ Ù…Ø³ØªÙ‚ÛŒÙ… Ø§Ù†Ø¬Ø§Ù… Ø¨Ø¯Ù‡ Ùˆ Ø§Ø² Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†.
-`;
-
-        // FEATURE (persistent file memory): tell the model which files exist
-        // in this chat's permanent archive (names only - the content is
-        // fetched on-demand via get_archived_file, see GEMINI_TOOLS above).
-        // If the archive is empty, say nothing extra so the prompt doesn't
-        // grow for chats that never used this.
-        if (archivedFileNames.length > 0) {
-            systemText += `
-ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ø¢Ø±Ø´ÛŒÙˆØ´Ø¯Ù‡ Ø¯Ø± Ø§ÛŒÙ† Ú¯ÙØªÚ¯Ùˆ (ÙÙ‚Ø· Ù†Ø§Ù… - Ù…Ø­ØªÙˆØ§ Ø¨Ø§ Ø§Ø¨Ø²Ø§Ø± get_archived_file Ù‚Ø§Ø¨Ù„ Ø¯Ø±ÛŒØ§ÙØª Ø§Ø³Øª):
-${archivedFileNames.map(n => `- ${n}`).join('\n')}
-
-ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ Ú©Ø§Ø±Ø¨Ø± ÙˆØ§Ù‚Ø¹Ø§Ù‹ Ø¨Ù‡ Ù…Ø­ØªÙˆØ§ÛŒ ÛŒÚ©ÛŒ Ø§Ø² Ø§ÛŒÙ† ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ Ù†ÛŒØ§Ø² Ø¯Ø§Ø±Ø¯ ÛŒØ§ Ø§Ø±Ø¬Ø§Ø¹ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ (Ù†Ù‡ ØµØ±ÙØ§Ù‹ ÙˆÙ‚ØªÛŒ Ø§Ø³Ù…Ø´ Ø±Ø§ Ù…ÛŒâ€ŒØ¨ÛŒÙ†ÛŒ)ØŒ Ø§Ø¨Ø²Ø§Ø± get_archived_file Ø±Ø§ Ø¨Ø§ Ù†Ø§Ù… Ø¯Ù‚ÛŒÙ‚ ÙØ§ÛŒÙ„ ØµØ¯Ø§ Ø¨Ø²Ù†.
-Ù…Ù‡Ù…: Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ù‡Ù…ÛŒÙ† Ù¾ÛŒØ§Ù… ÛŒÚ© ÙØ§ÛŒÙ„ Ø±Ø§ Ù…Ø³ØªÙ‚ÛŒÙ…Ø§Ù‹ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ (Ú†Ù‡ Ù¾ÛŒØ§Ù… Ø§ÙˆÙ„ Ø¨Ø§Ø´Ø¯ Ú†Ù‡ Retry)ØŒ Ù‡Ù…ÛŒØ´Ù‡ Ø§Ø² Ù‡Ù…Ø§Ù† Ù†Ø³Ø®Ù‡â€ŒÛŒ Ø¶Ù…ÛŒÙ…Ù‡â€ŒØ´Ø¯Ù‡ (Ú©Ù‡ Ø¯Ø± Ø¨Ø®Ø´ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ ÙØ¹Ù„ÛŒ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ ØªÙˆØ³Øª) Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†ØŒ Ø­ØªÛŒ Ø§Ú¯Ø± ÙØ§ÛŒÙ„ÛŒ Ù‡Ù…â€ŒÙ†Ø§Ù… Ø¯Ø± Ø¢Ø±Ø´ÛŒÙˆ Ù…ÙˆØ¬ÙˆØ¯ Ø¨Ø§Ø´Ø¯. get_archived_file Ø±Ø§ Ø¯Ø± Ø§ÛŒÙ† Ø­Ø§Ù„Øª ØµØ¯Ø§ Ù†Ø²Ù†Ø› Ø§ÛŒÙ† Ø§Ø¨Ø²Ø§Ø± ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒÛŒ Ø§Ø³Øª Ú©Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¨Ù‡ Ø¢Ù†â€ŒÙ‡Ø§ Ø§Ø±Ø¬Ø§Ø¹ Ù…ÛŒâ€ŒØ¯Ù‡Ø¯ Ø¨Ø¯ÙˆÙ† Ø§ÛŒÙ†â€ŒÚ©Ù‡ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ Ø¨Ø§Ø´Ø¯.
-`;
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | File Edit Mode
-        |--------------------------------------------------------------------------
-        */
-
-        if (textFiles.length > 0) {
-            const fileNamesList =
-                textFiles
-                    .map(
-                        f =>
-                            `Â«${f.name || 'file'}Â»`
+            // Stage 3: whitespace-tolerant match. Builds a regex from old's
+            // lines where each line's leading/inner whitespace is treated as
+            // \s+, so indentation-only differences (very common when a model
+            // "remembers" code instead of copying it verbatim) still resolve
+            // to a single unique location.
+            {
+                const oldLines = edit.old.split(/\r\n|\r|\n/);
+                const pattern = oldLines
+                    .map(line =>
+                        line
+                            .trim()
+                            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                            .replace(/ +/g, '\\s+')
                     )
-                    .join('ØŒ ');
-
-            systemText += `
-
-Ø­Ø§Ù„Øª ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ (SEARCH/REPLACE):
-
-- Ú©Ø§Ø±Ø¨Ø± ${textFiles.length > 1
-                    ? `${textFiles.length} ÙØ§ÛŒÙ„ Ú©Ø¯/Ù…ØªÙ† (${fileNamesList})`
-                    : `ÛŒÚ© ÙØ§ÛŒÙ„ Ú©Ø¯/Ù…ØªÙ†`
-                } Ø¶Ù…ÛŒÙ…Ù‡ Ú©Ø±Ø¯Ù‡ Ø§Ø³Øª.
-
-- Ù…Ø­ØªÙˆØ§ÛŒ ÙØ§ÛŒÙ„ Ù…Ù†Ø¨Ø¹ Ù…Ø¹ØªØ¨Ø± Ú©Ø¯ Ø§Ø³Øª.
-- Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± ØªØºÛŒÛŒØ± Ú©Ø¯ Ø®ÙˆØ§Ø³ØªØŒ ÙˆØ§Ù‚Ø¹Ø§Ù‹ ØªØºÛŒÛŒØ± Ø±Ø§ Ø±ÙˆÛŒ ÙØ§ÛŒÙ„ Ø§Ø¹Ù…Ø§Ù„ Ú©Ù†.
-- Ø³Ø§Ø®ØªØ§Ø±Ù‡Ø§ÛŒ Ù…ÙˆØ¬ÙˆØ¯ Ø±Ø§ Ø¨Ø±Ø±Ø³ÛŒ Ú©Ù† Ùˆ Ú†ÛŒØ²Ù‡Ø§ÛŒ Ø¨ÛŒâ€ŒØ¯Ù„ÛŒÙ„ Ø§Ø®ØªØ±Ø§Ø¹ Ù†Ú©Ù†.
-- Ø¨Ù‡ Ø¬Ø§ÛŒ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ú©Ù„ ÙØ§ÛŒÙ„ØŒ ÙÙ‚Ø· Ù‚Ø·Ø¹Ù‡(Ù‡Ø§ÛŒ) Ù„Ø§Ø²Ù… Ø±Ø§ Ø¨Ø§ apply_edit ØªØºÛŒÛŒØ± Ø¨Ø¯Ù‡.
-
-Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ Ù‡Ø± ÙØ§ÛŒÙ„ Ø§Ø² Ù‚Ø¨Ù„ Ø¯Ø± Ù¾ÛŒØ§Ù… Ø³ÛŒØ³ØªÙ… (Ø¨Ø®Ø´ [Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„(Ù‡Ø§ÛŒ) Ù‚Ø§Ø¨Ù„ ÙˆÛŒØ±Ø§ÛŒØ´]) Ø¨Ù‡ ØªÙˆ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯Ù‡ Ø§Ø³Øª.
-
-Ø±ÙˆÙ†Ø¯ Ø§Ø¬Ø¨Ø§Ø±ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ (Ù‡Ø± Ù…Ø±Ø­Ù„Ù‡ Ù‚Ø¨Ù„ Ø§Ø² Ø¨Ø¹Ø¯ÛŒ):
-Û±. Ø§Ø² Ø±ÙˆÛŒ Ù…Ø­ØªÙˆØ§ÛŒ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ú©Ù‡ Ø¯Ø§Ø±ÛŒØŒ Ø¨Ø®Ø´ Ø¯Ù‚ÛŒÙ‚ÛŒ Ú©Ù‡ Ø¨Ø§ÛŒØ¯ ØªØºÛŒÛŒØ± Ú©Ù†Ø¯ Ø±Ø§ Ù¾ÛŒØ¯Ø§ Ú©Ù† - Ø­Ø¯Ø³ Ù†Ø²Ù†ØŒ Ù…ØªÙ† ÙˆØ§Ù‚Ø¹ÛŒ Ø±Ø§ Ø§Ø² Ù‡Ù…Ø§Ù† Ù…Ø­ØªÙˆØ§ Ú©Ù¾ÛŒ Ú©Ù†.
-Û². apply_edit Ø±Ø§ Ø¨Ø§ fileØŒ search (Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ Ù…ÙˆØ¬ÙˆØ¯ - Ú†Ù†Ø¯ Ø®Ø· Ø§Ø·Ø±Ø§Ù ØªØºÛŒÛŒØ± Ø¨Ø±Ø§ÛŒ ÛŒÚ©ØªØ§ Ø¨ÙˆØ¯Ù†) Ùˆ replace (Ù…ØªÙ† Ù†Ù‡Ø§ÛŒÛŒ Ø¬Ø¯ÛŒØ¯ Ù‡Ù…Ø§Ù† Ø¨Ø®Ø´) ØµØ¯Ø§ Ø¨Ø²Ù†.
-   - Ø§Ú¯Ø± success:true Ùˆ valid:true Ø¨Ø±Ú¯Ø´ØªØŒ ØªØºÛŒÛŒØ± Ø§Ø¹Ù…Ø§Ù„ Ø´Ø¯.
-   - Ø§Ú¯Ø± success:false Ø¨Ø±Ú¯Ø´Øª (Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯ ÛŒØ§ Ù…Ø¨Ù‡Ù… Ø¨ÙˆØ¯)ØŒ Ø§Ø² context Ù‡Ø§ÛŒÛŒ Ú©Ù‡ Ø¯Ø± Ù¾Ø§Ø³Ø® Ø®Ø·Ø§ Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ú©Ù…Ú© Ø¨Ú¯ÛŒØ± ØªØ§ search Ø±Ø§ Ø¯Ù‚ÛŒÙ‚â€ŒØªØ±/ÛŒÚ©ØªØ§ØªØ± Ú©Ù†ÛŒØŒ Ø³Ù¾Ø³ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØµØ¯Ø§ Ø¨Ø²Ù†. Ù‡Ø±Ú¯Ø² Ø­Ø¯Ø³ Ù†Ø²Ù† ÛŒØ§ Ù…Ø­ØªÙˆØ§ Ø±Ø§ Ø§Ø² Ø­Ø§ÙØ¸Ù‡ Ø¨Ø§Ø²Ø³Ø§Ø²ÛŒ Ù†Ú©Ù† - Ø§Ø² context ÙˆØ§Ù‚Ø¹ÛŒ Ø¨Ø±Ú¯Ø´ØªÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†.
-   - Ø§Ú¯Ø± Ù„Ø§Ø²Ù… Ø¨ÙˆØ¯ Ù…ØªÙ† Ø¯Ù‚ÛŒÙ‚ ÛŒÚ© Ø¨Ø®Ø´ Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø¨Ø¨ÛŒÙ†ÛŒ (ÙØ§ÛŒÙ„ Ø®ÛŒÙ„ÛŒ Ø¨Ø²Ø±Ú¯ Ø¨ÙˆØ¯ ÛŒØ§ Ù…Ø·Ù…Ø¦Ù† Ù†Ø¨ÙˆØ¯ÛŒ)ØŒ read_file_section Ø±Ø§ Ø¨Ø§ startLine/endLine ØµØ¯Ø§ Ø¨Ø²Ù†.
-Û³. Ø§Ú¯Ø± Ú†Ù†Ø¯ Ø¨Ø®Ø´ Ø¬Ø¯Ø§ Ø§Ø² Ù‡Ù… Ø¨Ø§ÛŒØ¯ ØªØºÛŒÛŒØ± Ú©Ù†Ù†Ø¯ØŒ apply_edit Ø±Ø§ ÛŒÚ©ÛŒâ€ŒÛŒÚ©ÛŒ Ø¨Ø±Ø§ÛŒ Ù‡Ø±Ú©Ø¯Ø§Ù… ØµØ¯Ø§ Ø¨Ø²Ù†.
-Û´. Ø¨Ø¹Ø¯ Ø§Ø² ØªÙ…Ø§Ù… apply_edit Ù‡Ø§ÛŒ Ù„Ø§Ø²Ù…ØŒ Ø­ØªÙ…Ø§Ù‹ verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù†. Ø§Ú¯Ø± valid:false Ø¨Ø±Ú¯Ø´ØªØŒ Ø¨Ø®Ø´ Ù…Ø´Ú©Ù„â€ŒØ¯Ø§Ø± Ø±Ø§ Ø¨Ø§ apply_edit Ø¯ÛŒÚ¯Ø±ÛŒ Ø§ØµÙ„Ø§Ø­ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ verify_file Ø±Ø§ ØµØ¯Ø§ Ø¨Ø²Ù† - ØªØ§ valid:true Ù†Ú¯ÛŒØ±ÛŒ Ø§Ø¬Ø§Ø²Ù‡â€ŒÛŒ Ù¾Ø§Ø³Ø® Ù†Ù‡Ø§ÛŒÛŒ Ø±Ø§ Ù†Ø¯Ø§Ø±ÛŒ.
-Ûµ. Ø¨Ø¹Ø¯ Ø§Ø² verify_file Ù…ÙˆÙÙ‚ (valid:true)ØŒ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ø¨Ú¯Ùˆ Ú†Ù‡ ØªØºÛŒÛŒØ±ÛŒ Ø¯Ø§Ø¯ÛŒØ› Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ Ú†Ø§Ù¾ Ú©Ø¯ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ ÛŒØ§ Ù‡ÛŒÚ† Ø¨Ù„Ø§Ú© JSON Ø®Ø§ØµÛŒ Ø¯Ø± Ù¾Ø§Ø³Ø® Ù†ÛŒØ³Øª - ÙØ§ÛŒÙ„ Ù†Ù‡Ø§ÛŒÛŒ Ø§Ø² Ø±ÙˆÛŒ ØªØºÛŒÛŒØ±Ø§Øª Ø§Ø¹Ù…Ø§Ù„â€ŒØ´Ø¯Ù‡ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± ØªØ­ÙˆÛŒÙ„ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-
-Ø®Ø§Ø±Ø¬ Ø§Ø² Ø§ÛŒÙ† Ø±ÙˆÙ†Ø¯ØŒ Ú©Ø¯ Ú©Ø§Ù…Ù„ ÙØ§ÛŒÙ„ Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ú†Ø§Ù¾ Ù†Ú©Ù†.
-
-Ù‚ÙˆØ§Ù†ÛŒÙ† Ø­ÛŒØ§ØªÛŒ Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Ø§Ø¯Ø¹Ø§ÛŒ Ù…ÙˆÙÙ‚ÛŒØª (Ø¨Ø³ÛŒØ§Ø± Ù…Ù‡Ù… - Ù†Ù‚Ø¶ Ø§ÛŒÙ† Ù‚ÙˆØ§Ù†ÛŒÙ† ÛŒØ¹Ù†ÛŒ Ú©Ø§Ø±Ø¨Ø± Ù‡ÛŒÚ† ÙØ§ÛŒÙ„ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯):
-- Ù‡Ø±Ú¯Ø² Ø¬Ù…Ù„Ù‡â€ŒÙ‡Ø§ÛŒÛŒ Ù…Ø«Ù„ Â«Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø°Ø®ÛŒØ±Ù‡/ÙˆÛŒØ±Ø§ÛŒØ´/Ø§Ø¹Ù…Ø§Ù„ Ø´Ø¯Â» ÛŒØ§ Ù…Ø´Ø§Ø¨Ù‡ Ø¢Ù† Ù†Ù†ÙˆÛŒØ³ Ù…Ú¯Ø± Ø§ÛŒÙ†Ú©Ù‡ ÙˆØ§Ù‚Ø¹Ø§Ù‹ apply_edit Ø±Ø§ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø¨Ø§Ø´ÛŒ (Ùˆ success:true Ú¯Ø±ÙØªÙ‡ Ø¨Ø§Ø´ÛŒ) Ùˆ Ø³Ù¾Ø³ verify_file Ø±Ø§ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø¨Ø§Ø´ÛŒ Ùˆ valid:true Ú¯Ø±ÙØªÙ‡ Ø¨Ø§Ø´ÛŒ. Ø§Ú¯Ø± Ø§ÛŒÙ† Ø¯Ùˆ Ø§Ø¨Ø²Ø§Ø± ØµØ¯Ø§ Ø²Ø¯Ù‡ Ù†Ø´Ø¯Ù‡ ÛŒØ§ Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯Ù‡â€ŒØ§Ù†Ø¯ØŒ Ù‡Ø±Ú¯Ø² Ø§Ø¯Ø¹Ø§ÛŒ Ù…ÙˆÙÙ‚ÛŒØª Ù†Ú©Ù† - ÙÙ‚Ø· Ø¨Ú¯Ùˆ Ú©Ù‡ Ù‡Ù†ÙˆØ² Ù…ÙˆÙÙ‚ Ù†Ø´Ø¯Ù‡â€ŒØ§ÛŒ.
-- ØªØºÛŒÛŒØ± Ú©Ø¯ Ø±Ø§ Ù‡Ø±Ú¯Ø² Ø¨Ù‡â€ŒØµÙˆØ±Øª ÛŒÚ© Ø¨Ù„ÙˆÚ© Ú©Ø¯ Ø¬Ø¯Ø§ (Ù…Ø«Ù„Ø§Ù‹ \`\`\`html ... \`\`\` ÛŒØ§ \`\`\`css ... \`\`\`) Ø¯Ø± Ù…ØªÙ† Ù¾Ø§Ø³Ø® Ù†Ù†ÙˆÛŒØ³ ÛŒØ§ Ù†Ø´Ø§Ù† Ù†Ø¯Ù‡ØŒ Ø­ØªÛŒ Ø§Ú¯Ø± Ø¨Ø®ÙˆØ§Ù‡ÛŒ ÙÙ‚Ø· ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡ÛŒ Ú†Ù‡ Ú†ÛŒØ²ÛŒ Ø¹ÙˆØ¶ Ø´Ø¯Ù‡ - Ø§ÛŒÙ† Ú©Ø§Ø± ØªÙˆØ³Ø· Ø±Ø§Ø¨Ø· Ú©Ø§Ø±Ø¨Ø±ÛŒ Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† ÛŒÚ© ÙØ§ÛŒÙ„ Ø¬Ø¯ÛŒØ¯ Ùˆ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ (Ù†Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ Ù…ÙˆØ¬ÙˆØ¯) Ù†Ù…Ø§ÛŒØ´ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ù‡ÛŒÚ† Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙˆØ§Ù‚Ø¹ÛŒ Ù†Ø¯Ø§Ø±Ø¯ØŒ Ùˆ Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ Ú¯ÛŒØ¬ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ú†ÙˆÙ† ÙÚ©Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ø§ÛŒÙ† Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡ Ø§Ø³Øª Ø¯Ø± Ø­Ø§Ù„ÛŒ Ú©Ù‡ Ù†ÛŒØ³Øª. Ø§Ú¯Ø± Ù…ÛŒâ€ŒØ®ÙˆØ§Ù‡ÛŒ ØªØºÛŒÛŒØ± Ø±Ø§ ØªÙˆØ¶ÛŒØ­ Ø¯Ù‡ÛŒØŒ ÙÙ‚Ø· Ø¯Ø± Ù‚Ø§Ù„Ø¨ Ù…ØªÙ† Ø¹Ø§Ø¯ÛŒ (Ø¨Ø¯ÙˆÙ† \`\`\`) ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡Ø› ØªØºÛŒÛŒØ± ÙˆØ§Ù‚Ø¹ÛŒ ÙÙ‚Ø· Ùˆ ÙÙ‚Ø· Ø§Ø² Ø·Ø±ÛŒÙ‚ apply_edit + verify_file Ø§Ø¹Ù…Ø§Ù„ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-- Ø§Ú¯Ø± apply_edit ÛŒØ§ verify_file Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯Ù†Ø¯ Ùˆ Ù†ØªÙˆØ§Ù†Ø³ØªÛŒ Ø¨Ø§ ØªÙ„Ø§Ø´ Ù…Ø¬Ø¯Ø¯ Ø¯Ø±Ø³ØªØ´Ø§Ù† Ú©Ù†ÛŒØŒ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ø¨Ú¯Ùˆ Ú©Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ù†Ø´Ø¯ Ùˆ Ú†Ø±Ø§ - Ù‡Ø±Ú¯Ø² ÙˆØ§Ù†Ù…ÙˆØ¯ Ù†Ú©Ù† Ú©Ù‡ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ØŒ Ùˆ Ù‡Ø±Ú¯Ø² Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù… ÙˆØ§Ù‚Ø¹ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ØŒ ÙÙ‚Ø· ÙØ§ÛŒÙ„ Ø±Ø§ Ø¯Ø± Ù¾Ø§Ø³Ø® Ù…ØªÙ†ÛŒ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù†Ú©Ù†.
-`;
-        }
-
-        if (oversizedTextFiles.length > 0) {
-            const droppedNames = oversizedTextFiles.map(f => `Â«${f.name || 'file'}Â»`).join('ØŒ ');
-            systemText += `
-
-ØªÙˆØ¬Ù‡: ÙØ§ÛŒÙ„(Ù‡Ø§ÛŒ) ${droppedNames} Ø¨Ù‡â€ŒØ¯Ù„ÛŒÙ„ Ø­Ø¬Ù… Ø²ÛŒØ§Ø¯ (Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ù…Ø¬Ø§Ø²) Ù¾Ø±Ø¯Ø§Ø²Ø´ Ù†Ø´Ø¯Ù†Ø¯ Ùˆ Ø¯Ø± Ø§Ø®ØªÛŒØ§Ø± ØªÙˆ Ù†ÛŒØ³ØªÙ†Ø¯. Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø³Ø¤Ø§Ù„ Ú©Ø±Ø¯ØŒ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ø¨Ú¯Ùˆ Ú©Ù‡ ÙØ§ÛŒÙ„ Ø¨Ù‡â€ŒØ®Ø§Ø·Ø± Ø­Ø¬Ù… Ø²ÛŒØ§Ø¯ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯Ù‡ Ùˆ Ø¨Ø§ÛŒØ¯ Ù†Ø³Ø®Ù‡â€ŒÛŒ Ú©ÙˆÚ†Ú©â€ŒØªØ±ÛŒ Ø¨ÙØ±Ø³ØªØ¯.
-`;
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | Model Fallback
-        |--------------------------------------------------------------------------
-        */
-
-        const modelsToTry = [MODEL_NAME];
-
-        if (
-            MODEL_NAME ===
-            'gemini-3.1-pro-preview'
-        ) {
-            modelsToTry.push(
-                'gemini-3.7-flash'
-            );
-
-            modelsToTry.push(
-                'gemini-3.5-flash-lite'
-            );
-        }
-
-        if (
-            MODEL_NAME ===
-            'gemini-3.7-flash'
-        ) {
-            modelsToTry.push(
-                'gemini-3.5-flash-lite'
-            );
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | STREAM
-        |--------------------------------------------------------------------------
-        */
-
-        if (wantsStream) {
-            // FIX (real streaming on Vercel): setHeader()+flushHeaders() was
-            // relying on Node's default behavior, but Vercel's Node.js
-            // Serverless Function runtime only switches a response into true
-            // chunked/streaming mode once writeHead() is called explicitly
-            // with the headers passed directly to it - without that exact
-            // call, Vercel's platform layer can buffer the whole response
-            // and flush it all at once when the function returns, no matter
-            // how many times res.write()/res.flush() are called afterward.
-            // This was the actual root cause of "the whole reply lands at
-            // once with a delay" even though the SSE writes themselves were
-            // already correct.
-            res.writeHead(200, {
-                'Content-Type': 'text/event-stream; charset=utf-8',
-                'Cache-Control': 'no-cache, no-transform',
-                'Connection': 'keep-alive',
-                'X-Accel-Buffering': 'no'
-            });
-
-            if (
-                typeof res.flushHeaders ===
-                'function'
-            ) {
-                res.flushHeaders();
-            }
-
-            // FIX: 60s was a hard ceiling on the *whole* streaming attempt
-            // (checked only between model/key retries, not during an
-            // in-progress stream). For heavy replies â€” long code files,
-            // multi-file edits â€” Gemini can legitimately take longer than
-            // that just to finish one stream, and this file already has no
-            // per-chunk timeout, so raising the deadline doesn't reduce
-            // safety, it just stops penalizing large-but-healthy streams.
-            // FIX (false "all 12 keys exhausted" after just 1-2 tries): this
-            // used to be a flat 180s no matter how many keys/models exist to
-            // try. A single slow attempt (e.g. a round that needs
-            // get_archived_file - up to ~120s across two Gemini rounds) could
-            // eat almost the whole budget, so the loop would then bail out
-            // via the deadline check after only 1-2 attempts and surface
-            // that one attempt's error as if it applied to every key. Scale
-            // the deadline with how many keys actually exist so a real fleet
-            // of keys gets a real chance to be tried, while a fast failure
-            // (quota/429, which fails immediately at the upstream.ok check,
-            // not after a timeout) barely uses any of that budget anyway.
-            const overallDeadline =
-                Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
-
-            let lastError = null;
-            // FIX 3 (block-based rewrite): shared across every key/model
-            // retry attempt for THIS one incoming HTTP request, so a
-            // mid-loop attempt failure (retryable rate-limit/timeout ->
-            // next key/model) does not reset block read/edit/verify
-            // progress back to zero. editStates: fileName -> FileEditState
-            // (see createBlockFileState). See the matching comment inside
-            // runAgentLoop for the full explanation.
-            const sharedRequestState = {
-                editStates: new Map()
-            };
-            let attemptsTried = 0; // diagnostic: how many model/key combos actually got a real try
-
-            outerLoop:
-            for (
-                const currentModel of modelsToTry
-            ) {
-                // FIX: try keys in health order (fewest recent consecutive
-                // failures first) instead of always starting from index 0.
-                // Previously `rotateKeysByHealth` was defined but never
-                // called here, so a bad/rate-limited key at index 0 would
-                // eat a full 6s timeout on *every single request* before
-                // falling through to a healthy key â€” this was the other
-                // big contributor to multi-second delays on non-lite
-                // models (which, unlike flash-lite, have >1 key attempt
-                // in the common case). Sorting first means a key that
-                // just failed drops to the back of the line for this
-                // request and subsequent ones, until it recovers.
-                const orderedKeys =
-                    rotateKeysByHealth(geminiKeys);
-
-                for (
-                    let k = 0;
-                    k < orderedKeys.length;
-                    k++
-                ) {
-                    if (
-                        Date.now() >
-                        overallDeadline
-                    ) {
-                        break outerLoop;
-                    }
-
-                    const currentKey =
-                        orderedKeys[k];
-
-                    attemptsTried++;
-
-                    // Declared OUTSIDE the try so it's always defined by the
-                    // time the catch block below runs â€” this was previously
-                    // declared inside try{}, which is normally fine (same
-                    // block scope as its catch), but a stale/partial deploy
-                    // once left a version where the two were out of sync and
-                    // threw "attemptStartedAt is not defined" here, which
-                    // then hit the mid-stream error path instead of just
-                    // logging the connect time. Hoisting it removes that
-                    // class of bug entirely, regardless of deploy state.
-                    let attemptStartedAt = Date.now();
-                    // FIX (deadlineTimer is not defined): same class of bug
-                    // as attemptStartedAt above. deadlineTimer was declared
-                    // with const INSIDE the try block; if anything threw
-                    // before that declaration line executed (e.g. log.info
-                    // itself, or an error early in the try), the catch block
-                    // below referenced a deadlineTimer that was never
-                    // initialized in this iteration - a real ReferenceError,
-                    // not a hypothetical one (this is exactly what the
-                    // screenshot showed). Hoisted above try, defaulting to
-                    // null, so clearTimeout(deadlineTimer) in catch is always
-                    // safe regardless of where inside try the throw happened.
-                    let deadlineTimer = null;
-
-                    try {
-                        attemptStartedAt = Date.now();
-
-                        log.info('model.attempt', {
-                            mode: 'stream',
-                            model: currentModel,
-                            key: keyLabel(geminiKeys, currentKey)
-                        });
-
-                        const abortController = new AbortController();
-                        // FIX (single key attempt could blow past
-                        // overallDeadline entirely): overallDeadline was
-                        // only ever checked BEFORE starting a new attempt
-                        // (the `if (Date.now() > overallDeadline) break`
-                        // above), never enforced WHILE an attempt was
-                        // in-flight. With MAX_TOOL_ROUNDS=10 and up to 170s
-                        // per round, one stuck attempt could run ~28
-                        // minutes uninterrupted - far past the intended
-                        // <=10min overallDeadline - before the check ever
-                        // got a chance to fire again. Force-abort this
-                        // attempt's own controller the moment the shared
-                        // deadline passes, same signal path onAbort/fetch
-                        // already listens to for client-disconnect.
-                        const deadlineMsRemaining = Math.max(0, overallDeadline - Date.now());
-                        deadlineTimer = setTimeout(() => abortController.abort(), deadlineMsRemaining);
-
-                        // FIX: previously this whole section made one raw
-                        // streamGenerateContent call and piped SSE chunks
-                        // straight through - no room for the model to ever
-                        // call a tool mid-answer. runAgentLoop drives a
-                        // proper function-calling loop instead: the model
-                        // can call web_search / ask_user as many times as it
-                        // judges necessary, each call is narrated to the
-                        // client immediately via a {step} event (so a slow
-                        // search doesn't look like a silent hang), and only
-                        // once the model returns a final text-only answer do
-                        // we send it to the client. This trades raw
-                        // token-by-token streaming of the final answer for
-                        // real tool use - the reply still appears to the
-                        // user as one flush (not the old incremental
-                        // typing), but with live "Ø¯Ø± Ø­Ø§Ù„ Ø§Ù†Ø¬Ø§Ù…..." steps
-                        // along the way to fill that gap.
-                        let searchWasPerformed = false;
-                        const requestSearchIntent = looksLikeWebSearchIntent(searchQueryBase || text);
-
-                        // FIX (heavy code UX): code blocks now stream live,
-                        // chunk-by-chunk, exactly like normal prose - no more
-                        // buffering the whole fenced block and flushing it in
-                        // one piece, and no more fake "Ø¯Ø± Ø­Ø§Ù„ Ù†ÙˆØ´ØªÙ† Ú©Ø¯..."
-                        // step event standing in for it (that event used to
-                        // fire on ANY ``` fence, including ones that weren't
-                        // real code, which made it misleading). We still keep
-                        // a tiny carry buffer so a ``` marker split across two
-                        // raw chunks isn't sent as two separate backticks -
-                        // that's purely a transport-safety detail and has no
-                        // effect on what the user sees typed out.
-                        const codeStreamGate = (() => {
-                            let carry = ''; // holds a partial ``` at chunk boundary
-                            let seenTail = ''; // small rolling window to detect the ```file-edit fence across chunk boundaries
-                            let fileEditStepSent = false;
-
-                            const emitText = (t) => {
-                                if (!t) return;
-                                res.write(`data: ${JSON.stringify({ text: t })}\n\n`);
-                                if (typeof res.flush === 'function') res.flush();
-                            };
-
-                            return function feed(rawChunk) {
-                                let chunk = carry + rawChunk;
-                                carry = '';
-
-                                // If the chunk ends mid-fence-marker (e.g. "``"),
-                                // hold the tail back until the next chunk so we
-                                // don't split a ``` marker across two SSE events.
-                                const tailBackticks = chunk.match(/`{1,2}$/);
-                                if (tailBackticks && !chunk.endsWith('```')) {
-                                    carry = tailBackticks[0];
-                                    chunk = chunk.slice(0, -carry.length);
-                                }
-
-                                // FEATURE (file-edit progress narration): the
-                                // model only emits the ```file-edit fence once
-                                // it has finished "deciding" the diff and is
-                                // about to print the actual old/new JSON -
-                                // narrate that moment specifically (not any
-                                // ``` fence in general, which was already
-                                // tried and reverted above for being
-                                // misleading on non-code fences).
-                                if (!fileEditStepSent && textFiles.length > 0) {
-                                    seenTail = (seenTail + chunk).slice(-32);
-                                    if (seenTail.includes('```file-edit')) {
-                                        fileEditStepSent = true;
-                                        res.write(`data: ${JSON.stringify({ step: 'Ø¯Ø± Ø­Ø§Ù„ Ø§Ø¹Ù…Ø§Ù„ ØªØºÛŒÛŒØ±Ø§Øª Ø±ÙˆÛŒ ÙØ§ÛŒÙ„...' })}\n\n`);
-                                        if (typeof res.flush === 'function') res.flush();
-                                    }
-                                }
-
-                                emitText(chunk);
-                            };
-                        })();
-
-                        const agentResult = await runAgentLoop({
-                            currentModel,
-                            currentKey,
-                            keyIndex: geminiKeys.indexOf(currentKey) + 1,
-                            systemText,
-                            contents,
-                            tavilyKeys,
-                            archivedFiles,
-                            textFiles,
-                            searchCache,
-                            searchState,
-                            searchIntent: requestSearchIntent,
-                            fileEditIntent,
-                            sharedRequestState,
-                            signal: abortController.signal,
-                            disableTools: hasVideoAttachment,
-                            hasVideoAttachment,
-                            thinkLevel,
-                            onStep: (label, toolName) => {
-                                if (toolName === 'web_search') searchWasPerformed = true;
-                                res.write(
-                                    `data: ${JSON.stringify({ step: label })}\n\n`
-                                );
-                                if (typeof res.flush === 'function') res.flush();
-                            },
-                            onChunk: (textChunk) => {
-                                codeStreamGate(textChunk);
-                            }
-                        });
-
-                        clearTimeout(deadlineTimer);
-                        markKeyResult(currentKey, true);
-                        log.info('model.connected', {
-                            mode: 'stream',
-                            model: currentModel,
-                            connectMs: Date.now() - attemptStartedAt
-                        });
-
-                        try {
-                            res.setHeader('X-Search-Performed', String(searchWasPerformed));
-                        } catch (_) {
-                            // Headers may already be flushed by the time we know this;
-                            // harmless to skip, X-Search-Performed is observability-only.
-                        }
-
-                        // NOTE: a normal final answer's text has already been
-                        // sent to the client incrementally via onChunk above,
-                        // so it must NOT be written again here (that would
-                        // duplicate the reply). The one exception is the
-                        // ask_user path: that text comes from the tool result
-                        // itself, never passed through onChunk, so it still
-                        // needs to be sent once here.
-                        if (agentResult.askUser && agentResult.finalText) {
-                            res.write(
-                                `data: ${JSON.stringify({ text: agentResult.finalText })}\n\n`
-                            );
-                            if (typeof res.flush === 'function') res.flush();
-                        }
-
-                        // truncated=true tells the client the model was cut
-                        // off by its own output-token limit (not an error,
-                        // not the user pressing Stop) so it can offer to
-                        // continue instead of treating the reply as final.
-                        const truncated =
-                            agentResult.finishReason === 'MAX_TOKENS';
-
-                        // DIAGNOSTICS: ÙˆÙ‚ØªÛŒ Ø­Ù„Ù‚Ù‡ Ø¨Ù‡ Ø³Ù‚Ù MAX_TOOL_ROUNDS
-                        // Ù…ÛŒâ€ŒØ±Ø³Ø¯ (finishReason === 'TOOL_LOOP_LIMIT')ØŒ Ø§ÛŒÙ†
-                        // Ù…Ø³ÛŒØ± throw Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯ - ÛŒÚ© finalText Ø¹Ù…ÙˆÙ…ÛŒ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯
-                        // Ùˆ Ø¨Ù‡ Ù‡Ù…ÛŒÙ† Ø´Ú©Ù„ Ø¨Ù‡ Ú©Ø§Ø±Ø¨Ø± Ù…ÛŒâ€ŒØ±Ø³Ø¯ØŒ Ø¨Ø¯ÙˆÙ† ØªÙˆØ¶ÛŒØ­ ÙˆØ§Ù‚Ø¹ÛŒ.
-                        // agentResult.diagnostics Ø±Ø§ Ù‡Ù…ÛŒÙ†Ø¬Ø§ Ù‡Ù… Ø¨Ù‡ Ù„Ø§Ú¯ Ø³Ø±ÙˆØ± Ùˆ
-                        // Ù‡Ù… (ØªØ­Øª "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ù…Ø´Ø§Ø¨Ù‡ Ù…Ø³ÛŒØ± Ø®Ø·Ø§) Ø¨Ù‡ Ú©Ù„Ø§ÛŒÙ†Øª
-                        // Ù…ÛŒâ€ŒÙØ±Ø³ØªÛŒÙ… ØªØ§ Ø§ÛŒÙ† Ø­Ø§Ù„Øª Ù‡Ù… Ø¯ÛŒÚ¯Ø± Ú©ÙˆØ±Ú©ÙˆØ±Ø§Ù†Ù‡ Ù†Ø¨Ø§Ø´Ø¯.
-                        if (agentResult.diagnostics) {
-                            log.warn('agent.tool_loop_limit_surfaced', {
-                                model: currentModel,
-                                summary: agentResult.diagnostics.humanSummary
-                            });
-                        }
-
-                        res.write(
-                            `data: ${JSON.stringify({
-                                done: true,
-                                finishReason: agentResult.finishReason,
-                                truncated,
-                                askUser: !!agentResult.askUser,
-                                ...(agentResult.finishReason === 'TOOL_LOOP_LIMIT' && agentResult.diagnostics
-                                    ? { diagnostics: agentResult.diagnostics }
-                                    : {}),
-                                ...(truncated && agentResult.partialFiles?.length
-                                    ? { partialFiles: agentResult.partialFiles, canContinue: true }
-                                    : {}),
-                                ...(agentResult.editedFiles?.length
-                                    ? { editedFiles: agentResult.editedFiles }
-                                    : {}),
-                                ...(agentResult.unresolvedEditFailure
-                                    ? { unresolvedEditFailure: agentResult.unresolvedEditFailure }
-                                    : {})
-                            })}\n\n`
-                        );
-
-                        log.info('request.finish_reason', {
-                            model: currentModel,
-                            finishReason: agentResult.finishReason || 'unknown'
-                        });
-
-                        if (
-                            typeof res.flush ===
-                            'function'
-                        ) {
-                            res.flush();
-                        }
-
-                        log.info('request.completed', {
-                            mode: 'stream',
-                            model: currentModel,
-                            durationMs: Date.now() - requestStartedAt
-                        });
-
-                        return res.end();
-
-                    } catch (error) {
-                        clearTimeout(deadlineTimer);
-                        const classified = classifyGeminiError(error?.body || error);
-                        if (classified.keySpecific) markKeyResult(currentKey, false);
-                        log.error('model.stream_error', {
-                            model: currentModel,
-                            category: classified.category,
-                            status: classified.status,
-                            providerCode: classified.providerCode,
-                            message: classified.rawMessage || error?.message || String(error),
-                            wasTimeout: classified.category === 'timeout',
-                            keySpecific: classified.keySpecific,
-                            connectMs: Date.now() - attemptStartedAt
-                        });
-
-                        lastError = {
-                            ...(error?.body && typeof error.body === 'object' ? error.body : {}),
-                            _classification: classified
-                        };
-
-                        // Daily/free-tier/project quota exhaustion is a shared
-                        // limit. Rotating keys or models cannot fix it, so stop
-                        // the retry loop immediately and surface the real reason.
-                        if (!classified.retryable) {
-                            break outerLoop;
-                        }
-
-                        // BUGFIX (silent empty reply after a tool call): this
-                        // specific error means the model itself returned an
-                        // empty/blocked reply right after reading an
-                        // archived file - it's not a key/quota problem, so
-                        // retrying with another key or model will almost
-                        // certainly reproduce the exact same empty result.
-                        // Stop immediately and tell the user what actually
-                        // happened instead of silently burning through every
-                        // remaining key/model and only then showing the
-                        // generic "server busy" message.
-                        if (error?.body?.type === 'empty_after_tool_call') {
-                            break outerLoop;
-                        }
-                    }
-                }
-            }
-
-            // Surface Gemini's own reason (status + message), not just our
-            // generic Persian fallback, so it's possible to tell apart a
-            // real daily quota exhaustion (RESOURCE_EXHAUSTED) from a
-            // per-minute rate limit (429 without RESOURCE_EXHAUSTED, often
-            // hit faster when web_search is on since each turn costs 2+
-            // Gemini calls instead of 1) from anything else (auth,
-            // permission, model-not-found, etc). Both live only in the
-            // "detail" field the client already renders behind "Ø¬Ø²Ø¦ÛŒØ§Øª
-            // Ø¨ÛŒØ´ØªØ±", so no UI changes are needed to see them.
-            const classification = lastError?._classification || classifyGeminiError(lastError);
-            const geminiStatusCode = classification.status;
-            const geminiReasonMessage = classification.rawMessage || 'unknown';
-
-            log.error('request.all_models_failed', {
-                mode: 'stream',
-                category: classification.category,
-                attemptsTried,
-                totalPossible: modelsToTry.length * geminiKeys.length,
-                geminiStatusCode,
-                lastError: geminiReasonMessage
-            });
-
-            // At this point every model/key combo has already been tried and
-            // failed, so a per-key "try the next key" message would be
-            // misleading here - there is no next key left. If the final
-            // failure was a per-key quota/rate-limit hit, say plainly that
-            // it was ALL keys, not just the last one tried.
-            const allKeysExhaustedMessage =
-                (classification.category === 'quota_exhausted' || classification.category === 'rate_limit') && classification.keySpecific
-                    ? `Ù‡Ù…Ù‡Ù” ${geminiKeys.length} Ú©Ù„ÛŒØ¯ ØªÙ†Ø¸ÛŒÙ…â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ø³Ù‡Ù…ÛŒÙ‡/Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ù†Ø±Ø® Ú¯ÛŒØ± Ú©Ø±Ø¯Ù†Ø¯Ø› Ù„Ø·ÙØ§Ù‹ Ú©Ù…ÛŒ Ø¨Ø¹Ø¯ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†.`
-                    : classification.message;
-
-            // DIAGNOSTICS: Ø§Ú¯Ø± Ø®Ø·Ø§ Ø§Ø² Ù†ÙˆØ¹ "Ø³Ú©ÙˆØª Ø¨Ø¹Ø¯ Ø§Ø² Ø§Ø¨Ø²Ø§Ø±" ÛŒØ§ "Ø³Ù‚Ù
-            // Ù…Ø±Ø§Ø­Ù„" Ø¨ÙˆØ¯ØŒ lastError.diagnostics.humanSummary Ø±Ø§ Ø¯Ø§Ø±ÛŒÙ… (Ú†ÙˆÙ†
-            // runAgentLoop Ø¢Ù† Ø±Ø§ Ø¯Ø± err.body Ú¯Ø°Ø§Ø´ØªÙ‡ Ùˆ Ù„Ø§ÛŒÙ† Ø¨Ø§Ù„Ø§ Ú©Ù„ err.body
-            // Ø±Ø§ Ø±ÙˆÛŒ lastError Ù¾Ø®Ø´ Ù…ÛŒâ€ŒÚ©Ù†Ø¯). Ø¢Ù† Ø±Ø§ Ø¨Ù‡ detail Ø§Ø¶Ø§ÙÙ‡ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…
-            // ØªØ§ Ø¨Ø¯ÙˆÙ† Ù‡ÛŒÚ† ØªØºÛŒÛŒØ± ÙØ±Ø§Ù†Øªâ€ŒØ§Ù†Ø¯ÛŒØŒ Ø²ÛŒØ± "Ø¬Ø²Ø¦ÛŒØ§Øª Ø¨ÛŒØ´ØªØ±" Ø¯ÛŒØ¯Ù‡ Ø´ÙˆØ¯.
-            const diagnosticsSummary = lastError?.diagnostics?.humanSummary || null;
-            const detailText =
-                `Gemini${geminiStatusCode ? ' [' + geminiStatusCode + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${geminiReasonMessage}` +
-                ` (actual attempts: ${attemptsTried})` +
-                (diagnosticsSummary ? `\n\n--- Ø±Ø¯Ù Ø§Ø¬Ø±Ø§ÛŒ Ù…Ø¯Ù„ ---\n${diagnosticsSummary}` : '');
-
-            res.write(
-                `data: ${JSON.stringify({
-                    error: {
-                        message: allKeysExhaustedMessage,
-                        type: classification.category,
-                        category: classification.category,
-                        retryable: classification.retryable,
-                        retryAfterSeconds: classification.retryAfterSeconds ?? null,
-                        stage: 'stream_generation',
-                        detail: detailText,
-                        ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {}),
-                        ...(Array.isArray(lastError?.partialFiles) && lastError.partialFiles.length
-                            ? { partialFiles: lastError.partialFiles, canContinue: true }
-                            : {})
-                    }
-                })}\n\n`
-            );
-
-            return res.end();
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | NON STREAM
-        |--------------------------------------------------------------------------
-        */
-
-        // FIX: this deadline was left at the old 60s value while the
-        // streaming path above was already raised to 180s. A video
-        // attachment routed through the non-stream path (or a slow non-video
-        // reply that needed a second model/key retry) could get cut off here
-        // well before Gemini finished, producing the exact "Ù¾Ø§Ø³Ø® Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯
-        // Ø·ÙˆÙ„ Ú©Ø´ÛŒØ¯" timeout being reported. Matching it to the same 180s
-        // (and further via hasVideoAttachment inside runAgentLoop's own
-        // per-round timeout) keeps both code paths consistent.
-        // FIX (false "all keys exhausted" after just 1-2 tries): same
-        // reasoning as the streaming path above - scale with key count.
-        const overallDeadline =
-            Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
-
-        let lastError = null;
-        // FIX 3 (block-based rewrite): see the matching comment in the
-        // other attempt loop above and inside runAgentLoop â€” keeps block
-        // read/edit/verify progress alive across retryable key/model
-        // retries within this one HTTP request.
-        const sharedRequestState = {
-            editStates: new Map()
-        };
-        let attemptsTried = 0;
-
-        outerLoopNonStream:
-        for (
-            const currentModel of modelsToTry
-        ) {
-            // Same health-ordering fix as the streaming loop above.
-            const orderedKeysNonStream =
-                rotateKeysByHealth(geminiKeys);
-
-            for (
-                let k = 0;
-                k < orderedKeysNonStream.length;
-                k++
-            ) {
-                if (
-                    Date.now() >
-                    overallDeadline
-                ) {
-                    break outerLoopNonStream;
-                }
-
-                const currentKey =
-                    orderedKeysNonStream[k];
-
-                attemptsTried++;
-
-                // FIX (same class as deadlineTimer in the streaming loop):
-                // hoisted above try so clearTimeout in the catch block below
-                // is always safe, even if something throws before this
-                // iteration's setTimeout call executes.
-                let deadlineTimerNonStream = null;
-
+                    .join('\\s*\\r?\\n\\s*');
                 try {
-                    log.info('model.attempt', {
-                        mode: 'non-stream',
-                        model: currentModel,
-                        key: keyLabel(geminiKeys, currentKey)
-                    });
-
-                    const abortController = new AbortController();
-                    // Same fix as the streaming loop: force-abort this
-                    // attempt once the shared overallDeadline passes,
-                    // instead of only checking the deadline between
-                    // attempts (which let one stuck attempt run far past
-                    // the intended request-wide time budget).
-                    const deadlineMsRemainingNonStream = Math.max(0, overallDeadline - Date.now());
-                    deadlineTimerNonStream = setTimeout(() => abortController.abort(), deadlineMsRemainingNonStream);
-
-                    // Same tool-calling loop as the streaming path (see
-                    // comment there) - non-stream mode just doesn't narrate
-                    // intermediate steps, since there's no open connection
-                    // to push them over.
-                    const agentResult = await runAgentLoop({
-                        currentModel,
-                        currentKey,
-                        keyIndex: geminiKeys.indexOf(currentKey) + 1,
-                        systemText,
-                        contents,
-                        tavilyKeys,
-                        archivedFiles,
-                        searchCache,
-                        searchState,
-                        fileEditIntent,
-                        sharedRequestState,
-                        signal: abortController.signal,
-                        disableTools: hasVideoAttachment,
-                        hasVideoAttachment,
-                        thinkLevel,
-                        onStep: null
-                    });
-
-                    clearTimeout(deadlineTimerNonStream);
-                    markKeyResult(currentKey, true);
-                    log.info('request.completed', {
-                        mode: 'non-stream',
-                        model: currentModel,
-                        durationMs: Date.now() - requestStartedAt
-                    });
-
-                    // Shaped like Gemini's native generateContent response so
-                    // any existing non-stream caller keeps working unchanged,
-                    // even though the answer may have gone through one or
-                    // more tool calls internally.
-                    return res.status(200).json({
-                        candidates: [
-                            {
-                                content: {
-                                    role: 'model',
-                                    parts: [{ text: agentResult.finalText || '' }]
-                                },
-                                finishReason: agentResult.finishReason || 'STOP'
-                            }
-                        ],
-                        usageMetadata: agentResult.usage || undefined,
-                        // DIAGNOSTICS: ÙÙ‚Ø· ÙˆÙ‚ØªÛŒ finishReason ØºÛŒØ±Ø¹Ø§Ø¯ÛŒ Ø§Ø³Øª
-                        // (Ø³Ù‚Ù Ù…Ø±Ø§Ø­Ù„ Ùˆ Ù…Ø´Ø§Ø¨Ù‡ Ø¢Ù†) Ù¾Ø± Ù…ÛŒâ€ŒØ´ÙˆØ¯Ø› Ø±ÙˆÛŒ Ù¾Ø§Ø³Ø®â€ŒÙ‡Ø§ÛŒ
-                        // Ù…Ø¹Ù…ÙˆÙ„ÛŒ Ú†ÛŒØ²ÛŒ Ø§Ø¶Ø§ÙÙ‡ Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯.
-                        ...(agentResult.diagnostics ? { diagnostics: agentResult.diagnostics } : {}),
-                        ...(agentResult.editedFiles?.length ? { editedFiles: agentResult.editedFiles } : {}),
-                        ...(agentResult.unresolvedEditFailure ? { unresolvedEditFailure: agentResult.unresolvedEditFailure } : {})
-                    });
-
-                } catch (error) {
-                    clearTimeout(deadlineTimerNonStream);
-                    const classified = classifyGeminiError(error?.body || error);
-                    if (classified.keySpecific) markKeyResult(currentKey, false);
-                    log.error('model.error', {
-                        mode: 'non-stream',
-                        model: currentModel,
-                        category: classified.category,
-                        status: classified.status,
-                        providerCode: classified.providerCode,
-                        message: classified.rawMessage || error?.message || String(error),
-                        keySpecific: classified.keySpecific
-                    });
-
-                    lastError = {
-                        ...(error?.body && typeof error.body === 'object' ? error.body : {}),
-                        _classification: classified
-                    };
-
-                    // Same rule as streaming: a shared/daily quota cannot be
-                    // repaired by trying another configured API key.
-                    if (!classified.retryable) {
-                        break outerLoopNonStream;
+                    const re = new RegExp(pattern);
+                    const matches = content.match(new RegExp(pattern, 'g')) || [];
+                    if (matches.length === 1) {
+                        const m = content.match(re);
+                        content = content.slice(0, m.index) + edit.new + content.slice(m.index + m[0].length);
+                        appliedCount++;
+                        continue;
                     }
-
-                    // See identical comment in the streaming path above.
-                    if (error?.body?.type === 'empty_after_tool_call') {
-                        break outerLoopNonStream;
-                    }
+                } catch (_) {
+                    // Malformed pattern (e.g. old text collapses to empty
+                    // after trimming) - fall through to fuzzy stage.
                 }
+            }
+
+            // Stage 4: fuzzy line-window match, only applied when there is a
+            // single unambiguous best candidate. This is intentionally the
+            // most conservative stage - it never guesses between two
+            // similar-looking blocks.
+            {
+                const win = findBestFuzzyWindow(content, edit.old);
+                if (win) {
+                    const contentLines = content.split('\n');
+                    const before = contentLines.slice(0, win.startLine).join('\n');
+                    const after = contentLines.slice(win.endLine).join('\n');
+                    const sep1 = win.startLine > 0 ? '\n' : '';
+                    const sep2 = win.endLine < contentLines.length ? '\n' : '';
+                    content = before + sep1 + edit.new + sep2 + after;
+                    appliedCount++;
+                    fuzzyCount++;
+                    continue;
+                }
+            }
+
+            failedCount++;
+        }
+        return { content, appliedCount, failedCount, fuzzyCount };
+    }
+
+    // Renders the card for the NEW block-based edit flow's payload: the
+    // server sends already-final, already-verified file content directly
+    // (see streamEditedFiles capture above) instead of a diff to apply
+    // client-side. Simpler than buildFileEditResultHtml below (which still
+    // handles the OLD old/new diff-block format for any code path that
+    // still produces it) since there's no matching/applying to do - the
+    // content is final as-is.
+    function buildEditedFilesHtml(editedFiles) {
+        if (!editedFiles || !editedFiles.length) return '';
+        let html = '';
+        for (const f of editedFiles) {
+            const content = f.content || '';
+            const fileName = f.editedName || f.name || 'edited-file.txt';
+            const encoded = encodeURIComponent(content);
+            const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
+            const lineCount = content ? content.split(/\r?\n/).length : 0;
+            const codeCardId = `full-code-${Math.random().toString(36).slice(2)}`;
+            html += `<div class="code-card edited-file-card">
+                <div class="code-card-head">
+                    <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد</span>
+                    <div class="code-actions">
+                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
+                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
+                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
+                    </div>
+                </div>
+                <div class="edited-file-meta">${sizeKb} KB &middot; ${lineCount} خط &middot; آماده</div>
+                <pre id="${codeCardId}" class="full-code-view" style="display:none; max-height:480px; overflow:auto; margin:10px 0 0; padding:12px; background:var(--bg-secondary,#111); border-radius:8px; font-size:0.78rem; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(content)}</code></pre>
+            </div>`;
+        }
+        return html;
+    }
+
+    function buildFileEditResultHtml(edits) {
+        if (!edits || !edits.length) return '';
+
+        // FIX (archived-file edit result missing): an edit can target a file
+        // that the model found through get_archived_file rather than a file
+        // attached in the current turn. Previously this function only looked
+        // at lastCodeFilesForEdit, so the model could successfully say
+        // "تغییرات اعمال شد" while the UI showed NO edited-file card because
+        // the archived file was not present in lastCodeFilesForEdit.
+        // Build one canonical client-side candidate list from the current
+        // turn, live code-file memory, and the full local archive. The archive
+        // is already the source of truth for files saved in this chat, so this
+        // does not require another API request or another Gemini round.
+        const editFileCandidates = [];
+        const addCandidate = (file) => {
+            if (!file || !file.name || typeof file.content !== 'string') return;
+            const existing = editFileCandidates.find(f => f.name === file.name);
+            if (existing) {
+                // Prefer the newest/current copy when the same file exists in
+                // multiple stores (e.g. current attachment + archive).
+                existing.content = file.content;
+                return;
+            }
+            editFileCandidates.push({ name: file.name, content: file.content });
+        };
+
+        (lastCodeFilesForEdit || []).forEach(addCandidate);
+        (codeFilesMemory || []).forEach(addCandidate);
+        ((chatFileArchive && chatFileArchive[currentChatId]) || []).forEach(addCandidate);
+
+        if (!editFileCandidates.length) return '';
+
+        // Resolve the file explicitly when possible. If an older model output
+        // omits "file", infer the target from the unique file containing "old"
+        // instead of silently dropping the edit.
+        //
+        // FIX (archived + line-anchored edit silently dropped): apply_patch
+        // on the backend returns editedName/suggestedOutputName with an
+        // "_edited"/"_edited2"/... suffix (nextEditedFileName), and the
+        // system prompt tells the model to put THAT name in "file" - but
+        // editFileCandidates only ever holds ORIGINAL names (from the
+        // archive/current attachment/memory), never the edited variant, so
+        // the exact/base-name match always failed for it. On top of that,
+        // line-anchored edits have no "old" text at all, so the old-text
+        // fallback also always returned null - the two failures combined
+        // meant this class of edit was silently dropped with no card and
+        // no error. Strip a trailing _edited\d* before comparing names, and
+        // fall back to the single-candidate file when there's only one
+        // file in play (very common: user is editing "the" archived file)
+        // even for edits with no "old" text.
+        const stripEditedSuffix = (name) => String(name || '').replace(/_edited\d*(?=\.[^.]*$|$)/i, '');
+        const resolveEditTarget = (edit) => {
+            const explicit = String(edit?.file || '').trim();
+            if (explicit) {
+                const exact = editFileCandidates.find(f => f.name === explicit);
+                if (exact) return exact.name;
+                const base = explicit.split('/').pop().split('\\').pop();
+                const byBase = editFileCandidates.filter(f => f.name.split('/').pop().split('\\').pop() === base);
+                if (byBase.length === 1) return byBase[0].name;
+                // Try again after stripping an "_edited"/"_edited2"/... suffix
+                // the backend adds to distinguish the patched name from the
+                // original - this is the common case for any archived-file
+                // edit, line-anchored or not.
+                const strippedBase = stripEditedSuffix(base);
+                const byStrippedBase = editFileCandidates.filter(f => stripEditedSuffix(f.name.split('/').pop().split('\\').pop()) === strippedBase);
+                if (byStrippedBase.length === 1) return byStrippedBase[0].name;
+            }
+            // Line-anchored edits carry no "old" text to match against - if
+            // there's exactly one candidate file in play, it's almost
+            // certainly the target (this mirrors the existing single-file
+            // fallback below, just reached before requiring "old").
+            if (Number.isFinite(edit?.startLine) && Number.isFinite(edit?.endLine) && editFileCandidates.length === 1) {
+                return editFileCandidates[0].name;
+            }
+            const oldText = normalizeLineEndings(String(edit?.old || ''));
+            if (!oldText) return null;
+            const candidates = editFileCandidates.filter(f =>
+                normalizeLineEndings(f.content || '').indexOf(oldText) !== -1
+            );
+            if (candidates.length === 1) return candidates[0].name;
+            if (editFileCandidates.length === 1) return editFileCandidates[0].name;
+            return null;
+        };
+
+        const editsByFile = {};
+        let unresolvedEdits = 0;
+        for (const edit of edits) {
+            const targetName = resolveEditTarget(edit);
+            if (!targetName) {
+                unresolvedEdits++;
+                continue;
+            }
+            if (!editsByFile[targetName]) editsByFile[targetName] = [];
+            editsByFile[targetName].push(edit);
+        }
+
+        let html = '';
+        if (unresolvedEdits > 0) {
+            html += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> ${unresolvedEdits} ویرایش نیاز به تعیین فایل داشت</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">برای بخشی از ویرایش‌ها نام فایل مشخص نبود یا متن تغییر در چند فایل تکراری بود؛ ویرایش‌های قابل تشخیص همچنان اعمال شدند.</div></div>`;
+        }
+        for (const fileName of Object.keys(editsByFile)) {
+            const fileEntry = editFileCandidates.find(f => f.name === fileName);
+            if (!fileEntry) continue;
+
+            const { content, appliedCount, failedCount, fuzzyCount } = applyFileEdits(fileEntry.content, editsByFile[fileName]);
+            if (appliedCount === 0) {
+                // هیچ ادیتی اعمال نشد (متن مبدأ با محتوای فایل مطابقت نداشت) —
+                // به‌جای سکوت کامل، به کاربر بگو چرا دکمه دانلودی نمی‌بینه.
+                html += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> ویرایش «${escapeHtml(fileName)}» انجام نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">متن مبدأ ویرایش با محتوای فعلی فایل مطابقت نداشت (${failedCount} مورد رد شد). دوباره امتحان کن یا دقیق‌تر بگو چه بخشی را عوض کنم.</div></div>`;
+                continue;
+            }
+
+            // حافظه‌ی فایل رو با نسخه‌ی ویرایش‌شده آپدیت کن تا پیام بعدی روی همین نسخه ادامه بده.
+            fileEntry.content = content;
+            const memoryEntry = codeFilesMemory.find(f => f.name === fileName);
+            if (memoryEntry) memoryEntry.content = content;
+
+            // Keep the persistent chat archive synchronized too. This is
+            // especially important when the edited file came from an older
+            // message/archive rather than the current attachment.
+            const archiveList = (chatFileArchive && chatFileArchive[currentChatId]) || [];
+            const archiveEntry = archiveList.find(f => f.name === fileName);
+            if (archiveEntry) {
+                archiveEntry.content = content;
+                archiveEntry.savedAt = Date.now();
+                try { saveFileToArchive(currentChatId, fileName, content); } catch (_) {}
+            }
+
+            // §6: Edited File Card — name, size, status, change count,
+            // Copy/Download actions, and the full patched code itself
+            // (collapsed by default) so the complete file is visible right
+            // in the chat without ever asking the model to retype it -
+            // this content comes straight from applyFileEdits, i.e. it's
+            // the real file, not anything reconstructed by the model.
+            const encoded = encodeURIComponent(content);
+            const failNote = failedCount ? ` (${failedCount} مورد به‌دلیل عدم تطابق دقیق اعمال نشد)` : '';
+            // Fuzzy-applied edits matched via best-effort line similarity
+            // rather than an exact/whitespace-normalized match - flag this
+            // explicitly so the user knows to double-check that spot, since
+            // it's the one stage that isn't a guaranteed-correct match.
+            const fuzzyNote = fuzzyCount ? ` (${fuzzyCount} مورد به‌صورت تقریبی/فازی تطبیق داده شد - پیشنهاد می‌شود بررسی شود)` : '';
+            const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
+            const codeCardId = `full-code-${Math.random().toString(36).slice(2)}`;
+            html += `<div class="code-card edited-file-card">
+                <div class="code-card-head">
+                    <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}${fuzzyNote}</span>
+                    <div class="code-actions">
+                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
+                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
+                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
+                    </div>
+                </div>
+                <div class="edited-file-meta">${sizeKb} KB &middot; آماده</div>
+                <pre id="${codeCardId}" class="full-code-view" style="display:none; max-height:480px; overflow:auto; margin:10px 0 0; padding:12px; background:var(--bg-secondary,#111); border-radius:8px; font-size:0.78rem; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(content)}</code></pre>
+            </div>`;
+        }
+        return html;
+    }
+
+    function downloadEditedFile(btn) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        const filename = btn.dataset.filename || 'edited-file.txt';
+        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    function toggleFullCodeView(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+    }
+
+    function escapeAttr(value) {
+        return String(value ?? '').replace(/"/g, '&quot;');
+    }
+
+    async function copyEditedFile(btn) {
+        const code = decodeURIComponent(btn.dataset.code || '');
+        try { await navigator.clipboard.writeText(code); }
+        catch { const ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد';
+        setTimeout(() => btn.innerHTML = old, 1200);
+        if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
+    }
+
+    function repairLoadedChatButtons(chatBox) {
+        if (!chatBox) return;
+        // Old saved chats may contain speaker buttons from older versions.
+        chatBox.querySelectorAll('.speak-btn').forEach(btn => {
+            const footer = btn.closest('.msg-footer');
+            if (footer) footer.remove();
+            else btn.remove();
+        });
+        chatBox.querySelectorAll('.msg-footer').forEach(footer => {
+            if (!footer.querySelector('button')) footer.remove();
+        });
+        // Older saved Retry buttons lost their JS listener after innerHTML was restored.
+        chatBox.querySelectorAll('.retry-btn').forEach(btn => {
+            if (!btn.getAttribute('onclick')) {
+                btn.onclick = () => retryFromButton(btn);
+            }
+        });
+        // Make every saved code action explicitly usable after history restore.
+        chatBox.querySelectorAll('.code-action').forEach(btn => {
+            if (!btn.dataset.code) btn.disabled = true;
+        });
+    }
+
+    function initializeV3() {
+        setupFileDropAndPaste();
+        const chatBox = document.getElementById('chatBox');
+        chatBox?.addEventListener('scroll', updateScrollLatestButton, { passive: true });
+        repairLoadedChatButtons(chatBox);
+        updateScrollLatestButton();
+    }
+    setTimeout(initializeV3, 0);
+
+    function startNewChat() {
+        if (isGenerating) stopGeneration();
+        currentChatId = Date.now();
+        try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
+        isFirstMessage = true;
+        document.getElementById("chatBox").innerHTML = "";
+        document.getElementById("chatBox").style.display = 'none';
+        document.getElementById("homeScreen").style.display = 'flex';
+        // FIX: a New Chat must not silently carry over the previous chat's
+        // attached file / code files. Without this, selectedFileData and
+        // codeFilesMemory kept referencing files from the old conversation
+        // and got sent along with the very first message of the new chat.
+        removeFile();
+        clearCodeFilesMemory();
+        lastCodeFilesForEdit = [];
+        lastFailedRequest = null;
+        renderHistoryList();
+        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+    }
+
+    // Strips heavy base64 data-URL media (img/video/source src="data:...")
+    // out of a saved chat's HTML, replacing each with a small placeholder.
+    // Returns {html, bytesFreed, changed}. Used by pruneHeavyMedia() below —
+    // this is what actually frees space without deleting the conversation.
+    function stripHeavyMediaFromHtml(html) {
+        if (!html || html.indexOf('data:') === -1) return { html, bytesFreed: 0, changed: false };
+        let bytesFreed = 0;
+        let changed = false;
+        const placeholder = '<span class="pruned-media-notice" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;color:var(--text-muted);"><i class="lucide-icon" data-lucide="image-off"></i> فایل ضمیمه (برای آزاد شدن حافظه حذف شد)</span>';
+        const newHtml = html.replace(/(<(?:img|source)\b[^>]*\bsrc=")data:[^"]*(")/gi, (match, pre, post) => {
+            bytesFreed += match.length;
+            changed = true;
+            return pre + '#' + post; // keep tag structurally valid, just drop the payload
+        });
+        if (!changed) return { html, bytesFreed: 0, changed: false };
+        return { html: newHtml, bytesFreed, changed: true };
+    }
+
+    // FIX: pruning previously deleted whole chats (oldest 20%) the moment
+    // localStorage filled up — a single heavy image/video attachment could
+    // wipe out several complete conversations. Now, before deleting any
+    // conversation, we first strip the heavy base64 media out of each
+    // chat's saved HTML (oldest messages / oldest chats first), which is
+    // almost always enough to free the needed space on its own since the
+    // base64 attachments are what actually bloat storage — the text of the
+    // conversation itself is tiny by comparison. Whole-chat deletion is now
+    // the last resort, only if stripping media everywhere still isn't enough.
+    function pruneHeavyMedia(stored) {
+        let freedAny = false;
+        const ids = Object.keys(stored).sort((a, b) => Number(a) - Number(b)); // oldest first
+        for (const id of ids) {
+            const chat = stored[id];
+            if (!chat || !chat.html) continue;
+            const { html, changed } = stripHeavyMediaFromHtml(chat.html);
+            if (changed) {
+                stored[id] = { ...chat, html };
+                freedAny = true;
+            }
+        }
+        return freedAny;
+    }
+
+    // Safe localStorage writer: on quota errors, first strips heavy base64
+    // media from saved chats (oldest first) to free space without losing
+    // any conversation text; only deletes whole chats as a last resort if
+    // that still isn't enough. Surfaces a toast either way so it's visible
+    // instead of a chat just silently vanishing after a refresh.
+    function safeSetItem(key, value, opts = {}) {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (err) {
+            const isQuotaError = err && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22);
+            if (!isQuotaError || !opts.pruneChatsKey) return false;
+            const chatsKey = opts.pruneChatsKey;
+
+            // Step 1: strip heavy embedded media from stored chats (oldest first).
+            // This is almost always enough on its own — a chat's real text content
+            // is tiny; it's the base64 images/videos that blow up storage.
+            try {
+                const stored = JSON.parse(localStorage.getItem(chatsKey) || '{}');
+                const freedAny = pruneHeavyMedia(stored);
+                if (freedAny) {
+                    localStorage.setItem(chatsKey, JSON.stringify(stored));
+                    localStorage.setItem(key, value);
+                    if (typeof showToast === 'function') {
+                        showToast(
+                            'حافظه‌ی مرورگر پر شده بود؛ فایل/تصویرهای ضمیمه‌ی گفتگوهای قدیمی‌تر برای آزاد شدن جا حذف شدند (خود گفتگوها دست‌نخورده ماندند).',
+                            'warning',
+                            5000
+                        );
+                    }
+                    return true;
+                }
+            } catch (mediaErr) {
+                console.error('media pruning failed:', mediaErr);
+            }
+
+            // Step 2: last resort — no media left to strip (or it wasn't
+            // enough), so fall back to deleting the oldest whole chats.
+            try {
+                const stored = JSON.parse(localStorage.getItem(chatsKey) || '{}');
+                const ids = Object.keys(stored).sort((a, b) => Number(a) - Number(b));
+                const toDrop = Math.max(1, Math.ceil(ids.length * 0.2));
+                const droppedIds = ids.slice(0, toDrop);
+                droppedIds.forEach(id => { delete stored[id]; });
+                localStorage.setItem(chatsKey, JSON.stringify(stored));
+                localStorage.setItem(key, value);
+                if (typeof showToast === 'function') {
+                    showToast(
+                        `حافظه‌ی مرورگر همچنان پر بود؛ ${droppedIds.length} گفتگوی قدیمی‌تر کامل حذف شد تا گفتگوی فعلی ذخیره بماند.`,
+                        'warning',
+                        5000
+                    );
+                }
+                return true;
+            } catch (retryErr) {
+                console.error('localStorage write failed even after pruning:', retryErr);
+                if (typeof showToast === 'function') {
+                    showToast('حافظه‌ی مرورگر پر است و این گفتگو ذخیره نشد. فایل‌های حجیم را حذف کن یا گفتگوهای قدیمی را پاک کن.', 'error', 5000);
+                }
+                return false;
+            }
+        }
+    }
+
+    let __historyRenderQueued = false;
+    function saveCurrentChat() {
+        const chatBox = document.getElementById("chatBox");
+        if (!chatBox) return;
+        const firstUserMsg = chatBox.querySelector('.message.user')?.innerText || "گفتگوی جدید";
+        // FIX: قبلاً این‌جا chats[currentChatId] کاملاً بازنویسی می‌شد و
+        // pinned قبلی‌ش پاک می‌شد (هر پیام جدید = چت از پین دراومدن!). حالا
+        // فیلدهای قبلی رو نگه می‌داریم و فقط چیزهایی که واقعاً باید عوض
+        // بشن رو آپدیت می‌کنیم. updatedAt هم دقیقاً همین‌جا (نه در باز کردن
+        // چت) به‌روز می‌شه، چون این تابع فقط وقتی صدا زده می‌شه که واقعاً
+        // پیامی رد و بدل شده - همون رفتاری که برای "چت فعال بره بالای
+        // لیست" واقعاً می‌خوایم.
+        const prev = chats[currentChatId] || {};
+        chats[currentChatId] = {
+            ...prev,
+            title: firstUserMsg.substring(0, 20) + "...",
+            html: chatBox.innerHTML,
+            updatedAt: Date.now()
+        };
+        queueChatSave(currentChatId);
+        try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
+        renderHistoryList();
+    }
+
+    // Re-renders the sidebar list from the in-memory `chats` object without
+    // re-reading and re-parsing the whole (potentially large) JSON blob back
+    // out of localStorage — that reload is only needed when `chats` might be
+    // stale (initial load / login), see renderHistory() below.
+    // ===== انتخاب چندتایی گفتگوها برای حذف دسته‌جمعی =====
+    let historySelectMode = false;
+    let selectedHistoryIds = new Set();
+
+    function toggleHistorySelectMode() {
+        historySelectMode = !historySelectMode;
+        selectedHistoryIds.clear();
+        const btn = document.getElementById('historySelectToggle');
+        const list = document.getElementById('historyList');
+        if (btn) btn.classList.toggle('active', historySelectMode);
+        if (list) list.classList.toggle('select-mode', historySelectMode);
+        updateHistoryBulkBar();
+        renderHistoryList();
+    }
+
+    function toggleHistoryItemSelected(chatId) {
+        if (selectedHistoryIds.has(chatId)) selectedHistoryIds.delete(chatId);
+        else selectedHistoryIds.add(chatId);
+        updateHistoryBulkBar();
+        renderHistoryList();
+    }
+
+    function selectAllHistoryItems() {
+        const list = document.getElementById('historyList');
+        // فقط همون آیتم‌هایی که الان (با فیلتر جستجوی فعلی) روی صفحه دیده
+        // می‌شن انتخاب می‌شن، نه لزوماً کل چت‌ها - اگر کاربر جستجو کرده،
+        // «انتخاب همه» باید فقط نتایج همون جستجو رو بگیره.
+        list?.querySelectorAll('.history-item[data-chat-id]').forEach(el => {
+            selectedHistoryIds.add(el.dataset.chatId);
+        });
+        updateHistoryBulkBar();
+        renderHistoryList();
+    }
+
+    function updateHistoryBulkBar() {
+        const bar = document.getElementById('historyBulkBar');
+        const count = document.getElementById('historyBulkCount');
+        if (!bar || !count) return;
+        bar.classList.toggle('active', historySelectMode);
+        count.textContent = `${selectedHistoryIds.size} انتخاب شده`;
+    }
+
+    async function deleteSelectedHistoryItems() {
+        if (!selectedHistoryIds.size) {
+            showToast('اول حداقل یه گفتگو رو انتخاب کن.', 'warning');
+            return;
+        }
+        const ok = await showConfirm(`${selectedHistoryIds.size} گفتگوی انتخاب‌شده پاک بشه؟ این کار قابل بازگشت نیست.`);
+        if (!ok) return;
+
+        const owner = getChatOwnerKey();
+        const idsToDelete = [...selectedHistoryIds];
+        let deletedCurrentChat = false;
+
+        for (const chatId of idsToDelete) {
+            if (chatId == currentChatId) deletedCurrentChat = true;
+            delete chats[chatId];
+            delete chatHistoryData[chatId];
+            delete chatFileArchive[chatId];
+            try {
+                await Promise.all([
+                    idbDelete(CHAT_STORE, `${owner}:${chatId}`),
+                    idbDelete(HISTORY_STORE, `${owner}:${chatId}`),
+                    idbDelete(FILES_STORE, `${owner}:${chatId}`)
+                ]);
+            } catch (e) {
+                console.error('IndexedDB bulk chat delete failed:', e);
             }
         }
 
-        const classification = lastError?._classification || classifyGeminiError(lastError);
-        log.error('request.all_models_failed', {
-            mode: 'non-stream',
-            category: classification.category,
-            attemptsTried,
-            totalPossible: modelsToTry.length * geminiKeys.length,
-            status: classification.status,
-            lastError: classification.rawMessage || 'unknown'
+        selectedHistoryIds.clear();
+        historySelectMode = false;
+        syncDeleteChatIds(idsToDelete);
+        const btn = document.getElementById('historySelectToggle');
+        const list = document.getElementById('historyList');
+        if (btn) btn.classList.remove('active');
+        if (list) list.classList.remove('select-mode');
+        updateHistoryBulkBar();
+
+        if (deletedCurrentChat) {
+            startNewChat();
+        } else {
+            renderHistoryList();
+        }
+        showToast(`${idsToDelete.length} گفتگو حذف شد`, 'success');
+    }
+
+    function renderHistoryList() {
+        const list = document.getElementById("historyList");
+        const query = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
+        list.innerHTML = "";
+        let visible = 0;
+        // Pinned chats first (most-recently-updated pinned chat on top),
+        // then the rest sorted by updatedAt (most-recent-first) - this is
+        // also what makes opening an old chat bump it back to the top of
+        // its section, not just sending a new message in it.
+        const ids = Object.keys(chats);
+        const byRecency = (a, b) => (chats[b]?.updatedAt || Number(b) || 0) - (chats[a]?.updatedAt || Number(a) || 0);
+        const pinnedIds = ids.filter(id => chats[id].pinned).sort(byRecency);
+        const restIds = ids.filter(id => !chats[id].pinned).sort(byRecency);
+        [...pinnedIds, ...restIds].forEach(id => {
+            const title = chats[id].title || 'گفتگوی جدید';
+            if (query && !title.toLowerCase().includes(query)) return;
+            visible++;
+            const item = document.createElement("div");
+            item.className = `history-item ${id == currentChatId ? 'active' : ''}`;
+            item.dataset.chatId = id;
+            const isChecked = selectedHistoryIds.has(id);
+            item.innerHTML = `
+                <div class="history-item-checkbox ${isChecked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleHistoryItemSelected('${id}')"><i class="lucide-icon" data-lucide="check"></i></div>
+                ${chats[id].pinned ? '<i class="lucide-icon" data-lucide="pin" style="color:var(--accent-2);"></i>' : '<i class="lucide-icon" data-lucide="message-circle"></i>'}
+                <span>${escapeHtml(title)}</span>
+                <button class="icon-btn history-item-menu-btn" type="button" title="گزینه‌ها" onclick="event.stopPropagation(); toggleHistoryItemMenu('${id}', this)">
+                    <i class="lucide-icon" data-lucide="more-vertical"></i>
+                </button>
+            `;
+            item.onclick = () => {
+                if (historySelectMode) { toggleHistoryItemSelected(id); return; }
+                if (!isGenerating) loadChat(id);
+            };
+            list.appendChild(item);
         });
+        const empty = document.getElementById('historyEmpty');
+        if (empty) empty.style.display = visible ? 'none' : 'block';
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    }
 
-        // See the streaming path above for why this needs an "all keys"
-        // message instead of the raw per-key message once every key/model
-        // combo has already been tried and failed.
-        const allKeysExhaustedMessageNonStream =
-            (classification.category === 'quota_exhausted' || classification.category === 'rate_limit') && classification.keySpecific
-                ? `Ù‡Ù…Ù‡Ù” ${geminiKeys.length} Ú©Ù„ÛŒØ¯ ØªÙ†Ø¸ÛŒÙ…â€ŒØ´Ø¯Ù‡ Ø¯Ø± Ø³Ù‡Ù…ÛŒÙ‡/Ù…Ø­Ø¯ÙˆØ¯ÛŒØª Ù†Ø±Ø® Ú¯ÛŒØ± Ú©Ø±Ø¯Ù†Ø¯Ø› Ù„Ø·ÙØ§Ù‹ Ú©Ù…ÛŒ Ø¨Ø¹Ø¯ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†.`
-                : classification.message;
+    // ===== منوی سه‌نقطه‌ی هر چت: پین/حذف/تغییرنام =====
+    function closeHistoryItemMenu() {
+        document.getElementById('historyItemMenu')?.remove();
+        document.removeEventListener('click', closeHistoryItemMenu);
+    }
 
-        // DIAGNOSTICS: Ù‡Ù…Ø§Ù† Ø§Ù„Ú¯ÙˆÛŒ Ù…Ø³ÛŒØ± streaming - Ø§Ú¯Ø± runAgentLoop ÛŒÚ©
-        // diagnostics Ø±ÙˆÛŒ err.body Ú¯Ø°Ø§Ø´ØªÙ‡ Ø¨ÙˆØ¯ (empty_after_tool_call ÛŒØ§
-        // tool_loop_limit)ØŒ Ø§ÛŒÙ†Ø¬Ø§ Ù‡Ù… Ø¨Ù‡ detail Ùˆ Ù‡Ù… Ø¨Ù‡ ÙÛŒÙ„Ø¯ Ø¬Ø¯Ø§ Ø§Ø¶Ø§ÙÙ‡â€ŒØ§Ø´ Ú©Ù†.
-        const diagnosticsSummaryNonStream = lastError?.diagnostics?.humanSummary || null;
-        const detailTextNonStream =
-            `Gemini${classification.status ? ' [' + classification.status + ']' : ''}${classification.providerCode ? ' [' + classification.providerCode + ']' : ''}: ${classification.rawMessage || 'unknown'}` +
-            ` (actual attempts: ${attemptsTried})` +
-            (diagnosticsSummaryNonStream ? `\n\n--- Ø±Ø¯Ù Ø§Ø¬Ø±Ø§ÛŒ Ù…Ø¯Ù„ ---\n${diagnosticsSummaryNonStream}` : '');
+    function toggleHistoryItemMenu(chatId, btnEl) {
+        const existing = document.getElementById('historyItemMenu');
+        if (existing) {
+            const wasForSameChat = existing.dataset.chatId === chatId;
+            closeHistoryItemMenu();
+            if (wasForSameChat) return;
+        }
 
-        return res.status(classification.category === 'empty_response' ? 502 : (classification.status && classification.status >= 400 && classification.status < 600 ? classification.status : 500)).json({
-            error: {
-                message: allKeysExhaustedMessageNonStream,
-                type: classification.category,
-                category: classification.category,
-                retryable: classification.retryable,
-                retryAfterSeconds: classification.retryAfterSeconds ?? null,
-                stage: 'non_stream_generation',
-                detail: detailTextNonStream,
-                ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {})
-            }
+        const chat = chats[chatId];
+        if (!chat) return;
+
+        const menu = document.createElement('div');
+        menu.id = 'historyItemMenu';
+        menu.className = 'history-item-menu';
+        menu.dataset.chatId = chatId;
+        menu.innerHTML = `
+            <button type="button" data-action="pin"><i class="lucide-icon" data-lucide="pin"></i> ${chat.pinned ? 'برداشتن پین' : 'پین کردن'}</button>
+            <button type="button" data-action="rename"><i class="lucide-icon" data-lucide="pencil"></i> تغییر نام</button>
+            <button type="button" data-action="delete" class="danger"><i class="lucide-icon" data-lucide="trash-2"></i> حذف گفتگو</button>
+        `;
+
+        document.body.appendChild(menu);
+        const rect = btnEl.getBoundingClientRect();
+        menu.style.top = (rect.bottom + 4 + window.scrollY) + 'px';
+        // RTL layout: anchor menu's right edge to the button's right edge.
+        menu.style.right = (window.innerWidth - rect.right) + 'px';
+
+        menu.querySelector('[data-action="pin"]').onclick = (e) => { e.stopPropagation(); togglePinChat(chatId); closeHistoryItemMenu(); };
+        menu.querySelector('[data-action="rename"]').onclick = (e) => { e.stopPropagation(); renameChat(chatId); closeHistoryItemMenu(); };
+        menu.querySelector('[data-action="delete"]').onclick = (e) => { e.stopPropagation(); deleteChatById(chatId); closeHistoryItemMenu(); };
+
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+        setTimeout(() => document.addEventListener('click', closeHistoryItemMenu), 0);
+    }
+
+    function togglePinChat(chatId) {
+        const chat = chats[chatId];
+        if (!chat) return;
+        chat.pinned = !chat.pinned;
+        queueChatSave(chatId);
+        renderHistoryList();
+    }
+
+    async function renameChat(chatId) {
+        const chat = chats[chatId];
+        if (!chat) return;
+        const newTitle = await showPrompt('نام جدید گفتگو را وارد کن:', chat.title || 'گفتگوی جدید');
+        if (!newTitle) return; // cancelled or empty
+        chat.title = newTitle.slice(0, 120);
+        queueChatSave(chatId);
+        renderHistoryList();
+    }
+
+    async function deleteChatById(chatId) {
+        const ok = await showConfirm('این گفتگو پاک شود؟ این کار قابل بازگشت نیست.');
+        if (!ok) return;
+        const owner = getChatOwnerKey();
+        const wasCurrent = chatId == currentChatId;
+        delete chats[chatId];
+        delete chatHistoryData[chatId];
+        delete chatFileArchive[chatId];
+        try {
+            await Promise.all([
+                idbDelete(CHAT_STORE, `${owner}:${chatId}`),
+                idbDelete(HISTORY_STORE, `${owner}:${chatId}`),
+                idbDelete(FILES_STORE, `${owner}:${chatId}`)
+            ]);
+        } catch (e) {
+            console.error('IndexedDB chat delete failed:', e);
+        }
+        syncDeleteChatIds([String(chatId)]);
+        if (wasCurrent) {
+            startNewChat();
+        } else {
+            renderHistoryList();
+        }
+        showToast('گفتگو حذف شد', 'success');
+    }
+
+    // Full reload from localStorage — use only when `chats` may be stale
+    // (initial page load, after login/switch account). Everywhere else,
+    // renderHistoryList() reuses the already-current in-memory `chats`.
+    async function renderHistory() {
+        try {
+            await loadChatsFromIndexedDB();
+        } catch (e) {
+            console.error('History load failed:', e);
+        }
+        renderHistoryList();
+        // خلاصه‌ی چت‌های اخیر رو از همین ابتدا (بدون بلاک کردن UI) در پس‌زمینه
+        // آماده می‌کنیم تا اولین پیام کاربر در این سشن هم لحن درست رو ببینه.
+        refreshRecentChatsSummaryInBackground();
+    }
+
+    function toggleHistorySearch() {
+        const input = document.getElementById('historySearchInput');
+        if (!input) return;
+        const tools = input.closest('.history-tools');
+        tools.classList.toggle('active');
+        if (tools.classList.contains('active')) {
+            input.focus();
+        } else {
+            input.value = '';
+            renderHistoryList();
+        }
+    }
+
+    function filterHistory(value) {
+        renderHistoryList();
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            const sidebar = document.getElementById('sidebar');
+            if (window.innerWidth > 768 && sidebar.classList.contains('collapsed')) toggleSidebar();
+            const tools = document.querySelector('.history-tools');
+            if (tools && !tools.classList.contains('active')) toggleHistorySearch();
+            document.getElementById('historySearchInput')?.focus();
+        }
+    });
+
+
+    function loadChat(id, isInitialLoad = false) {
+        if (isGenerating) stopGeneration();
+        if (!chats[id]) return;
+        currentChatId = id;
+        try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
+        isFirstMessage = false;
+        removeFile();
+        clearCodeFilesMemory();
+        lastCodeFilesForEdit = [];
+        lastFailedRequest = null;
+        // FIX (چت‌ها هنگام صرفاً باز کردن جابه‌جا می‌شدند و کلیک بعدی به چت
+        // اشتباه می‌خورد): این‌جا قبلاً updatedAt چت را با هر بار *باز کردنش*
+        // (نه فقط با فرستادن پیام تازه) به الان تغییر می‌داد و لیست را
+        // renderHistoryList می‌کرد - یعنی همون لحظه‌ی کلیک، چت به بالای
+        // لیست می‌پرید. چون این جابه‌جایی زیر دست کاربر اتفاق می‌افتاد،
+        // کلیک بعدی روی همون مختصات، عملاً به چت دیگری (که تازه به آن‌جا
+        // منتقل شده بود) می‌خورد و حس می‌شد که هایلایت/انتخاب اشتباه است.
+        // الان updatedAt فقط جایی که واقعاً پیام جدید ذخیره می‌شود (مثلاً
+        // queueChatSave از سمت ارسال پیام) به‌روز می‌شود، نه با صرفِ باز
+        // کردن یک چت قدیمی برای خواندن.
+        
+        const chatBox = document.getElementById("chatBox");
+        document.getElementById("homeScreen").style.display = 'none';
+        chatBox.style.display = 'flex';
+        chatBox.innerHTML = chats[id].html || '';
+        repairLoadedChatButtons(chatBox);
+        renderHistoryList();
+        if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+        const scrollToBottom = () => { chatBox.scrollTop = chatBox.scrollHeight; };
+        scrollToBottom();
+        requestAnimationFrame(scrollToBottom);
+        setTimeout(scrollToBottom, isInitialLoad ? 120 : 0);
+    }
+
+
+
+    function exportCurrentChat(format){
+        const box=document.getElementById('chatBox');
+        if(!box || !box.querySelector('.message')) return;
+        const rows=[...box.querySelectorAll('.message-wrapper')].map(w=>{
+            const who=w.classList.contains('user')?'کاربر':'Virtual Bot';
+            const text=w.querySelector('.message')?.innerText||'';
+            return format==='md'?`## ${who}\n\n${text}`:`${who}:\n${text}`;
         });
+        const content=rows.join(format==='md'?'\n\n---\n\n':'\n\n----------------\n\n');
+        const blob=new Blob([content],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`virtual-chat-${new Date().toISOString().slice(0,10)}.${format}`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    }
+    async function clearCurrentChat(){
+        const ok = await showConfirm('این گفتگو پاک شود؟ این کار قابل بازگشت نیست.');
+        if(!ok) return;
+        const id = currentChatId;
+        const owner = getChatOwnerKey();
+        delete chats[id];
+        delete chatHistoryData[id];
+        delete chatFileArchive[id];
+        try {
+            await Promise.all([
+                idbDelete(CHAT_STORE, `${owner}:${id}`),
+                idbDelete(HISTORY_STORE, `${owner}:${id}`),
+                idbDelete(FILES_STORE, `${owner}:${id}`)
+            ]);
+        } catch (e) {
+            console.error('IndexedDB chat delete failed:', e);
+        }
+        syncDeleteChatIds([String(id)]);
+        startNewChat();
+        closeSettings();
+        showToast('گفتگو حذف شد', 'success');
+    }
 
-    } catch (globalError) {
-        log.error('request.global_error', {
-            message: globalError?.message || String(globalError)
-        });
 
-        // FIX (ERR_HTTP_HEADERS_SENT): this catch wraps the WHOLE handler,
-        // including the streaming path below, which already calls
-        // res.write()/res.setHeader() as soon as it starts sending SSE
-        // chunks. If something throws AFTER that point (e.g. a late error
-        // while reading the upstream stream), execution falls through to
-        // here â€” and calling res.status(...).json(...) on a response whose
-        // headers are already sent crashes with ERR_HTTP_HEADERS_SENT,
-        // which is exactly what killed the reply instead of just failing
-        // gracefully. We now check res.headersSent first: if the response
-        // was never started, send the normal JSON error as before; if it
-        // was already streaming, we can't send a fresh JSON body anymore,
-        // so emit one last SSE error event (if the stream is still open)
-        // and end the response instead of trying to set headers again.
-        if (res.headersSent) {
-            try {
-                if (!res.writableEnded) {
-                    res.write(
-                        `data: ${JSON.stringify({
-                            error: {
-                                message: 'Ø®Ø·Ø§ÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø³Ø±ÙˆØ± Ø¯Ø± Ù…ÛŒØ§Ù†Ù‡â€ŒÛŒ Ù¾Ø§Ø³Ø®. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
-                                type: 'internal_error',
-                                category: 'handler_mid_stream',
-                                stage: 'handler_mid_stream',
-                                detail: globalError?.message || String(globalError)
-                            }
-                        })}\n\n`
-                    );
-                    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-                }
-            } catch (_) {
-                // Stream may already be broken/closed â€” nothing more we can do.
-            }
-            if (!res.writableEnded) {
-                try { res.end(); } catch (_) {}
-            }
+    // ===== Virtual Chat UX upgrade (keeps the user's current backend/API contract) =====
+    // NOTE: kept in sync with the persona set server-side in chat.js's
+    // systemText - this frontend-injected version used to be more formal/
+    // dry ("بی‌دلیل هیجان اضافه نکن") and was fighting the real persona.
+    const upgradedPersona = `تو Virtual Bot هستی؛ یک دستیار هوش مصنوعی گرم، صمیمی، طبیعی و جذاب. گفتگو باید شبیه صحبت با یک دوست باهوش و خوش‌برخورد باشد، نه یک متن خشک و رسمی. لحن کاربر را تشخیص بده و متناسب با آن پاسخ بده: رسمی بود محترمانه باش، دوستانه بود صمیمی باش، شوخی کرد در حد مناسب همراهی کن، ناراحت/نگران بود آرام و همدلانه باش و شوخی نکن. از اصطلاحات محاوره‌ای فارسی طبیعی استفاده کن، زیاده‌روی نکن. پاسخ را با واکنش مناسب به حرف کاربر شروع کن و بعد سراغ اصل مطلب برو. ایموجی را متناسب با فضا و به‌اندازه استفاده کن (نه در هر جمله)، هرگز 🤖 استفاده نکن. از شوخی تکراری یا کلیشه‌ای (مثل «حتماً! با کمال میل!») خودداری کن. سؤال ساده را کوتاه جواب بده؛ موضوع پیچیده را کامل و مرحله‌به‌مرحله توضیح بده. در سؤال فنی همچنان صمیمی بمان ولی دقت فنی را فدای شوخی نکن. هیچ واقعیت، قابلیت، منبع، نتیجه، لینک یا کاری را که مطمئن نیستی انجام شده، نساز. برای کدنویسی، کد کامل و قابل اجرا بده، توضیح را بیرون از بلوک کد نگه دار و زبان کد را مشخص کن. در فارسی راست‌به‌چپ و برای کد چپ‌به‌راست درست بنویس.`;
+    try { window.virtualPersona = upgradedPersona; } catch (_) {}
+
+    function addMessageActions(wrapper, sender) {
+        if (!wrapper || wrapper.querySelector('.message-actions')) return;
+        const msg = wrapper.querySelector('.message');
+        if (!msg) return;
+        const bar = document.createElement('div');
+        bar.className = 'message-actions';
+        const copy = document.createElement('button');
+        copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="lucide-icon" data-lucide="copy"></i>';
+        copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="lucide-icon" data-lucide="check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
+        bar.appendChild(copy);
+        if(sender==='bot'){
+            const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="lucide-icon" data-lucide="rotate-cw"></i>';
+            regen.onclick=()=>regenerateMessage(wrapper);bar.appendChild(regen);
+        } else {
+            const edit=document.createElement('button');edit.className='msg-action';edit.type='button';edit.title='ویرایش و ارسال دوباره';edit.innerHTML='<i class="lucide-icon" data-lucide="pencil"></i>';
+            edit.onclick=()=>editUserMessage(wrapper);bar.appendChild(edit);
+        }
+        wrapper.appendChild(bar);
+    }
+
+    function decorateMessages(root=document.getElementById('chatBox')) {
+        if(!root) return;
+        root.querySelectorAll('.message-wrapper.bot').forEach(w=>addMessageActions(w,'bot'));
+        root.querySelectorAll('.message-wrapper.user').forEach(w=>addMessageActions(w,'user'));
+    }
+
+    function regenerateMessage(wrapper) {
+        if (isGenerating || !wrapper?.isConnected) return;
+
+        let userWrapper = wrapper.previousElementSibling;
+        while (userWrapper && !userWrapper.classList.contains('user')) {
+            userWrapper = userWrapper.previousElementSibling;
+        }
+        const prompt = userWrapper?.querySelector('.message')?.innerText?.trim() || '';
+        if (!prompt) {
+            showToast('پیام اصلی برای تولید دوباره پیدا نشد.', 'warning');
             return;
         }
 
-        return res.status(500).json({
-            error: {
-                message: 'Ø®Ø·Ø§ÛŒ Ø¯Ø§Ø®Ù„ÛŒ Ø³Ø±ÙˆØ±. Ù„Ø·ÙØ§Ù‹ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ù…ØªØ­Ø§Ù† Ú©Ù†.',
-                type: 'internal_error',
-                category: 'handler',
-                stage: 'handler',
-                detail: globalError?.message || String(globalError)
+        const snapshot = Array.isArray(wrapper.__virtualRequestFiles)
+            ? wrapper.__virtualRequestFiles.map(f => ({ ...f }))
+            : [];
+
+        const loadingDiv = wrapper.querySelector('.message');
+        if (!loadingDiv) return;
+        // Reuse the existing bot wrapper as a retry. sendToGemini's retry path
+        // intentionally does not push a duplicate user turn into history.
+        sendToGemini(prompt, snapshot, { retry: true, wrapper, loadingDiv });
+    }
+
+    function editUserMessage(wrapper){
+        if(isGenerating) return;
+        const msgEl = wrapper.querySelector('.message');
+        if (!msgEl) return;
+
+        // FIX (edit-loses-files bug): previously this only read innerText,
+        // which for image/video tags returns nothing and for the file-name
+        // <span> returns the icon+filename as plain text — so editing a
+        // message that had an attachment silently dropped the actual file
+        // and left a garbled filename string in its place. Now we walk the
+        // message's child nodes, split out any file/image/video tags back
+        // into selectedFilesData (so they're re-attached and sent again
+        // exactly like a fresh upload), and keep only the real text.
+        const clone = msgEl.cloneNode(true);
+        const restoredFiles = [];
+
+        clone.querySelectorAll('img').forEach(img => {
+            restoredFiles.push({ name: 'image.jpg', type: 'image/jpeg', base64: img.getAttribute('src') || '' });
+            img.remove();
+        });
+        clone.querySelectorAll('video source').forEach(source => {
+            const type = source.getAttribute('type') || 'video/webm';
+            restoredFiles.push({ name: 'video.webm', type, base64: source.getAttribute('src') || '' });
+        });
+        clone.querySelectorAll('video').forEach(v => v.remove());
+        clone.querySelectorAll('span').forEach(span => {
+            // Only the file-chip spans have this icon; message text never does.
+            if (span.querySelector('i[data-lucide="file"]')) {
+                const name = span.textContent.trim();
+                restoredFiles.push({ name: name || 'file', type: guessMimeType(name || ''), base64: '' });
+                span.remove();
             }
         });
-    }
-}
+        clone.querySelectorAll('br').forEach(br => br.remove());
 
-module.exports = handler;
+        const text = clone.innerText || clone.textContent || '';
+
+        // File-chip attachments (non-image/video) have no base64 recorded in
+        // the DOM, so we can't actually resend their binary content — warn
+        // the user instead of silently sending a message that looks
+        // attached but isn't.
+        const filesWithoutData = restoredFiles.filter(f => !f.base64);
+        const filesWithData = restoredFiles.filter(f => f.base64);
+
+        if (filesWithoutData.length > 0) {
+            showToast('فایل(های) غیرتصویری این پیام هنگام ویرایش دوباره ضمیمه نمی‌شن — لازمه دوباره آپلودشون کنی.', 'warning');
+        }
+
+        if (filesWithData.length > 0) {
+            selectedFilesData = filesWithData.map(f => {
+                const previewId = addFilePreviewItem(f.name);
+                updateFilePreviewItem(previewId, {
+                    status: f.type.startsWith('image/') ? 'تصویر آماده' : 'ویدیو آماده',
+                    statusClass: 'success',
+                    thumbSrc: f.type.startsWith('image/') ? f.base64 : undefined
+                });
+                return { __previewId: previewId, name: f.name, type: f.type, base64: f.base64 };
+            });
+        }
+
+        const input=document.getElementById('userInput'); input.value=text.trim(); autoResizeTextarea(input); input.focus();
+        wrapper.classList.add('editing');
+        input.dataset.editingWrapper='1';
+    }
+
+    function openChatSearch(){const p=document.getElementById('chatSearchPanel');p.classList.add('active');setTimeout(()=>document.getElementById('chatSearchInput')?.focus(),20)}
+    function closeChatSearch(){document.getElementById('chatSearchPanel')?.classList.remove('active');searchInCurrentChat('')}
+    function searchInCurrentChat(q){
+        const msgs=[...document.querySelectorAll('#chatBox .message')];msgs.forEach(m=>m.classList.remove('search-hit'));
+        q=(q||'').trim();if(!q){document.getElementById('chatSearchCount').textContent='';return}
+        const hits=msgs.filter(m=>m.innerText.toLowerCase().includes(q.toLowerCase()));
+        hits.forEach(m=>m.classList.add('search-hit'));document.getElementById('chatSearchCount').textContent=hits.length?`${hits.length} نتیجه`:'نتیجه‌ای نیست';
+        if(hits[0]) hits[0].scrollIntoView({behavior:'smooth',block:'center'});
+    }
+
+    function runComposerCommand(cmd){
+        const input=document.getElementById('userInput');
+        if(cmd==='web'){ if(!isSearchEnabled) toggleSearch(); input.value=''; input.placeholder='جستجو در وب فعاله؛ چی رو پیدا کنم؟'; }
+        if(cmd==='code'){ input.value='برای این کار کد بنویس و کد کامل و قابل اجرا را در بلوک کد بده:\n'; autoResizeTextarea(input); }
+        if(cmd==='clear'){ input.value=''; autoResizeTextarea(input); }
+        document.getElementById('commandMenu')?.classList.remove('active');input.focus();
+    }
+
+    // Keep existing keyboard behavior but add / command discovery.
+    const __oldHandleKeyDown = handleKeyDown;
+    handleKeyDown = function(e){
+        const input=e.target;
+        if(e.key==='Escape'){closeChatSearch();document.getElementById('commandMenu')?.classList.remove('active');return}
+        __oldHandleKeyDown(e);
+    };
+    document.getElementById('userInput')?.addEventListener('input',function(){
+        const menu=document.getElementById('commandMenu');
+        menu?.classList.toggle('active', this.value.trim()==='/');
+    });
+
+    // Upgrade persona without changing /api/chat payload shape.
+    ensureVirtualPersona = function(){
+        if(!chatHistoryData[currentChatId]) chatHistoryData[currentChatId]=[];
+        const h=chatHistoryData[currentChatId];
+        const oldIndex=h.findIndex(x=>x.__virtualPersona);
+        if(oldIndex>=0){h.splice(oldIndex,2);}
+        h.unshift({role:'user',text:upgradedPersona,__virtualPersona:true},{role:'model',text:'متوجه شدم؛ دقیق، طبیعی و مرتب پاسخ می‌دهم و چیزی را بدون اطمینان نمی‌سازم.',__virtualPersona:true});
+    };
+
+    // FEATURE: تبدیل یک آرایه‌ی تخت از آیتم‌های لیست (هرکدام با depth) به
+    // HTML لیست تودرتوی واقعی. الگوریتم stack-based ساده: هر بار depth بالا
+    // می‌رود یک <ul>/<ol> تودرتو باز می‌شود، هر بار پایین می‌آید بسته می‌شود.
+    function renderNestedList(items){
+        if(!items.length) return '';
+        let html='';
+        const stack=[]; // {type, depth}
+        for(const item of items){
+            while(stack.length && stack[stack.length-1].depth > item.depth){
+                html+=`</li></${stack.pop().type}>`;
+            }
+            if(!stack.length || stack[stack.length-1].depth < item.depth){
+                html+=`<${item.type}>`;
+                stack.push({type:item.type, depth:item.depth});
+            } else if(stack[stack.length-1].type!==item.type && stack[stack.length-1].depth===item.depth){
+                html+=`</li></${stack.pop().type}><${item.type}>`;
+                stack.push({type:item.type, depth:item.depth});
+            } else {
+                html+='</li>';
+            }
+            html+=`<li>${formatInline(item.text)}`;
+        }
+        while(stack.length){ html+=`</li></${stack.pop().type}>`; }
+        return html;
+    }
+
+    // More reliable formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit.
+    formatReply = function(text){
+        const rawParts=String(text ?? '').split(/```/);
+        const rendered=rawParts.map((rawPart,index)=>{
+            if(index%2===1){
+                // نسخه‌ی خام کد (بدون escape) برای کپی/دانلود نگه
+                // داشته می‌شود. طبق تصمیم جدید: کد کوتاه (زیر ۵۰ خط) به
+                // همان شکل معمول همه‌ی دستیارهای هوش مصنوعی، مستقیم به‌صورت
+                // بلوک کد داخل چت (با دکمه‌ی کپی) نمایش داده می‌شود؛ فقط
+                // کد بلند (۵۰ خط یا بیشتر) به‌صورت کارت فایل جمع‌شده (با
+                // دکمه‌ی کپی + دانلود، بدون نمایش مستقیم متن کد) نشان داده
+                // می‌شود - چون کد به این بلندی داخل حباب چت غیرقابل‌استفاده
+                // می‌شود و منطقی‌تر است به‌عنوان یک فایل تحویل داده شود.
+                const raw=rawPart.replace(/^\n/,''); const first=raw.split('\n')[0].trim().toLowerCase();
+                const lang=/^[a-zA-Z0-9+#.-]+$/.test(first)?first:'';
+                const rawCode=(lang?raw.slice(raw.indexOf('\n')+1):raw).trim();
+                const encoded=encodeURIComponent(rawCode);
+                const lineCount=rawCode?rawCode.split('\n').length:0;
+                const ext=(CODE_LANG_EXTENSIONS[(lang||'').toLowerCase()]||'txt');
+                const CODE_CARD_LINE_THRESHOLD = 50;
+                if (lineCount < CODE_CARD_LINE_THRESHOLD) {
+                    // کد کوتاه: بلوک کد معمولی داخل چت، فقط با دکمه‌ی کپی.
+                    return `<div class="code-card">
+                        <div class="code-card-head">
+                            <span>${escapeHtml(lang||'code')}</span>
+                            <div class="code-actions">
+                                <button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>
+                            </div>
+                        </div>
+                        <pre><code>${escapeHtml(rawCode)}</code></pre>
+                    </div>`;
+                }
+                // کد بلند: همان کارت فایل جمع‌شده‌ی قبلی، با دکمه‌ی دانلود.
+                const fileLabel=`code.${ext}`;
+                return `<div class="code-card code-card-collapsed">
+                    <div class="code-card-head">
+                        <span class="code-card-filelabel"><i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(fileLabel)}</span>
+                        <div class="code-actions">
+                            <button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>
+                            <button class="code-action" onclick="downloadCodeAsFile(this)" data-code="${encoded}" data-lang="${lang}">دانلود فایل</button>
+                        </div>
+                    </div>
+                    <div class="code-card-meta">${lineCount} خط ${lang?('· '+escapeHtml(lang)):''}</div>
+                </div>`;
+            }
+            const escapedPart=escapeHtml(rawPart);
+            const lines=escapedPart.split('\n');let out=[],para=[],list=null,items=[],tableRows=null;
+            const flushP=()=>{if(para.length){out.push(`<p>${formatInline(para.join(' '))}</p>`);para=[]}};
+            // FEATURE: پشتیبانی از لیست تودرتو - سطح تورفتگی از تعداد
+            // فاصله/تب ابتدای خط تشخیص داده می‌شود و به‌صورت <ul>/<ol> تودرتو
+            // رندر می‌شود، به‌جای یک لیست تخت.
+            const flushL=()=>{
+                if(!items.length) return;
+                out.push(renderNestedList(items));
+                items=[];list=null;
+            };
+            const flushTable=()=>{
+                if(!tableRows||!tableRows.length) return;
+                const [headerRow,...bodyRows]=tableRows;
+                const thead=`<thead><tr>${headerRow.map(c=>`<th>${formatInline(c)}</th>`).join('')}</tr></thead>`;
+                const tbody=bodyRows.length?`<tbody>${bodyRows.map(r=>`<tr>${r.map(c=>`<td>${formatInline(c)}</td>`).join('')}</tr>`).join('')}</tbody>`:'';
+                out.push(`<div class="msg-table-wrap"><table class="msg-table">${thead}${tbody}</table></div>`);
+                tableRows=null;
+            };
+            const parseTableRow=(line)=>line.replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+            const isTableSeparator=(line)=>/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(line);
+            for(const raw of lines){
+                const rawTrimmed=raw.replace(/&nbsp;/g,' ');
+                const line=rawTrimmed.trim();
+                const indentMatch=raw.match(/^(\s*)/);
+                const indent=indentMatch?indentMatch[1].replace(/\t/g,'  ').length:0;
+                if(!line){flushP();flushL();flushTable();continue}
+                // FEATURE: جدول مارک‌داون | ستون | ستون |  با ردیف جداکننده |---|---|
+                const isTableLine=/^\|.*\|$/.test(line)||(line.includes('|')&&!/^[-*•]\s|^\d+[.)]\s/.test(line));
+                if(isTableLine&&!tableRows){
+                    // شروع احتمالی جدول: فقط اگر خط بعدی جداکننده باشد قبول می‌کنیم
+                    const nextIdx=lines.indexOf(raw)+1;
+                    const nextLine=(lines[nextIdx]||'').trim();
+                    if(isTableSeparator(nextLine)){flushP();flushL();tableRows=[parseTableRow(line)];continue}
+                }
+                if(tableRows){
+                    if(isTableSeparator(line)) continue; // ردیف جداکننده را رد کن
+                    if(isTableLine){tableRows.push(parseTableRow(line));continue}
+                    flushTable();
+                }
+                const head=line.match(/^(#{1,3})\s+(.+)$/), bullet=line.match(/^[-*•]\s+(.+)$/), ordered=line.match(/^\d+[.)]\s+(.+)$/), quote=line.match(/^&gt;\s*(.+)$/), hr=/^[-*_]{3,}$/.test(line);
+                if(head){flushP();flushL();const lv=Math.min(4,head[1].length+1);out.push(`<h${lv}>${formatInline(head[2])}</h${lv}>`)}
+                else if(quote){flushP();flushL();out.push(`<blockquote>${formatInline(quote[1])}</blockquote>`)}
+                else if(hr){flushP();flushL();out.push('<hr>')}
+                else if(bullet){flushP();list='ul';items.push({type:'ul',depth:Math.floor(indent/2),text:bullet[1]})}
+                else if(ordered){flushP();list='ol';items.push({type:'ol',depth:Math.floor(indent/2),text:ordered[1]})}
+                else {flushL();para.push(line)}
+            } flushP();flushL();flushTable();return out.join('');
+        }).join('');return rendered||'<p>پاسخی دریافت نشد.</p>';
+    };
+
+    // Decorate restored and newly generated messages without breaking saved chat HTML.
+    // Perf note: decorateMessages() does querySelectorAll over the *whole*
+    // chat box, so calling it after every single message makes each turn's
+    // cost grow with total chat length (O(n) per message => O(n²) per chat).
+    // A new message only ever appends as the box's last child, so on the
+    // hot path we decorate just that node; the full scan is reserved for
+    // loadChat, where the entire subtree is freshly restored from stored
+    // HTML and every wrapper genuinely needs its action bar re-attached.
+    const __oldAppendMessage=appendMessage;
+    appendMessage=function(sender,content){
+        __oldAppendMessage(sender,content);
+        const last=document.getElementById('chatBox')?.lastElementChild;
+        if(last) addMessageActions(last,sender);
+    };
+    const __oldLoadChat=loadChat;
+    loadChat=function(id,isInitialLoad=false){__oldLoadChat(id,isInitialLoad);setTimeout(()=>decorateMessages(),0)};
+    const __oldSendToGemini=sendToGemini;
+    sendToGemini=async function(...args){
+        const result=await __oldSendToGemini(...args);
+        const last=document.getElementById('chatBox')?.lastElementChild;
+        if(last) addMessageActions(last,'bot');
+        return result;
+    };
+    setTimeout(decorateMessages,50);
+
+    // ===== Toast notifications =====
+    // showToast(message, type) — type: 'success' | 'error' | 'info' | 'warning'
+    const TOAST_ICONS = {
+        success: 'ph-fill ph-check-circle',
+        error: 'ph-fill ph-warning-circle',
+        warning: 'ph-fill ph-warning',
+        info: 'ph-fill ph-info'
+    };
+    function showToast(message, type = 'info', duration = 3200) {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `<i class="${TOAST_ICONS[type] || TOAST_ICONS.info}"></i><span>${escapeHtml(message)}</span>`;
+        container.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.add('leaving');
+            setTimeout(() => toast.remove(), 220);
+        }, duration);
+    }
+
+    // ===== Custom confirm modal (replaces native confirm()) =====
+    // showConfirm(message) returns a Promise<boolean>
+    function showConfirm(message) {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('confirmOverlay');
+            const msgEl = document.getElementById('confirmMessage');
+            const okBtn = document.getElementById('confirmOkBtn');
+            const cancelBtn = document.getElementById('confirmCancelBtn');
+            if (!overlay || !msgEl || !okBtn || !cancelBtn) { resolve(window.confirm(message)); return; }
+
+            msgEl.textContent = message;
+            overlay.classList.add('active');
+
+            const cleanup = (result) => {
+                overlay.classList.remove('active');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                overlay.removeEventListener('click', onOverlayClick);
+                resolve(result);
+            };
+            const onOk = () => cleanup(true);
+            const onCancel = () => cleanup(false);
+            const onOverlayClick = (e) => { if (e.target === overlay) cleanup(false); };
+
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+            overlay.addEventListener('click', onOverlayClick);
+        });
+    }
+
+    // ===== Custom prompt modal (replaces native prompt()) =====
+    // showPrompt(message, defaultValue) returns a Promise<string|null>
+    function showPrompt(message, defaultValue = '') {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('promptOverlay');
+            const msgEl = document.getElementById('promptMessage');
+            const input = document.getElementById('promptInput');
+            const okBtn = document.getElementById('promptOkBtn');
+            const cancelBtn = document.getElementById('promptCancelBtn');
+            if (!overlay || !msgEl || !input || !okBtn || !cancelBtn) { resolve(window.prompt(message, defaultValue)); return; }
+
+            msgEl.textContent = message;
+            input.value = defaultValue;
+            overlay.classList.add('active');
+            setTimeout(() => { input.focus(); input.select(); }, 30);
+
+            const cleanup = (result) => {
+                overlay.classList.remove('active');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                overlay.removeEventListener('click', onOverlayClick);
+                input.removeEventListener('keydown', onKeydown);
+                resolve(result);
+            };
+            const onOk = () => cleanup(input.value.trim() || null);
+            const onCancel = () => cleanup(null);
+            const onOverlayClick = (e) => { if (e.target === overlay) cleanup(null); };
+            const onKeydown = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); onOk(); }
+                else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+            };
+
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+            overlay.addEventListener('click', onOverlayClick);
+            input.addEventListener('keydown', onKeydown);
+        });
+    }
+
+    // ===== Online / offline status =====
+    (function setupConnectionStatus() {
+        const pill = document.getElementById('connectionStatus');
+        if (!pill) return;
+        let hideTimer = null;
+
+        function updateStatus() {
+            clearTimeout(hideTimer);
+            if (navigator.onLine) {
+                if (pill.classList.contains('show')) {
+                    // Only show the "back online" pill if we were previously offline.
+                    pill.classList.add('reconnected');
+                    pill.innerHTML = '<i class="lucide-icon" data-lucide="wifi"></i><span>اتصال اینترنت برقرار شد</span>';
+                    hideTimer = setTimeout(() => pill.classList.remove('show'), 2200);
+                }
+            } else {
+                pill.classList.remove('reconnected');
+                pill.innerHTML = '<i class="lucide-icon" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span>';
+                pill.classList.add('show');
+            }
+        }
+        window.addEventListener('online', updateStatus);
+        window.addEventListener('offline', updateStatus);
+        if (!navigator.onLine) updateStatus();
+    })();
+
+
+(function setupApiUsagePanel(){
+    let timer=null;
+    function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+    window.refreshApiUsage=async function(e){
+        if(e) e.stopPropagation();
+        const summary=document.getElementById('apiUsageSummary'), list=document.getElementById('apiUsageKeys');
+        if(!summary||!list)return;
+        summary.textContent='در حال دریافت...'; list.innerHTML='';
+        try{
+            const r=await fetch('/api/chat?mode=usage',{cache:'no-store'});
+            const d=await r.json();
+            if(!r.ok) throw new Error(d?.error?.message||'usage failed');
+            const total=(d.keys||[]).reduce((n,k)=>n+(k.requestsLast60s||0),0);
+            const errors=(d.keys||[]).reduce((n,k)=>n+(k.lastStatus>=400?1:0),0);
+            const storageLabel=d.storage==='vercel-kv'?'🟢 Vercel KV':'🟡 حافظه موقت';
+            summary.innerHTML=`<div class="api-usage-row"><span>کل درخواست‌های واقعی / ۶۰ ثانیه</span><strong>${total}</strong></div><div class="api-usage-row"><span>کلیدهای تنظیم‌شده</span><strong>${d.keys?.length||0}</strong></div><div class="api-usage-row"><span>Storage مصرف</span><strong>${storageLabel}</strong></div><div class="api-usage-row"><span>آخرین وضعیت خطا</span><strong>${errors?'⚠️ مشاهده شد':'🟢 بدون خطای اخیر'}</strong></div>`;
+            list.innerHTML=(d.keys||[]).map(k=>{const bad=k.lastStatus>=400; const left=k.secondsUntilOldestExpires?` · ${k.secondsUntilOldestExpires}s تا خروج قدیمی‌ترین درخواست`:''; return `<div class="api-usage-row"><span><span class="api-usage-dot ${bad?'warn':''}"></span><span class="api-usage-key">${esc(k.label)}</span></span><span class="api-usage-count">${k.requestsLast60s} درخواست <span class="api-usage-status">(${k.lastStatus||'—'}${esc(left)})</span></span></div>`;}).join('')||'<div class="api-usage-sub">هیچ کلیدی در محیط فعلی پیدا نشد.</div>';
+        }catch(err){summary.textContent='دریافت Usage ناموفق بود.'; list.innerHTML=`<div class="api-usage-sub">${esc(err.message)}</div>`;}
+    };
+    window.toggleApiUsage=function(e){
+        if(e)e.stopPropagation();
+        const p=document.getElementById('apiUsagePanel'); if(!p)return;
+        p.classList.toggle('active');
+        if(p.classList.contains('active')){
+            refreshApiUsage();
+            clearInterval(timer);
+            timer=setInterval(()=>refreshApiUsage(),5000);
+            requestAnimationFrame(()=>{
+                const wrap=p.parentElement, rect=wrap?.getBoundingClientRect();
+                if(!rect)return;
+                const width=p.getBoundingClientRect().width;
+                p.style.left='0'; p.style.right='auto';
+                if(rect.left + width > window.innerWidth - 8){
+                    p.style.left='auto'; p.style.right='0';
+                }
+            });
+        } else {clearInterval(timer);timer=null;}
+    };
+    document.addEventListener('click',e=>{const wrap=document.querySelector('.api-usage-wrap'),p=document.getElementById('apiUsagePanel'); if(wrap&&p&&!wrap.contains(e.target)){p.classList.remove('active');clearInterval(timer);timer=null;}});
+})();
+</script>
+</body>
+</html>
