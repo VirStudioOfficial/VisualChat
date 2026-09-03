@@ -508,6 +508,7 @@ function keyLabel(keys, key) {
 */
 const MAX_HISTORY_TURNS = 60;       // most recent user+model turns kept verbatim (~30 user messages, since each user turn has a matching model turn)
 const MAX_HISTORY_CHARS = 60000;    // rough safety cap on total history text size
+const MAX_SEARCH_RESULT_CHARS = 12000; // safety cap on a single web_search result injected into context
 
 function summarizeOldTurns(oldTurns) {
     if (!oldTurns.length) return null;
@@ -2928,10 +2929,21 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             const resultText = searchResult?.result || searchResult?.message || 'Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ Ø§Ø² Ø¬Ø³ØªØ¬Ùˆ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯.';
+            // FIX (silent empty reply on long chats after web_search): a
+            // Tavily result had no size cap before being pushed into the
+            // model's next-round context. On an already-long conversation
+            // (history can be up to MAX_HISTORY_CHARS on its own), adding an
+            // uncapped search result on top could push the combined payload
+            // past what the model handles cleanly - Gemini would then return
+            // an empty round (finishReason NONE/STOP, 0 chars) instead of a
+            // clean error. Cap it here so this can't happen.
+            const cappedResultText = resultText.length > MAX_SEARCH_RESULT_CHARS
+                ? resultText.slice(0, MAX_SEARCH_RESULT_CHARS) + '\n\n[... \u0646\u062a\u06cc\u062c\u0647 \u0637\u0648\u0644\u0627\u0646\u06cc \u0628\u0648\u062f \u0648 \u06a9\u0648\u062a\u0627\u0647 \u0634\u062f ...]'
+                : resultText;
             workingContents.push({
                 role: 'user',
                 parts: [{
-                    text: `[Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ â€” Ø¬Ø³ØªØ¬Ùˆ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ ØªÙ…Ø§Ù… Ø´Ø¯Ù‡ Ùˆ Ø¯ÛŒÚ¯Ø± Ù‡ÛŒÚ† Ø§Ø¨Ø²Ø§Ø±ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†]:\n${resultText}`
+                    text: `[Ù†ØªÛŒØ¬Ù‡ Ø¬Ø³ØªØ¬ÙˆÛŒ ÙˆØ¨ â€” Ø¬Ø³ØªØ¬Ùˆ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø³Ø¤Ø§Ù„ ØªÙ…Ø§Ù… Ø´Ø¯Ù‡ Ùˆ Ø¯ÛŒÚ¯Ø± Ù‡ÛŒÚ† Ø§Ø¨Ø²Ø§Ø±ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ú©Ù†]:\n${cappedResultText}`
                 }]
             });
 
