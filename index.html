@@ -4704,9 +4704,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         btn.classList.toggle('show', distance > 140);
     }
 
-    function scrollToLatest() {
+    function scrollToLatest(smooth = true) {
         const chatBox = document.getElementById('chatBox');
-        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+        // FIX (لگ حین استریم پیام): این تابع در حالت قبلی همیشه با
+        // behavior:'smooth' اسکرول می‌کرد. چون در حین استریم شدن پاسخ،
+        // scrollToLatest تقریباً هر ۶۴ میلی‌ثانیه صدا زده می‌شود، هر بار
+        // یک انیمیشن smooth-scroll جدید شروع می‌شد در حالی که انیمیشن قبلی
+        // هنوز تمام نشده بود؛ نتیجه‌اش رقابت مداوم مرورگر با خودش روی
+        // ترد اصلی بود که هم باعث لگ کلی صفحه می‌شد هم باعث می‌شد بقیه‌ی
+        // انیمیشن‌ها (مثل ورود پیام) تکه‌تکه/ناهماهنگ اجرا شوند. حالا در
+        // حین استریم اسکرول با behavior:'auto' (فوری، بدون انیمیشن رقابتی)
+        // انجام می‌شود؛ فقط اسکرول‌های غیر-استریم (مثل باز کردن یک چت یا
+        // زدن دکمه‌ی "برو به آخر") همچنان smooth باقی می‌مانند.
+        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
     }
 
     function makeRetryError(loadingDiv, message, request, errorDetail = null) {
@@ -5090,7 +5100,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 // automatically once streaming ends (see below).
                 if (!streamEnded) html += '<span class="stream-cursor"></span>';
                 loadingDiv.innerHTML = html;
-                scrollToLatest();
+                scrollToLatest(false);
             };
 
             const queueLiveRender = (force = false) => {
@@ -5100,7 +5110,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     return;
                 }
                 if (liveRenderTimer) return;
-                liveRenderTimer = setTimeout(flushLiveRender, 64);
+                // FIX (لگ روی پاسخ‌های بلند): formatReply کل متن جمع‌شده تا
+                // این لحظه را از صفر پارس می‌کند، نه فقط تکه‌ی جدید - پس
+                // هزینه‌ی هر رندر با بلندتر شدن پاسخ رشد می‌کند (تقریباً
+                // درجه دو در طول کل استریم). یک تأخیر ثابت ۶۴ میلی‌ثانیه‌ای
+                // برای پاسخ‌های خیلی بلند کافی نیست چون خودِ پارس‌کردن هم
+                // بیشتر از ۶۴ میلی‌ثانیه طول می‌کشد و رندرها روی هم تلنبار
+                // می‌شوند. فاصله‌ی رندر را متناسب با طول متن فعلی زیاد
+                // می‌کنیم تا مرورگر فرصت کافی برای هر رندر داشته باشد.
+                const delay = fullReply.length > 6000 ? 220 : fullReply.length > 2000 ? 130 : 64;
+                liveRenderTimer = setTimeout(flushLiveRender, delay);
             };
 
             while (true) {
@@ -5141,7 +5160,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             } else {
                                 loadingDiv.innerHTML = stepHtml;
                             }
-                            scrollToLatest();
+                            scrollToLatest(false);
                         }
                     }
                     if (parsed.text) {
