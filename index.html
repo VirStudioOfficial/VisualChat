@@ -5089,9 +5089,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 signal: currentAbortController.signal
             });
 
-            // خلاصه‌ی چت‌های اخیر رو در پس‌زمینه به‌روز می‌کنیم - fire-and-forget،
-            // بعد از شروع درخواست اصلی، تا هیچ تاخیری به پاسخ فعلی اضافه نشه.
-            refreshRecentChatsSummaryInBackground();
+            // خلاصه‌ی چت‌های اخیر بعد از پایان کامل پاسخ در پس‌زمینه به‌روز می‌شود
+            // تا هیچ رقابت کلیدی یا ترافیک هم‌زمانی در لحظه ارسال پیام کاربر رخ ندهد.
 
             if (requestId !== activeRequestId) return;
 
@@ -5181,13 +5180,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
                 const dt = lastRevealTs ? (ts - lastRevealTs) : 16;
                 lastRevealTs = ts;
-                // سرعت پایه: حدود ۴۵ کاراکتر در هر ثانیه (نرم و قابل خواندن).
-                // اگر متنی که هنوز نمایش داده نشده خیلی زیاد شده باشد (سرور
-                // سریع‌تر از نرخ نمایش متن فرستاده)، سرعت را افزایش می‌دهیم
-                // تا نمایش هیچ‌وقت خیلی از متن واقعی عقب نیفتد.
+                // سرعت پایه: افزایش به ۱۲۰ کاراکتر در ثانیه برای پاسخ‌دهی سریع و بدون معطلی مصنوعی
                 const backlog = target - revealedChars;
-                const baseCharsPerSec = 45;
-                const speedup = backlog > 400 ? 6 : backlog > 150 ? 3 : backlog > 40 ? 1.6 : 1;
+                const baseCharsPerSec = 120;
+                const speedup = backlog > 300 ? 5 : backlog > 100 ? 2.5 : backlog > 20 ? 1.4 : 1;
                 const charsThisFrame = Math.max(1, Math.round((dt / 1000) * baseCharsPerSec * speedup));
                 revealedChars = Math.min(target, revealedChars + charsThisFrame);
                 renderRevealed(ts);
@@ -5410,6 +5406,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             }
             setGeneratingState(false);
             saveCurrentChat();
+            // خلاصه‌ی چت‌ها بعد از اتمام درخواست کاربر در پس‌زمینه به‌روز می‌شود تا تداخلی با درخواست اصلی نداشته باشد
+            setTimeout(() => refreshRecentChatsSummaryInBackground(), 1000);
         } finally {
             clearTimeout(watchdogId);
             // مطمئن شو این پرچم در هیچ مسیر خروجی (موفق/خطا/Stop) روشن
