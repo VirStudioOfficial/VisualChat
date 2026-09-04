@@ -41,12 +41,12 @@
                         root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
                         root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%), radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%)');
                     } else {
-                        root.style.setProperty('--bg-main', '#000000');
-                        root.style.setProperty('--bg-sidebar', '#0a0a0a');
-                        root.style.setProperty('--bg-card', '#171717');
-                        root.style.setProperty('--bg-card-hover', '#212121');
-                        root.style.setProperty('--bg-input', '#171717');
-                        root.style.setProperty('--border', '#262626');
+                        root.style.setProperty('--bg-main', '#1a1a1a');
+                        root.style.setProperty('--bg-sidebar', '#141414');
+                        root.style.setProperty('--bg-card', '#232323');
+                        root.style.setProperty('--bg-card-hover', '#2a2a2a');
+                        root.style.setProperty('--bg-input', '#232323');
+                        root.style.setProperty('--border', '#2e2e2e');
                         root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
                         root.style.setProperty('--text-main', '#f4f6fb');
                         root.style.setProperty('--text-muted', '#8a8a8a');
@@ -77,21 +77,21 @@
          لاگین حالا با ریدایرکت به api/auth-start.js انجام می‌شود. -->
 
     <style>
-        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.35; shape-rendering: geometricPrecision; }
+        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2; shape-rendering: geometricPrecision; }
         [class*="ph-"] { vertical-align: -0.09em; }
         :root {
-            --bg-main: #000000;
-            --bg-sidebar: #0a0a0a;
-            --bg-card: #171717;
-            --bg-card-hover: #212121;
-            --bg-input: #171717;
-            --accent-1: #6366f1;
-            --accent-2: #a855f7;
-            --accent-grad: linear-gradient(135deg, #6366f1, #a855f7);
+            --bg-main: #1a1a1a;
+            --bg-sidebar: #141414;
+            --bg-card: #232323;
+            --bg-card-hover: #2a2a2a;
+            --bg-input: #232323;
+            --accent-1: #9a9a9a;
+            --accent-2: #d4d4d4;
+            --accent-grad: linear-gradient(135deg, #52525b, #71717a);
             --danger: #f87171;
             --text-main: #f4f6fb;
             --text-muted: #a3a3a3;
-            --border: #262626;
+            --border: #2e2e2e;
             --border-soft: rgba(255,255,255,0.08);
             --shadow-a: rgba(0,0,0,0.3);
             --shadow-b: rgba(0,0,0,0.55);
@@ -102,8 +102,9 @@
             --code-head-bg: rgba(255,255,255,0.04);
             --code-head-bg-solid: #1c1c1c;
             --code-text: #f4f6fb;
-            /* پس‌زمینه صاف و مشکی خالص - بدون گرادیان رنگی؛ فقط یک درخشش
-               بسیار محو و خنثی (نه رنگی) که فقط عمق کمی به صفحه می‌دهد. */
+            /* پس‌زمینه خاکستری تیره (نه مشکی مطلق) به سبک Open WebUI - بدون
+               گرادیان رنگی؛ فقط یک درخشش بسیار محو و خنثی که عمق کمی به
+               صفحه می‌دهد. */
             --app-bg-image:
                 radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%),
                 radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%);
@@ -124,6 +125,9 @@
             --border-soft: rgba(15,23,42,0.08);
             --shadow-a: rgba(30,41,59,0.08);
             --shadow-b: rgba(30,41,59,0.14);
+            --accent-1: #4b5563;
+            --accent-2: #1f2937;
+            --accent-grad: linear-gradient(135deg, #4b5563, #1f2937);
             --app-bg-image:
                 radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%),
                 radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%);
@@ -315,6 +319,15 @@
         }
 
         .message-wrapper { animation: messageInSoft 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+        /* FIX (inconsistent message animation): messages restored in bulk when
+           reopening a saved chat (chatBox.innerHTML = chats[id].html) used to
+           either all animate at once or sometimes appear to skip the
+           animation entirely, depending on browser paint timing - while a
+           freshly sent/streamed message always animated smoothly. This class
+           is applied only to history restored this way, so old messages just
+           appear instantly (as expected when reopening a chat), while new
+           live messages keep the smooth pop-in animation. */
+        .no-entry-anim { animation: none !important; }
 
         .action-btn:active i { animation: sendPop 0.38s ease; }
 
@@ -392,11 +405,10 @@
         .brand-title .brand-name { display: flex; align-items: center; gap: 9px; }
         .brand-mark {
             width: 26px; height: 26px;
-            border-radius: 8px;
-            background: var(--accent-grad);
+            border-radius: 50%;
+            background: var(--text-main);
             display: flex; align-items: center; justify-content: center;
-            font-size: 0.75rem; color: #fff; flex-shrink: 0;
-            box-shadow: 0 0 18px color-mix(in srgb, var(--accent-1) 45%, transparent);
+            font-size: 0.72rem; color: var(--bg-main); flex-shrink: 0;
             position: relative;
         }
         .brand-mark::after {
@@ -418,22 +430,28 @@
             50% { opacity: 0.45; }
         }
         .brand-text {
-            background: var(--accent-grad);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
+            color: var(--text-main);
+            font-weight: 700;
         }
 
+        /* پروفایل کاربر به سبک Open WebUI: یک ردیف ساده و صاف پایینِ
+           سایدبار (نه یک کارت جدا با بوردر/پس‌زمینه بالای لیست). با
+           order آن را به انتهای سایدبار منتقل می‌کنیم - چون .sidebar
+           یک flex-column است، این کار فقط با CSS و بدون تغییر ساختار
+           HTML/جاوااسکریپت انجام می‌شود. */
         .user-profile {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-soft);
-            border-radius: 14px;
-            padding: 10px 12px;
-            margin-bottom: 14px;
+            background-color: transparent;
+            border: none;
+            border-top: 1px solid var(--border-soft);
+            border-radius: 0;
+            padding: 12px 4px 2px 4px;
+            margin-bottom: 0;
+            margin-top: 8px;
             display: flex;
             align-items: center;
             gap: 10px;
-            min-height: 56px;
+            min-height: auto;
+            order: 3;
         }
         .user-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
         .user-avatar-letter {
@@ -447,22 +465,22 @@
         .user-actions .icon-btn { width: 28px; height: 28px; font-size: 0.8rem; }
 
         .new-chat-btn {
-            background: var(--bg-card);
+            background: transparent;
             color: var(--text-main);
-            border: 1px solid var(--border-soft);
-            padding: 12px;
-            border-radius: 12px;
+            border: none;
+            padding: 8px 6px;
+            border-radius: 8px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 9px;
-            font-weight: 600;
+            justify-content: flex-start;
+            gap: 10px;
+            font-weight: 500;
             font-size: 0.9rem;
-            transition: all 0.2s ease;
+            transition: all 0.15s ease;
         }
-        .new-chat-btn:hover { background-color: var(--bg-card-hover); border-color: color-mix(in srgb, var(--accent-1) 40%, transparent); }
-        .new-chat-btn i { color: var(--accent-2); }
+        .new-chat-btn:hover { background-color: var(--bg-card-hover); }
+        .new-chat-btn i { color: var(--text-main); }
 
         .history-list {
             flex: 1;
@@ -665,32 +683,97 @@
             animation: fadeIn 0.35s ease-out;
         }
 
-        .home-mark {
-            width: 56px; height: 56px;
-            border-radius: 16px;
-            background: var(--accent-grad);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 1.5rem; color: #fff;
-            box-shadow: 0 0 40px color-mix(in srgb, var(--accent-1) 35%, transparent);
-            animation: glowPulse 3.5s ease-in-out infinite;
+        /* حالت "خانه" (سبک Open WebUI): وقتی گفتگو هنوز شروع نشده، نوار
+           پیام واقعی (همون #inputWrapper با تمام دکمه‌ها/JS اصلیش) با
+           جاوااسکریپت به داخل #homeInputSlot منتقل می‌شه، بین تیتر و
+           کارت‌های پیشنهادی - دقیقاً مثل Open WebUI. با شروع اولین پیام
+           یا بازکردن یک گفتگوی قدیمی، همون نود به جای اصلیش (زیر
+           chat-box) برگردونده می‌شه. هیچ کپی/المان جدیدی ساخته نمی‌شه. */
+        body.is-home .main-content {
+            display: flex;
+            flex-direction: column;
+        }
+        body.is-home .home-screen {
+            flex: 1;
+            justify-content: center;
+            gap: 34px;
+        }
+        body.is-home .chat-box { display: none !important; }
+        body.is-home #inputWrapper {
+            margin: 0 auto;
+            max-width: 700px;
+        }
+        /* توی حالت خانه، خودِ کادر ورودی بزرگ‌تر و مربع‌تر می‌شه (شبیه
+           Open WebUI) - ارتفاع بیشتر برای textarea، پدینگ بیشتر داخل
+           کادر، و گوشه‌های کمتر گرد. دکمه‌ها همچنان همون دکمه‌های واقعی
+           هستن، فقط بزرگ‌تر دیده می‌شن. */
+        body.is-home .input-box {
+            border-radius: 22px;
+            padding: 16px 18px;
+        }
+        body.is-home textarea#userInput {
+            min-height: 54px;
+            height: 54px;
+            font-size: 1.05rem;
+        }
+        /* ردیف دکمه‌ها (تفکر/مدل/فایل) به یک ردیف جدا زیر textarea منتقل
+           می‌شه - با flex-wrap روی همون input-box-row واقعی، بدون اینکه
+           هیچ دکمه‌ای جابه‌جا یا کپی بشه در HTML. */
+        body.is-home .input-box-row {
+            flex-wrap: wrap;
+            row-gap: 10px;
+        }
+        body.is-home textarea#userInput {
+            order: 1;
+            flex-basis: 100%;
+        }
+        body.is-home #actionBtn { order: 5; margin-right: auto; }
+        body.is-home #thinkModeBtn { order: 3; }
+        body.is-home .composer-model-selector { order: 4; }
+        body.is-home #attachBtn { order: 2; }
+        /* توی حالت خانه، دکمه‌های تفکر/مدل کم‌رنگ‌تر و ساده‌تر می‌شن تا
+           تمرکز بصری روی خودِ textarea باشه - بدون حذف کردنشون. */
+        body.is-home .think-btn,
+        body.is-home .composer-model-selector {
+            border-color: var(--border-soft);
+            background: var(--bg-card);
+        }
+        body.is-home .think-btn:hover,
+        body.is-home .composer-model-selector:hover {
+            background: var(--bg-card-hover);
         }
 
-        .home-text { display: flex; flex-direction: column; gap: 10px; align-items: center; }
-        .home-title { font-size: 1.5rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; line-height: 1.4; max-width: 460px; }
+        .home-mark {
+            width: 44px; height: 44px;
+            border-radius: 12px;
+            background: var(--text-main);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.15rem; color: var(--bg-main);
+            order: 0;
+        }
+
+        .home-text { display: flex; flex-direction: row; gap: 14px; align-items: center; order: 0; }
+        .home-title { font-size: 2rem; font-weight: 500; color: var(--text-main); letter-spacing: -0.02em; line-height: 1.3; max-width: 460px; }
         .home-subtitle { font-size: 0.92rem; color: var(--text-muted); line-height: 1.6; }
 
-        .suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 520px; }
+        /* ترتیب دیداری به سبک Open WebUI: عنوان کوچیک بالا، زیرش کادر
+           پیام واقعی (به‌جاش با جاوااسکریپت منتقل می‌شه - نه کپی)، و
+           کارت‌های پیشنهادی زیرِ همه. */
+        #homeInputSlot { order: 1; width: 100%; display: flex; justify-content: center; }
+        .suggestion-chips { order: 2; display: flex; flex-direction: column; gap: 6px; justify-content: center; align-items: stretch; width: 100%; max-width: 480px; margin-top: 4px; }
         .suggestion-chip {
-            padding: 9px 16px;
-            background: var(--bg-card);
+            padding: 13px 16px;
+            background: transparent;
             border: 1px solid var(--border-soft);
-            border-radius: 20px;
-            font-size: 0.82rem;
-            color: var(--text-muted);
+            border-radius: 14px;
+            font-size: 0.86rem;
+            font-weight: 600;
+            color: var(--text-main);
             cursor: pointer;
             transition: all 0.2s;
+            text-align: right;
         }
-        .suggestion-chip:hover { color: var(--text-main); border-color: color-mix(in srgb, var(--accent-1) 40%, transparent); background: var(--bg-card-hover); }
+        .suggestion-chip:hover { border-color: color-mix(in srgb, var(--accent-1) 40%, transparent); background: var(--bg-card-hover); }
 
         .chat-box {
             flex: 1;
@@ -733,7 +816,7 @@
         }
 
         .message.user {
-            background-color: var(--bg-card);
+            background-color: color-mix(in srgb, var(--text-main) 12%, var(--bg-card));
             border: none;
             color: var(--text-main);
             border-radius: 20px;
@@ -757,7 +840,7 @@
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
         .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
         .code-actions { display:flex; gap:6px; }
-        .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:5px 9px; cursor:pointer; font-family:inherit; font-size:0.76rem; }
+        .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:6px 8px; cursor:pointer; font-family:inherit; font-size:0.76rem; display:inline-flex; align-items:center; gap:5px; }
         .code-action:hover { border-color:var(--accent-2); }
         .code-card pre { margin:0; padding:16px; overflow:auto; line-height:1.65; tab-size: 2; border-radius: 0 0 14px 14px; flex-shrink: 0; }
         .code-card pre code { background:transparent; padding:0; border-radius:0; white-space:pre; font-family: 'Consolas', 'Menlo', 'Courier New', monospace; font-size: 0.85rem; color: var(--code-text); }
@@ -856,11 +939,11 @@
         .input-box {
             background-color: var(--bg-input);
             border: 1px solid var(--border-soft);
-            border-radius: 22px;
-            padding: 6px 10px;
+            border-radius: 28px;
+            padding: 10px 14px;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 6px 24px var(--shadow-a);
+            box-shadow: 0 8px 28px var(--shadow-a);
             transition: border-color 0.2s, box-shadow 0.2s;
         }
         .input-box:focus-within {
@@ -878,7 +961,7 @@
         .input-box-row {
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 6px;
         }
 
         /* REDESIGN (چیدمان جمع‌وجورتر نوار ورودی): ترتیب بصری در RTL از
@@ -946,20 +1029,21 @@
         textarea:disabled { opacity: 0.55; cursor: not-allowed; }
 
         .icon-btn {
-            color: var(--text-muted);
-            font-size: 1.05rem;
+            color: var(--text-main);
+            opacity: 0.75;
+            font-size: 1.18rem;
             cursor: pointer;
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
             transition: color 0.15s, background-color 0.15s, border-color 0.15s, opacity 0.15s;
         }
-        .icon-btn:hover:not(:disabled) { color: var(--text-main); background-color: var(--border-soft); }
-        .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .icon-btn:hover:not(:disabled) { opacity: 1; background-color: var(--border-soft); }
+        .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
         /* ===== دکمه‌ی حالت تفکر (Think) ===== */
         .think-btn-wrap { position: relative; flex-shrink: 0; }
@@ -1425,23 +1509,23 @@
             padding-bottom: 8vh;
         }
         .home-mark {
-            width: 72px; height: 72px; border-radius: 24px;
-            box-shadow: 0 18px 55px color-mix(in srgb, var(--accent-2) 14%, transparent), 0 0 35px color-mix(in srgb, var(--accent-1) 22%, transparent);
+            width: 52px; height: 52px; border-radius: 14px;
+            box-shadow: none;
         }
         .home-title {
-            font-size: clamp(1.7rem, 3vw, 2.35rem);
-            font-weight: 800;
+            font-size: clamp(1.8rem, 3vw, 2.4rem);
+            font-weight: 500;
             max-width: 680px;
         }
         .home-subtitle { font-size: 1rem; max-width: 580px; }
-        .suggestion-chips { max-width: 650px; gap: 10px; }
+        .suggestion-chips { max-width: 560px; gap: 8px; }
         .suggestion-chip {
-            padding: 11px 17px;
+            padding: 14px 18px;
             color: var(--text-main);
-            background: var(--bg-card);
+            background: transparent;
             border-radius: 14px;
         }
-        .suggestion-chip:hover { transform: translateY(-2px); }
+        .suggestion-chip:hover { background: var(--bg-card-hover); }
         .chat-box {
             padding: 30px max(7%, calc((100% - 940px) / 2));
             gap: 22px;
@@ -1456,7 +1540,7 @@
             letter-spacing: 0.005em;
         }
         .message.user {
-            background: var(--bg-card);
+            background: color-mix(in srgb, var(--text-main) 12%, var(--bg-card));
             border-radius: 20px;
             padding: 14px 18px;
         }
@@ -1502,10 +1586,6 @@
         }
         textarea#userInput { font-size: 1rem; line-height: 1.7; }
         .action-btn { border-radius: 12px; }
-        .new-chat-btn {
-            background: linear-gradient(135deg, color-mix(in srgb, var(--accent-1) 18%, transparent), color-mix(in srgb, var(--accent-2) 10%, transparent));
-            border-color: color-mix(in srgb, var(--accent-1) 28%, transparent);
-        }
         @media (max-width: 768px) {
             .chat-box { padding: 18px 14px; --chat-box-pad-top: 18px; }
             .message-wrapper.bot { max-width: 100%; }
@@ -1608,15 +1688,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         polish ===== */
         .sidebar-close-btn { display:flex !important; }
         .history-tools { display:flex; align-items:center; gap:7px; margin-top:10px; }
-        .history-search-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
-        .history-search-toggle:hover { color:var(--text-main); border-color:color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .history-search-toggle { width:36px; height:36px; border:none; background:transparent; color: var(--text-main); opacity:0.8; border-radius:8px; cursor:pointer; flex:0 0 36px; }
+        .history-search-toggle:hover { opacity:1; background: var(--bg-card-hover); }
         .history-search-input { display:none; min-width:0; flex:1; height:36px; padding:0 11px; border:1px solid var(--border-soft); outline:none; background:var(--bg-input); color:var(--text-main); border-radius:10px; font-family:inherit; font-size:.78rem; }
         .history-tools.active .history-search-input { display:block; animation:fadeIn .16s ease; }
         .history-empty { color:var(--text-muted); font-size:.75rem; text-align:center; padding:18px 8px; line-height:1.7; }
 
         /* ===== Multi-select bulk delete for chat history ===== */
-        .history-select-toggle { width:36px; height:36px; border:1px solid var(--border-soft); background:var(--bg-card); color:var(--text-muted); border-radius:10px; cursor:pointer; flex:0 0 36px; }
-        .history-select-toggle:hover, .history-select-toggle.active { color:var(--text-main); border-color:color-mix(in srgb, var(--accent-1) 40%, transparent); }
+        .history-select-toggle { width:36px; height:36px; border:none; background:transparent; color: var(--text-main); opacity:0.8; border-radius:8px; cursor:pointer; flex:0 0 36px; }
+        .history-select-toggle:hover, .history-select-toggle.active { opacity:1; background: var(--bg-card-hover); }
         .history-select-toggle.active { background: var(--accent-grad); color:#fff; border-color:transparent; }
         .history-list.select-mode .history-item { padding-right: 40px; position: relative; }
         .history-item-checkbox {
@@ -1640,7 +1720,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         .history-bulk-bar.active { display: flex; animation: fadeIn 0.16s ease; }
         .history-bulk-count { font-size: 0.78rem; color: var(--text-main); font-weight: 600; }
         .history-bulk-actions { display: flex; gap: 6px; }
-        .history-bulk-btn { border: 1px solid var(--border-soft); background: var(--bg-input); color: var(--text-main); border-radius: 8px; padding: 6px 10px; font-size: 0.74rem; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+        .history-bulk-btn { border: 1px solid var(--border-soft); background: var(--bg-input); color: var(--text-main); border-radius: 8px; padding: 7px 9px; font-size: 0.74rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; }
         .history-bulk-btn.danger { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
         .history-bulk-btn:hover { filter: brightness(1.15); }
         .sidebar.collapsed { width:0; min-width:0; padding-left:0; padding-right:0; border:0; overflow:hidden; }
@@ -1805,7 +1885,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .api-usage-wrap{position:relative}.api-usage-panel{display:none;position:absolute;top:calc(100% + 10px);left:0;right:auto;width:min(390px,calc(100vw - 28px));z-index:100;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px var(--shadow-b);padding:14px;backdrop-filter:blur(18px)}.api-usage-panel.active{display:block;animation:fadeIn .16s ease}.api-usage-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.api-usage-title{font-weight:800;font-size:.9rem}.api-usage-sub{font-size:.7rem;color:var(--text-muted);line-height:1.45}.api-usage-summary{padding:10px;border:1px solid var(--border-soft);border-radius:12px;background:var(--bg-card);margin-bottom:10px}.api-usage-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border-soft);font-size:.75rem}.api-usage-row:last-child{border-bottom:0}.api-usage-key{font-weight:700}.api-usage-count{font-variant-numeric:tabular-nums}.api-usage-status{font-size:.66rem;color:var(--text-muted)}.api-usage-refresh{border:1px solid var(--border);background:transparent;color:var(--text-main);border-radius:8px;padding:5px 8px;cursor:pointer}.api-usage-note{margin-top:9px;font-size:.67rem;color:var(--text-muted);line-height:1.5}.api-usage-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-2);margin-left:5px}.api-usage-dot.warn{background:var(--danger)}
 </style>
 </head>
-<body>
+<body class="is-home">
 
     <div id="toastContainer" aria-live="polite"></div>
 
@@ -1900,8 +1980,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="history-bulk-bar" id="historyBulkBar">
             <span class="history-bulk-count" id="historyBulkCount">۰ انتخاب شده</span>
             <div class="history-bulk-actions">
-                <button class="history-bulk-btn" type="button" onclick="selectAllHistoryItems()"><i class="lucide-icon" data-lucide="check-check"></i> همه</button>
-                <button class="history-bulk-btn danger" type="button" onclick="deleteSelectedHistoryItems()"><i class="lucide-icon" data-lucide="trash-2"></i> حذف</button>
+                <button class="history-bulk-btn" type="button" title="انتخاب همه" onclick="selectAllHistoryItems()"><i class="lucide-icon" data-lucide="check-check"></i></button>
+                <button class="history-bulk-btn danger" type="button" title="حذف انتخاب‌شده‌ها" onclick="deleteSelectedHistoryItems()"><i class="lucide-icon" data-lucide="trash-2"></i></button>
             </div>
         </div>
         <div class="history-list" id="historyList"></div>
@@ -1955,20 +2035,16 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         </div>
 
         <div class="home-screen" id="homeScreen">
-            <div class="home-mark"><i class="ph-fill ph-sparkle"></i></div>
             <div class="home-text">
+                <div class="home-mark"><i class="ph-fill ph-sparkle"></i></div>
                 <h1 class="home-title" id="welcomeHomeTitle">سلام! امروز چیکار کنیم؟</h1>
             </div>
-            <div class="suggestion-chips">
-                <div class="suggestion-chip" onclick="useSuggestion(this)">یه ایده خفن بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">ساده توضیح بده</div>
-                <div class="suggestion-chip" onclick="useSuggestion(this)">کد بنویس</div>
-            </div>
+            <div id="homeInputSlot"></div>
         </div>
 
         <div class="chat-box" id="chatBox"></div>
 
-        <div class="input-wrapper">
+        <div class="input-wrapper" id="inputWrapper">
             <div class="command-menu" id="commandMenu">
                 <div class="command-item" onclick="runComposerCommand('web')"><span><i class="lucide-icon" data-lucide="globe"></i> جستجو در وب</span><span>/web</span></div>
                 <div class="command-item" onclick="runComposerCommand('code')"><span><i class="lucide-icon" data-lucide="code"></i> حالت کدنویسی</span><span>/code</span></div>
@@ -3191,7 +3267,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         updateUserUI();
     }
 
-    const defaultSettings = { theme: 'auto', c1: '#6366f1', c2: '#a855f7', fontSize: 'normal', uiPalette: 'flat' };
+    const defaultSettings = { theme: 'auto', c1: '#6b7280', c2: '#374151', fontSize: 'normal', uiPalette: 'flat' };
 
     // FIX (stale palette stuck forever): کاربرهایی که قبل از این آپدیت از
     // اپ استفاده کرده بودند، تنظیمات قدیمی (uiPalette: 'charcoal' و رنگ‌های
@@ -3262,19 +3338,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             root.style.setProperty('--code-text', '#0d0d0d');
             root.style.setProperty('--shadow-a', 'rgba(30,41,59,0.08)');
             root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
-            root.style.setProperty('--accent-1', '#6366f1');
-            root.style.setProperty('--accent-2', '#a855f7');
-            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6366f1, #a855f7)');
+            root.style.setProperty('--accent-1', '#4b5563');
+            root.style.setProperty('--accent-2', '#1f2937');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #4b5563, #1f2937)');
             root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(0,0,0,0.015), transparent 45%), radial-gradient(circle at -10% 110%, rgba(0,0,0,0.01), transparent 40%)');
             return;
         }
         if (isFlat) {
-            root.style.setProperty('--bg-main', '#000000');
-            root.style.setProperty('--bg-sidebar', '#0a0a0a');
-            root.style.setProperty('--bg-card', '#171717');
-            root.style.setProperty('--bg-card-hover', '#212121');
-            root.style.setProperty('--bg-input', '#171717');
-            root.style.setProperty('--border', '#262626');
+            root.style.setProperty('--bg-main', '#1a1a1a');
+            root.style.setProperty('--bg-sidebar', '#141414');
+            root.style.setProperty('--bg-card', '#232323');
+            root.style.setProperty('--bg-card-hover', '#2a2a2a');
+            root.style.setProperty('--bg-input', '#232323');
+            root.style.setProperty('--border', '#2e2e2e');
             root.style.setProperty('--border-soft', 'rgba(255,255,255,0.08)');
             root.style.setProperty('--text-main', '#f4f6fb');
             root.style.setProperty('--text-muted', '#8a8a8a');
@@ -3283,9 +3359,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             root.style.setProperty('--code-text', '#f4f6fb');
             root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.3)');
             root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
-            root.style.setProperty('--accent-1', '#6366f1');
-            root.style.setProperty('--accent-2', '#a855f7');
-            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #6366f1, #a855f7)');
+            root.style.setProperty('--accent-1', '#9a9a9a');
+            root.style.setProperty('--accent-2', '#d4d4d4');
+            root.style.setProperty('--accent-grad', 'linear-gradient(135deg, #52525b, #71717a)');
             root.style.setProperty('--app-bg-image', 'radial-gradient(circle at 85% -10%, rgba(255,255,255,0.02), transparent 45%), radial-gradient(circle at -10% 110%, rgba(255,255,255,0.015), transparent 40%)');
             return;
         }
@@ -3393,6 +3469,28 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // دکمه‌ی دستی سرچ حذف شده؛ سرچ همیشه خودکاره. این تابع فقط برای
         // سازگاری با فرمان /web نگه داشته شده و کاری نمی‌کنه.
         isSearchEnabled = true;
+    }
+
+    // ===== حالت "خانه" (Open WebUI-style): نوار پیام واقعی رو بین
+    // تیتر خوش‌آمدگویی و کارت‌های پیشنهادی جابه‌جا می‌کنه، و با شروع
+    // چت به جای اصلیش (زیر chat-box) برمی‌گردونه. همون نود واقعیه،
+    // کپی نیست، پس هیچ id/رویداد تکراری ساخته نمی‌شه. */
+    function enterHomeLayout() {
+        const slot = document.getElementById('homeInputSlot');
+        const wrapper = document.getElementById('inputWrapper');
+        if (slot && wrapper && wrapper.parentElement !== slot) {
+            slot.appendChild(wrapper);
+        }
+        document.body.classList.add('is-home');
+    }
+    function exitHomeLayout() {
+        const mainContent = document.querySelector('.main-content');
+        const wrapper = document.getElementById('inputWrapper');
+        const chatBox = document.getElementById('chatBox');
+        if (mainContent && wrapper && chatBox && wrapper.parentElement !== mainContent) {
+            chatBox.insertAdjacentElement('afterend', wrapper);
+        }
+        document.body.classList.remove('is-home');
     }
 
     function toggleSidebar() {
@@ -4391,6 +4489,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (isFirstMessage) {
             document.getElementById("homeScreen").style.display = 'none';
             document.getElementById("chatBox").style.display = 'flex';
+            exitHomeLayout();
             isFirstMessage = false;
         }
 
@@ -4664,7 +4763,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="more-details-btn" type="button" onclick="toggleErrorDetails('${detailId}')">جزئیات بیشتر</button>
                 <div class="error-details" id="${detailId}" style="display:none;">
                     ${rows.join('')}
-                    <button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedDetail}">کپی جزئیات</button>
+                    <button class="code-action" type="button" title="کپی جزئیات" onclick="copyErrorDetails(this)" data-detail="${encodedDetail}"><i class="lucide-icon" data-lucide="copy"></i></button>
                 </div>`;
         }
 
@@ -4673,7 +4772,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const retryButtonHtml = canRetry
             ? `<button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button>`
             : `<span class="retry-disabled-note">این خطا قابل تکرار خودکار نیست.</span>`;
-        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i> کپی پیام</button></div>`;
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" title="کپی پیام" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i></button></div>`;
         if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
@@ -4689,7 +4788,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const text = decodeURIComponent(btn.dataset.detail || '');
         try { await navigator.clipboard.writeText(text); }
         catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.textContent; btn.textContent = 'کپی شد'; setTimeout(() => btn.textContent = old, 1200);
+        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i>'; setTimeout(() => btn.innerHTML = old, 1200);
         if (typeof showToast === 'function') showToast('جزئیات خطا کپی شد', 'success');
     }
 
@@ -5243,7 +5342,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function copyCode(btn) {
         const code = decodeURIComponent(btn.dataset.code || '');
         try { await navigator.clipboard.writeText(code); } catch { const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old=btn.textContent; btn.textContent='کپی شد'; setTimeout(()=>btn.textContent=old,1200);
+        const old=btn.innerHTML; btn.innerHTML='<i class="lucide-icon" data-lucide="check"></i>'; setTimeout(()=>{btn.innerHTML=old;},1200);
     }
 
     // FIX (requested): previously only HTML/"runnable" code blocks had a
@@ -5520,8 +5619,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد</span>
                     <div class="code-actions">
                         <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
-                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
-                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
+                        <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
+                        <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i></button>
                     </div>
                 </div>
                 <div class="edited-file-meta">${sizeKb} KB &middot; ${lineCount} خط &middot; آماده</div>
@@ -5679,8 +5778,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}${fuzzyNote}</span>
                     <div class="code-actions">
                         <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
-                        <button class="code-action" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i> کپی</button>
-                        <button class="code-action" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i> دانلود</button>
+                        <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
+                        <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i></button>
                     </div>
                 </div>
                 <div class="edited-file-meta">${sizeKb} KB &middot; آماده</div>
@@ -5715,7 +5814,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const code = decodeURIComponent(btn.dataset.code || '');
         try { await navigator.clipboard.writeText(code); }
         catch { const ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i> کپی شد';
+        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i>';
         setTimeout(() => btn.innerHTML = old, 1200);
         if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
     }
@@ -5749,6 +5848,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         chatBox?.addEventListener('scroll', updateScrollLatestButton, { passive: true });
         repairLoadedChatButtons(chatBox);
         updateScrollLatestButton();
+        if (document.body.classList.contains('is-home')) enterHomeLayout();
     }
     setTimeout(initializeV3, 0);
 
@@ -5760,6 +5860,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         document.getElementById("chatBox").innerHTML = "";
         document.getElementById("chatBox").style.display = 'none';
         document.getElementById("homeScreen").style.display = 'flex';
+        enterHomeLayout();
         // FIX: a New Chat must not silently carry over the previous chat's
         // attached file / code files. Without this, selectedFileData and
         // codeFilesMemory kept referencing files from the old conversation
@@ -6185,8 +6286,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         
         const chatBox = document.getElementById("chatBox");
         document.getElementById("homeScreen").style.display = 'none';
+        exitHomeLayout();
         chatBox.style.display = 'flex';
         chatBox.innerHTML = chats[id].html || '';
+        chatBox.querySelectorAll('.message-wrapper').forEach(w => w.classList.add('no-entry-anim'));
         repairLoadedChatButtons(chatBox);
         renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
@@ -6446,7 +6549,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                         <div class="code-card-head">
                             <span>${escapeHtml(lang||'code')}</span>
                             <div class="code-actions">
-                                <button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>
+                                <button class="code-action" type="button" title="کپی کد" onclick="copyCode(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
                             </div>
                         </div>
                         <pre><code>${escapeHtml(rawCode)}</code></pre>
@@ -6458,8 +6561,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     <div class="code-card-head">
                         <span class="code-card-filelabel"><i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(fileLabel)}</span>
                         <div class="code-actions">
-                            <button class="code-action" onclick="copyCode(this)" data-code="${encoded}">کپی</button>
-                            <button class="code-action" onclick="downloadCodeAsFile(this)" data-code="${encoded}" data-lang="${lang}">دانلود فایل</button>
+                            <button class="code-action" type="button" title="کپی کد" onclick="copyCode(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
+                            <button class="code-action" type="button" title="دانلود فایل" onclick="downloadCodeAsFile(this)" data-code="${encoded}" data-lang="${lang}"><i class="lucide-icon" data-lucide="download"></i></button>
                         </div>
                     </div>
                     <div class="code-card-meta">${lineCount} خط ${lang?('· '+escapeHtml(lang)):''}</div>
