@@ -2983,6 +2983,49 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         initUserData(); // اگر currentUser ست شده باشد چت‌های همان حساب، وگرنه چت‌های مهمان لود می‌شوند
     }
 
+    // ===== بهینه‌سازی و حفاظت در برابر خطای 413 (Payload Too Large) سرور ورسل =====
+    function sanitizeHtmlForSync(rawHtml) {
+        if (!rawHtml || typeof rawHtml !== 'string') return '';
+        // اگر کاربر عکس یا ویدیو ضمیمه کرده باشد، داده‌های base64 در DOM قرار می‌گیرند
+        // که حجم HTML را به راحتی به ۲ تا ۶ مگابایت می‌رسانند و سقف ورسل (4.5MB) را رد می‌کنند.
+        // در IndexedDB لوکال نسخه باکیفیت و کامل می‌ماند، اما برای سینک سرور داده‌های سنگین base64 خلاصه می‌شوند.
+        let cleaned = rawHtml.replace(/src=["']data:(image|video)\/[^;]+;base64,[^"']+["']/gi, (match) => {
+            if (match.length > 5000) {
+                return 'src="data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'120\' height=\'40\'><rect width=\'100%\' height=\'100%\' fill=\'%23222\'/><text x=\'50%\' y=\'55%\' fill=\'%23888\' font-size=\'11\' text-anchor=\'middle\' dominant-baseline=\'middle\'>[رسانه پیوست]</text></svg>"';
+            }
+            return match;
+        });
+        if (cleaned.length > 1500000) {
+            cleaned = cleaned.slice(-1500000);
+        }
+        return cleaned;
+    }
+
+    function prepareFilesForSync(chatId) {
+        const list = chatFileArchive[chatId] || [];
+        return list.slice(-3).map(f => ({
+            name: f.name,
+            savedAt: f.savedAt,
+            content: typeof f.content === 'string' && f.content.length > 250000
+                ? f.content.slice(0, 250000) + '\n...[محتوای فایل طولانی در سرور کوتاه شد]'
+                : f.content
+        }));
+    }
+
+    function prepareHistoryForSync(chatId) {
+        const list = chatHistoryData[chatId] || [];
+        return list.map(m => {
+            if (!m || !m.text || typeof m.text !== 'string') return m;
+            if (m.text.length > 300000) {
+                return {
+                    ...m,
+                    text: m.text.slice(0, 300000) + '\n...[متن طولانی در سینک کوتاه شد]'
+                };
+            }
+            return m;
+        });
+    }
+
     // ===== Sync گفتگوها با سرور (api/chats.js) - فقط وقتی کاربر لاگین است =====
     // FEATURE: این توابع علاوه بر IndexedDB محلی (که همیشه انجام می‌شود)،
     // در پس‌زمینه با سرور هم sync می‌کنند. اگر کاربر لاگین نباشد (مهمان)
@@ -2995,18 +3038,33 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const chat = chats[chatId];
         if (!chat) return;
         try {
-            await authFetch(`/api/chats?chatId=${encodeURIComponent(chatId)}`, {
+            const cleanHtml = sanitizeHtmlForSync(chat.html);
+            const syncHistory = prepareHistoryForSync(chatId);
+            const syncFiles = prepareFilesForSync(chatId);
+
+            const payload = {
+                title: chat.title || 'گفتگوی جدید',
+                html: cleanHtml,
+                pinned: !!chat.pinned,
+                updatedAt: Date.now(),
+                history: syncHistory,
+                files: syncFiles
+            };
+
+            const payloadStr = JSON.stringify(payload);
+            if (payloadStr.length > 3000000) {
+                console.warn('[sync] حجم گفتگو بیش از ۳ مگابایت است؛ HTML از پی‌لود سینک حذف شد.');
+                payload.html = '';
+            }
+
+            const resp = await authFetch(`/api/chats?chatId=${encodeURIComponent(chatId)}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: chat.title || 'گفتگوی جدید',
-                    html: chat.html || '',
-                    pinned: !!chat.pinned,
-                    updatedAt: Date.now(),
-                    history: chatHistoryData[chatId] || [],
-                    files: chatFileArchive[chatId] || []
-                })
+                body: JSON.stringify(payload)
             });
+            if (resp && resp.status === 413) {
+                console.warn('[sync] سرور خطای 413 برگرداند (حجم پی‌لود زیاد است) برای چت:', chatId);
+            }
         } catch (e) {
             console.error('[sync] save chat failed:', e);
         }
@@ -6433,6 +6491,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         exitHomeLayout();
         chatBox.style.display = 'flex';
         chatBox.innerHTML = chats[id].html || '';
+        // اگر HTML خالی بود ولی تاریخچه وجود داشت (مثلاً در چت‌های بسیار طولانی سینک‌شده)، DOM را از تاریخچه بازسازی کن
+        if (!chatBox.innerHTML.trim() && Array.isArray(chatHistoryData[id]) && chatHistoryData[id].length) {
+            let rebuilt = '';
+            for (const msg of chatHistoryData[id]) {
+                if (msg.__virtualPersona || !msg.text) continue;
+                const isUser = msg.role === 'user';
+                const cls = isUser ? 'user' : 'bot';
+                const formatted = isUser ? escapeHtml(msg.text).replace(/\n/g, '<br>') : (typeof formatReply === 'function' ? formatReply(msg.text) : escapeHtml(msg.text));
+                rebuilt += `<div class="message-wrapper ${cls}"><div class="message ${cls}">${formatted}</div></div>`;
+            }
+            chatBox.innerHTML = rebuilt;
+            chats[id].html = rebuilt;
+        }
         chatBox.querySelectorAll('.message-wrapper').forEach(w => w.classList.add('no-entry-anim'));
         repairLoadedChatButtons(chatBox);
         renderHistoryList();
