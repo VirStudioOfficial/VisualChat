@@ -19,7 +19,7 @@ const THINK_LEVEL_MAP = {
 // the MINIMAL thinking level.
 const THINKING_MODEL_DEFAULTS = {
     'gemini-3.5-flash-lite': null,
-    'gemini-3.7-flash': 'low',
+    'gemini-3.6-flash': 'low',
     'gemini-3.1-pro-preview': 'low'
 };
 
@@ -2472,7 +2472,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         ],
                         // FIX (Ú©Ù†Ø¯ÛŒ Ù…Ø­Ø³ÙˆØ³ Ø¨Ø§ Ù…Ø¯Ù„â€ŒÙ‡Ø§ÛŒ ØºÛŒØ± Ø§Ø² flash-lite): ØªØ§
                         // Ø§ÛŒÙ†Ø¬Ø§ Ù‡ÛŒÚ† generationConfig/thinkingConfig Ø§Ø±Ø³Ø§Ù„
-                        // Ù†Ù…ÛŒâ€ŒØ´Ø¯ØŒ Ù¾Ø³ gemini-3.7-flash Ùˆ gemini-3.1-pro-preview
+                        // Ù†Ù…ÛŒâ€ŒØ´Ø¯ØŒ Ù¾Ø³ gemini-3.6-flash Ùˆ gemini-3.1-pro-preview
                         // Ø¨Ø§ Ø³Ø·Ø­ ØªÙÚ©Ø± Ù¾ÛŒØ´â€ŒÙØ±Ø¶ Ø®ÙˆØ¯Ø´Ø§Ù† (Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø®Ø§Ù†ÙˆØ§Ø¯Ù‡ Ø§Ø²
                         // Ù…Ø¯Ù„â€ŒÙ‡Ø§ Ù…Ø¹Ù…ÙˆÙ„Ø§Ù‹ medium/high Ø§Ø³Øª) Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´Ø¯Ù†Ø¯ - ÛŒØ¹Ù†ÛŒ
                         // Ù‚Ø¨Ù„ Ø§Ø² Ø´Ø±ÙˆØ¹ Ø§Ø³ØªØ±ÛŒÙ… Ù¾Ø§Ø³Ø®ØŒ Ù…Ø¯Ù„ Ù…Ø¯Øª Ù‚Ø§Ø¨Ù„â€ŒØªÙˆØ¬Ù‡ÛŒ ØµØ±Ù
@@ -3824,7 +3824,7 @@ async function handler(req, res) {
         // ÙÙ‚Ø· Ù†Ø§Ù… Ù…Ø¯Ù„ Ø¯Ø§Ø®Ù„ÛŒ Ú©Ù‡ Ø¯Ø± Ù…Ø¹Ø±ÙÛŒ Ø§Ø­ØªÙ…Ø§Ù„ÛŒ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ ÙØ±Ù‚ Ø¯Ø§Ø±Ø¯).
         const modelDisplayName =
             MODEL_NAME === 'gemini-3.5-flash-lite' ? 'Virtual Bot 1.1' :
-            MODEL_NAME === 'gemini-3.7-flash' ? 'Virtual Bot 1.6' :
+            MODEL_NAME === 'gemini-3.6-flash' ? 'Virtual Bot 1.6' :
             MODEL_NAME === 'gemini-3.1-pro-preview' ? 'Virtual Bot 1.3' :
             'Virtual Bot';
 
@@ -3987,7 +3987,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             'gemini-3.1-pro-preview'
         ) {
             modelsToTry.push(
-                'gemini-3.7-flash'
+                'gemini-3.6-flash'
             );
 
             modelsToTry.push(
@@ -3997,7 +3997,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
         if (
             MODEL_NAME ===
-            'gemini-3.7-flash'
+            'gemini-3.6-flash'
         ) {
             modelsToTry.push(
                 'gemini-3.5-flash-lite'
