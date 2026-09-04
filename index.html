@@ -5289,7 +5289,29 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
             streamEnded = true;
             window.__isStreamingReply = false;
-            queueLiveRender(true);
+            // FIX (افکت "رفرش خوردن" وقتی پیام تمام می‌شود): اینجا قبلاً دو
+            // اتفاق پشت‌سرهم می‌افتاد که با هم یک پرش/چشمک محسوس می‌ساختند:
+            // ۱) queueLiveRender(true) کل باقی‌مانده‌ی متن را یک‌دفعه (بدون
+            // انیمیشن حرف‌به‌حرف) می‌پراند وسط صفحه، ۲) بلافاصله بعدش
+            // loadingDiv.innerHTML دوباره با finalHtml جایگزین می‌شد و
+            // کلاس msgContentIn هم عمداً حذف/اضافه می‌شد تا انیمیشن pop از
+            // نو اجرا شود - یعنی محتوا برای یک لحظه دوبار پشت‌سرهم به‌طور
+            // کامل بازسازی می‌شد. دیگر انیمیشن نهایی pop را اجرا نمی‌کنیم؛
+            // به‌جایش صبر می‌کنیم افکت حرف‌به‌حرف طبیعی به انتهای متن برسد
+            // (یا اگر کاربر همان لحظه اسکرول کرده/تب را عوض کرده، بی‌صدا در
+            // پس‌زمینه کامل می‌شود) و سپس finalHtml را جایگزین می‌کنیم -
+            // بدون ری‌استارت انیمیشن، چون بصری هیچ تفاوتی با آخرین فریمِ
+            // حرف‌به‌حرف ندارد.
+            await new Promise((resolve) => {
+                const waitForReveal = () => {
+                    if (requestId !== activeRequestId) { resolve(); return; }
+                    const liveView = stripFileEditBlock(fullReply).displayText;
+                    if (revealedChars >= liveView.length) { resolve(); return; }
+                    requestAnimationFrame(waitForReveal);
+                };
+                startRevealLoop();
+                requestAnimationFrame(waitForReveal);
+            });
             // اگر حین استریم آیکون جدیدی اضافه شده بود و ناظر عمداً صبر
             // کرده بود، همین الان که استریم تمام شد یک‌بار رفرش کن.
             if (window.__lucideRefreshPending && window.lucide) {
@@ -5347,9 +5369,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 }
 
                 loadingDiv.innerHTML = finalHtml;
-                loadingDiv.classList.remove('msg-content-in');
-                void loadingDiv.offsetWidth; // restart animation
-                loadingDiv.classList.add('msg-content-in');
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
                 removePushedUserTurnIfUnanswered();
