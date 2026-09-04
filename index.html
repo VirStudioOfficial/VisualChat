@@ -6490,9 +6490,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         document.getElementById("homeScreen").style.display = 'none';
         exitHomeLayout();
         chatBox.style.display = 'flex';
-        chatBox.innerHTML = chats[id].html || '';
+        let fullHtml = chats[id].html || '';
         // اگر HTML خالی بود ولی تاریخچه وجود داشت (مثلاً در چت‌های بسیار طولانی سینک‌شده)، DOM را از تاریخچه بازسازی کن
-        if (!chatBox.innerHTML.trim() && Array.isArray(chatHistoryData[id]) && chatHistoryData[id].length) {
+        if (!fullHtml.trim() && Array.isArray(chatHistoryData[id]) && chatHistoryData[id].length) {
             let rebuilt = '';
             for (const msg of chatHistoryData[id]) {
                 if (msg.__virtualPersona || !msg.text) continue;
@@ -6501,9 +6501,67 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const formatted = isUser ? escapeHtml(msg.text).replace(/\n/g, '<br>') : (typeof formatReply === 'function' ? formatReply(msg.text) : escapeHtml(msg.text));
                 rebuilt += `<div class="message-wrapper ${cls}"><div class="message ${cls}">${formatted}</div></div>`;
             }
-            chatBox.innerHTML = rebuilt;
+            fullHtml = rebuilt;
             chats[id].html = rebuilt;
         }
+
+        // FEATURE (paged chat loading): چت‌های طولانی کل HTML‌شون رو یک‌جا
+        // توی DOM نمی‌ریزن - فقط آخرین PAGE_SIZE پیام رندر می‌شه، و بقیه‌ی
+        // پیام‌های قدیمی‌تر توی یه container جدا (نه توی DOM اصلی) نگه
+        // داشته می‌شن. کلیک روی دکمه‌ی "بارگذاری پیام‌های قدیمی‌تر" همون
+        // بافر رو parse می‌کنه و PAGE_SIZE پیام بعدی رو از انتها به اول
+        // چت اضافه می‌کنه، بدون این‌که هیچ فراخوانی شبکه/سرور لازم باشه -
+        // همه‌چیز از همون chats[id].html که از قبل توی حافظه/IndexedDB هست
+        // خونده می‌شه. این باعث می‌شه باز کردن یک چت خیلی طولانی همون‌قدر
+        // سبک بمونه که یک چت تازه.
+        const PAGE_SIZE = 15;
+        const parser = document.createElement('div');
+        parser.innerHTML = fullHtml;
+        const allWrappers = Array.from(parser.children);
+
+        chatBox.innerHTML = '';
+        delete chatBox.dataset.pendingOlderCount;
+
+        if (allWrappers.length <= PAGE_SIZE) {
+            allWrappers.forEach(w => chatBox.appendChild(w));
+        } else {
+            const remaining = allWrappers.length - PAGE_SIZE;
+            const olderWrappers = allWrappers.slice(0, remaining);
+            const recentWrappers = allWrappers.slice(remaining);
+
+            // بافر پیام‌های قدیمی‌تر - توی DOM نیست، فقط نگه داشته می‌شه
+            // تا وقتی کاربر واقعاً درخواستشون رو بده.
+            chatBox.__olderWrappersBuffer = olderWrappers;
+
+            const loadOlderBtn = document.createElement('div');
+            loadOlderBtn.className = 'load-older-messages';
+            loadOlderBtn.style.cssText = 'text-align:center;padding:10px 16px;margin:8px auto;max-width:fit-content;cursor:pointer;opacity:0.85;font-size:0.88em;border:1px solid var(--border-soft,rgba(255,255,255,0.15));border-radius:20px;transition:opacity .15s;';
+            loadOlderBtn.onmouseenter = () => { loadOlderBtn.style.opacity = '1'; };
+            loadOlderBtn.onmouseleave = () => { loadOlderBtn.style.opacity = '0.85'; };
+            loadOlderBtn.textContent = `بارگذاری ${remaining} پیام قدیمی‌تر`;
+            loadOlderBtn.onclick = () => {
+                const buffer = chatBox.__olderWrappersBuffer || [];
+                if (!buffer.length) { loadOlderBtn.remove(); return; }
+                const prevScrollHeight = chatBox.scrollHeight;
+                const nextBatch = buffer.splice(Math.max(0, buffer.length - PAGE_SIZE));
+                nextBatch.forEach(w => {
+                    w.classList.add('no-entry-anim');
+                    loadOlderBtn.insertAdjacentElement('afterend', w);
+                });
+                repairLoadedChatButtons(chatBox);
+                if (buffer.length) {
+                    loadOlderBtn.textContent = `بارگذاری ${buffer.length} پیام قدیمی‌تر`;
+                } else {
+                    loadOlderBtn.remove();
+                }
+                // موقعیت اسکرول رو حفظ کن تا با اضافه شدن پیام‌های بالا، دید کاربر نپره
+                chatBox.scrollTop += (chatBox.scrollHeight - prevScrollHeight);
+            };
+
+            chatBox.appendChild(loadOlderBtn);
+            recentWrappers.forEach(w => chatBox.appendChild(w));
+        }
+
         chatBox.querySelectorAll('.message-wrapper').forEach(w => w.classList.add('no-entry-anim'));
         repairLoadedChatButtons(chatBox);
         renderHistoryList();
