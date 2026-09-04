@@ -2515,7 +2515,19 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     signal: controller.signal
                 }
             );
-            await recordGoogleAttempt(currentKey, upstream.status, keyIndex);
+            // FIX (KV telemetry blocking Gemini latency): this was
+            // `await`ed here, which meant every Gemini call waited on
+            // up to 6 KV round-trips (each with a 1.8s timeout) BEFORE
+            // we even started reading the actual Gemini stream. That
+            // contradicts the fire-and-forget design described on
+            // recordGoogleAttempt itself and could add real seconds to
+            // every response. Kept fire-and-forget: still runs and still
+            // completes before the function exits (Node/Vercel keeps
+            // the event loop alive for pending promises within the same
+            // invocation), just no longer blocks the response path.
+            recordGoogleAttempt(currentKey, upstream.status, keyIndex).catch((error) => {
+                log.warn('usage.record_attempt_failed', { message: error?.message });
+            });
         } finally {
             clearTimeout(timeoutId);
             if (signal) signal.removeEventListener('abort', onAbort);
