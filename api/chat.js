@@ -512,8 +512,8 @@ function keyLabel(keys, key) {
 | lost. This is a lightweight heuristic summary (not a model call) so it
 | never adds latency or extra API cost.
 */
-const MAX_HISTORY_TURNS = 60;       // most recent user+model turns kept verbatim (~30 user messages, since each user turn has a matching model turn)
-const MAX_HISTORY_CHARS = 60000;    // rough safety cap on total history text size
+const MAX_HISTORY_TURNS = 30;       // most recent user+model turns kept verbatim (~15 user messages, since each user turn has a matching model turn)
+const MAX_HISTORY_CHARS = 30000;    // rough safety cap on total history text size
 const MAX_SEARCH_RESULT_CHARS = 12000; // safety cap on a single web_search result injected into context
 
 function summarizeOldTurns(oldTurns) {
