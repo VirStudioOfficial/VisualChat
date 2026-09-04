@@ -2724,6 +2724,18 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // (نه با هر تغییر بی‌ربط DOM) آیکون‌ها رو رندر می‌کنه. این باعث
         // می‌شه دکمه‌هایی که همین الان لود شدن، بدون دلیل دوباره جایگزین
         // نشن و افکت hover/transition روشون قطع نشه (چشمک زدن دکمه‌ها).
+        // FIX (فریز کامل UI حین استریم پیام): lucide.createIcons() بدون
+        // آرگومان کل document را از صفر اسکن می‌کند و هر [data-lucide]
+        // موجود در کل صفحه را (نه فقط نود تازه اضافه‌شده) با SVG جایگزین
+        // می‌کند. چون بلوک‌های کد داخل پاسخ استریم‌شده هم دکمه‌ی کپی با
+        // data-lucide دارند، هر بار loadingDiv.innerHTML تغییر می‌کرد این
+        // MutationObserver فعال می‌شد و ۶۰ میلی‌ثانیه بعد یک اسکن سنگین
+        // روی کل بدنه‌ی صفحه اجرا می‌کرد - دقیقاً هم‌زمان با پارس دوباره‌ی
+        // formatReply روی کل پاسخ. این دو عملیات سنگین روی هم تلنبار
+        // می‌شدند و ترد اصلی را برای یک لحظه کامل قفل می‌کردند (fullReply
+        // متوقف به‌نظر می‌رسید و انیمیشن‌ها اصلاً اجرا نمی‌شدند). حالا فقط
+        // خودِ زیردرخت‌های واقعاً تغییر کرده را به createIcons می‌دهیم، نه
+        // کل body.
         function hasNewLucideIcon(mutations) {
             for (const m of mutations) {
                 for (const node of m.addedNodes) {
@@ -2737,9 +2749,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (window.lucide) {
             try { lucide.createIcons(); } catch (e) {}
             const iconObserver = new MutationObserver((mutations) => {
+                // در حین استریم شدن یک پیام، آیکون‌های داخلش (مثل دکمه‌ی
+                // کپی کد) لازم نیست لحظه‌به‌لحظه رندر بشن - همین که پیام
+                // کامل شد یک‌بار رندر می‌شوند (نگاه کنید به فراخوانی
+                // lucide.createIcons روی loadingDiv در پایان استریم).
+                // در حین استریم شدن، فقط این را یادداشت کن که یک رفرش
+                // لازم است - خودِ اسکن سنگین createIcons() را عمداً اجرا
+                // نمی‌کنیم تا با پارس مارک‌داون روی هم تلنبار نشود.
                 if (!hasNewLucideIcon(mutations)) return;
+                window.__lucideRefreshPending = true;
+                if (window.__isStreamingReply) return;
                 clearTimeout(window.__lucideRefreshTimer);
                 window.__lucideRefreshTimer = setTimeout(() => {
+                    window.__lucideRefreshPending = false;
                     try { lucide.createIcons(); } catch (e) {}
                 }, 60);
             });
@@ -5088,6 +5110,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             let streamEditedFiles = null;
             let liveRenderTimer = null;
             let streamEnded = false;
+            // FIX (فریز UI حین استریم): تا وقتی این پرچم روشنه، ناظر
+            // آیکون‌های لوسید اسکن سنگین createIcons() را روی هر تیکه‌ی
+            // جدید متن اجرا نمی‌کند - چون همان لحظه formatReply هم دارد
+            // کل متن را دوباره پارس می‌کند و اجرای هم‌زمان این دو، ترد
+            // اصلی را قفل می‌کرد.
+            window.__isStreamingReply = true;
 
             const flushLiveRender = () => {
                 liveRenderTimer = null;
@@ -5214,7 +5242,15 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             }
 
             streamEnded = true;
+            window.__isStreamingReply = false;
             queueLiveRender(true);
+            // اگر حین استریم آیکون جدیدی اضافه شده بود و ناظر عمداً صبر
+            // کرده بود، همین الان که استریم تمام شد یک‌بار رفرش کن.
+            if (window.__lucideRefreshPending && window.lucide) {
+                window.__lucideRefreshPending = false;
+                clearTimeout(window.__lucideRefreshTimer);
+                try { lucide.createIcons(); } catch (e) {}
+            }
 
             if (requestId !== activeRequestId) return;
 
@@ -5293,6 +5329,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             saveCurrentChat();
         } finally {
             clearTimeout(watchdogId);
+            // مطمئن شو این پرچم در هیچ مسیر خروجی (موفق/خطا/Stop) روشن
+            // نمی‌ماند، وگرنه ناظر آیکون‌ها برای همیشه غیرفعال باقی می‌ماند.
+            window.__isStreamingReply = false;
+            if (window.__lucideRefreshPending && window.lucide) {
+                window.__lucideRefreshPending = false;
+                clearTimeout(window.__lucideRefreshTimer);
+                try { lucide.createIcons(); } catch (e) {}
+            }
             if (requestId === activeRequestId) {
                 currentAbortController = null;
                 activeLoadingDiv = null;
