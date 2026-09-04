@@ -3454,18 +3454,13 @@ async function handler(req, res) {
                 ? req.body.files
                 : (file ? [file] : []);
 
-        // Guard: reject any individual text file content that is absurdly large.
-        // The frontend already caps this at 300KB, but the backend must not
-        // trust the client - a hand-crafted request could skip that check.
-        const MAX_TEXT_FILE_CHARS = 300 * 1024;
-
+        // NOTE: no size cap on text files anymore - removed by request.
         const textFiles =
             incomingFiles.filter(
                 f =>
                     f &&
                     f.mode === 'text' &&
-                    typeof f.content === 'string' &&
-                    f.content.length <= MAX_TEXT_FILE_CHARS
+                    typeof f.content === 'string'
             );
 
         // FIX (block-editing system silently never activated): fileEditIntent
@@ -3483,21 +3478,6 @@ async function handler(req, res) {
         // (the model just never calls read_block/write_block), so there's no
         // downside to always doing it whenever textFiles is non-empty.
         const fileEditIntent = textFiles.length > 0;
-
-        const oversizedTextFiles =
-            incomingFiles.filter(
-                f =>
-                    f &&
-                    f.mode === 'text' &&
-                    typeof f.content === 'string' &&
-                    f.content.length > MAX_TEXT_FILE_CHARS
-            );
-
-        if (oversizedTextFiles.length > 0) {
-            log.warn('file.rejected_too_large_text', {
-                names: oversizedTextFiles.map(f => f.name || 'unknown')
-            });
-        }
 
         const binaryFiles =
             incomingFiles.filter(
@@ -3991,14 +3971,6 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 - Ù‡Ø±Ú¯Ø² Ø¬Ù…Ù„Ù‡â€ŒÙ‡Ø§ÛŒÛŒ Ù…Ø«Ù„ Â«Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø°Ø®ÛŒØ±Ù‡/ÙˆÛŒØ±Ø§ÛŒØ´/Ø§Ø¹Ù…Ø§Ù„ Ø´Ø¯Â» ÛŒØ§ Ù…Ø´Ø§Ø¨Ù‡ Ø¢Ù† Ù†Ù†ÙˆÛŒØ³ Ù…Ú¯Ø± Ø§ÛŒÙ†Ú©Ù‡ ÙˆØ§Ù‚Ø¹Ø§Ù‹ apply_edit Ø±Ø§ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø¨Ø§Ø´ÛŒ (Ùˆ success:true Ú¯Ø±ÙØªÙ‡ Ø¨Ø§Ø´ÛŒ) Ùˆ Ø³Ù¾Ø³ verify_file Ø±Ø§ ØµØ¯Ø§ Ø²Ø¯Ù‡ Ø¨Ø§Ø´ÛŒ Ùˆ valid:true Ú¯Ø±ÙØªÙ‡ Ø¨Ø§Ø´ÛŒ. Ø§Ú¯Ø± Ø§ÛŒÙ† Ø¯Ùˆ Ø§Ø¨Ø²Ø§Ø± ØµØ¯Ø§ Ø²Ø¯Ù‡ Ù†Ø´Ø¯Ù‡ ÛŒØ§ Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯Ù‡â€ŒØ§Ù†Ø¯ØŒ Ù‡Ø±Ú¯Ø² Ø§Ø¯Ø¹Ø§ÛŒ Ù…ÙˆÙÙ‚ÛŒØª Ù†Ú©Ù† - ÙÙ‚Ø· Ø¨Ú¯Ùˆ Ú©Ù‡ Ù‡Ù†ÙˆØ² Ù…ÙˆÙÙ‚ Ù†Ø´Ø¯Ù‡â€ŒØ§ÛŒ.
 - ØªØºÛŒÛŒØ± Ú©Ø¯ Ø±Ø§ Ù‡Ø±Ú¯Ø² Ø¨Ù‡â€ŒØµÙˆØ±Øª ÛŒÚ© Ø¨Ù„ÙˆÚ© Ú©Ø¯ Ø¬Ø¯Ø§ (Ù…Ø«Ù„Ø§Ù‹ \`\`\`html ... \`\`\` ÛŒØ§ \`\`\`css ... \`\`\`) Ø¯Ø± Ù…ØªÙ† Ù¾Ø§Ø³Ø® Ù†Ù†ÙˆÛŒØ³ ÛŒØ§ Ù†Ø´Ø§Ù† Ù†Ø¯Ù‡ØŒ Ø­ØªÛŒ Ø§Ú¯Ø± Ø¨Ø®ÙˆØ§Ù‡ÛŒ ÙÙ‚Ø· ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡ÛŒ Ú†Ù‡ Ú†ÛŒØ²ÛŒ Ø¹ÙˆØ¶ Ø´Ø¯Ù‡ - Ø§ÛŒÙ† Ú©Ø§Ø± ØªÙˆØ³Ø· Ø±Ø§Ø¨Ø· Ú©Ø§Ø±Ø¨Ø±ÛŒ Ø¨Ù‡â€ŒØ¹Ù†ÙˆØ§Ù† ÛŒÚ© ÙØ§ÛŒÙ„ Ø¬Ø¯ÛŒØ¯ Ùˆ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ (Ù†Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´ ÙØ§ÛŒÙ„ Ù…ÙˆØ¬ÙˆØ¯) Ù†Ù…Ø§ÛŒØ´ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ù‡ÛŒÚ† Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙˆØ§Ù‚Ø¹ÛŒ Ù†Ø¯Ø§Ø±Ø¯ØŒ Ùˆ Ú©Ø§Ø±Ø¨Ø± Ø±Ø§ Ú¯ÛŒØ¬ Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ú†ÙˆÙ† ÙÚ©Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯ Ø§ÛŒÙ† Ù‡Ù…Ø§Ù† ÙØ§ÛŒÙ„ ÙˆÛŒØ±Ø§ÛŒØ´â€ŒØ´Ø¯Ù‡ Ø§Ø³Øª Ø¯Ø± Ø­Ø§Ù„ÛŒ Ú©Ù‡ Ù†ÛŒØ³Øª. Ø§Ú¯Ø± Ù…ÛŒâ€ŒØ®ÙˆØ§Ù‡ÛŒ ØªØºÛŒÛŒØ± Ø±Ø§ ØªÙˆØ¶ÛŒØ­ Ø¯Ù‡ÛŒØŒ ÙÙ‚Ø· Ø¯Ø± Ù‚Ø§Ù„Ø¨ Ù…ØªÙ† Ø¹Ø§Ø¯ÛŒ (Ø¨Ø¯ÙˆÙ† \`\`\`) ØªÙˆØ¶ÛŒØ­ Ø¨Ø¯Ù‡Ø› ØªØºÛŒÛŒØ± ÙˆØ§Ù‚Ø¹ÛŒ ÙÙ‚Ø· Ùˆ ÙÙ‚Ø· Ø§Ø² Ø·Ø±ÛŒÙ‚ apply_edit + verify_file Ø§Ø¹Ù…Ø§Ù„ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
 - Ø§Ú¯Ø± apply_edit ÛŒØ§ verify_file Ø´Ú©Ø³Øª Ø®ÙˆØ±Ø¯Ù†Ø¯ Ùˆ Ù†ØªÙˆØ§Ù†Ø³ØªÛŒ Ø¨Ø§ ØªÙ„Ø§Ø´ Ù…Ø¬Ø¯Ø¯ Ø¯Ø±Ø³ØªØ´Ø§Ù† Ú©Ù†ÛŒØŒ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ø¨Ú¯Ùˆ Ú©Ù‡ ÙˆÛŒØ±Ø§ÛŒØ´ Ø§Ù†Ø¬Ø§Ù… Ù†Ø´Ø¯ Ùˆ Ú†Ø±Ø§ - Ù‡Ø±Ú¯Ø² ÙˆØ§Ù†Ù…ÙˆØ¯ Ù†Ú©Ù† Ú©Ù‡ Ø§Ù†Ø¬Ø§Ù… Ø´Ø¯Ù‡ØŒ Ùˆ Ù‡Ø±Ú¯Ø² Ø¨Ù‡â€ŒØ¬Ø§ÛŒ Ø§Ù†Ø¬Ø§Ù… ÙˆØ§Ù‚Ø¹ÛŒ ÙˆÛŒØ±Ø§ÛŒØ´ØŒ ÙÙ‚Ø· ÙØ§ÛŒÙ„ Ø±Ø§ Ø¯Ø± Ù¾Ø§Ø³Ø® Ù…ØªÙ†ÛŒ Ø¨Ø§Ø²Ù†ÙˆÛŒØ³ÛŒ Ù†Ú©Ù†.
-`;
-        }
-
-        if (oversizedTextFiles.length > 0) {
-            const droppedNames = oversizedTextFiles.map(f => `Â«${f.name || 'file'}Â»`).join('ØŒ ');
-            systemText += `
-
-ØªÙˆØ¬Ù‡: ÙØ§ÛŒÙ„(Ù‡Ø§ÛŒ) ${droppedNames} Ø¨Ù‡â€ŒØ¯Ù„ÛŒÙ„ Ø­Ø¬Ù… Ø²ÛŒØ§Ø¯ (Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ù…Ø¬Ø§Ø²) Ù¾Ø±Ø¯Ø§Ø²Ø´ Ù†Ø´Ø¯Ù†Ø¯ Ùˆ Ø¯Ø± Ø§Ø®ØªÛŒØ§Ø± ØªÙˆ Ù†ÛŒØ³ØªÙ†Ø¯. Ø§Ú¯Ø± Ú©Ø§Ø±Ø¨Ø± Ø¯Ø±Ø¨Ø§Ø±Ù‡â€ŒÛŒ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ Ø³Ø¤Ø§Ù„ Ú©Ø±Ø¯ØŒ ØµØ§Ø¯Ù‚Ø§Ù†Ù‡ Ø¨Ú¯Ùˆ Ú©Ù‡ ÙØ§ÛŒÙ„ Ø¨Ù‡â€ŒØ®Ø§Ø·Ø± Ø­Ø¬Ù… Ø²ÛŒØ§Ø¯ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯Ù‡ Ùˆ Ø¨Ø§ÛŒØ¯ Ù†Ø³Ø®Ù‡â€ŒÛŒ Ú©ÙˆÚ†Ú©â€ŒØªØ±ÛŒ Ø¨ÙØ±Ø³ØªØ¯.
 `;
         }
 
