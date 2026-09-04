@@ -1215,6 +1215,9 @@
             border-bottom: 1px solid var(--border-soft);
             margin-bottom: 6px;
         }
+        #codeFilesBar {
+            display: none;
+        }
         #codeFilesBar.has-items {
             display: flex;
             border-bottom: 1px solid var(--border-soft);
@@ -4282,11 +4285,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 selectedFilesData.push({ __previewId: previewId, name: file.name, type: file.size > MAX_DIRECT_SIZE ? 'video/webm' : (file.type || guessMimeType(file.name)), base64: videoBase64 });
                 updateFilePreviewItem(previewId, { status: 'ویدیو آماده', statusClass: 'success' });
             } else if (isCodeOrTextFile(file)) {
-                const MAX_TEXT_SIZE = 650 * 1024;
-                if (file.size > MAX_TEXT_SIZE) {
-                    updateFilePreviewItem(previewId, { status: 'فایل خیلی بزرگ است (حداکثر ۶۵۰ کیلوبایت)', statusClass: 'error' });
-                    showToast('فایل خیلی بزرگه — حداکثر ۶۵۰ کیلوبایت برای فایل متنی/کد.', 'warning');
-                } else {
+                // NOTE: no size cap on text/code files anymore - removed by request.
+                {
                     const text = await new Promise((resolve, reject) => {
                         const reader = new FileReader();
                         reader.onload = (e) => resolve(String(e.target.result || ''));
