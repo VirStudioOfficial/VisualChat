@@ -664,7 +664,22 @@
         }
         @media (max-width: 900px) {
             .composer-model-selector .model-name { display: none; }
-            .composer-model-selector .model-dropdown { left: auto; right: 0; }
+            /* FIX (منوی مدل از صفحه بیرون می‌زد در موبایل عمودی): این
+               دراپ‌داون به composer-model-selector می‌چسبد که خودش گوشه‌ی
+               چپِ نوار پیام (نزدیک دکمه‌ی +) قرار دارد. حالت قبلی با
+               right:0 لبه‌ی راست دراپ‌داون را به لبه‌ی راست همین باکس
+               باریک می‌چسباند، پس عرض ۱۶۰px+ باکس به‌جای رشد به‌سمت داخل
+               صفحه، از لبه‌ی چپ صفحه بیرون می‌زد. با left:0 دراپ‌داون از
+               همان گوشه‌ی چپِ دکمه (جایی که واقعاً باز می‌شود) به‌سمت راست
+               و داخل صفحه رشد می‌کند. علاوه بر آن یک max-width بر اساس
+               عرض واقعی صفحه هم اضافه شده تا حتی روی گوشی‌های خیلی باریک
+               (کمتر از ۱۶۰px فضای باقی‌مانده) هم هرگز از صفحه بیرون نزند.
+            */
+            .composer-model-selector .model-dropdown {
+                left: 0;
+                right: auto;
+                max-width: calc(100vw - 24px);
+            }
         }
         @keyframes dropUp {
             from { opacity: 0; transform: translateY(6px); }
