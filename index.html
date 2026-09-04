@@ -5117,37 +5117,83 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // اصلی را قفل می‌کرد.
             window.__isStreamingReply = true;
 
-            const flushLiveRender = () => {
-                liveRenderTimer = null;
+            // FEATURE (نمایش حرف‌به‌حرف شبیه ChatGPT): قبلاً هر تیکه‌ای که
+            // از شبکه می‌رسید مستقیم و یکجا با innerHTML جایگزین می‌شد، پس
+            // متن به‌صورت تکه‌های بزرگ و ناگهانی ظاهر می‌شد، نه نرم و
+            // حرف‌به‌حرف. اینجا متن واقعی (fullReply) از رندر بصری جدا شده:
+            // چیزی که کاربر می‌بیند با یک تایمر مستقل و ملایم به‌سمت
+            // fullReply.length "کشیده" می‌شود، با سرعتی که خودش را با
+            // سرعت رسیدن متن از سرور تطبیق می‌دهد (اگر سرور سریع‌تر از حد
+            // معمول تایپ متن بفرستد، سرعت نمایش هم بیشتر می‌شود تا عقب
+            // نیفتد؛ اگر سرور کند شود، نمایش هم روی همان نقطه صبر می‌کند).
+            let revealedChars = 0;
+            let revealRafId = null;
+            let lastRevealTs = 0;
+
+            let lastRenderedChars = -1;
+            let lastRenderTs = 0;
+            const renderRevealed = (ts, force = false) => {
                 if (requestId !== activeRequestId) return;
+                // حداکثر نرخ رندر واقعی (پارس + innerHTML) را حدود ۳۰ فریم
+                // در ثانیه نگه می‌داریم - برای چشم انسان کاملاً نرم است،
+                // ولی نصف هزینه‌ی پارس کردن در هر فریمِ ۶۰fps را حذف می‌کند.
+                if (!force && ts && lastRenderTs && (ts - lastRenderTs) < 32) return;
+                lastRenderTs = ts || lastRenderTs;
                 const liveView = stripFileEditBlock(fullReply).displayText;
-                let html = formatReply(sanitizeVirtualIdentity(liveView));
-                // Cursor is pure CSS (no JS timers, no extra reflow work),
-                // so it doesn't slow down rendering — it's just appended to
-                // whatever HTML was already going to be written, and removed
-                // automatically once streaming ends (see below).
-                if (!streamEnded) html += '<span class="stream-cursor"></span>';
+                const clamped = Math.min(revealedChars, liveView.length);
+                if (!force && clamped === lastRenderedChars) return;
+                lastRenderedChars = clamped;
+                const shown = liveView.slice(0, clamped);
+                let html = formatReply(sanitizeVirtualIdentity(shown));
+                if (!streamEnded || clamped < liveView.length) html += '<span class="stream-cursor"></span>';
                 loadingDiv.innerHTML = html;
                 scrollToLatest(false);
             };
 
-            const queueLiveRender = (force = false) => {
-                if (force) {
-                    if (liveRenderTimer) clearTimeout(liveRenderTimer);
-                    flushLiveRender();
+            const revealTick = (ts) => {
+                revealRafId = null;
+                if (requestId !== activeRequestId) return;
+                const liveView = stripFileEditBlock(fullReply).displayText;
+                const target = liveView.length;
+                if (revealedChars >= target) {
+                    if (streamEnded) { renderRevealed(ts, true); return; }
+                    lastRevealTs = ts;
+                    revealRafId = requestAnimationFrame(revealTick);
                     return;
                 }
-                if (liveRenderTimer) return;
-                // FIX (لگ روی پاسخ‌های بلند): formatReply کل متن جمع‌شده تا
-                // این لحظه را از صفر پارس می‌کند، نه فقط تکه‌ی جدید - پس
-                // هزینه‌ی هر رندر با بلندتر شدن پاسخ رشد می‌کند (تقریباً
-                // درجه دو در طول کل استریم). یک تأخیر ثابت ۶۴ میلی‌ثانیه‌ای
-                // برای پاسخ‌های خیلی بلند کافی نیست چون خودِ پارس‌کردن هم
-                // بیشتر از ۶۴ میلی‌ثانیه طول می‌کشد و رندرها روی هم تلنبار
-                // می‌شوند. فاصله‌ی رندر را متناسب با طول متن فعلی زیاد
-                // می‌کنیم تا مرورگر فرصت کافی برای هر رندر داشته باشد.
-                const delay = fullReply.length > 6000 ? 220 : fullReply.length > 2000 ? 130 : 64;
-                liveRenderTimer = setTimeout(flushLiveRender, delay);
+                const dt = lastRevealTs ? (ts - lastRevealTs) : 16;
+                lastRevealTs = ts;
+                // سرعت پایه: حدود ۴۵ کاراکتر در هر ثانیه (نرم و قابل خواندن).
+                // اگر متنی که هنوز نمایش داده نشده خیلی زیاد شده باشد (سرور
+                // سریع‌تر از نرخ نمایش متن فرستاده)، سرعت را افزایش می‌دهیم
+                // تا نمایش هیچ‌وقت خیلی از متن واقعی عقب نیفتد.
+                const backlog = target - revealedChars;
+                const baseCharsPerSec = 45;
+                const speedup = backlog > 400 ? 6 : backlog > 150 ? 3 : backlog > 40 ? 1.6 : 1;
+                const charsThisFrame = Math.max(1, Math.round((dt / 1000) * baseCharsPerSec * speedup));
+                revealedChars = Math.min(target, revealedChars + charsThisFrame);
+                renderRevealed(ts);
+                revealRafId = requestAnimationFrame(revealTick);
+            };
+
+            const startRevealLoop = () => {
+                if (revealRafId) return;
+                lastRevealTs = 0;
+                revealRafId = requestAnimationFrame(revealTick);
+            };
+
+            const flushLiveRender = () => {
+                liveRenderTimer = null;
+                startRevealLoop();
+            };
+
+            const queueLiveRender = (force = false) => {
+                // با روش جدید، خودِ revealTick (rAF) مسئول نرخ رندر بصری
+                // است، نه setTimeout - پس اینجا فقط کافی است حلقه روشن
+                // بماند؛ force هم یعنی همین الان یک فریم رندر کن (مثلاً در
+                // پایان استریم، برای رساندن سریع به انتهای متن).
+                startRevealLoop();
+                if (force) { revealedChars = stripFileEditBlock(fullReply).displayText.length; renderRevealed(0, true); }
             };
 
             while (true) {
