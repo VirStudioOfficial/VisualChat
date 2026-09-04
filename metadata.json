@@ -1,0 +1,6 @@
+{
+  "name": "Virtual Chat",
+  "description": "AI-powered chat application with multimodal and streaming capabilities",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -2,7 +2,14 @@
   "name": "virtual-chat",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "dev": "node server.js",
+    "build": "echo 'Build complete'",
+    "start": "node server.js",
+    "lint": "node -c server.js && node -c api/chat.js"
+  },
   "dependencies": {
+    "express": "^5.2.1",
     "redis": "^4.7.0"
   }
 }
