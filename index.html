@@ -5022,17 +5022,25 @@
                     thinkingConfig: { thinkingLevel: 'low' },
                     speechConfig: {
                         voiceConfig: { prebuiltVoiceConfig: { voiceName: getLiveVoicePref() } }
-                    },
-                    // Ask the server to also stream back text transcripts
-                    // of both sides of the audio conversation, alongside
-                    // the audio itself - not a separate STT pass we'd have
-                    // to run ourselves. inputTranscription covers what the
-                    // user said, outputTranscription covers what the model
-                    // said. Used to mirror the live call into the regular
-                    // text chat in real time (see ws.onmessage below).
-                    inputAudioTranscription: {},
-                    outputAudioTranscription: {}
+                    }
                 },
+                // Ask the server to also stream back text transcripts of
+                // both sides of the audio conversation, alongside the
+                // audio itself - not a separate STT pass we'd have to run
+                // ourselves. inputAudioTranscription covers what the user
+                // said, outputAudioTranscription covers what the model
+                // said. Used to mirror the live call into the regular
+                // text chat in real time (see ws.onmessage below).
+                //
+                // NOTE: these two fields live directly under `setup`, as
+                // siblings of generationConfig - NOT nested inside it.
+                // Nesting them inside generationConfig (where some older
+                // docs/examples put them) gets rejected by this model
+                // with "Unknown name inputAudioTranscription at
+                // setup.generation_config: Cannot find field" (code 1007)
+                // - confirmed against gemini-3.1-flash-live-preview.
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
                 tools: tools,
                 realtimeInputConfig: {
                     automaticActivityDetection: { disabled: true }
