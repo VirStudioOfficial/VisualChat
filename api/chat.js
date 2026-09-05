@@ -2701,34 +2701,34 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
         };
 
+        // FIX (duplicated-looking paragraphs on file-edit turns): the
+        // verify_file gate below (search for "agent.verify_gate.forced")
+        // can force an extra round AFTER the model has already written and
+        // streamed what it thought was its final "تمام شد" paragraph for
+        // this round. Gemini then treats the forced verify_file round as a
+        // fresh turn and writes ANOTHER full closing paragraph once it sees
+        // the result - so the user sees two (or more) similar-but-not-
+        // identical paragraphs back to back.
+        //
+        // This buffer is intentionally separate from pendingToolPreamble/
+        // armPreambleHoldTimer above: those exist for the search-preamble
+        // case and have their own PREAMBLE_HOLD_MS(1500ms) forced-flush
+        // timeout, which fires the moment a file-edit closing paragraph
+        // (routinely several seconds of streamed text) runs past 1.5s -
+        // reusing them silently defeated this fix, since preambleTimedOut
+        // then made every later chunk this round bypass the hold entirely.
+        // A file-edit closing paragraph must never be time-boxed like that:
+        // it has to be held for the WHOLE round no matter how long the
+        // model takes, because only the end of the round (zero function
+        // calls vs. a forced verify_file) tells us whether it was real.
+        let pendingEditClosingText = '';
+
         const handleStreamText = (text) => {
-            // FIX (duplicated-looking paragraphs on file-edit turns): the
-            // verify_file gate below (search for "agent.verify_gate.forced")
-            // can force an extra round AFTER the model has already written
-            // and streamed what it thought was its final "تمام شد" paragraph
-            // for this round. Gemini then treats the forced verify_file
-            // round as a fresh turn and writes ANOTHER full closing
-            // paragraph once it sees the result - so the user sees two (or
-            // more) similar-but-not-identical paragraphs back to back,
-            // looking like a "typing restarted from scratch" bug even
-            // though each one is a real, distinct round.
-            //
-            // Fix: on any round where this request is a file edit AND at
-            // least one file still has unverified edits (editCount > 0 &&
-            // !verified) AND no functionCall has been seen yet this round,
-            // we don't yet know whether this round's text is the model's
-            // true final answer or a premature "done" claim about to be
-            // followed by a forced verify round. Hold it exactly like the
-            // search preamble buffer - if a functionCall arrives (forced
-            // verify_file or a real one), the round loop below decides
-            // whether to keep or discard it; if the round ends with truly
-            // zero function calls, it is flushed normally further down.
             const hasUnverifiedEdits = !!(fileEditIntent && editStates && editStates.size > 0 &&
                 [...editStates.values()].some(s => s.editCount > 0 && !s.verified));
 
             if (hasUnverifiedEdits && !sawFunctionCall) {
-                pendingToolPreamble += text;
-                armPreambleHoldTimer();
+                pendingEditClosingText += text;
                 return;
             }
 
@@ -2766,6 +2766,12 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 // small preamble is left as-is — the discard only applies to
                 // whatever is still sitting in the buffer at this point.)
                 pendingToolPreamble = '';
+                // A real functionCall this round (the model itself decided
+                // to keep working, e.g. another apply_edit) means whatever
+                // it wrote just before that call was mid-task narration, not
+                // a final answer - discard it the same way, for the same
+                // reason.
+                pendingEditClosingText = '';
             }
 
             for (const part of parts) {
@@ -2891,12 +2897,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 // verify_file ever ran - it must NOT reach the client, since
                 // the verify_file round below will produce the model's real
                 // (and only) closing paragraph once it actually knows the
-                // edit is valid. That text was held (not streamed) by the
-                // hasUnverifiedEdits branch in handleStreamText above
+                // edit is valid. That text was held (not streamed) in
+                // pendingEditClosingText by handleStreamText above
                 // specifically so it could be discarded here instead of
                 // showing the user two similar paragraphs back to back.
-                pendingToolPreamble = '';
-                clearPreambleHoldTimer();
+                pendingEditClosingText = '';
             }
         }
 
@@ -2951,6 +2956,16 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             if (pendingToolPreamble) {
                 emitStreamText(pendingToolPreamble);
                 pendingToolPreamble = '';
+            }
+            // FIX (duplicated-looking paragraphs): this round genuinely
+            // ended with zero function calls AND (since the verify gate
+            // above did not fire / already ran earlier for this file) is
+            // not a premature claim - it's the model's real final answer.
+            // Flush the closing text that was held back in
+            // pendingEditClosingText while we didn't yet know that.
+            if (pendingEditClosingText) {
+                emitStreamText(pendingEditClosingText);
+                pendingEditClosingText = '';
             }
             // Final answer. Text is already streamed live above. There is
             // normally nothing left to flush here; keep a fallback for any
