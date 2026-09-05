@@ -1261,33 +1261,105 @@
 
         .live-call-overlay {
             position: fixed; inset: 0; z-index: 9999;
-            background: color-mix(in srgb, var(--bg-main) 92%, transparent);
-            backdrop-filter: blur(6px);
+            background:
+                radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--accent-1, #6d5efc) 16%, transparent), transparent 55%),
+                color-mix(in srgb, var(--bg-main) 96%, transparent);
+            backdrop-filter: blur(14px);
             display: none;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 28px;
+            gap: 36px;
         }
         .live-call-overlay.open { display: flex; }
+
+        /* اورب اصلی: چند لایه‌ی حلقه‌ی محو که به‌آرومی نفس می‌کشن (idle)،
+           وقتی کاربر صحبت می‌کنه سریع‌تر و فشرده‌تر واکنش نشون می‌دن، و
+           وقتی مدل داره جواب می‌ده حلقه‌ها با یک موج بیرون‌رونده حرکت
+           می‌کنن - این سه حالت باعث میشه فوراً معلوم باشه کی نوبت کیه،
+           به‌جای یک آیکون ثابت که تفاوتی بین «گوش می‌ده» و «داره جواب
+           می‌ده» نشون نمی‌داد. */
+        .live-orb-wrap {
+            position: relative;
+            width: 168px; height: 168px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .live-orb-ring {
+            position: absolute; inset: 0;
+            border-radius: 50%;
+            border: 1.5px solid color-mix(in srgb, var(--accent-1, #6d5efc) 45%, transparent);
+            opacity: 0;
+        }
         .live-orb {
-            width: 128px; height: 128px; border-radius: 50%;
+            position: relative; z-index: 1;
+            width: 108px; height: 108px; border-radius: 50%;
             background: var(--accent-grad);
             display: flex; align-items: center; justify-content: center;
-            font-size: 2.4rem; color: #fff;
-            transition: transform 0.15s ease;
+            font-size: 2rem; color: #fff;
+            box-shadow: 0 8px 40px color-mix(in srgb, var(--accent-1, #6d5efc) 35%, transparent);
+            transition: transform 0.2s ease;
+            animation: liveOrbIdle 3.2s ease-in-out infinite;
         }
-        .live-orb.speaking { animation: micPulse 1s infinite; }
-        .live-status-text { color: var(--text-main); font-size: 1rem; opacity: 0.85; }
-        .live-call-controls { display: flex; gap: 16px; }
+        @keyframes liveOrbIdle {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.045); }
+        }
+        /* حالت "کاربر داره صحبت می‌کنه": حلقه‌ها به‌سرعت از داخل اورب
+           بیرون می‌زنن - شبیه موج صدای واقعی، نه یک پالس نگران‌کننده‌ی
+           قرمز که قبلاً استفاده می‌شد. */
+        .live-orb-wrap.listening .live-orb-ring {
+            animation: liveRingListening 1.4s ease-out infinite;
+        }
+        .live-orb-wrap.listening .live-orb-ring:nth-child(2) { animation-delay: 0.35s; }
+        @keyframes liveRingListening {
+            0% { transform: scale(0.72); opacity: 0.55; border-color: color-mix(in srgb, var(--accent-1, #6d5efc) 70%, transparent); }
+            100% { transform: scale(1.35); opacity: 0; }
+        }
+        /* حالت "مدل داره جواب می‌ده": اورب خودش کمی بزرگ‌تر و درخشان‌تر
+           می‌شه و حلقه‌ها آروم‌تر و پیوسته‌تر حرکت می‌کنن - تفکیک واضح از
+           حالت گوش دادن. */
+        .live-orb-wrap.speaking .live-orb {
+            animation: liveOrbSpeaking 0.9s ease-in-out infinite;
+        }
+        .live-orb-wrap.speaking .live-orb-ring {
+            animation: liveRingSpeaking 2.2s ease-in-out infinite;
+            border-color: color-mix(in srgb, var(--accent-2, #d4d4d4) 55%, transparent);
+        }
+        .live-orb-wrap.speaking .live-orb-ring:nth-child(2) { animation-delay: 0.5s; }
+        @keyframes liveOrbSpeaking {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.09); }
+        }
+        @keyframes liveRingSpeaking {
+            0% { transform: scale(0.85); opacity: 0.4; }
+            50% { transform: scale(1.15); opacity: 0.15; }
+            100% { transform: scale(0.85); opacity: 0.4; }
+        }
+        .live-status-text {
+            color: var(--text-main); font-size: 1.05rem; font-weight: 500;
+            opacity: 0.9; letter-spacing: 0.01em;
+        }
+        /* برچسب کوچک زیر متن وضعیت که همیشه روشن می‌کنه این یک تماس
+           صوتی با هوش مصنوعیه، نه یک تماس تلفنی معمولی - همون چیزی که
+           قبلاً کاملاً غایب بود و باعث می‌شد ظاهر شبیه تماس واقعی به نظر
+           بیاد. */
+        .live-call-subtitle {
+            color: var(--text-muted, #aab3c5); font-size: 0.85rem;
+            display: flex; align-items: center; gap: 6px;
+            margin-top: -22px;
+        }
+        .live-call-subtitle i { font-size: 0.95rem; }
+        .live-call-controls { display: flex; gap: 18px; }
         .live-call-controls button {
-            width: 56px; height: 56px; border-radius: 50%; border: none;
+            width: 58px; height: 58px; border-radius: 50%; border: none;
             display: flex; align-items: center; justify-content: center;
             font-size: 1.3rem; cursor: pointer; color: #fff;
+            transition: transform 0.15s ease, filter 0.15s ease;
         }
+        .live-call-controls button:hover { filter: brightness(1.1); transform: translateY(-1px); }
         .live-end-btn { background: var(--danger); }
-        .live-mute-btn { background: var(--bg-card, #333); color: var(--text-main); }
-        .live-mute-btn.muted { background: var(--accent-2); }
+        .live-mute-btn { background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-soft, rgba(255,255,255,0.09)); }
+        .live-mute-btn.muted { background: var(--accent-2); color: var(--bg-main); }
 
         /* REDESIGN v2 (مطابق نمونه‌ی درخواستی): فایل‌های غیرتصویری به‌صورت
            چیپ بزرگ‌تر با آیکون دایره‌ای توپر و دو خط متن (اسم + نوع فایل)
@@ -2176,8 +2248,13 @@
 
                 <!-- Gemini Live full-screen call overlay -->
                 <div class="live-call-overlay" id="liveCallOverlay">
-                    <div class="live-orb" id="liveOrb"><i class="ph-fill ph-waveform"></i></div>
+                    <div class="live-orb-wrap" id="liveOrbWrap">
+                        <div class="live-orb-ring"></div>
+                        <div class="live-orb-ring"></div>
+                        <div class="live-orb" id="liveOrb"><i class="ph-fill ph-waveform"></i></div>
+                    </div>
                     <div class="live-status-text" id="liveStatusText">در حال اتصال...</div>
+                    <div class="live-call-subtitle"><i class="ph-fill ph-sparkle"></i> گفتگوی صوتی با هوش مصنوعی</div>
                     <div class="live-call-controls">
                         <button class="live-mute-btn" id="liveMuteBtn" onclick="toggleLiveMute()" title="قطع/وصل میکروفن">
                             <i class="ph-fill ph-microphone" id="liveMuteIcon"></i>
@@ -4740,8 +4817,9 @@
 
         const overlay = document.getElementById('liveCallOverlay');
         const statusText = document.getElementById('liveStatusText');
-        const orb = document.getElementById('liveOrb');
+        const orbWrap = document.getElementById('liveOrbWrap');
         overlay.classList.add('open');
+        orbWrap.classList.remove('listening', 'speaking');
         statusText.textContent = 'در حال گرفتن مجوز میکروفن...';
 
         liveState = {
@@ -4845,13 +4923,14 @@
                     const audioB64 = part.inlineData?.data;
                     if (audioB64 && part.inlineData?.mimeType?.startsWith('audio/')) {
                         playLiveAudioChunk(audioB64);
-                        orb.classList.add('speaking');
+                        orbWrap.classList.remove('listening');
+                        orbWrap.classList.add('speaking');
                         statusText.textContent = 'در حال صحبت...';
                     }
                 }
 
                 if (data.serverContent?.turnComplete) {
-                    orb.classList.remove('speaking');
+                    orbWrap.classList.remove('speaking');
                     statusText.textContent = 'در حال گوش دادن...';
                 }
 
@@ -4859,7 +4938,7 @@
                     // The model was interrupted by the user talking - stop
                     // whatever audio is still queued for playback.
                     stopQueuedPlayback();
-                    orb.classList.remove('speaking');
+                    orbWrap.classList.remove('speaking');
                 }
             };
 
@@ -4945,6 +5024,8 @@
         const SILENCE_HANG_MS = 600;     // silence needed before activityEnd
         liveState.speaking = false;
         liveState.lastVoiceTs = 0;
+        const orbWrap = document.getElementById('liveOrbWrap');
+        const statusText = document.getElementById('liveStatusText');
 
         liveState.micProcessorNode.port.onmessage = (e) => {
             if (!liveState || liveState.muted || !liveState.ws || liveState.ws.readyState !== WebSocket.OPEN) return;
@@ -4961,10 +5042,18 @@
                 if (!liveState.speaking) {
                     liveState.speaking = true;
                     liveState.ws.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
+                    // Visual feedback that the mic is actually picking up
+                    // the user's voice right now - this is what was
+                    // missing before: no indication the user was heard.
+                    orbWrap.classList.remove('speaking');
+                    orbWrap.classList.add('listening');
+                    statusText.textContent = 'در حال شنیدن...';
                 }
             } else if (liveState.speaking && (now - liveState.lastVoiceTs) >= SILENCE_HANG_MS) {
                 liveState.speaking = false;
                 liveState.ws.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
+                orbWrap.classList.remove('listening');
+                statusText.textContent = 'در حال گوش دادن...';
             }
 
             // Only stream audio while inside a detected speech turn - this
@@ -5125,9 +5214,9 @@
         liveState = null;
 
         const overlay = document.getElementById('liveCallOverlay');
-        const orb = document.getElementById('liveOrb');
+        const orbWrap = document.getElementById('liveOrbWrap');
         overlay.classList.remove('open');
-        orb.classList.remove('speaking');
+        orbWrap.classList.remove('speaking', 'listening');
     }
 
     // ===== نقطه‌ی وضعیت روی آیکون تب مرورگر =====
