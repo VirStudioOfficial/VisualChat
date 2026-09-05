@@ -860,6 +860,19 @@
         .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
         .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
+        /* FIX (هدر کارت کد هنگام اسکرول کمی پایین‌تر/محو به‌نظر می‌رسید):
+           #chatBox یک mask-image (فید محو) در ۲۸ پیکسل بالا/پایین خودش دارد
+           تا لبه‌ی بالای ناحیه‌ی پیام‌ها به‌جای بریدگی تیز، محو شود. این ماسک
+           روی کل چیزی که داخل #chatBox رندر می‌شود به‌صورت یک لایه‌ی واحد
+           اعمال می‌شود - یعنی هر عنصر sticky که با top:0 دقیقاً به لبه‌ی
+           بالای همین کادر بچسبد، همیشه داخل همان نوار ۲۸ پیکسلیِ محوشونده
+           قرار می‌گیرد و از پشتش کمی محو/جابه‌جا دیده می‌شود - همان چیزی که
+           «هدر سرجایش نیست» احساس می‌شود. mask-image روی خودِ هدر ارث‌بری
+           نمی‌شود (چون ماسک والد روی رندر ترکیبی کل زیرشاخه اعمال می‌شود، نه
+           جداگانه روی هر فرزند)، پس تنها راه واقعی این است که نقطه‌ی
+           چسبیدنش را همان‌قدر که ماسک محو است (۲۸px) پایین‌تر ببریم تا هدر
+           همیشه *بعد* از ناحیه‌ی محو بنشیند، نه داخلش. */
+        .code-card-head { top: 28px; }
         /* FIX (پرش هدر کارت کد حین استریم): وقتی پاسخ در حال تایپ زنده است،
            loadingDiv.innerHTML مدام (تا ۳۰ بار در ثانیه) کل DOM را جایگزین
            می‌کند. چون هدر کارت کد position: sticky دارد، این جایگزینی مکرر
@@ -1601,7 +1614,7 @@
             text-align: left;
             white-space: pre;
             tab-size: 2;
-            background: #0b0f19;
+            background: var(--code-bg);
             padding: 16px;
             border-radius: 12px;
             overflow-x: auto;
