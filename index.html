@@ -6315,6 +6315,16 @@
         };
         currentAbortController = new AbortController();
 
+        // FIX (ReferenceError: revealRafId is not defined): این متغیرها قبلاً
+        // داخل try تعریف می‌شدند. اگر خطایی زودتر از رسیدن به آن خط رخ
+        // می‌داد (مثلاً خودِ fetch)، بلوک finally در پایین که به revealRafId
+        // ارجاع می‌دهد با ReferenceError متوقف می‌شد. با بالا آوردن تعریف
+        // آن‌ها (قبل از try)، در هر مسیر خروجی مقداری (حداقل null) دارند.
+        let revealedChars = 0;
+        let revealRafId = null;
+        let lastRevealTs = 0;
+        let catchUpOnVisible = () => {};
+
         try {
             const response = await fetch('/api/chat', {
                 method: "POST",
@@ -6445,9 +6455,10 @@
             // سرعت رسیدن متن از سرور تطبیق می‌دهد (اگر سرور سریع‌تر از حد
             // معمول تایپ متن بفرستد، سرعت نمایش هم بیشتر می‌شود تا عقب
             // نیفتد؛ اگر سرور کند شود، نمایش هم روی همان نقطه صبر می‌کند).
-            let revealedChars = 0;
-            let revealRafId = null;
-            let lastRevealTs = 0;
+            // (revealedChars/revealRafId/lastRevealTs بالای try تعریف شده‌اند)
+            revealedChars = 0;
+            revealRafId = null;
+            lastRevealTs = 0;
 
             let lastRenderedChars = -1;
             let lastRenderTs = 0;
@@ -6505,7 +6516,7 @@
             // نمایش بصری آن متوقف شده). با گوش‌دادن به visibilitychange،
             // به‌محض برگشت به تب، بلافاصله یک رندر کامل و فوری انجام
             // می‌دهیم تا کاربر منتظر تکمیل انیمیشن نماند.
-            const catchUpOnVisible = () => {
+            catchUpOnVisible = () => {
                 if (document.visibilityState !== 'visible') return;
                 if (requestId !== activeRequestId) return;
                 const liveView = stripFileEditBlock(fullReply).displayText;
