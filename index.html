@@ -4728,12 +4728,6 @@
     const LIVE_MODEL_NAME = 'gemini-3.1-flash-live-preview';
     const LIVE_SEND_SAMPLE_RATE = 16000;   // what we must send the model
     const LIVE_RECEIVE_SAMPLE_RATE = 24000; // what the model sends back
-    // How far ahead of "now" we schedule playback. Too small and any
-    // network jitter between chunks causes an audible gap (choppy/robotic
-    // speech); too large and there's a noticeable delay before the user
-    // hears anything after the model starts responding. 150ms is a
-    // reasonable middle ground for this kind of streamed audio.
-    const PLAYBACK_LOOKAHEAD_SEC = 0.15;
 
     let liveState = null; // holds everything for the active call, or null
 
@@ -4754,7 +4748,18 @@
             micSourceNode: null,
             micProcessorNode: null,
             playContext: null,
-            playQueueTime: 0,
+            playProcessorNode: null,
+            // Continuous playback queue: incoming PCM samples are pushed
+            // here and drained by a single always-running audio node. This
+            // replaces scheduling a separate AudioBufferSourceNode per
+            // network chunk, which - even with a lookahead cushion - was
+            // producing an audible click/gap at the boundary between
+            // chunks (heard as choppy, robotic, letter-by-letter speech),
+            // because each source node is its own independent playback
+            // unit and Web Audio doesn't guarantee sample-accurate
+            // gapless joins between separately-scheduled sources.
+            playQueue: [],       // array of Float32Array chunks awaiting playback
+            playQueueOffset: 0,  // how far into playQueue[0] we've already played
             muted: false,
             closing: false
         };
@@ -4783,7 +4788,7 @@
         // to it (see LIVE_PROXY_WS_URL above).
         try {
             liveState.playContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: LIVE_RECEIVE_SAMPLE_RATE });
-            liveState.playQueueTime = liveState.playContext.currentTime;
+            setUpContinuousPlayback();
 
             const ws = new WebSocket(LIVE_PROXY_WS_URL);
             liveState.ws = ws;
@@ -4956,47 +4961,62 @@
         return btoa(binary);
     }
 
+    function setUpContinuousPlayback() {
+        const bufferSize = 4096;
+        // 1 input channel (unused, all zeros), 1 output channel.
+        liveState.playProcessorNode = liveState.playContext.createScriptProcessor(bufferSize, 1, 1);
+        liveState.playProcessorNode.onaudioprocess = (e) => {
+            const out = e.outputBuffer.getChannelData(0);
+            let written = 0;
+            while (written < out.length && liveState.playQueue.length > 0) {
+                const head = liveState.playQueue[0];
+                const remaining = head.length - liveState.playQueueOffset;
+                const toCopy = Math.min(remaining, out.length - written);
+                out.set(head.subarray(liveState.playQueueOffset, liveState.playQueueOffset + toCopy), written);
+                written += toCopy;
+                liveState.playQueueOffset += toCopy;
+                if (liveState.playQueueOffset >= head.length) {
+                    liveState.playQueue.shift();
+                    liveState.playQueueOffset = 0;
+                }
+            }
+            // Nothing left to play: fill the rest of this block with
+            // silence rather than leaving stale/garbage data in the
+            // output buffer.
+            for (let i = written; i < out.length; i++) out[i] = 0;
+        };
+        // This node must be connected to the destination for
+        // onaudioprocess to fire at all (ScriptProcessorNode quirk), even
+        // though its own input is unused.
+        liveState.playProcessorNode.connect(liveState.playContext.destination);
+    }
+
     function playLiveAudioChunk(base64Audio) {
         if (!liveState || !liveState.playContext) return;
         const binary = atob(base64Audio);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-        // Incoming audio is raw PCM16 @ 24kHz, mono - decode manually into
-        // an AudioBuffer instead of decodeAudioData (which expects a full
-        // container format like wav/mp3, not headerless raw PCM).
+        // Incoming audio is raw PCM16 @ 24kHz, mono. Decode straight into
+        // a Float32Array and push it onto the continuous playback queue -
+        // the always-running processor above drains it sample-by-sample,
+        // so there's no per-chunk scheduling and therefore no boundary
+        // clicks between chunks.
         const sampleCount = bytes.length / 2;
-        const audioBuffer = liveState.playContext.createBuffer(1, sampleCount, LIVE_RECEIVE_SAMPLE_RATE);
-        const channel = audioBuffer.getChannelData(0);
+        const floatSamples = new Float32Array(sampleCount);
         const view = new DataView(bytes.buffer);
         for (let i = 0; i < sampleCount; i++) {
-            channel[i] = view.getInt16(i * 2, true) / 0x8000;
+            floatSamples[i] = view.getInt16(i * 2, true) / 0x8000;
         }
-
-        const source = liveState.playContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(liveState.playContext.destination);
-
-        const now = liveState.playContext.currentTime;
-        // PLAYBACK_LOOKAHEAD_SEC holds a small cushion of scheduled-but-not-
-        // yet-playing audio at all times. Without it, the very first chunk
-        // (and any chunk that arrives a beat late over the network) starts
-        // playing at `now` with zero buffer - if the next chunk is even
-        // slightly delayed, there's a real silence gap before it can be
-        // scheduled, which is exactly the choppy/stuttering, word-by-word
-        // playback being reported. Starting the queue this far in the
-        // future gives later chunks room to arrive before their turn.
-        const startAt = Math.max(now + PLAYBACK_LOOKAHEAD_SEC, liveState.playQueueTime);
-        source.start(startAt);
-        liveState.playQueueTime = startAt + audioBuffer.duration;
+        liveState.playQueue.push(floatSamples);
     }
 
     function stopQueuedPlayback() {
-        if (!liveState || !liveState.playContext) return;
-        // Reset the schedule so any chunks arriving after an interruption
-        // start playing after the same lookahead cushion as normal, instead
-        // of stacking on top of now-irrelevant already-queued audio.
-        liveState.playQueueTime = liveState.playContext.currentTime;
+        if (!liveState) return;
+        // Drop everything queued but not yet played - used when the model
+        // is interrupted, so stale audio doesn't keep playing afterward.
+        liveState.playQueue = [];
+        liveState.playQueueOffset = 0;
     }
 
     function toggleLiveMute() {
@@ -5019,6 +5039,7 @@
         try { liveState.micProcessorNode && liveState.micProcessorNode.disconnect(); } catch (_) {}
         try { liveState.micSourceNode && liveState.micSourceNode.disconnect(); } catch (_) {}
         try { liveState.micContext && liveState.micContext.close(); } catch (_) {}
+        try { liveState.playProcessorNode && liveState.playProcessorNode.disconnect(); } catch (_) {}
         try { liveState.playContext && liveState.playContext.close(); } catch (_) {}
         try { liveState.micStream && liveState.micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
 
