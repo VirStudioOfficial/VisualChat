@@ -3192,6 +3192,23 @@
                     });
                     await idbPut(HISTORY_STORE, { id: `${owner}:${chatId}`, owner, chatId, history: chatHistoryData[chatId] });
                     await idbPut(FILES_STORE, { id: `${owner}:${chatId}`, owner, chatId, files: chatFileArchive[chatId] });
+
+                    // FIX (پیام‌ها بعد از رفرش/سوییچ چت ناقص یا نصفه می‌شدند):
+                    // این‌جا فقط chats[chatId] در حافظه/IndexedDB آپدیت می‌شد،
+                    // ولی اگر کاربر همین لحظه دقیقاً همین چت را باز داشت،
+                    // خودِ DOM (#chatBox) هیچ‌وقت با نسخه‌ی تازه‌ی سرور
+                    // دوباره رندر نمی‌شد. یعنی صفحه هنوز نسخه‌ی قدیمی/محلی
+                    // را نشان می‌داد، ولی chats[chatId].html در پس‌زمینه با
+                    // نسخه‌ی سرور عوض شده بود. بعداً اگر کاربر پیامی می‌فرستاد،
+                    // saveCurrentChat() از روی همون DOM قدیمی (نه نسخه‌ی
+                    // sync‌شده) دوباره می‌نوشت و همین ناهماهنگی باعث می‌شد
+                    // پیام‌ها انگار نصفه/حذف‌شده به‌نظر برسند. راه‌حل: اگر
+                    // چتی که همین الان sync شد همان چت باز روی صفحه است و
+                    // کاربر وسط تایپ/استریم نیست، DOM را با loadChat دوباره
+                    // از نسخه‌ی تازه بازسازی می‌کنیم تا صفحه و حافظه یکی شوند.
+                    if (String(chatId) === String(currentChatId) && !isGenerating) {
+                        loadChat(chatId, true);
+                    }
                 }
             }
             renderHistoryList();
@@ -3383,6 +3400,24 @@
         // دستگاه‌های دیگر هم بیایند؛ چت‌های مهمان اصلاً به سرور نمی‌روند.
         if (currentUser) syncPullFromServer();
     }
+
+    // FIX (رفرش ناگهانی/بستن تب گاهی چند پیام آخر یا پیام‌های قدیمی‌تر
+    // بافرشده را از دست می‌داد): saveCurrentChat فقط بعد از فرستادن/دریافت
+    // پیام صدا زده می‌شود، نه با هر تعامل (مثلاً باز کردن دکمه‌ی «بارگذاری
+    // پیام‌های قدیمی‌تر» به‌تنهایی چیزی را ذخیره نمی‌کند). اگر درست همان
+    // لحظه کاربر رفرش/تب را ببندد، آخرین وضعیت واقعی DOM (شامل پیام‌های
+    // تازه‌بارگذاری‌شده) هرگز به IndexedDB نمی‌رسید. pagehide/beforeunload
+    // به‌عنوان یک safety-net همیشه یک saveCurrentChat سینک‌شده اجرا می‌کند
+    // (اگر چتی باز و در حال تولید نباشد) تا آخرین وضعیت واقعی صفحه از دست نرود.
+    function flushChatBeforeUnload() {
+        try {
+            if (currentChatId && chats[currentChatId] && !isGenerating) {
+                saveCurrentChat();
+            }
+        } catch (e) {}
+    }
+    window.addEventListener('pagehide', flushChatBeforeUnload);
+    window.addEventListener('beforeunload', flushChatBeforeUnload);
 
 
     function updateUserUI() {
@@ -5540,6 +5575,20 @@
                 }
 
                 loadingDiv.classList.remove('is-streaming');
+                // FIX (کارت‌های ویرایش فایل بعد از پایان استریم گاهی نمایش
+                // داده نمی‌شدند تا رفرش صفحه): حلقه‌ی انیمیشن حرف‌به‌حرف
+                // (revealTick/rAF) با startRevealLoop() دوباره روشن مانده
+                // بود و می‌توانست یک فریم اضافه بعد از همین‌جا اجرا شود -
+                // آن فریم loadingDiv.innerHTML را دوباره با formatReply
+                // ساده (بدون buildEditedFilesHtml/buildFileEditResultHtml)
+                // بازنویسی می‌کرد، یعنی کارت فایل که همین الان با finalHtml
+                // ست شده بود از DOM پاک می‌شد. رفرش صفحه چون از chats[id].html
+                // ذخیره‌شده (که finalHtml درست در آن ذخیره شده بود) دوباره
+                // می‌خواند، مشکل را "درست می‌کرد" - اما فقط چون از اول یک
+                // منبع دیگر می‌خواند، نه چون خودِ باگ رفع شده بود. با لغو
+                // صریح rAF درست همین‌جا، هیچ فریم دیرهنگامی دیگر
+                // loadingDiv را overwrite نمی‌کند.
+                if (revealRafId) { cancelAnimationFrame(revealRafId); revealRafId = null; }
                 loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
