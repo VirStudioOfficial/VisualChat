@@ -4705,9 +4705,12 @@
     |      traffic instead. The real GEMINI_API_KEY lives only on that
     |      proxy, never in the browser.
     |   2. Sends a setup message with the model + generationConfig.
-    |   3. Captures mic audio via getUserMedia + AudioWorklet-free ScriptNode
-    |      (kept dependency-free), downsamples to 16kHz PCM16, base64-encodes
-    |      and streams it as realtimeInput chunks.
+    |   3. Captures mic audio via getUserMedia + an AudioWorkletNode (source
+    |      registered inline from a Blob URL, so this stays a single
+    |      dependency-free HTML file with no separate .js asset or build
+    |      step), downsamples to 16kHz PCM16, base64-encodes and streams
+    |      it as realtimeInput chunks. Runs on the audio rendering thread,
+    |      not main, so it isn't starved when main thread is busy.
     |   4. Incoming model audio (24kHz PCM16, base64) is queued and played
     |      back through a second AudioContext.
     |   5. endLiveCall() tears everything down (mic tracks, audio contexts,
@@ -4749,17 +4752,16 @@
             micProcessorNode: null,
             playContext: null,
             playProcessorNode: null,
-            // Continuous playback queue: incoming PCM samples are pushed
-            // here and drained by a single always-running audio node. This
-            // replaces scheduling a separate AudioBufferSourceNode per
+            // Continuous playback: incoming PCM samples are transferred to
+            // the playback AudioWorklet (see setUpContinuousPlayback),
+            // which queues and drains them internally on the audio thread.
+            // This replaces scheduling a separate AudioBufferSourceNode per
             // network chunk, which - even with a lookahead cushion - was
             // producing an audible click/gap at the boundary between
             // chunks (heard as choppy, robotic, letter-by-letter speech),
             // because each source node is its own independent playback
             // unit and Web Audio doesn't guarantee sample-accurate
             // gapless joins between separately-scheduled sources.
-            playQueue: [],       // array of Float32Array chunks awaiting playback
-            playQueueOffset: 0,  // how far into playQueue[0] we've already played
             muted: false,
             closing: false
         };
@@ -4788,7 +4790,8 @@
         // to it (see LIVE_PROXY_WS_URL above).
         try {
             liveState.playContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: LIVE_RECEIVE_SAMPLE_RATE });
-            setUpContinuousPlayback();
+            await setUpContinuousPlayback();
+            if (!liveState) return; // call may have been ended while awaiting addModule
 
             const ws = new WebSocket(LIVE_PROXY_WS_URL);
             liveState.ws = ws;
@@ -4876,17 +4879,58 @@
         }
     }
 
-    function beginMicStreaming() {
+    // AudioWorkletProcessor source for the mic pipeline. This runs on the
+    // dedicated audio rendering thread, NOT the main thread - so unlike
+    // ScriptProcessorNode, it keeps firing on schedule (every ~128 frames)
+    // even when the main thread is busy parsing large incoming WS messages,
+    // re-rendering the UI, or running GC. That main-thread contention was
+    // exactly what produced the multi-second gaps between mic chunks we
+    // saw in the logs (onaudioprocess simply wasn't being called), which
+    // in turn delayed/dropped activityEnd. Registered once via a Blob URL
+    // so this stays a single dependency-free HTML file (no build step,
+    // no separate .js asset to host/serve).
+    const MIC_WORKLET_SOURCE = `
+        class MicCaptureProcessor extends AudioWorkletProcessor {
+            constructor() {
+                super();
+                this._bufferSize = 4096;
+                this._buffer = new Float32Array(this._bufferSize);
+                this._writeIndex = 0;
+            }
+            process(inputs) {
+                const input = inputs[0];
+                const channel = input && input[0];
+                if (!channel) return true;
+                for (let i = 0; i < channel.length; i++) {
+                    this._buffer[this._writeIndex++] = channel[i];
+                    if (this._writeIndex >= this._bufferSize) {
+                        // Transfer ownership to the main thread - zero-copy.
+                        this.port.postMessage(this._buffer, [this._buffer.buffer]);
+                        this._buffer = new Float32Array(this._bufferSize);
+                        this._writeIndex = 0;
+                    }
+                }
+                return true;
+            }
+        }
+        registerProcessor('mic-capture-processor', MicCaptureProcessor);
+    `;
+
+    async function beginMicStreaming() {
         if (!liveState || !liveState.micStream) return;
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         liveState.micContext = new AudioCtx({ sampleRate: LIVE_SEND_SAMPLE_RATE });
         liveState.micSourceNode = liveState.micContext.createMediaStreamSource(liveState.micStream);
 
-        // ScriptProcessorNode is deprecated but has zero build-step /
-        // dependency cost and is still supported everywhere - fine for a
-        // straightforward mic -> PCM16 pipeline like this one.
-        const bufferSize = 4096;
-        liveState.micProcessorNode = liveState.micContext.createScriptProcessor(bufferSize, 1, 1);
+        const workletBlobUrl = URL.createObjectURL(new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }));
+        try {
+            await liveState.micContext.audioWorklet.addModule(workletBlobUrl);
+        } finally {
+            URL.revokeObjectURL(workletBlobUrl);
+        }
+        if (!liveState) return; // call may have been ended while awaiting addModule
+
+        liveState.micProcessorNode = new AudioWorkletNode(liveState.micContext, 'mic-capture-processor');
 
         // --- Manual VAD state ---
         // We do our own speech/silence detection here (RMS amplitude
@@ -4902,9 +4946,9 @@
         liveState.speaking = false;
         liveState.lastVoiceTs = 0;
 
-        liveState.micProcessorNode.onaudioprocess = (e) => {
+        liveState.micProcessorNode.port.onmessage = (e) => {
             if (!liveState || liveState.muted || !liveState.ws || liveState.ws.readyState !== WebSocket.OPEN) return;
-            const input = e.inputBuffer.getChannelData(0);
+            const input = e.data; // Float32Array, 4096 samples
 
             let sumSquares = 0;
             for (let i = 0; i < input.length; i++) sumSquares += input[i] * input[i];
@@ -4940,8 +4984,9 @@
             }));
         };
 
+        // The worklet node still needs to be connected into the graph for
+        // its process() to be pulled, even though we don't use its output.
         liveState.micSourceNode.connect(liveState.micProcessorNode);
-        liveState.micProcessorNode.connect(liveState.micContext.destination);
     }
 
     function floatTo16BitPCM(float32Array) {
@@ -4961,62 +5006,96 @@
         return btoa(binary);
     }
 
-    function setUpContinuousPlayback() {
-        const bufferSize = 4096;
-        // 1 input channel (unused, all zeros), 1 output channel.
-        liveState.playProcessorNode = liveState.playContext.createScriptProcessor(bufferSize, 1, 1);
-        liveState.playProcessorNode.onaudioprocess = (e) => {
-            const out = e.outputBuffer.getChannelData(0);
-            let written = 0;
-            while (written < out.length && liveState.playQueue.length > 0) {
-                const head = liveState.playQueue[0];
-                const remaining = head.length - liveState.playQueueOffset;
-                const toCopy = Math.min(remaining, out.length - written);
-                out.set(head.subarray(liveState.playQueueOffset, liveState.playQueueOffset + toCopy), written);
-                written += toCopy;
-                liveState.playQueueOffset += toCopy;
-                if (liveState.playQueueOffset >= head.length) {
-                    liveState.playQueue.shift();
-                    liveState.playQueueOffset = 0;
-                }
+    // AudioWorkletProcessor source for playback. Same reasoning as the mic
+    // worklet above: this drains the queue on the audio thread, so main-
+    // thread contention (large incoming JSON messages, UI work, GC) can no
+    // longer cause playback underruns or scheduling gaps either.
+    //
+    // The queue itself (arrays of Float32Array chunks) still lives on the
+    // main thread, since that's where playLiveAudioChunk() decodes each
+    // incoming WS message. We ship whole chunks over to the worklet via
+    // postMessage (transferred, zero-copy) and it drains them sample-by-
+    // sample into its own internal queue - so a slow/late chunk arrival
+    // never blocks or is blocked by the audio callback itself.
+    const PLAYBACK_WORKLET_SOURCE = `
+        class PlaybackProcessor extends AudioWorkletProcessor {
+            constructor() {
+                super();
+                this._queue = [];
+                this._offset = 0;
+                this.port.onmessage = (e) => {
+                    if (e.data && e.data.type === 'push') {
+                        this._queue.push(e.data.samples);
+                    } else if (e.data && e.data.type === 'clear') {
+                        this._queue = [];
+                        this._offset = 0;
+                    }
+                };
             }
-            // Nothing left to play: fill the rest of this block with
-            // silence rather than leaving stale/garbage data in the
-            // output buffer.
-            for (let i = written; i < out.length; i++) out[i] = 0;
-        };
-        // This node must be connected to the destination for
-        // onaudioprocess to fire at all (ScriptProcessorNode quirk), even
-        // though its own input is unused.
+            process(inputs, outputs) {
+                const out = outputs[0][0];
+                let written = 0;
+                while (written < out.length && this._queue.length > 0) {
+                    const head = this._queue[0];
+                    const remaining = head.length - this._offset;
+                    const toCopy = Math.min(remaining, out.length - written);
+                    out.set(head.subarray(this._offset, this._offset + toCopy), written);
+                    written += toCopy;
+                    this._offset += toCopy;
+                    if (this._offset >= head.length) {
+                        this._queue.shift();
+                        this._offset = 0;
+                    }
+                }
+                for (let i = written; i < out.length; i++) out[i] = 0;
+                return true;
+            }
+        }
+        registerProcessor('playback-processor', PlaybackProcessor);
+    `;
+
+    async function setUpContinuousPlayback() {
+        const workletBlobUrl = URL.createObjectURL(new Blob([PLAYBACK_WORKLET_SOURCE], { type: 'application/javascript' }));
+        try {
+            await liveState.playContext.audioWorklet.addModule(workletBlobUrl);
+        } finally {
+            URL.revokeObjectURL(workletBlobUrl);
+        }
+        if (!liveState) return; // call may have been ended while awaiting addModule
+
+        liveState.playProcessorNode = new AudioWorkletNode(liveState.playContext, 'playback-processor', {
+            numberOfInputs: 0,
+            numberOfOutputs: 1,
+            outputChannelCount: [1]
+        });
         liveState.playProcessorNode.connect(liveState.playContext.destination);
     }
 
     function playLiveAudioChunk(base64Audio) {
-        if (!liveState || !liveState.playContext) return;
+        if (!liveState || !liveState.playProcessorNode) return;
         const binary = atob(base64Audio);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
         // Incoming audio is raw PCM16 @ 24kHz, mono. Decode straight into
-        // a Float32Array and push it onto the continuous playback queue -
-        // the always-running processor above drains it sample-by-sample,
-        // so there's no per-chunk scheduling and therefore no boundary
-        // clicks between chunks.
+        // a Float32Array and hand it (transferred, zero-copy) to the
+        // playback worklet's own internal queue - it drains samples on
+        // the audio thread, so there's no per-chunk scheduling and
+        // therefore no boundary clicks between chunks.
         const sampleCount = bytes.length / 2;
         const floatSamples = new Float32Array(sampleCount);
         const view = new DataView(bytes.buffer);
         for (let i = 0; i < sampleCount; i++) {
             floatSamples[i] = view.getInt16(i * 2, true) / 0x8000;
         }
-        liveState.playQueue.push(floatSamples);
+        liveState.playProcessorNode.port.postMessage({ type: 'push', samples: floatSamples }, [floatSamples.buffer]);
     }
 
     function stopQueuedPlayback() {
-        if (!liveState) return;
+        if (!liveState || !liveState.playProcessorNode) return;
         // Drop everything queued but not yet played - used when the model
         // is interrupted, so stale audio doesn't keep playing afterward.
-        liveState.playQueue = [];
-        liveState.playQueueOffset = 0;
+        liveState.playProcessorNode.port.postMessage({ type: 'clear' });
     }
 
     function toggleLiveMute() {
