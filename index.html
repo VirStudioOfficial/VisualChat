@@ -4698,11 +4698,13 @@
     | Gemini Live (voice chat)
     |--------------------------------------------------------------------------
     | Flow:
-    |   1. startLiveCall() asks our own backend (/api/live-token) for a
-    |      short-lived ephemeral token - the real GEMINI_API_KEY never
-    |      leaves the server.
-    |   2. Opens a WebSocket directly from the browser to Gemini Live using
-    |      that token, sends a setup message.
+    |   1. startLiveCall() opens a WebSocket to our own proxy server
+    |      (LIVE_PROXY_WS_URL) instead of connecting to Google directly -
+    |      some networks block direct browser->Google WebSocket connections
+    |      with a handshake timeout, so the proxy (hosted on Render) relays
+    |      traffic instead. The real GEMINI_API_KEY lives only on that
+    |      proxy, never in the browser.
+    |   2. Sends a setup message with the model + generationConfig.
     |   3. Captures mic audio via getUserMedia + AudioWorklet-free ScriptNode
     |      (kept dependency-free), downsamples to 16kHz PCM16, base64-encodes
     |      and streams it as realtimeInput chunks.
@@ -4711,7 +4713,12 @@
     |   5. endLiveCall() tears everything down (mic tracks, audio contexts,
     |      socket) so nothing keeps running in the background.
     */
-    const LIVE_WS_HOST = 'generativelanguage.googleapis.com';
+    // We connect to our own proxy (which relays to Gemini Live) instead of
+    // connecting to Google directly from the browser. Direct browser->Google
+    // WebSocket connections get blocked with a handshake timeout on some
+    // networks; routing through a proxy hosted elsewhere fixes that.
+    const LIVE_PROXY_WS_URL = 'wss://gemini-live-proxy-kmu4.onrender.com/live';
+    const LIVE_MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
     const LIVE_SEND_SAMPLE_RATE = 16000;   // what we must send the model
     const LIVE_RECEIVE_SAMPLE_RATE = 24000; // what the model sends back
 
@@ -4758,34 +4765,27 @@
 
         statusText.textContent = 'در حال اتصال...';
 
-        let tokenData;
-        try {
-            const resp = await fetch('/api/live-token', { method: 'POST' });
-            tokenData = await resp.json();
-            if (!resp.ok || !tokenData?.token) {
-                throw new Error(tokenData?.error || 'خطا در دریافت توکن');
-            }
-        } catch (err) {
-            statusText.textContent = 'اتصال ناموفق بود.';
-            showToast('نتونستم به گفت‌وگوی صوتی وصل بشم. دوباره امتحان کن.', 'error');
-            setTimeout(() => endLiveCall(), 1200);
-            return;
-        }
-
+        // No token fetch needed anymore: the real GEMINI_API_KEY now lives
+        // only on the proxy server, so the browser just connects straight
+        // to it (see LIVE_PROXY_WS_URL above).
         try {
             liveState.playContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: LIVE_RECEIVE_SAMPLE_RATE });
             liveState.playQueueTime = liveState.playContext.currentTime;
 
-            const wsUrl = `wss://${LIVE_WS_HOST}/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(tokenData.token)}`;
-            const ws = new WebSocket(wsUrl);
+            const ws = new WebSocket(LIVE_PROXY_WS_URL);
             liveState.ws = ws;
 
             ws.onopen = () => {
-                // The ephemeral token is "constrained" - model and
-                // generationConfig were already locked in when we created
-                // it server-side (see api/live-token.js), so an empty setup
-                // object is what BidiGenerateContentConstrained expects here.
-                ws.send(JSON.stringify({ setup: {} }));
+                // Unlike the old ephemeral-token setup (where model +
+                // generationConfig were baked into the token), the proxy
+                // connects to Gemini with a plain API key, so we need to
+                // send the full setup here ourselves.
+                ws.send(JSON.stringify({
+                    setup: {
+                        model: `models/${LIVE_MODEL_NAME}`,
+                        generationConfig: { responseModalities: ['AUDIO'] }
+                    }
+                }));
             };
 
             ws.onmessage = async (event) => {
