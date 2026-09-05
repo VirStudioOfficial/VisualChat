@@ -2720,7 +2720,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         roundEntry.usage = lastUsage ? {
             promptTokens: lastUsage.promptTokenCount ?? null,
             candidateTokens: lastUsage.candidatesTokenCount ?? null,
-            totalTokens: lastUsage.totalTokenCount ?? null
+            totalTokens: lastUsage.totalTokenCount ?? null,
+            // DIAGNOSTICS ONLY (no behavior change): Gemini's implicit
+            // caching is already on by default for our 3.x models - this
+            // just exposes how many prompt tokens actually hit that cache,
+            // so real savings can be measured before touching anything
+            // structural like system_instruction/tool-definition placement.
+            cachedContentTokens: lastUsage.cachedContentTokenCount ?? null
         } : null;
 
         // ENFORCEMENT (must verify before final answer): if any file has
