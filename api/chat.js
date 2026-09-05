@@ -895,6 +895,23 @@ function looksLikeFileEditIntent(text) {
     return /(?:ویرایش|ادیت|تغییر بده|تغییرش بده|اضافه کن|اضافه‌|حذف کن|پاک کن|اصلاح کن|درست کن|پیاده کن|پیاده‌|بروزرسانی کن|آپدیت کن|به‌روز کن|جایگزین کن|بازنویسی کن|اضافه کردن|حذف کردن|تغییر دادن|اصلاح کردن|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor)/i.test(t);
 }
 
+// FIX (ادعای موفقیت بعد از تغییرِ فقط یک رخداد از چند رخداد پراکنده):
+// درخواست‌هایی مثل "رنگ/تم/پالت رو سبز کن" یا "اسم فلان متغیر/تابع رو
+// عوض کن" تقریباً همیشه در چند جای پراکنده‌ی فایل تکرار شده‌اند (مثلاً هم
+// در CSS/:root و هم در یک تابع جاوااسکریپتی که همان مقادیر را دوباره از
+// localStorage اعمال می‌کند). صرفاً توضیح این نکته در system prompt کافی
+// نبود - مدل با پیدا کردن و عوض کردن فقط یک رخداد (مثلاً یک بلوک :root)
+// ادعای اتمام کار می‌کرد، بدون این‌که find_in_file را حتی یک‌بار امتحان
+// کند. این تابع چنین درخواست‌هایی را از روی کلیدواژه تشخیص می‌دهد تا
+// runAgentLoop بتواند find_in_file را - دقیقاً مثل verify_file - به‌عنوان
+// یک تول‌کال واقعی و اجباری قبل از پاسخ نهایی تزریق کند، نه صرفاً پیشنهاد
+// متنی.
+function looksLikeScatteredPatternEdit(text) {
+    const t = String(text || '').trim().toLowerCase();
+    if (!t) return false;
+    return /(?:رنگ|پالت|تم(?:\s|$)|دارک|لایت|theme|palette|colou?r|رنگ‌بندی|سبز|قرمز|آبی|زرد|بنفش|نارنجی|صورتی|مشکی|سفید|طوسی|خاکستری|rename|اسم.*عوض|نام.*عوض)/i.test(t);
+}
+
 /*
 |--------------------------------------------------------------------------
 | Versioned output filename
@@ -2274,7 +2291,7 @@ async function executeToolCall(name, args, ctx) {
 // we just no longer throw away real token-by-token streaming to get it.
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
-async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, sharedRequestState, thinkLevel }) {
+async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, scatteredPatternIntent, sharedRequestState, thinkLevel }) {
     // FIX (تشخیص فایل تازه‌ی ضمیمه‌شده در برابر فایل promote-شده از آرشیو):
     // textFiles یک آرایه‌ی mutable است که get_archived_file هم به آن
     // فایل‌های آرشیوی را push می‌کند (ببین «promoted.push» در آن هندلر).
@@ -2478,6 +2495,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // چند کاراکتر متن متوقف شد.
     const roundTrace = [];
     const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
+    let scatteredPatternProbed = false; // guards the find_in_file enforcement gate below to fire at most once per request
     const agentLoopStartedAt = Date.now();
     // FIX (ادعای دروغین موفقیت بعد از write_block ردشده): وقتی write_block
     // به دلیل نامعتبر شدن فایل رد می‌شود (validatePatchedContent) و مدل به
@@ -2841,6 +2859,50 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 // Keep any text the model produced this round (e.g. "الان
                 // فایل رو نهایی می‌کنم") - it will be followed by the
                 // verify_file round's own text, both streamed normally.
+            }
+        }
+
+        // ENFORCEMENT (scattered-pattern edits must be scoped with
+        // find_in_file first): requests like "تم/رنگ/پالت رو سبز کن" or
+        // "اسم فلان تابع رو عوض کن" are almost always spread across several
+        // places in the file (e.g. both a CSS :root block and a JS function
+        // that re-applies the same values from localStorage at runtime).
+        // Just telling the model this in the system prompt was not enough
+        // in practice - it kept changing one occurrence (one :root block),
+        // calling that done, and never touching the rest. Same fix pattern
+        // as the verify_file gate above: if this request was flagged as a
+        // scattered-pattern edit and the model is trying to end the turn
+        // (zero function calls) without ever having called find_in_file
+        // even once, force a real find_in_file round first instead of
+        // letting it answer - the model still decides what to do with the
+        // result, but it can no longer skip looking entirely. Only fires
+        // once per request (guarded by scatteredPatternProbed) so it can't
+        // loop forever if the model still doesn't act on the results.
+        if (
+            functionCalls.length === 0 &&
+            scatteredPatternIntent &&
+            !scatteredPatternProbed &&
+            (toolCallTally['find_in_file'] || 0) === 0 &&
+            Array.isArray(textFiles) && textFiles.length > 0
+        ) {
+            scatteredPatternProbed = true;
+            const targetFile = textFiles[0] && textFiles[0].name;
+            if (targetFile) {
+                log.info('agent.scattered_pattern_gate.forced', { file: targetFile, round });
+                functionCalls.push({
+                    name: 'find_in_file',
+                    args: {
+                        file: targetFile,
+                        // A broad, cheap probe: variable-declaration-like
+                        // tokens plus common color/theme keywords. This is
+                        // just meant to surface enough scattered hits that
+                        // the model realizes there's more than one spot -
+                        // it's expected to then call find_in_file again
+                        // itself with a more specific query if needed.
+                        query: '(--|#[0-9a-fA-F]{3,8}|theme|palette|localStorage)',
+                        isRegex: true
+                    }
+                });
             }
         }
 
@@ -3573,6 +3635,10 @@ async function handler(req, res) {
         // downside to always doing it whenever textFiles is non-empty.
         const fileEditIntent = textFiles.length > 0;
 
+        // See looksLikeScatteredPatternEdit above for why this exists:
+        // only meaningful when there's actually a file to edit.
+        const scatteredPatternIntent = fileEditIntent && looksLikeScatteredPatternEdit(text);
+
         const binaryFiles =
             incomingFiles.filter(
                 f =>
@@ -4295,6 +4361,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                             searchState,
                             searchIntent: requestSearchIntent,
                             fileEditIntent,
+                            scatteredPatternIntent,
                             sharedRequestState,
                             signal: abortController.signal,
                             disableTools: hasVideoAttachment,
@@ -4603,6 +4670,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
                         searchCache,
                         searchState,
                         fileEditIntent,
+                        scatteredPatternIntent,
                         sharedRequestState,
                         signal: abortController.signal,
                         disableTools: hasVideoAttachment,
