@@ -807,9 +807,12 @@
             --chat-box-pad-top: 22px;
             scrollbar-width: none; /* Firefox */
             -ms-overflow-style: none; /* IE and Edge */
-            /* FEATURE: همون fade mask روی لبه بالا/پایین ناحیه پیام‌ها */
-            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
-            mask-image: linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+            /* FEATURE: fade mask فقط روی لبه‌ی پایین ناحیه‌ی پیام‌ها.
+               قبلاً لبه‌ی بالا هم محو می‌شد که باعث می‌شد هدر sticky کارت کد
+               (که دقیقاً روی همان لبه‌ی بالا می‌چسبد) پشت این نوار محو
+               کمی جابه‌جا/کدر به‌نظر برسد. */
+            -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
+            mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
         }
         .chat-box::-webkit-scrollbar {
             display: none; /* Chrome, Safari, Opera */
@@ -860,19 +863,18 @@
         .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
         .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
-        /* FIX (هدر کارت کد هنگام اسکرول کمی پایین‌تر/محو به‌نظر می‌رسید):
-           #chatBox یک mask-image (فید محو) در ۲۸ پیکسل بالا/پایین خودش دارد
-           تا لبه‌ی بالای ناحیه‌ی پیام‌ها به‌جای بریدگی تیز، محو شود. این ماسک
-           روی کل چیزی که داخل #chatBox رندر می‌شود به‌صورت یک لایه‌ی واحد
-           اعمال می‌شود - یعنی هر عنصر sticky که با top:0 دقیقاً به لبه‌ی
-           بالای همین کادر بچسبد، همیشه داخل همان نوار ۲۸ پیکسلیِ محوشونده
-           قرار می‌گیرد و از پشتش کمی محو/جابه‌جا دیده می‌شود - همان چیزی که
-           «هدر سرجایش نیست» احساس می‌شود. mask-image روی خودِ هدر ارث‌بری
-           نمی‌شود (چون ماسک والد روی رندر ترکیبی کل زیرشاخه اعمال می‌شود، نه
-           جداگانه روی هر فرزند)، پس تنها راه واقعی این است که نقطه‌ی
-           چسبیدنش را همان‌قدر که ماسک محو است (۲۸px) پایین‌تر ببریم تا هدر
-           همیشه *بعد* از ناحیه‌ی محو بنشیند، نه داخلش. */
-        .code-card-head { top: 28px; }
+        /* FIX (هدر کارت کد هنگام اسکرول یک فاصله‌ی ثابت و اشتباه از بالا داشت):
+           راه‌حل قبلی (top: 28px روی خودِ هدر) یک عدد ثابت بود که با پدینگ
+           بالای #chatBox هم‌خوانی نداشت - آن پدینگ در سایزهای مختلف صفحه
+           (۱۵px / ۱۸px / ۲۲px / ۳۰px، متغیر --chat-box-pad-top) عوض می‌شود،
+           در حالی که 28px عددی ثابت بود؛ برای همین هدر همیشه یک فاصله‌ی
+           غلط (یا خیلی کم یا خیلی زیاد) از بالای واقعی #chatBox می‌گرفت،
+           دقیقاً همان چیزی که در اسکرین‌شات دیده می‌شد. راه‌حل درست: نقطه‌ی
+           چسبیدن هدر را دست‌نخورده (top: 0 نسبت به content-box #chatBox،
+           که sticky خودش این را درست محاسبه می‌کند) رها می‌کنیم؛ به‌جایش
+           خودِ #chatBox را از محو شدن در لبه‌ی بالا معاف می‌کنیم (فقط لبه‌ی
+           پایین محو بماند) تا نواری که هدر پشتش محو/جابه‌جا به‌نظر برسد
+           اصلاً وجود نداشته باشد. */
         /* FIX (پرش هدر کارت کد حین استریم): وقتی پاسخ در حال تایپ زنده است،
            loadingDiv.innerHTML مدام (تا ۳۰ بار در ثانیه) کل DOM را جایگزین
            می‌کند. چون هدر کارت کد position: sticky دارد، این جایگزینی مکرر
