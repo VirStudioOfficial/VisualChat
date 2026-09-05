@@ -1411,7 +1411,7 @@
             content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%;
             background: #fff; top: 3px; right: 3px; transition: transform 0.2s ease;
         }
-        .live-settings-toggle input:checked + .live-settings-toggle-track { background: var(--accent-grad); }
+        .live-settings-toggle input:checked + .live-settings-toggle-track { background: var(--accent-2); }
         .live-settings-toggle input:checked + .live-settings-toggle-track::before { transform: translateX(-18px); }
         .live-settings-hint { color: var(--text-muted, #aab3c5); font-size: 0.72rem; text-align: center; }
 
@@ -4846,6 +4846,50 @@
 
     let liveState = null; // holds everything for the active call, or null
 
+    // Short beep played on call connect/disconnect, synthesized on the fly
+    // with WebAudio (no audio file to host/fetch). Uses its own throwaway
+    // AudioContext rather than liveState.playContext, since on disconnect
+    // that context is already being torn down and on connect it may not
+    // exist yet (setupComplete fires before setUpContinuousPlayback in
+    // some orderings) - keeping this fully independent means it can't be
+    // silently skipped by call-teardown timing.
+    function playCallToneEffect(kind) {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            const ctx = new Ctx();
+            const now = ctx.currentTime;
+            // Connect: quick rising two-note chirp. Disconnect: a single
+            // lower, slightly longer note - the two should be tellable
+            // apart with eyes closed, not just "a beep happened".
+            const notes = kind === 'connect'
+                ? [{ freq: 720, start: 0, dur: 0.09 }, { freq: 1080, start: 0.09, dur: 0.11 }]
+                : [{ freq: 480, start: 0, dur: 0.16 }];
+            notes.forEach(n => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = n.freq;
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                const t0 = now + n.start;
+                const t1 = t0 + n.dur;
+                // Fast fade in/out avoids an audible click at the edges of
+                // the tone (a raw on/off gain step is what causes that).
+                gain.gain.setValueAtTime(0, t0);
+                gain.gain.linearRampToValueAtTime(0.18, t0 + 0.01);
+                gain.gain.linearRampToValueAtTime(0, t1);
+                osc.start(t0);
+                osc.stop(t1 + 0.02);
+            });
+            const totalDur = Math.max(...notes.map(n => n.start + n.dur)) + 0.05;
+            setTimeout(() => { try { ctx.close(); } catch (_) {} }, totalDur * 1000 + 50);
+        } catch (_) {
+            // Sound effects are a nice-to-have; never let a WebAudio quirk
+            // break the actual call flow.
+        }
+    }
+
     // Builds a compact transcript of the current text chat so the Live
     // voice call can pick up where the typed conversation left off,
     // instead of starting with zero memory of it. Capped to the last N
@@ -5127,7 +5171,14 @@
 
             if (data.setupComplete) {
                 statusText.textContent = 'در حال گوش دادن...';
-                if (!liveState.micProcessorNode) beginMicStreaming();
+                // Only chirp on the real first connect, not on the silent
+                // fresh-session reconnect after a 1007 search-crash (that
+                // path re-fires setupComplete mid-call and a beep there
+                // would sound like a random glitch to the user).
+                if (!liveState.micProcessorNode) {
+                    if (!liveState.searchCrashRetried) playCallToneEffect('connect');
+                    beginMicStreaming();
+                }
                 return;
             }
 
@@ -5450,6 +5501,12 @@
             document.getElementById('liveCallOverlay').classList.remove('open');
             return;
         }
+        // Only play the disconnect tone if the call had actually connected
+        // (mic streaming started) - otherwise a permission-denial or
+        // failed-connection bail-out (see startLiveCall's catch blocks)
+        // would also beep, which reads as "call ended" when nothing
+        // really connected in the first place.
+        if (liveState.micProcessorNode) playCallToneEffect('disconnect');
         liveState.closing = true;
 
         try { liveState.ws && liveState.ws.close(); } catch (_) {}
