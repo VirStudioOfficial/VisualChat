@@ -45,12 +45,15 @@ async function requestEphemeralToken(apiKey) {
             uses: 1,
             expireTime,
             newSessionExpireTime,
-            liveConnectConstraints: {
+            // NOTE: the field is `bidiGenerateContentSetup` in the real REST
+            // API (confirmed against https://ai.google.dev/api/live). Some
+            // docs/SDKs show a `liveConnectConstraints: { model, config }`
+            // wrapper, but that's an SDK-level alias, not what the raw
+            // v1beta/auth_tokens endpoint accepts - sending that wrapper
+            // gets rejected with "Unknown name liveConnectConstraints".
+            bidiGenerateContentSetup: {
                 model: `models/${LIVE_MODEL}`,
-                config: {
-                    sessionResumption: {},
-                    responseModalities: ['AUDIO']
-                }
+                generationConfig: { responseModalities: ['AUDIO'] }
             }
         })
     });
