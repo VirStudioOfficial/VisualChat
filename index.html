@@ -4718,7 +4718,14 @@
     // WebSocket connections get blocked with a handshake timeout on some
     // networks; routing through a proxy hosted elsewhere fixes that.
     const LIVE_PROXY_WS_URL = 'wss://gemini-live-proxy-kmu4.onrender.com/live';
-    const LIVE_MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
+    // Switched from gemini-2.5-flash-native-audio-preview-09-2025: that
+    // model has a known, Google-acknowledged bug where it silently stops
+    // producing audio mid-session (no error, socket stays open) - see
+    // https://github.com/google-gemini/cookbook/issues/1225. This matches
+    // what we saw in the proxy logs: audio kept streaming in, nothing ever
+    // came back. gemini-3.1-flash-live-preview is the newer Live model and
+    // does not have this specific issue reported against it.
+    const LIVE_MODEL_NAME = 'gemini-3.1-flash-live-preview';
     const LIVE_SEND_SAMPLE_RATE = 16000;   // what we must send the model
     const LIVE_RECEIVE_SAMPLE_RATE = 24000; // what the model sends back
 
@@ -4791,7 +4798,14 @@
                 ws.send(JSON.stringify({
                     setup: {
                         model: `models/${LIVE_MODEL_NAME}`,
-                        generationConfig: { responseModalities: ['AUDIO'] },
+                        generationConfig: {
+                            responseModalities: ['AUDIO'],
+                            // 3.1 Flash Live uses thinkingLevel instead of
+                            // the old thinkingBudget. 'minimal' is what
+                            // Google recommends for lowest response latency
+                            // in real-time voice use cases.
+                            thinkingConfig: { thinkingLevel: 'minimal' }
+                        },
                         realtimeInputConfig: {
                             automaticActivityDetection: {
                                 startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
