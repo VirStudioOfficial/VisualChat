@@ -2453,6 +2453,19 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // واقعی (apply_edit/verify_file) جای دیگری (GEMINI_TOOLS) به
     // fileEditIntent گیت شده‌اند و دست‌نخورده می‌مانند.
     const editStates = sharedRequestState?.editStates || new Map();
+
+    // FIX (معیار مشترک برای «آیا ابزار ادیت واقعاً در دسترس مدل بوده»):
+    // fileEditIntentِ ثابتِ ابتدای درخواست به‌تنهایی کافی نیست، چون
+    // get_archived_file می‌تواند در وسط درخواست فایلی را به editStates
+    // اضافه کند و از آن لحظه به بعد ابزار ادیت واقعاً در دسترس می‌شود -
+    // ولی fileEditIntent هیچ‌وقت به‌روز نمی‌شود. این پرچم را هر جا لیست
+    // ابزار Gemini واقعاً تعیین می‌شود (پایین‌تر در این تابع) true می‌کنیم؛
+    // برای بررسی «مدل اصلاً فرصت apply_edit زدن داشت یا نه» در پایان
+    // درخواست (رجوع کن به hadEditableFiles) هم همین‌جا استفاده می‌شود -
+    // نه fileEditIntentِ ثابت و نه صرفِ editStates.size>0 (که برای فایل
+    // تازه‌ی نظرخواهی هم غیرصفر می‌شود).
+    let editToolsEverAvailable = false;
+
     if (Array.isArray(textFiles) && textFiles.length > 0) {
         try {
             if (onStep) onStep('در حال بررسی فایل...', fileEditIntent ? 'apply_edit' : 'read');
@@ -2673,7 +2686,32 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         // just emptied) when a video is attached, since some
                         // Gemini versions treat an empty tools array
                         // differently from no tools key at all.
-                        ...((disableTools || scopedSearchState.used) ? {} : { tools: fileEditIntent ? GEMINI_TOOLS_NO_SEARCH : GEMINI_TOOLS })
+                        //
+                        // FIX (فایل آرشیوشده گرفته می‌شد ولی apply_edit/
+                        // verify_file اصلاً در دسترس مدل نبودند): fileEditIntent
+                        // فقط یک‌بار در ابتدای درخواست، بر اساس فایل‌های
+                        // تازه‌ی همان پیام محاسبه می‌شد. اگر کاربر بدون
+                        // ضمیمه‌ی جدید فقط یک پیام کوتاه («کار نمی‌کنه»)
+                        // می‌فرستاد، fileEditIntent همان لحظه false می‌شد -
+                        // و همین‌طور false می‌ماند حتی بعد از این‌که مدل طبق
+                        // دستورالعمل‌های بالا get_archived_file را صدا می‌زد
+                        // و فایل را به‌درستی به editStates/textFiles اضافه
+                        // (promote) می‌کرد. چون این مقدار ثابت هر بار برای
+                        // انتخاب لیست ابزار همین‌جا استفاده می‌شد، مدل حتی در
+                        // round های بعدی هم فقط GEMINI_TOOLS (بدون
+                        // apply_edit/verify_file) را می‌دید - یعنی می‌توانست
+                        // فایل را بخواند اما هیچ راهی برای واقعاً ویرایش‌کردنش
+                        // نداشت، و یا ادعای انجام کاری می‌کرد که اصلاً امکانش
+                        // نبود، یا صرفاً می‌گفت نمی‌تواند/فایل نرسیده. راه‌حل:
+                        // به‌جای تکیه به مقدار ثابت fileEditIntent، همین‌جا
+                        // پویا چک می‌کنیم که آیا تا همین لحظه (چه از ابتدا،
+                        // چه بعداً با get_archived_file) واقعاً فایلی برای
+                        // ویرایش در editStates وجود دارد یا نه.
+                        ...((disableTools || scopedSearchState.used) ? {} : (() => {
+                            const editToolsAvailableNow = fileEditIntent || (editStates && editStates.size > 0);
+                            if (editToolsAvailableNow) editToolsEverAvailable = true;
+                            return { tools: editToolsAvailableNow ? GEMINI_TOOLS_NO_SEARCH : GEMINI_TOOLS };
+                        })())
                     }),
                     signal: controller.signal
                 }
@@ -3193,15 +3231,18 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // write_block اصلاً صدا زده نشد و هیچ فایلی patch نشد، این هم
             // همان کلاس مشکل است.
             const writeBlockCallCount = (toolCallTally['write_block'] || 0) + (toolCallTally['apply_edit'] || 0);
-            // FIX (هشدار غلط در حالت نظرخواهی): hadEditableFiles قبلاً فقط
-            // روی editStates.size>0 بود. از وقتی تزریق محتوای فایل (و ساخت
-            // editStates) از قید fileEditIntent آزاد شد تا در حالت نظرخواهی
-            // هم مدل بتواند محتوای فایل را ببیند، editStates.size>0 دیگر
-            // به‌تنهایی نشانه‌ی «کاربر ادیت خواسته» نیست - باید fileEditIntent
-            // را هم صریحاً چک کنیم، وگرنه این هشدار برای هر پیام نظرخواهی/
-            // سؤالی که فایل ضمیمه دارد (که در آن apply_edit اصلاً نباید صدا
-            // زده شود) به‌غلط فعال می‌شود.
-            const hadEditableFiles = fileEditIntent && editStates && editStates.size > 0;
+            // FIX (هشدار غلط در حالت نظرخواهی + هشدار ازدست‌رفته در حالت
+            // آرشیو): hadEditableFiles قبلاً فقط روی editStates.size>0 بود؛
+            // بعد آن را به fileEditIntentِ ثابتِ ابتدای درخواست هم مقید
+            // کردیم تا برای نظرخواهیِ صرف («نظرت چیه؟») به‌غلط فعال نشود.
+            // اما fileEditIntentِ ثابت برای سناریوی «کاربر با پیام کوتاه/
+            // مبهم مثل کار نمی‌کنه ادامه می‌دهد و مدل فایل را از آرشیو
+            // می‌گیرد» از ابتدا false است و هیچ‌وقت به‌روز نمی‌شود - پس به‌جای
+            // آن از editToolsEverAvailable استفاده می‌کنیم که واقعاً نشان
+            // می‌دهد آیا مدل در طول این درخواست (چه از ابتدا، چه بعد از
+            // get_archived_file) دسترسی واقعی به apply_edit/verify_file
+            // داشته یا نه.
+            const hadEditableFiles = editToolsEverAvailable && editStates && editStates.size > 0;
             let unresolvedEditFailure = null;
             if (rejectedWriteBlocksByFile && rejectedWriteBlocksByFile.size > 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
                 const entries = [...rejectedWriteBlocksByFile.entries()];
@@ -4173,7 +4214,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 فقط وقتی کاربر واقعاً به محتوای یکی از این فایل‌ها نیاز دارد یا ارجاع می‌دهد (نه صرفاً وقتی اسمش را می‌بینی)، ابزار get_archived_file را با نام دقیق فایل صدا بزن.
 مهم: اگر کاربر در همین پیام یک فایل را مستقیماً ضمیمه کرده (چه پیام اول باشد چه Retry)، همیشه از همان نسخه‌ی ضمیمه‌شده (که در بخش فایل‌های فعلی در دسترس توست) استفاده کن، حتی اگر فایلی هم‌نام در آرشیو موجود باشد. get_archived_file را در این حالت صدا نزن؛ این ابزار فقط برای فایل‌هایی است که کاربر به آن‌ها ارجاع می‌دهد بدون این‌که دوباره ضمیمه کرده باشد.
 
-FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبهمِ پیگیری): اگر کاربر بدون ضمیمه‌کردن فایل جدید، با جمله‌ای کوتاه و مبهم مثل «کار نمی‌کنه»، «هنوز درست نشد»، «باگ داره»، «همون مشکل هست» یا مشابه آن ادامه‌ی گفتگو را می‌دهد - این خودش یک ارجاع ضمنی به همان فایلی است که همین گفتگو تازه رویش کار شده (معمولاً آخرین فایلِ آرشیوشده/ویرایش‌شده در تاریخچه)، نه اعلام نبودِ فایل. در این حالت:
+FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبهمِ پیگیری): اگر کاربر بدون ضمیمه‌کردن فایل جدید، با جمله‌ای کوتاه و مبهم - به هر زبانی که باشد (فارسی، انگلیسی، یا هر زبان دیگر) - مثل «کار نمی‌کنه»/«doesn't work»، «هنوز درست نشد»/«still broken»، «باگ داره»/«has a bug»، «همون مشکل هست»/«same issue» یا مشابه آن ادامه‌ی گفتگو را می‌دهد - این خودش یک ارجاع ضمنی به همان فایلی است که همین گفتگو تازه رویش کار شده (معمولاً آخرین فایلِ آرشیوشده/ویرایش‌شده در تاریخچه)، نه اعلام نبودِ فایل. زبان پیام کاربر هیچ فرقی در این رفتار ایجاد نمی‌کند. در این حالت:
 ۱. هرگز فوراً به کاربر نگو «فایلت رو دریافت نکردم» یا از او نخواه دوباره فایل را بفرستد - این ادعا معمولاً نادرست است، چون فایل در آرشیو موجود است.
 ۲. اول get_archived_file را با نام همان فایل (از تاریخچه/فایل‌های آرشیوشده بالا) صدا بزن تا محتوای واقعی و به‌روز آن را ببینی.
 ۳. حتی بعد از گرفتن فایل، چون «کار نمی‌کنه» به‌تنهایی برای فهمیدن مشکل کافی نیست، حدس نزن و مستقیم سراغ apply_edit نرو - از کاربر بپرس دقیقاً چه چیزی کار نمی‌کند (کدام قابلیت/دکمه/افکت، چه رفتاری در عمل می‌بیند در مقابل چه انتظاری داشته، آیا خطایی در کنسول/صفحه دیده می‌شود). فقط بعد از فهمیدن دقیق مشکل وارد روند ویرایش شو.
