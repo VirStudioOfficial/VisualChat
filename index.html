@@ -82,7 +82,7 @@
          لاگین حالا با ریدایرکت به api/auth-start.js انجام می‌شود. -->
 
     <style>
-        .lucide-icon, svg.lucide { width: 1em !important; height: 1em !important; display: inline-block; vertical-align: -0.125em; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
+        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
         i[class*="ph-"], i[class^="ph "], i[class*=" ph "] { font-family: "Phosphor" !important; -webkit-text-stroke: 0.3px currentColor; }
         i.ph-fill { font-family: "Phosphor-Fill" !important; }
         i.ph-bold { font-family: "Phosphor-Bold" !important; }
@@ -326,15 +326,12 @@
             100% { opacity: 0; transform: translateY(-6px); }
         }
 
-        .message-wrapper { animation: messageInSoft 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
-        /* FIX (inconsistent message animation): messages restored in bulk when
-           reopening a saved chat (chatBox.innerHTML = chats[id].html) used to
-           either all animate at once or sometimes appear to skip the
-           animation entirely, depending on browser paint timing - while a
-           freshly sent/streamed message always animated smoothly. This class
-           is applied only to history restored this way, so old messages just
-           appear instantly (as expected when reopening a chat), while new
-           live messages keep the smooth pop-in animation. */
+        @keyframes messageInSmooth {
+            0% { opacity: 0; transform: translateY(6px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-wrapper { animation: messageInSmooth 0.45s cubic-bezier(0.16, 1, 0.3, 1); }
         .no-entry-anim { animation: none !important; }
 
         .action-btn:active i { animation: sendPop 0.38s ease; }
@@ -584,6 +581,7 @@
         .header-brand-text { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); letter-spacing: 0.2px; }
         .menu-btn { display: none; color: var(--text-main); font-size: 1.2rem; cursor: pointer; padding: 5px; }
         .header-right { display: flex; align-items: center; gap: 8px; }
+        .header-right .icon-btn { width: 20px; height: 20px; font-size: 0.72rem; }
 
         .model-selector {
             display: flex;
@@ -7592,6 +7590,14 @@
         const bufferedHtml = olderBuffer.map(w => w.outerHTML).join('');
         const clone = chatBox.cloneNode(true);
         clone.querySelectorAll('.load-older-messages').forEach(el => el.remove());
+        // FIX (پیام‌های کاربر/مدل بعد از تماس صوتی برای همیشه پالس می‌زدند):
+        // اگر saveCurrentChat درست وسط یک تماس زنده (قبل از این‌که
+        // finalizeLiveTranscriptTurn کلاس live-transcript-bubble رو پاک کنه)
+        // صدا زده می‌شد، اون کلاس - و انیمیشن بی‌نهایتش - مستقیماً داخل
+        // HTML ذخیره‌شده باقی می‌موند و هر بار که چت باز می‌شد، برای همیشه
+        // چشمک می‌زد. این کلاس فقط برای نمایش «در حال دریافت» طی خود تماسه؛
+        // هیچ‌وقت نباید داخل نسخه‌ی ذخیره‌شده بمونه.
+        clone.querySelectorAll('.live-transcript-bubble').forEach(el => el.classList.remove('live-transcript-bubble'));
         const fullHtmlToSave = bufferedHtml + clone.innerHTML;
         chats[currentChatId] = {
             ...prev,
@@ -7972,6 +7978,9 @@
         }
 
         chatBox.querySelectorAll('.message-wrapper').forEach(w => w.classList.add('no-entry-anim'));
+        // پاک‌سازی چت‌های قدیمی‌ای که قبل از فیکس بالا ذخیره شدن و کلاس
+        // live-transcript-bubble (پالس بی‌نهایت) داخل HTML‌شون گیر کرده بود.
+        chatBox.querySelectorAll('.live-transcript-bubble').forEach(w => w.classList.remove('live-transcript-bubble'));
         repairLoadedChatButtons(chatBox);
         renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
@@ -8500,7 +8509,7 @@
         <div class="live-orb" id="liveOrb"><i class="ph-fill ph-waveform"></i></div>
     </div>
     <div class="live-status-text" id="liveStatusText">در حال اتصال...</div>
-    <div class="live-call-subtitle"><i class="ph-fill ph-sparkle"></i> گفتگوی صوتی با ورچوال لایو</div>
+    <div class="live-call-subtitle"><i class="ph-fill ph-sparkle"></i> گفتگوی صوتی با هوش مصنوعی</div>
 
     <!-- Voice/language/search settings panel. Editable before a call
          starts (from the composer's call button area) and, since none of
