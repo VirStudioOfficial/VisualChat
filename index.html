@@ -1414,6 +1414,12 @@
         .live-settings-toggle input:checked + .live-settings-toggle-track { background: var(--accent-2); }
         .live-settings-toggle input:checked + .live-settings-toggle-track::before { transform: translateX(-18px); }
         .live-settings-hint { color: var(--text-muted, #aab3c5); font-size: 0.72rem; text-align: center; }
+        /* Live-call transcript bubbles: same look as normal chat bubbles,
+           just a soft pulse while still streaming (before turnComplete
+           finalizes them) so it visually reads as "live" rather than a
+           normal completed message. */
+        .live-transcript-bubble .message { animation: liveTranscriptPulse 1.6s ease-in-out infinite; }
+        @keyframes liveTranscriptPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
 
         /* REDESIGN v2 (مطابق نمونه‌ی درخواستی): فایل‌های غیرتصویری به‌صورت
            چیپ بزرگ‌تر با آیکون دایره‌ای توپر و دو خط متن (اسم + نوع فایل)
@@ -5016,7 +5022,16 @@
                     thinkingConfig: { thinkingLevel: 'low' },
                     speechConfig: {
                         voiceConfig: { prebuiltVoiceConfig: { voiceName: getLiveVoicePref() } }
-                    }
+                    },
+                    // Ask the server to also stream back text transcripts
+                    // of both sides of the audio conversation, alongside
+                    // the audio itself - not a separate STT pass we'd have
+                    // to run ourselves. inputTranscription covers what the
+                    // user said, outputTranscription covers what the model
+                    // said. Used to mirror the live call into the regular
+                    // text chat in real time (see ws.onmessage below).
+                    inputAudioTranscription: {},
+                    outputAudioTranscription: {}
                 },
                 tools: tools,
                 realtimeInputConfig: {
@@ -5180,16 +5195,44 @@
                 }
             }
 
+            // Live transcript mirroring: the server streams these
+            // alongside the audio when inputAudioTranscription /
+            // outputAudioTranscription are set in generationConfig (see
+            // buildLiveSetupMessage). Each arrives in small incremental
+            // chunks (a few words at a time), not one message per
+            // sentence, so we accumulate into liveState.pendingUserText /
+            // pendingModelText and only push a real chat bubble once
+            // turnComplete confirms that side is actually done - pushing
+            // a half-formed sentence every chunk would spam the chat with
+            // constantly-rewritten bubbles.
+            if (data.serverContent?.inputTranscription?.text) {
+                liveState.pendingUserText = (liveState.pendingUserText || '') + data.serverContent.inputTranscription.text;
+                upsertLiveTranscriptBubble('user', liveState.pendingUserText);
+            }
+            if (data.serverContent?.outputTranscription?.text) {
+                liveState.pendingModelText = (liveState.pendingModelText || '') + data.serverContent.outputTranscription.text;
+                upsertLiveTranscriptBubble('model', liveState.pendingModelText);
+            }
+
             if (data.serverContent?.turnComplete) {
                 orbWrap.classList.remove('speaking');
                 statusText.textContent = 'در حال گوش دادن...';
+                // Turn boundary: whatever we accumulated on each side is
+                // now final - commit both to permanent chat history (if
+                // non-empty) and reset the accumulators for the next turn.
+                finalizeLiveTranscriptTurn();
             }
 
             if (data.serverContent?.interrupted) {
                 // The model was interrupted by the user talking - stop
-                // whatever audio is still queued for playback.
+                // whatever audio is still queued for playback. The
+                // model's partial spoken sentence is still worth keeping
+                // in the transcript (it's what was actually said out loud
+                // before being cut off), so finalize it same as a normal
+                // turnComplete rather than discarding it.
                 stopQueuedPlayback();
                 orbWrap.classList.remove('speaking');
+                finalizeLiveTranscriptTurn();
             }
         };
 
@@ -5282,8 +5325,20 @@
         const VOICE_MARGIN = 2.2;            // signal must exceed noiseFloor * this to count as voice
         const MIN_VOICE_RMS = 0.012;         // absolute floor so a totally silent room doesn't trigger on tiny fluctuations
         const SILENCE_HANG_MS = 600;         // silence needed before activityEnd
+        // Safety valve: if a "speech turn" runs uninterrupted past this,
+        // force-close it even without a real silence gap. Without this, a
+        // sustained noise that sits just above the adaptive threshold
+        // (traffic swelling, a door left near the mic, wind on the mic)
+        // never produces a quiet frame, so activityEnd never fires, the
+        // model waits forever for the user's turn to end, and the call
+        // goes silent while state text is stuck on "در حال شنیدن..." -
+        // exactly the deadlock this was hit by. Real utterances almost
+        // never run this long uninterrupted, so this only ever fires on
+        // the stuck case.
+        const MAX_TURN_MS = 15000;
         liveState.speaking = false;
         liveState.lastVoiceTs = 0;
+        liveState.speechStartTs = 0;
         const orbWrap = document.getElementById('liveOrbWrap');
         const statusText = document.getElementById('liveStatusText');
 
@@ -5308,23 +5363,47 @@
                 noiseFloor += (rms - noiseFloor) * rate;
             }
 
-            if (isVoice) {
+            const turnTooLong = liveState.speaking && (now - liveState.speechStartTs) >= MAX_TURN_MS;
+
+            if (isVoice && !turnTooLong) {
                 liveState.lastVoiceTs = now;
                 if (!liveState.speaking) {
                     liveState.speaking = true;
+                    liveState.speechStartTs = now;
                     liveState.ws.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
-                    // Visual feedback that the mic is actually picking up
-                    // the user's voice right now - this is what was
-                    // missing before: no indication the user was heard.
+                    // Barge-in: if the model's own audio is still playing
+                    // out loud right when we detect the user starting to
+                    // talk, stop it LOCALLY immediately rather than
+                    // waiting for the server's "interrupted" message to
+                    // round-trip back (stopQueuedPlayback() below in
+                    // ws.onmessage still handles the server-confirmed
+                    // case too). Without this, there's a window - one
+                    // full network round-trip long - where our speaker is
+                    // still audibly playing the old answer at the exact
+                    // moment we start capturing and streaming the user's
+                    // new question. Even with echoCancellation, that
+                    // overlap can garble the very start of what gets
+                    // sent, which is consistent with "the first thing
+                    // said right as I cut the model off sometimes doesn't
+                    // get answered."
+                    if (orbWrap.classList.contains('speaking')) {
+                        stopQueuedPlayback();
+                    }
                     orbWrap.classList.remove('speaking');
                     orbWrap.classList.add('listening');
                     statusText.textContent = 'در حال شنیدن...';
                 }
-            } else if (liveState.speaking && (now - liveState.lastVoiceTs) >= SILENCE_HANG_MS) {
+            } else if (liveState.speaking && (turnTooLong || (now - liveState.lastVoiceTs) >= SILENCE_HANG_MS)) {
                 liveState.speaking = false;
                 liveState.ws.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
                 orbWrap.classList.remove('listening');
                 statusText.textContent = 'در حال گوش دادن...';
+                // A turn that had to be force-closed by the timeout means
+                // whatever was pushing rms above threshold this whole time
+                // is still there (it wasn't a real silence gap) - nudge
+                // the floor toward it directly so we don't immediately
+                // re-trigger on the exact same ongoing noise next frame.
+                if (turnTooLong) noiseFloor = Math.max(noiseFloor, rms * 0.9);
             }
 
             // Only stream audio while inside a detected speech turn - this
@@ -5478,6 +5557,10 @@
         // would also beep, which reads as "call ended" when nothing
         // really connected in the first place.
         if (liveState.micProcessorNode) playCallToneEffect('disconnect');
+        // Commit any still-in-progress transcript text (call hung up
+        // mid-sentence) rather than silently dropping it - it's still a
+        // real part of the conversation that happened.
+        try { finalizeLiveTranscriptTurn(); } catch (_) {}
         liveState.closing = true;
 
         try { liveState.ws && liveState.ws.close(); } catch (_) {}
@@ -6549,6 +6632,70 @@
         chatBox.appendChild(wrapperDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
         updateScrollLatestButton();
+    }
+
+    // --- Live call transcript mirroring ---
+    // Renders the in-progress (still streaming) side of a live-call turn
+    // as a real chat bubble that updates in place as more transcript text
+    // arrives, so the user watching the chat can literally read along
+    // while they're talking or while the model is talking - not just see
+    // it appear once the whole sentence is done. Uses appendMessage's same
+    // 'user'/'bot' classes so it looks identical to a normal typed
+    // message; 'model' role here maps to the 'bot' CSS class.
+    function upsertLiveTranscriptBubble(role, text) {
+        if (!liveState) return;
+        const cssClass = role === 'user' ? 'user' : 'bot';
+        const key = role === 'user' ? 'userBubbleEl' : 'modelBubbleEl';
+        if (!liveState[key] || !liveState[key].isConnected) {
+            const chatBox = document.getElementById('chatBox');
+            const wrapperDiv = document.createElement('div');
+            wrapperDiv.className = `message-wrapper ${cssClass} live-transcript-bubble`;
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${cssClass}`;
+            wrapperDiv.appendChild(msgDiv);
+            chatBox.appendChild(wrapperDiv);
+            liveState[key] = msgDiv;
+        }
+        liveState[key].textContent = text;
+        const chatBox = document.getElementById('chatBox');
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // Commits whatever text accumulated on each side this turn into
+    // permanent chat history (so it survives reload/switching chats, same
+    // as a typed message) and clears the accumulators + bubble refs so
+    // the next turn starts a fresh bubble instead of appending onto the
+    // old one.
+    function finalizeLiveTranscriptTurn() {
+        if (!liveState) return;
+        const userText = (liveState.pendingUserText || '').trim();
+        const modelText = (liveState.pendingModelText || '').trim();
+        if (userText) {
+            chatHistoryData[currentChatId] = chatHistoryData[currentChatId] || [];
+            chatHistoryData[currentChatId].push({ role: 'user', text: userText });
+        }
+        if (modelText) {
+            chatHistoryData[currentChatId] = chatHistoryData[currentChatId] || [];
+            chatHistoryData[currentChatId].push({ role: 'model', text: modelText });
+        }
+        if (userText || modelText) {
+            try { saveCurrentChat(); } catch (_) {}
+        }
+        // Stop the "still streaming" pulse animation on whatever bubbles
+        // this turn used - they're finalized now, so they should sit
+        // still like any other completed chat message.
+        if (liveState.userBubbleEl) {
+            const w = liveState.userBubbleEl.closest('.live-transcript-bubble');
+            if (w) w.classList.remove('live-transcript-bubble');
+        }
+        if (liveState.modelBubbleEl) {
+            const w = liveState.modelBubbleEl.closest('.live-transcript-bubble');
+            if (w) w.classList.remove('live-transcript-bubble');
+        }
+        liveState.pendingUserText = '';
+        liveState.pendingModelText = '';
+        liveState.userBubbleEl = null;
+        liveState.modelBubbleEl = null;
     }
 
     function escapeHtml(value) {
