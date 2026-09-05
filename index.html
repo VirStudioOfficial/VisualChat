@@ -4776,17 +4776,16 @@
             liveState.playContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: LIVE_RECEIVE_SAMPLE_RATE });
             liveState.playQueueTime = liveState.playContext.currentTime;
 
-            const wsUrl = `wss://${LIVE_WS_HOST}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?access_token=${encodeURIComponent(tokenData.token)}`;
+            const wsUrl = `wss://${LIVE_WS_HOST}/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(tokenData.token)}`;
             const ws = new WebSocket(wsUrl);
             liveState.ws = ws;
 
             ws.onopen = () => {
-                ws.send(JSON.stringify({
-                    setup: {
-                        model: `models/${tokenData.model}`,
-                        generationConfig: { responseModalities: ['AUDIO'] }
-                    }
-                }));
+                // The ephemeral token is "constrained" - model and
+                // generationConfig were already locked in when we created
+                // it server-side (see api/live-token.js), so an empty setup
+                // object is what BidiGenerateContentConstrained expects here.
+                ws.send(JSON.stringify({ setup: {} }));
             };
 
             ws.onmessage = async (event) => {
