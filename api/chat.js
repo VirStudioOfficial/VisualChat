@@ -2495,7 +2495,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // چند کاراکتر متن متوقف شد.
     const roundTrace = [];
     const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
-    let scatteredPatternProbed = false; // guards the find_in_file enforcement gate below to fire at most once per request
+    // FIX (scattered-pattern gate re-firing on every key/model retry): read
+    // this from sharedRequestState (same object across retries within one
+    // HTTP request) instead of a local `let` that reset to false on every
+    // fresh runAgentLoop call. See the comment on sharedRequestState's
+    // creation at the call site for the full "12 keys, 12 find_in_file
+    // calls" story this caused.
+    if (sharedRequestState && typeof sharedRequestState.scatteredPatternProbed !== 'boolean') {
+        sharedRequestState.scatteredPatternProbed = false;
+    }
     const agentLoopStartedAt = Date.now();
     // FIX (ادعای دروغین موفقیت بعد از write_block ردشده): وقتی write_block
     // به دلیل نامعتبر شدن فایل رد می‌شود (validatePatchedContent) و مدل به
@@ -2924,11 +2932,11 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         if (
             functionCalls.length === 0 &&
             scatteredPatternIntent &&
-            !scatteredPatternProbed &&
+            !sharedRequestState.scatteredPatternProbed &&
             (toolCallTally['find_in_file'] || 0) === 0 &&
             Array.isArray(textFiles) && textFiles.length > 0
         ) {
-            scatteredPatternProbed = true;
+            sharedRequestState.scatteredPatternProbed = true;
             const targetFile = textFiles[0] && textFiles[0].name;
             if (targetFile) {
                 log.info('agent.scattered_pattern_gate.forced', { file: targetFile, round });
@@ -4238,7 +4246,22 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
             // (see createBlockFileState). See the matching comment inside
             // runAgentLoop for the full explanation.
             const sharedRequestState = {
-                editStates: new Map()
+                editStates: new Map(),
+                // FIX (scattered-pattern gate re-firing on every key/model
+                // retry): this flag used to live as a local `let` inside
+                // runAgentLoop, so a 429/timeout retry that re-invoked
+                // runAgentLoop from scratch (a brand new JS call, not a
+                // continuation) reset it to false every time - re-arming
+                // the "force find_in_file once" gate on every single retry.
+                // With 12 keys all exhausted, that meant find_in_file (plus
+                // the round bookkeeping around it) ran up to 12 times for
+                // one user request before ever getting a real model
+                // response, each one adding to input-token usage and to
+                // the repeating "در حال بررسی فایل" steps the user saw.
+                // Moving it here, next to editStates, makes it survive
+                // exactly the same way (persists across retries within one
+                // HTTP request, resets only for a genuinely new request).
+                scatteredPatternProbed: false
             };
             let attemptsTried = 0; // diagnostic: how many model/key combos actually got a real try
 
@@ -4656,7 +4679,9 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         // read/edit/verify progress alive across retryable key/model
         // retries within this one HTTP request.
         const sharedRequestState = {
-            editStates: new Map()
+            editStates: new Map(),
+            // See matching comment on the streaming path's sharedRequestState above.
+            scatteredPatternProbed: false
         };
         let attemptsTried = 0;
 
