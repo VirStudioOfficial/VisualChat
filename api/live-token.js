@@ -35,7 +35,7 @@ async function requestEphemeralToken(apiKey) {
     const expireTime = new Date(now + EXPIRE_MINUTES * 60 * 1000).toISOString();
     const newSessionExpireTime = new Date(now + NEW_SESSION_EXPIRE_MINUTES * 60 * 1000).toISOString();
 
-    const response = await fetch('https://generativelanguage.googleapis.com/v1alpha/auth_tokens', {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/auth_tokens', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
