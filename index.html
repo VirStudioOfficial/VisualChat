@@ -885,7 +885,7 @@
         .message.bot ul, .message.bot ol { margin: 0.5rem 0 1.1rem; padding-right: 1.35rem; }
         .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
         .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
-        .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; position: relative; }
+        .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
         .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 7; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
         /* FIX (هدر کارت کد هنگام اسکرول یک فاصله‌ی ثابت و اشتباه از بالا داشت):
            راه‌حل قبلی (top: 28px روی خودِ هدر) یک عدد ثابت بود که با پدینگ
@@ -2845,6 +2845,24 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const chatBox = document.getElementById('chatBox');
         chatBox.addEventListener('scroll', updateScrollLatestButton);
         updateScrollLatestButton();
+        // FIX (هدر sticky کارت کد بالا نمی‌ماند و با اسکرول رد می‌شد):
+        // .message انیمیشن ورود (messageIn) با animation-fill-mode: forwards
+        // دارد که transform را انیمیت می‌کند. طبق مشخصات CSS، هر عنصری که
+        // transform را انیمیت کند (حتی وقتی مقدار پایانی translateY(0)
+        // scale(1) - یعنی بصری یکسان با حالت عادی - باشد) یک containing
+        // block جدید برای فرزندان position: sticky/fixed می‌سازد. چون
+        // forwards دارد، این containing block برای همیشه (نه فقط حین
+        // ۰.۳۸ ثانیه‌ی انیمیشن) باقی می‌ماند - یعنی هدر sticky کارت کد
+        // به‌جای چسبیدن به بالای کل #chatBox، فقط تا بالای همان حباب پیام
+        // می‌چسبد و چون حباب پیام کوتاه‌تر از کل ناحیه‌ی اسکرول است، خیلی
+        // زود از حالت چسبیده خارج شده و با بقیه‌ی محتوا بالا می‌رود. راه‌حل:
+        // بعد از پایان انیمیشن، خودِ انیمیشن را خاموش می‌کنیم تا واقعاً به
+        // transform: none برگردد و containing block از بین برود.
+        document.addEventListener('animationend', function (e) {
+            if (e.animationName === 'messageIn' && e.target.classList.contains('message')) {
+                e.target.style.animation = 'none';
+            }
+        }, true);
     };
 
     function autoResizeTextarea(textarea) {
