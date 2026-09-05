@@ -807,15 +807,39 @@
             --chat-box-pad-top: 22px;
             scrollbar-width: none; /* Firefox */
             -ms-overflow-style: none; /* IE and Edge */
-            /* FEATURE: fade mask فقط روی لبه‌ی پایین ناحیه‌ی پیام‌ها.
-               قبلاً لبه‌ی بالا هم محو می‌شد که باعث می‌شد هدر sticky کارت کد
-               (که دقیقاً روی همان لبه‌ی بالا می‌چسبد) پشت این نوار محو
-               کمی جابه‌جا/کدر به‌نظر برسد. */
-            -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
-            mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%);
+            position: relative;
         }
         .chat-box::-webkit-scrollbar {
             display: none; /* Chrome, Safari, Opera */
+        }
+        /* FIX (هدر sticky کارت کد هنگام اسکرول جای درستش نبود):
+           قبلاً محوشدگی بالا/پایین با mask-image روی خودِ #chatBox پیاده
+           شده بود. مشکل این بود: mask-image یک "containing block" و لایه‌ی
+           ترکیبی جدید برای کل زیردرخت #chatBox می‌سازد، و چون هدر کارت کد
+           position: sticky دارد، نقطه‌ی چسبیدنش دیگر درست نسبت به محتوای
+           واقعی اسکرول‌شونده محاسبه نمی‌شد و در جای اشتباه (کمی پایین‌تر/
+           بالاتر از حد انتظار) دیده می‌شد. راه‌حل: به‌جای mask-image واقعی
+           (که روی layout/stacking فرزندان اثر می‌گذارد)، یک لایه‌ی صرفاً
+           بصری با ::before/::after می‌سازیم که هیچ containing block ای
+           نمی‌سازد و کاری به موقعیت sticky فرزندان ندارد؛ ظاهر محو دقیقاً
+           همان قبلی می‌ماند. */
+        .chat-box::before,
+        .chat-box::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 28px;
+            pointer-events: none;
+            z-index: 6;
+        }
+        .chat-box::before {
+            top: 0;
+            background: linear-gradient(to bottom, var(--bg-main) 0%, transparent 100%);
+        }
+        .chat-box::after {
+            bottom: 0;
+            background: linear-gradient(to top, var(--bg-main) 0%, transparent 100%);
         }
 
         .message-wrapper { display: flex; flex-direction: column; max-width: 85%; }
@@ -862,7 +886,7 @@
         .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
         .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
-        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
+        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 7; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
         /* FIX (هدر کارت کد هنگام اسکرول یک فاصله‌ی ثابت و اشتباه از بالا داشت):
            راه‌حل قبلی (top: 28px روی خودِ هدر) یک عدد ثابت بود که با پدینگ
            بالای #chatBox هم‌خوانی نداشت - آن پدینگ در سایزهای مختلف صفحه
