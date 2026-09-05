@@ -2193,6 +2193,23 @@
             <div class="auth-guest-line">
                 <a onclick="continueAsGuest()">فعلاً بدون حساب ادامه بده</a>
             </div>
+
+            <!-- FEATURE (تایید ایمیل): بعد از register همیشه، و بعد از
+                 login فقط اگر دستگاه جدید باشد، سرور به‌جای توکن یک
+                 needsVerification برمی‌گرداند. این فرم مخفی است تا وقتی
+                 showVerifyStep() آن را باز کند. -->
+            <form class="auth-form" id="authVerifyForm" style="display:none" onsubmit="return handleVerifySubmit(event)">
+                <p id="authVerifyDesc" style="font-size:14px;color:#666;margin:0 0 8px;">یک کد ۶ رقمی به ایمیلت فرستادیم. کد تا ۱۵ دقیقه معتبره.</p>
+                <input type="text" id="authCodeInput" placeholder="کد ۶ رقمی" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code" required>
+                <div class="auth-error-msg" id="authVerifyErrorMsg"></div>
+                <button type="submit" class="auth-submit-btn" id="authVerifySubmitBtn">تایید کد</button>
+                <div class="auth-toggle-line">
+                    کد نرسید؟ <a onclick="handleResendCode()" id="authResendLink">ارسال دوباره</a>
+                </div>
+                <div class="auth-guest-line">
+                    <a onclick="cancelVerifyStep()">بازگشت</a>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -3090,7 +3107,25 @@
     // notify-admin برای احراز هویت نیست.
     const SYNC_API_BASE = 'https://virtual-chat-sync.vercel.app';
     const AUTH_TOKEN_KEY = 'vc_session_token';
+    const DEVICE_ID_KEY = 'vc_device_id';
     let authMode = 'login'; // 'login' | 'register' - toggleAuthMode بینشان سوییچ می‌کند
+
+    // FEATURE (تایید ایمیل): شناسه‌ی ثابت این دستگاه/مرورگر، تا سرور بتواند
+    // تشخیص دهد "دستگاه جدید" است یا از قبل تایید شده. یک بار ساخته و در
+    // localStorage نگه داشته می‌شود (پاک‌شدن localStorage یعنی دوباره
+    // "دستگاه جدید" حساب می‌شود که رفتار امن قابل‌قبولی است).
+    function getDeviceId() {
+        let id = localStorage.getItem(DEVICE_ID_KEY);
+        if (!id) {
+            id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+            localStorage.setItem(DEVICE_ID_KEY, id);
+        }
+        return id;
+    }
+
+    // بین submit فرم اصلی و فرم کد، باید ایمیل/پسورد/purpose را نگه داریم
+    // تا verify و resend-code بدانند برای کدام درخواست کد می‌فرستند.
+    let pendingAuth = null; // { email, password, purpose }
 
     function extractNameFromEmail(email, fallbackName = '') {
         if (fallbackName && fallbackName.trim() && !fallbackName.includes('@')) return fallbackName.trim();
@@ -3142,7 +3177,7 @@
             const resp = await fetch(`${SYNC_API_BASE}/api/auth?action=${authMode}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
+                body: JSON.stringify({ email, password, deviceId: getDeviceId() })
             });
             const data = await resp.json().catch(() => ({}));
 
@@ -3151,19 +3186,14 @@
                 return false;
             }
 
-            localStorage.setItem(AUTH_TOKEN_KEY, data.token);
-            const autoExtractedName = extractNameFromEmail(data.email);
-            currentUser = {
-                name: autoExtractedName,
-                customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
-                email: data.email,
-                picture: ''
-            };
-            localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
+            if (data.needsVerification) {
+                // به‌جای توکن، سرور کد ۶ رقمی به ایمیل فرستاده - فرم کد را نشان بده.
+                pendingAuth = { email, password, purpose: data.purpose || authMode };
+                showVerifyStep();
+                return false;
+            }
 
-            document.getElementById('authOverlay').classList.remove('active');
-            document.getElementById('authForm').reset();
-            initUserData();
+            finishLogin(data);
         } catch (err) {
             console.error('[auth] submit failed:', err);
             errorEl.textContent = 'اتصال به سرور برقرار نشد. اتصال اینترنت رو چک کن.';
@@ -3172,6 +3202,119 @@
             submitBtn.textContent = originalLabel;
         }
         return false;
+    }
+
+    // مشترک بین لاگین مستقیم (دستگاه شناخته‌شده) و لاگین بعد از تایید کد.
+    function finishLogin(data) {
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+        const autoExtractedName = extractNameFromEmail(data.email);
+        currentUser = {
+            name: autoExtractedName,
+            customName: localStorage.getItem('virtual_user_custom_name') || autoExtractedName,
+            email: data.email,
+            picture: ''
+        };
+        localStorage.setItem('virtual_chat_user', JSON.stringify(currentUser));
+
+        document.getElementById('authOverlay').classList.remove('active');
+        document.getElementById('authForm').reset();
+        cancelVerifyStep();
+        initUserData();
+    }
+
+    function showVerifyStep() {
+        document.getElementById('authForm').style.display = 'none';
+        document.getElementById('authToggleLine').style.display = 'none';
+        document.querySelector('#authOverlay .auth-guest-line').style.display = 'none';
+        document.getElementById('authVerifyErrorMsg').textContent = '';
+        document.getElementById('authCodeInput').value = '';
+        document.getElementById('authVerifyForm').style.display = '';
+        document.getElementById('authCodeInput').focus();
+    }
+
+    function cancelVerifyStep() {
+        pendingAuth = null;
+        document.getElementById('authVerifyForm').style.display = 'none';
+        document.getElementById('authForm').style.display = '';
+        document.getElementById('authToggleLine').style.display = '';
+        document.querySelector('#authOverlay .auth-guest-line').style.display = '';
+    }
+
+    async function handleVerifySubmit(event) {
+        event.preventDefault();
+        if (!pendingAuth) { cancelVerifyStep(); return false; }
+
+        const code = document.getElementById('authCodeInput').value.trim();
+        const errorEl = document.getElementById('authVerifyErrorMsg');
+        const submitBtn = document.getElementById('authVerifySubmitBtn');
+        errorEl.textContent = '';
+
+        if (!/^\d{6}$/.test(code)) {
+            errorEl.textContent = 'کد باید ۶ رقم باشد.';
+            return false;
+        }
+
+        submitBtn.disabled = true;
+        const originalLabel = submitBtn.textContent;
+        submitBtn.textContent = '...';
+
+        try {
+            const resp = await fetch(`${SYNC_API_BASE}/api/auth?action=verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: pendingAuth.email,
+                    code,
+                    purpose: pendingAuth.purpose,
+                    deviceId: getDeviceId()
+                })
+            });
+            const data = await resp.json().catch(() => ({}));
+
+            if (!resp.ok) {
+                errorEl.textContent = data.error || 'کد نادرست است.';
+                return false;
+            }
+
+            finishLogin(data);
+        } catch (err) {
+            console.error('[auth] verify failed:', err);
+            errorEl.textContent = 'اتصال به سرور برقرار نشد.';
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalLabel;
+        }
+        return false;
+    }
+
+    async function handleResendCode() {
+        if (!pendingAuth) return;
+        const link = document.getElementById('authResendLink');
+        const errorEl = document.getElementById('authVerifyErrorMsg');
+        errorEl.textContent = '';
+        link.style.pointerEvents = 'none';
+        try {
+            const resp = await fetch(`${SYNC_API_BASE}/api/auth?action=resend-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: pendingAuth.email,
+                    purpose: pendingAuth.purpose,
+                    deviceId: getDeviceId()
+                })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                errorEl.textContent = data.error || 'ارسال دوباره ناموفق بود.';
+            } else {
+                showToast('کد جدید ارسال شد.', 'info');
+            }
+        } catch (err) {
+            console.error('[auth] resend failed:', err);
+            errorEl.textContent = 'اتصال به سرور برقرار نشد.';
+        } finally {
+            setTimeout(() => { link.style.pointerEvents = ''; }, 3000);
+        }
     }
 
     // کاربر می‌تواند اورلی لاگین را رد کند و به‌صورت مهمان ادامه دهد؛
