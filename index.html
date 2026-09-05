@@ -39,6 +39,7 @@
                         root.style.setProperty('--text-muted', '#6b6b6b');
                         root.style.setProperty('--code-bg', '#f2f2f2');
                         root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
+                        root.style.setProperty('--code-head-bg-solid', '#e7e7e7');
                         root.style.setProperty('--code-text', '#0d0d0d');
                         root.style.setProperty('--shadow-a', 'rgba(30,41,59,0.08)');
                         root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
@@ -55,6 +56,7 @@
                         root.style.setProperty('--text-muted', '#8a8a8a');
                         root.style.setProperty('--code-bg', '#0d0d0d');
                         root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.04)');
+                        root.style.setProperty('--code-head-bg-solid', '#1c1c1c');
                         root.style.setProperty('--code-text', '#f4f6fb');
                         root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.3)');
                         root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
@@ -124,6 +126,7 @@
             --border: #e5e5e5;
             --code-bg: #f2f2f2;
             --code-head-bg: rgba(0,0,0,0.04);
+            --code-head-bg-solid: #e7e7e7;
             --code-text: #0d0d0d;
             --border-soft: rgba(15,23,42,0.08);
             --shadow-a: rgba(30,41,59,0.08);
@@ -857,6 +860,14 @@
         .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
         .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); position: sticky; top: 0; z-index: 5; border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
+        /* FIX (پرش هدر کارت کد حین استریم): وقتی پاسخ در حال تایپ زنده است،
+           loadingDiv.innerHTML مدام (تا ۳۰ بار در ثانیه) کل DOM را جایگزین
+           می‌کند. چون هدر کارت کد position: sticky دارد، این جایگزینی مکرر
+           باعث می‌شود مرورگر موقعیت sticky را هر بار دوباره محاسبه کند و
+           برای یک لحظه هدر از جای درستش (بالای کادر، هنگام اسکرول) جابه‌جا
+           به‌نظر برسد. در حین استریم، sticky را موقتاً غیرفعال می‌کنیم؛ به‌محض
+           پایان استریم (کلاس is-streaming حذف می‌شود) دوباره sticky می‌شود. */
+        .is-streaming .code-card-head { position: static; }
         .code-actions { display:flex; gap:6px; }
         .code-action { border:1px solid var(--border); background:var(--bg-card); color:var(--text-main); border-radius:8px; padding:6px 8px; cursor:pointer; font-family:inherit; font-size:0.76rem; display:inline-flex; align-items:center; gap:5px; }
         .code-action:hover { border-color:var(--accent-2); }
@@ -3436,6 +3447,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             root.style.setProperty('--text-muted', '#6b6b6b');
             root.style.setProperty('--code-bg', '#f2f2f2');
             root.style.setProperty('--code-head-bg', 'rgba(0,0,0,0.04)');
+            root.style.setProperty('--code-head-bg-solid', '#e7e7e7');
             root.style.setProperty('--code-text', '#0d0d0d');
             root.style.setProperty('--shadow-a', 'rgba(30,41,59,0.08)');
             root.style.setProperty('--shadow-b', 'rgba(30,41,59,0.14)');
@@ -3457,6 +3469,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             root.style.setProperty('--text-muted', '#8a8a8a');
             root.style.setProperty('--code-bg', '#0d0d0d');
             root.style.setProperty('--code-head-bg', 'rgba(255,255,255,0.04)');
+            root.style.setProperty('--code-head-bg-solid', '#1c1c1c');
             root.style.setProperty('--code-text', '#f4f6fb');
             root.style.setProperty('--shadow-a', 'rgba(0,0,0,0.3)');
             root.style.setProperty('--shadow-b', 'rgba(0,0,0,0.55)');
@@ -3478,6 +3491,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         root.style.setProperty('--bg-card-hover', mixHex(light ? '#e6e9f3' : '#1c2130', c1, light ? 0.06 : 0.18));
         root.style.setProperty('--bg-input', mixHex(light ? '#ffffff' : '#191e29', c1, light ? 0.035 : 0.15));
         root.style.setProperty('--border', mixHex(light ? '#e2e5ef' : '#232838', c1, light ? 0.10 : 0.18));
+        root.style.setProperty('--code-bg', mixHex(light ? '#f0f2f8' : '#161a24', c2, light ? 0.05 : 0.13));
+        root.style.setProperty('--code-head-bg', light ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)');
+        root.style.setProperty('--code-head-bg-solid', mixHex(light ? '#e6e9f3' : '#1c2130', c1, light ? 0.06 : 0.18));
+        root.style.setProperty('--code-text', light ? '#0d0d0d' : '#f4f6fb');
         root.style.setProperty('--app-bg-image',
             `radial-gradient(circle at 85% -10%, ${c1}33, transparent 45%), radial-gradient(circle at -10% 110%, ${c2}26, transparent 40%)`
         );
@@ -5192,6 +5209,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // کل متن را دوباره پارس می‌کند و اجرای هم‌زمان این دو، ترد
             // اصلی را قفل می‌کرد.
             window.__isStreamingReply = true;
+            loadingDiv.classList.add('is-streaming');
 
             // FEATURE (نمایش حرف‌به‌حرف شبیه ChatGPT): قبلاً هر تیکه‌ای که
             // از شبکه می‌رسید مستقیم و یکجا با innerHTML جایگزین می‌شد، پس
@@ -5462,9 +5480,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">${failedNames ? `فایل(های) «${failedNames}» ویرایش نشدند. ` : ''}مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده یا فایل را مجدداً پیوست کن.</div></div>`;
                 }
 
+                loadingDiv.classList.remove('is-streaming');
                 loadingDiv.innerHTML = finalHtml;
                 setGeneratingState(false); saveCurrentChat(); scrollToLatest();
             } else {
+                loadingDiv.classList.remove('is-streaming');
                 removePushedUserTurnIfUnanswered();
                 makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request, streamErrorDetail);
                 setGeneratingState(false); saveCurrentChat();
@@ -5478,9 +5498,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 // request started - stopping the request must remove it, or
                 // the NEXT message sent will be answered as if it were a
                 // continuation of this stopped/unanswered turn (see fix above).
+                loadingDiv.classList.remove('is-streaming');
                 removePushedUserTurnIfUnanswered();
                 loadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
             } else {
+                loadingDiv.classList.remove('is-streaming');
                 removePushedUserTurnIfUnanswered();
                 makeRetryError(loadingDiv, 'خطا در ارتباط با سرور.', request, { type: 'network_error', stage: 'fetch', detail: error?.message || String(error) });
             }
@@ -5493,6 +5515,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // مطمئن شو این پرچم در هیچ مسیر خروجی (موفق/خطا/Stop) روشن
             // نمی‌ماند، وگرنه ناظر آیکون‌ها برای همیشه غیرفعال باقی می‌ماند.
             window.__isStreamingReply = false;
+            loadingDiv.classList.remove('is-streaming');
             if (window.__lucideRefreshPending && window.lucide) {
                 window.__lucideRefreshPending = false;
                 clearTimeout(window.__lucideRefreshTimer);
@@ -6216,15 +6239,46 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         // پیامی رد و بدل شده - همون رفتاری که برای "چت فعال بره بالای
         // لیست" واقعاً می‌خوایم.
         const prev = chats[currentChatId] || {};
+        // FIX (پیام‌های قدیمی حذف/ناقص می‌شدند): چت‌های طولانی فقط آخرین
+        // PAGE_SIZE پیام را در DOM اصلی (#chatBox) دارند - پیام‌های
+        // قدیمی‌تر که هنوز با دکمه‌ی «بارگذاری پیام‌های قدیمی‌تر» باز نشده
+        // بودند، فقط در chatBox.__olderWrappersBuffer (خارج از DOM) نگه
+        // داشته می‌شدند (رجوع کن به loadChat). اینجا قبلاً مستقیم از
+        // chatBox.innerHTML برای ذخیره استفاده می‌شد، یعنی اگر کاربر بدون
+        // باز کردن آن پیام‌های قدیمی یک پیام جدید می‌فرستاد، saveCurrentChat
+        // دقیقاً همان چیزی را که در DOM بود (بدون پیام‌های بافرشده) به‌عنوان
+        // کل تاریخچه‌ی چت ذخیره می‌کرد - یعنی تمام پیام‌های قدیمی‌تر برای
+        // همیشه از HTML ذخیره‌شده پاک می‌شدند، و خودِ دکمه‌ی «بارگذاری
+        // پیام‌های قدیمی‌تر» (که یک <div> معمولی است، نه .message-wrapper)
+        // هم به‌جای پیام واقعی داخل HTML ذخیره‌شده باقی می‌ماند. حالا قبل
+        // از ذخیره، هر پیام قدیمی‌تر باقی‌مانده در بافر را دوباره به ابتدای
+        // HTML اضافه می‌کنیم و خودِ دکمه‌ی بارگذاری را از HTML ذخیره‌شده
+        // حذف می‌کنیم - بدون اینکه چیزی واقعاً به DOM/چیزی که کاربر می‌بیند
+        // اضافه شود.
+        const olderBuffer = Array.isArray(chatBox.__olderWrappersBuffer) ? chatBox.__olderWrappersBuffer : [];
+        const bufferedHtml = olderBuffer.map(w => w.outerHTML).join('');
+        const clone = chatBox.cloneNode(true);
+        clone.querySelectorAll('.load-older-messages').forEach(el => el.remove());
+        const fullHtmlToSave = bufferedHtml + clone.innerHTML;
         chats[currentChatId] = {
             ...prev,
             title: firstUserMsg.substring(0, 20) + "...",
-            html: chatBox.innerHTML,
+            html: fullHtmlToSave,
             updatedAt: Date.now()
         };
         queueChatSave(currentChatId);
         try { localStorage.setItem('last_active_chat_id', String(currentChatId)); } catch (_) {}
         renderHistoryList();
+        // FIX (به‌نظر می‌رسید چت به بالای لیست نمی‌رود): منطق مرتب‌سازی و
+        // updatedAt کاملاً درست بود - چت واقعاً بالای گروه خودش (پین‌شده یا
+        // عادی) می‌رفت. مشکل این بود که اگر کاربر قبلاً پایین‌تر در پنل
+        // گفتگوها اسکرول کرده بود (چون داشت یک چت قدیمی را از پایین لیست
+        // باز می‌کرد)، اسکرول پنل بعد از renderHistoryList() همان‌جای قبلی
+        // می‌ماند - یعنی چت واقعاً بالا رفته بود ولی چون کاربر بالای لیست
+        // را نمی‌دید، به‌نظرش می‌رسید هیچ اتفاقی نیفتاده. اسکرول پنل را به
+        // بالا برمی‌گردانیم تا جابه‌جایی واقعاً قابل مشاهده باشد.
+        const historyListEl = document.getElementById('historyList');
+        if (historyListEl) historyListEl.scrollTop = 0;
     }
 
     // Re-renders the sidebar list from the in-memory `chats` object without
