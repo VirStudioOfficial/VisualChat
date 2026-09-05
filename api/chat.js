@@ -1628,6 +1628,32 @@ const GEMINI_TOOLS = [
                 }
             },
             {
+                // FEATURE (find_in_file): برای تسک‌هایی که یک الگو/رنگ/نام
+                // متغیر در چند جای پراکنده‌ی فایل تکرار شده (مثلاً تغییر کل
+                // پالت رنگ تم)، مدل قبلاً مجبور بود حدس بزند کجاها باید عوض
+                // شود و اغلب بعد از عوض کردن فقط چند مورد، فکر می‌کرد کار
+                // تمام است. این ابزار همه‌ی رخدادها را با شماره خط یکجا
+                // نشان می‌دهد تا قبل از شروع، دامنه‌ی واقعی کار مشخص باشد.
+                name: 'find_in_file',
+                description:
+                    'همه‌ی خطوطی از فایل که شامل یک رشته یا الگوی مشخص هستند را با شماره خط برمی‌گرداند. ' +
+                    'همیشه قبل از شروع ویرایشی که ممکن است در چند جای پراکنده‌ی فایل تکرار شده باشد ' +
+                    '(مثلاً تغییر یک رنگ/متغیر/نام تابع که هم در CSS و هم در جاوااسکریپت استفاده شده، یا ' +
+                    'تغییر کل پالت رنگ یک تم) این ابزار را صدا بزن تا همه‌ی رخدادها را یکجا ببینی - نه ' +
+                    'اینکه فقط با یک apply_edit موفق فکر کنی همه‌جا عوض شده. بعد از دیدن نتیجه، برای هر ' +
+                    'رخداد مرتبط یک apply_edit جدا صدا بزن؛ تا وقتی همه‌ی رخدادهای مرتبط با درخواست ' +
+                    'کاربر عوض نشده‌اند، پاسخ نهایی نده.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        file: { type: 'string', description: 'نام دقیق فایل هدف.' },
+                        query: { type: 'string', description: 'رشته یا الگوی مورد جستجو (مثلاً یک کد رنگ hex، نام متغیر CSS، یا نام تابع).' },
+                        isRegex: { type: 'boolean', description: 'اختیاری - اگر true باشد، query به‌عنوان regular expression تفسیر می‌شود؛ در غیر این صورت (پیش‌فرض) به‌عنوان رشته‌ی ساده جستجو می‌شود.' }
+                    },
+                    required: ['file', 'query']
+                }
+            },
+            {
                 // اگر فایل خیلی بزرگ باشد و مدل قبل از نوشتن search نیاز به
                 // دیدن دقیق یک بخش خاص داشته باشد (مثلاً برای کپی دقیق
                 // تورفتگی/فاصله‌گذاری)، این ابزار یک بازه‌ی خط مشخص را
@@ -1735,6 +1761,9 @@ function describeToolCall(name, args) {
     }
     if (name === 'ask_user') {
         return 'قبل از ادامه، یه سؤال دارم...';
+    }
+    if (name === 'find_in_file') {
+        return `دارم همه‌ی جاهایی که «${(args && args.query) || ''}» توی فایل تکرار شده رو پیدا می‌کنم...`;
     }
     if (name === 'read_file_section') {
         return `در حال خواندن بخشی از فایل «${(args && args.file) || ''}»...`;
@@ -1986,6 +2015,66 @@ async function executeToolCall(name, args, ctx) {
                 note: 'این فایل خیلی بزرگ بود و فقط بخش ابتدایی آن (۷۰ هزار کاراکتر اول) بازگردانده شد. اگر بخش دیگری لازم است، به کاربر بگو که فایل کامل در دسترس نیست و باید بخش خاصی از آن را دوباره بفرستد.'
             } : {}),
             ...(structureNote ? { structure: structureNote } : {})
+        };
+    }
+
+    // FEATURE (find_in_file): پیش از این، مدل فقط می‌توانست حدس بزند کجای
+    // فایل یک متن/الگو تکرار شده - مثلاً برای تغییر کل پالت رنگ (ده‌ها
+    // متغیر CSS پراکنده + یک تابع جاوااسکریپتی که همان رنگ‌ها را دوباره از
+    // localStorage می‌خواند)، مدل یک apply_edit را می‌زد، فکر می‌کرد کار
+    // تمام است، و بقیه‌ی رخدادها (خصوصاً در بخش‌های دیگر فایل مثل تابع
+    // اعمال تم در جاوااسکریپت) دست‌نخورده می‌ماندند - دقیقاً همان الگوی
+    // "یک ثانیه سبز بعد دوباره مشکی" که کاربر گزارش داد. این ابزار همه‌ی
+    // رخدادهای یک رشته/الگو را با شماره خط یکجا برمی‌گرداند تا مدل قبل از
+    // شروع، دامنه‌ی واقعی کار را ببیند - نه این‌که بعد از یک ویرایش موفق
+    // تصور کند همه‌جا عوض شده.
+    if (name === 'find_in_file') {
+        const fileName = String((args && args.file) || '').trim();
+        const query = String((args && args.query) ?? '');
+        const useRegex = !!(args && args.isRegex);
+        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+        const found = files.find(f => f && (f.name === fileName || String(f.name || '').split('/').pop() === fileName.split('/').pop()));
+        if (!found) {
+            return { error: `فایل «${fileName}» در فایل‌های فعلی این درخواست پیدا نشد.` };
+        }
+        if (!query) {
+            return { error: 'query خالی بود.' };
+        }
+        const state = ctx && ctx.editStates && ctx.editStates.get(found.name || fileName);
+        const content = state ? state.content : (found.content || '');
+
+        let regex;
+        try {
+            regex = useRegex ? new RegExp(query, 'g') : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        } catch (error) {
+            return { error: `الگوی regex نامعتبر است: ${error?.message || error}` };
+        }
+
+        const lines = content.split('\n');
+        const MAX_MATCHES = 200; // safety cap so a too-common query doesn't blow up the response
+        const matches = [];
+        for (let i = 0; i < lines.length && matches.length < MAX_MATCHES; i++) {
+            regex.lastIndex = 0;
+            if (regex.test(lines[i])) {
+                matches.push({ line: i + 1, text: lines[i].length > 300 ? lines[i].slice(0, 300) + '…' : lines[i] });
+            }
+        }
+
+        log.info('agent.tool.find_in_file', {
+            name: found.name,
+            queryPreview: query.slice(0, 80),
+            matchCount: matches.length
+        });
+
+        return {
+            file: found.name,
+            matchCount: matches.length,
+            matches,
+            note: matches.length >= MAX_MATCHES
+                ? `تعداد رخدادها از ${MAX_MATCHES} بیشتر بود؛ فقط ${MAX_MATCHES} مورد اول نشان داده شد.`
+                : (matches.length === 0
+                    ? 'هیچ رخدادی پیدا نشد.'
+                    : 'برای هر رخداد که باید تغییر کند، یک apply_edit جدا با search دقیق همان خط (یا چند خط اطراف برای یکتا بودن) صدا بزن. تا وقتی همه‌ی رخدادهای مرتبط با درخواست کاربر تغییر نکرده‌اند، پاسخ نهایی نده.')
         };
     }
 
@@ -3920,6 +4009,7 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
 
 روند اجباری ویرایش (هر مرحله قبل از بعدی):
 ۱. از روی محتوای کامل فایل که داری، بخش دقیقی که باید تغییر کند را پیدا کن - حدس نزن، متن واقعی را از همان محتوا کپی کن.
+   - اگر درخواست کاربر ممکن است در چند جای پراکنده‌ی فایل تکرار شده باشد (مثلاً تغییر یک رنگ/پالت تم که هم در CSS/:root و هم در یک تابع جاوااسکریپتی که همان مقادیر را runtime از localStorage یا جای دیگر می‌خواند و دوباره اعمال می‌کند تعریف شده، یا تغییر نام یک متغیر/تابع استفاده‌شده در چند جا)، اول find_in_file را صدا بزن تا همه‌ی رخدادهای واقعی را با شماره خط ببینی - هرگز فرض نکن یک apply_edit موفق یعنی همه‌جا عوض شده.
 ۲. apply_edit را با file، search (متن دقیق موجود - چند خط اطراف تغییر برای یکتا بودن) و replace (متن نهایی جدید همان بخش) صدا بزن.
    - اگر success:true و valid:true برگشت، تغییر اعمال شد.
    - اگر success:false برگشت (پیدا نشد یا مبهم بود)، از context هایی که در پاسخ خطا برگردانده می‌شود کمک بگیر تا search را دقیق‌تر/یکتاتر کنی، سپس دوباره صدا بزن. هرگز حدس نزن یا محتوا را از حافظه بازسازی نکن - از context واقعی برگشتی استفاده کن.
