@@ -2702,6 +2702,36 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         };
 
         const handleStreamText = (text) => {
+            // FIX (duplicated-looking paragraphs on file-edit turns): the
+            // verify_file gate below (search for "agent.verify_gate.forced")
+            // can force an extra round AFTER the model has already written
+            // and streamed what it thought was its final "تمام شد" paragraph
+            // for this round. Gemini then treats the forced verify_file
+            // round as a fresh turn and writes ANOTHER full closing
+            // paragraph once it sees the result - so the user sees two (or
+            // more) similar-but-not-identical paragraphs back to back,
+            // looking like a "typing restarted from scratch" bug even
+            // though each one is a real, distinct round.
+            //
+            // Fix: on any round where this request is a file edit AND at
+            // least one file still has unverified edits (editCount > 0 &&
+            // !verified) AND no functionCall has been seen yet this round,
+            // we don't yet know whether this round's text is the model's
+            // true final answer or a premature "done" claim about to be
+            // followed by a forced verify round. Hold it exactly like the
+            // search preamble buffer - if a functionCall arrives (forced
+            // verify_file or a real one), the round loop below decides
+            // whether to keep or discard it; if the round ends with truly
+            // zero function calls, it is flushed normally further down.
+            const hasUnverifiedEdits = !!(fileEditIntent && editStates && editStates.size > 0 &&
+                [...editStates.values()].some(s => s.editCount > 0 && !s.verified));
+
+            if (hasUnverifiedEdits && !sawFunctionCall) {
+                pendingToolPreamble += text;
+                armPreambleHoldTimer();
+                return;
+            }
+
             if (!searchIntent || disableTools || scopedSearchState.used || sawFunctionCall || preambleTimedOut) {
                 emitStreamText(text);
                 return;
@@ -2856,9 +2886,17 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     round
                 });
                 functionCalls.push({ name: 'verify_file', args: { file: unverified.name } });
-                // Keep any text the model produced this round (e.g. "الان
-                // فایل رو نهایی می‌کنم") - it will be followed by the
-                // verify_file round's own text, both streamed normally.
+                // FIX (duplicated-looking paragraphs): this round's own text
+                // (if any) was a premature "تمام شد" claim written before
+                // verify_file ever ran - it must NOT reach the client, since
+                // the verify_file round below will produce the model's real
+                // (and only) closing paragraph once it actually knows the
+                // edit is valid. That text was held (not streamed) by the
+                // hasUnverifiedEdits branch in handleStreamText above
+                // specifically so it could be discarded here instead of
+                // showing the user two similar paragraphs back to back.
+                pendingToolPreamble = '';
+                clearPreambleHoldTimer();
             }
         }
 
