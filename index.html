@@ -1361,6 +1361,60 @@
         .live-mute-btn { background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-soft, rgba(255,255,255,0.09)); }
         .live-mute-btn.muted { background: var(--accent-2); color: var(--bg-main); }
 
+        /* Settings gear: sits above the mute/end row, opens a small panel
+           for voice/language/search - kept visually secondary (smaller,
+           less contrast) since it's a setup control, not a call action. */
+        .live-settings-btn {
+            width: 44px; height: 44px; border-radius: 50%;
+            background: var(--bg-card); color: var(--text-muted, #aab3c5);
+            border: 1px solid var(--border-soft, rgba(255,255,255,0.09));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.05rem; cursor: pointer;
+            transition: transform 0.15s ease, color 0.15s ease;
+        }
+        .live-settings-btn:hover { color: var(--text-main); transform: rotate(20deg); }
+        .live-call-settings-panel {
+            display: none;
+            flex-direction: column;
+            gap: 14px;
+            width: min(320px, 86vw);
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft, rgba(255,255,255,0.09));
+            border-radius: 18px;
+            padding: 18px 18px 14px 18px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+            position: relative;
+            z-index: 2;
+        }
+        .live-call-settings-panel.open { display: flex; }
+        .live-settings-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        }
+        .live-settings-label { color: var(--text-main); font-size: 0.9rem; }
+        .live-settings-select {
+            background: var(--bg-input, var(--bg-main));
+            color: var(--text-main);
+            border: 1px solid var(--border-soft, rgba(255,255,255,0.09));
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 0.85rem;
+            max-width: 170px;
+        }
+        .live-settings-toggle { position: relative; width: 42px; height: 24px; display: inline-block; }
+        .live-settings-toggle input { opacity: 0; width: 0; height: 0; }
+        .live-settings-toggle-track {
+            position: absolute; inset: 0; border-radius: 999px;
+            background: var(--bg-input, #333); transition: background 0.2s ease;
+            cursor: pointer;
+        }
+        .live-settings-toggle-track::before {
+            content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%;
+            background: #fff; top: 3px; right: 3px; transition: transform 0.2s ease;
+        }
+        .live-settings-toggle input:checked + .live-settings-toggle-track { background: var(--accent-grad); }
+        .live-settings-toggle input:checked + .live-settings-toggle-track::before { transform: translateX(-18px); }
+        .live-settings-hint { color: var(--text-muted, #aab3c5); font-size: 0.72rem; text-align: center; }
+
         /* REDESIGN v2 (مطابق نمونه‌ی درخواستی): فایل‌های غیرتصویری به‌صورت
            چیپ بزرگ‌تر با آیکون دایره‌ای توپر و دو خط متن (اسم + نوع فایل)
            نمایش داده می‌شوند؛ عکس‌ها یک thumbnail مربعیِ جدا و بزرگ‌تر با
@@ -4819,6 +4873,144 @@
         return text;
     }
 
+    // --- Live call voice/language preferences ---
+    // Real, documented Gemini Live prebuilt voices (speechConfig.voiceConfig
+    // .prebuiltVoiceConfig.voiceName) - see
+    // https://ai.google.dev/gemini-api/docs/live-api/capabilities - not
+    // invented names. Paired with the short style word Google's own docs
+    // use to describe each one, shown in the picker so the choice means
+    // something before you hear it.
+    const LIVE_VOICE_OPTIONS = [
+        { name: 'Zephyr', style: 'روشن' }, { name: 'Puck', style: 'سرزنده' },
+        { name: 'Charon', style: 'آموزنده' }, { name: 'Kore', style: 'محکم' },
+        { name: 'Fenrir', style: 'پرشور' }, { name: 'Leda', style: 'جوان' },
+        { name: 'Orus', style: 'محکم' }, { name: 'Aoede', style: 'ملایم' },
+        { name: 'Callirrhoe', style: 'آسوده' }, { name: 'Autonoe', style: 'روشن' },
+        { name: 'Enceladus', style: 'آرام' }, { name: 'Iapetus', style: 'شفاف' },
+        { name: 'Umbriel', style: 'آسوده' }, { name: 'Algieba', style: 'نرم' },
+        { name: 'Despina', style: 'نرم' }, { name: 'Erinome', style: 'شفاف' },
+        { name: 'Algenib', style: 'خشن' }, { name: 'Rasalgethi', style: 'آموزنده' },
+        { name: 'Laomedeia', style: 'شاداب' }, { name: 'Achernar', style: 'نرم' },
+        { name: 'Alnilam', style: 'محکم' }, { name: 'Schedar', style: 'یکنواخت' },
+        { name: 'Gacrux', style: 'باتجربه' }, { name: 'Pulcherrima', style: 'رک' },
+        { name: 'Achird', style: 'دوستانه' }, { name: 'Zubenelgenubi', style: 'خودمانی' },
+        { name: 'Vindemiatrix', style: 'ملایم' }, { name: 'Sadachbia', style: 'پرانرژی' },
+        { name: 'Sadaltager', style: 'مطلع' }, { name: 'Sulafat', style: 'گرم' }
+    ];
+    // Real BCP-47 language options Google documents as supported by the
+    // Live API. Note: native-audio models (gemini-3.1-flash-live-preview
+    // included) do NOT support forcing this via speechConfig.languageCode
+    // the way older non-native-audio models do - Google's own docs say
+    // native-audio models "automatically choose the appropriate language
+    // and don't support explicitly setting the language code", and
+    // instead recommend steering language through systemInstruction. So
+    // this picker's value is woven into the system prompt (see
+    // buildLiveSetupMessage below), not sent as a languageCode field -
+    // that's the actually-supported mechanism for this model, not a
+    // guess.
+    const LIVE_LANGUAGE_OPTIONS = [
+        { code: 'fa-IR', label: 'فارسی' },
+        { code: 'en-US', label: 'English (US)' },
+        { code: 'ar-EG', label: 'العربية' },
+        { code: 'fr-FR', label: 'Français' },
+        { code: 'de-DE', label: 'Deutsch' },
+        { code: 'es-US', label: 'Español' },
+        { code: 'hi-IN', label: 'हिन्दी' },
+        { code: 'tr-TR', label: 'Türkçe' }
+    ];
+    function getLiveVoicePref() { return localStorage.getItem('virtual_live_voice') || 'Kore'; }
+    function getLiveLanguagePref() { return localStorage.getItem('virtual_live_language') || 'fa-IR'; }
+    function setLiveVoicePref(name) { localStorage.setItem('virtual_live_voice', name); }
+    function setLiveLanguagePref(code) { localStorage.setItem('virtual_live_language', code); }
+    // Whether to offer the model the googleSearch tool for the NEXT call.
+    // Defaults on since the whole point of asking for it was searching
+    // during voice chats; the call settings panel can turn it off, and a
+    // 1007 crash (see reconnectLiveCallWithoutSearch) turns it off
+    // automatically for the current call only, without touching this
+    // persisted preference.
+    let liveSearchToggleEnabled = localStorage.getItem('virtual_live_search') !== 'off';
+    function setLiveSearchToggle(enabled) {
+        liveSearchToggleEnabled = enabled;
+        localStorage.setItem('virtual_live_search', enabled ? 'on' : 'off');
+    }
+
+    // Builds the setup message from current state - pulled into its own
+    // function so a post-crash reconnect (see the googleSearch 1007 handling
+    // in ws.onmessage) can rebuild an equivalent setup rather than
+    // duplicating this whole block. `opts.withSearch` lets a reconnect drop
+    // the googleSearch tool specifically, since Google's own bug reports
+    // (gemini-3.1-flash-live-preview, Aug 2026) show a session that died
+    // from a googleSearch call will just die again on resume if the tool is
+    // still declared - see the comment on ws.onmessage's toolCall/1007
+    // handling below for the full story.
+    function buildLiveSetupMessage(opts) {
+        opts = opts || {};
+        const withSearch = opts.withSearch !== false;
+        const historyBlock = liveState && liveState.liveCallHistoryContext
+            ? `\n\nخلاصه‌ی گفتگوی متنی که همین الان با همین کاربر در همین چت داشتی (برای تداوم، نه برای تکرار کردنش):\n${liveState.liveCallHistoryContext}\n\nبر اساس این سابقه ادامه بده - اگر کاربر با اشاره‌ای مبهم ("همونی که گفتی"، "ادامه‌ی اون") صحبت را شروع کرد، منظورش همین سابقه‌ست.`
+            : '';
+        const langOpt = LIVE_LANGUAGE_OPTIONS.find(l => l.code === getLiveLanguagePref()) || LIVE_LANGUAGE_OPTIONS[0];
+        // Native-audio models pick their own language automatically and
+        // don't accept an explicit languageCode field (see note on
+        // LIVE_LANGUAGE_OPTIONS above) - so the only real lever here is
+        // telling the model plainly, in its own instructions, which
+        // language to speak.
+        const languageBlock = `\n\nزبان گفتار: همیشه و فقط به ${langOpt.label} صحبت کن، حتی اگر کاربر به زبان دیگری صحبت کرد، مگر اینکه صراحتاً بخواهد زبان را عوض کنی.`;
+        const tools = [];
+        if (withSearch) {
+            // Real, documented Live API tool - see
+            // https://ai.google.dev/gemini-api/docs/live-api/tools. Known
+            // issue: certain queries with this tool enabled make Gemini
+            // 3.1 Flash Live close the whole session with code 1007
+            // (Google forum thread, Aug 2026) instead of just failing that
+            // one tool call - handled via the reconnect-without-search
+            // fallback in ws.onclose below, not solvable from our side.
+            tools.push({ googleSearch: {} });
+        }
+        // A real functionDeclarations tool the model can call on its own
+        // initiative to end the call - e.g. if the user says "خب همینه،
+        // خداحافظ" or the conversation naturally concludes. This is
+        // standard Live API function calling
+        // (https://ai.google.dev/gemini-api/docs/live-api/tools), not a
+        // special hangup API - the model just emits a normal toolCall with
+        // this name, which ws.onmessage below catches and translates into
+        // calling endLiveCall() client-side.
+        tools.push({
+            functionDeclarations: [{
+                name: 'end_call',
+                description: 'در صورتی که کاربر صریحاً خداحافظی کرد یا خواست تماس تمام شود، یا گفتگو به‌طور طبیعی و کامل به پایان رسید، این تابع را برای قطع تماس صدا بزن.',
+                parameters: { type: 'object', properties: {} }
+            }]
+        });
+
+        return {
+            setup: {
+                model: `models/${LIVE_MODEL_NAME}`,
+                systemInstruction: {
+                    parts: [{ text: virtualPersona + '\n\nاین یک گفتگوی صوتی زنده است: پاسخ‌ها را کوتاه، محاوره‌ای و مستقیم بگو (نه بولت‌پوینت یا تیتر، چون شنیده می‌شوند نه خوانده)، دقیقاً به همان چیزی که کاربر پرسید جواب بده و از حرف زدن بی‌ربط یا پرکردن سکوت با جملات کلی خودداری کن. اگر برای جواب دادن نیاز به اطلاعات به‌روز (قیمت، اخبار، هرچیز وابسته به زمان) بود، از ابزار جست‌وجو استفاده کن.' + languageBlock + historyBlock }]
+                },
+                generationConfig: {
+                    responseModalities: ['AUDIO'],
+                    // Bumped up from 'minimal': with zero thinking
+                    // budget the model would sometimes answer a
+                    // completely different question than what was
+                    // asked (e.g. asked X, rambled about Y). 'low'
+                    // keeps latency close to minimal while giving
+                    // it enough room to actually parse the
+                    // question before answering.
+                    thinkingConfig: { thinkingLevel: 'low' },
+                    speechConfig: {
+                        voiceConfig: { prebuiltVoiceConfig: { voiceName: getLiveVoicePref() } }
+                    }
+                },
+                tools: tools,
+                realtimeInputConfig: {
+                    automaticActivityDetection: { disabled: true }
+                }
+            }
+        };
+    }
+
     async function startLiveCall() {
         if (liveState) return; // already in a call
         if (isGenerating) return; // don't collide with a text generation in flight
@@ -4829,6 +5021,8 @@
         overlay.classList.add('open');
         orbWrap.classList.remove('listening', 'speaking');
         statusText.textContent = 'در حال گرفتن مجوز میکروفن...';
+        try { document.getElementById('liveCallSettingsPanel')?.classList.remove('open'); } catch (_) {}
+        try { populateLiveCallSettingsPanel(); } catch (_) {}
 
         liveState = {
             ws: null,
@@ -4850,6 +5044,12 @@
             // gapless joins between separately-scheduled sources.
             muted: false,
             closing: false,
+            // Whether the googleSearch tool is currently offered to the
+            // model - starts from the user's toggle in the call settings,
+            // gets forced to false permanently for this call if the
+            // known 1007-crash-on-search bug fires (see ws.onclose).
+            searchEnabled: liveSearchToggleEnabled,
+            searchCrashRetried: false,
             // Snapshot of the current chat's text history, captured now
             // (before the call connects) rather than read lazily later,
             // so it reflects exactly what was on screen when the user
@@ -4885,114 +5085,126 @@
             await setUpContinuousPlayback();
             if (!liveState) return; // call may have been ended while awaiting addModule
 
-            const ws = new WebSocket(LIVE_PROXY_WS_URL);
-            liveState.ws = ws;
-
-            ws.onopen = () => {
-                // Unlike the old ephemeral-token setup (where model +
-                // generationConfig were baked into the token), the proxy
-                // connects to Gemini with a plain API key, so we need to
-                // send the full setup here ourselves.
-                //
-                // automaticActivityDetection is disabled and turn
-                // boundaries are sent manually (activityStart/activityEnd)
-                // from beginMicStreaming's RMS-based VAD below. We switched
-                // to this after finding that constant background noise
-                // (an AC unit) kept Gemini's server-side VAD from ever
-                // seeing "silence", so it never closed the user's turn and
-                // sat waiting far longer than expected before responding.
-                // Without a systemInstruction here, the Live model had no
-                // persona, no identity answer, and no guardrails against
-                // making things up mid-sentence (e.g. rambling "happiness
-                // can be anything" instead of answering what was asked) -
-                // it was just raw Gemini with zero context. Reusing the
-                // same persona text as text-chat mode (virtualPersona,
-                // defined near ensureVirtualPersona above) keeps both
-                // modes consistent instead of the voice mode feeling like
-                // a completely different, less coherent assistant.
-                //
-                // liveCallHistoryContext (built just before the WS opened,
-                // see below) carries a transcript of whatever was already
-                // typed in this same chat, so starting a voice call mid-
-                // conversation continues it instead of starting fresh.
-                const historyBlock = liveState && liveState.liveCallHistoryContext
-                    ? `\n\nخلاصه‌ی گفتگوی متنی که همین الان با همین کاربر در همین چت داشتی (برای تداوم، نه برای تکرار کردنش):\n${liveState.liveCallHistoryContext}\n\nبر اساس این سابقه ادامه بده - اگر کاربر با اشاره‌ای مبهم ("همونی که گفتی"، "ادامه‌ی اون") صحبت را شروع کرد، منظورش همین سابقه‌ست.`
-                    : '';
-                ws.send(JSON.stringify({
-                    setup: {
-                        model: `models/${LIVE_MODEL_NAME}`,
-                        systemInstruction: {
-                            parts: [{ text: virtualPersona + '\n\nاین یک گفتگوی صوتی زنده است: پاسخ‌ها را کوتاه، محاوره‌ای و مستقیم بگو (نه بولت‌پوینت یا تیتر، چون شنیده می‌شوند نه خوانده)، دقیقاً به همان چیزی که کاربر پرسید جواب بده و از حرف زدن بی‌ربط یا پرکردن سکوت با جملات کلی خودداری کن.' + historyBlock }]
-                        },
-                        generationConfig: {
-                            responseModalities: ['AUDIO'],
-                            // Bumped up from 'minimal': with zero thinking
-                            // budget the model would sometimes answer a
-                            // completely different question than what was
-                            // asked (e.g. asked X, rambled about Y). 'low'
-                            // keeps latency close to minimal while giving
-                            // it enough room to actually parse the
-                            // question before answering.
-                            thinkingConfig: { thinkingLevel: 'low' }
-                        },
-                        realtimeInputConfig: {
-                            automaticActivityDetection: { disabled: true }
-                        }
-                    }
-                }));
-            };
-
-            ws.onmessage = async (event) => {
-                let data;
-                try {
-                    const raw = event.data instanceof Blob ? await event.data.text() : event.data;
-                    data = JSON.parse(raw);
-                } catch (_) { return; }
-
-                if (data.setupComplete) {
-                    statusText.textContent = 'در حال گوش دادن...';
-                    beginMicStreaming();
-                    return;
-                }
-
-                const parts = data.serverContent?.modelTurn?.parts || [];
-                for (const part of parts) {
-                    const audioB64 = part.inlineData?.data;
-                    if (audioB64 && part.inlineData?.mimeType?.startsWith('audio/')) {
-                        playLiveAudioChunk(audioB64);
-                        orbWrap.classList.remove('listening');
-                        orbWrap.classList.add('speaking');
-                        statusText.textContent = 'در حال صحبت...';
-                    }
-                }
-
-                if (data.serverContent?.turnComplete) {
-                    orbWrap.classList.remove('speaking');
-                    statusText.textContent = 'در حال گوش دادن...';
-                }
-
-                if (data.serverContent?.interrupted) {
-                    // The model was interrupted by the user talking - stop
-                    // whatever audio is still queued for playback.
-                    stopQueuedPlayback();
-                    orbWrap.classList.remove('speaking');
-                }
-            };
-
-            ws.onerror = () => {
-                if (!liveState || liveState.closing) return;
-                showToast('در ارتباط صوتی خطایی رخ داد.', 'error');
-                endLiveCall();
-            };
-
-            ws.onclose = () => {
-                if (!liveState || liveState.closing) return;
-                endLiveCall();
-            };
+            attachLiveWebSocketHandlers(statusText, orbWrap);
         } catch (err) {
             statusText.textContent = 'اتصال ناموفق بود.';
             setTimeout(() => endLiveCall(), 1200);
         }
+    }
+
+    // Opens a fresh WebSocket to the proxy and wires up all the Live API
+    // message handling. Pulled out of startLiveCall so the search-crash
+    // reconnect path (see ws.onclose below and
+    // reconnectLiveCallWithoutSearch) can open a brand-new connection with
+    // the exact same handling, just without re-doing mic/playback setup
+    // which is still perfectly fine and doesn't need to be touched.
+    function attachLiveWebSocketHandlers(statusText, orbWrap) {
+        const ws = new WebSocket(LIVE_PROXY_WS_URL);
+        liveState.ws = ws;
+
+        ws.onopen = () => {
+            // Unlike the old ephemeral-token setup (where model +
+            // generationConfig were baked into the token), the proxy
+            // connects to Gemini with a plain API key, so we need to
+            // send the full setup here ourselves.
+            //
+            // automaticActivityDetection is disabled and turn
+            // boundaries are sent manually (activityStart/activityEnd)
+            // from beginMicStreaming's RMS-based VAD below. We switched
+            // to this after finding that constant background noise
+            // (an AC unit) kept Gemini's server-side VAD from ever
+            // seeing "silence", so it never closed the user's turn and
+            // sat waiting far longer than expected before responding.
+            ws.send(JSON.stringify(buildLiveSetupMessage({ withSearch: liveState.searchEnabled !== false })));
+        };
+
+        ws.onmessage = async (event) => {
+            let data;
+            try {
+                const raw = event.data instanceof Blob ? await event.data.text() : event.data;
+                data = JSON.parse(raw);
+            } catch (_) { return; }
+
+            if (data.setupComplete) {
+                statusText.textContent = 'در حال گوش دادن...';
+                if (!liveState.micProcessorNode) beginMicStreaming();
+                return;
+            }
+
+            // The model calling our end_call function - a normal Live
+            // API toolCall message (see buildLiveSetupMessage above),
+            // not a special disconnect signal. We must send back a
+            // toolResponse before tearing down, since a hard close
+            // without one is what leaves resumption state confused;
+            // easier to just answer it and then hang up.
+            if (data.toolCall?.functionCalls?.length) {
+                const endCallFc = data.toolCall.functionCalls.find(fc => fc.name === 'end_call');
+                if (endCallFc) {
+                    try {
+                        ws.send(JSON.stringify({
+                            toolResponse: {
+                                functionResponses: [{ id: endCallFc.id, name: 'end_call', response: { result: 'ok' } }]
+                            }
+                        }));
+                    } catch (_) {}
+                    statusText.textContent = 'در حال پایان تماس...';
+                    setTimeout(() => endLiveCall(), 400); // brief pause so the model's goodbye audio finishes playing
+                    return;
+                }
+            }
+
+            const parts = data.serverContent?.modelTurn?.parts || [];
+            for (const part of parts) {
+                const audioB64 = part.inlineData?.data;
+                if (audioB64 && part.inlineData?.mimeType?.startsWith('audio/')) {
+                    playLiveAudioChunk(audioB64);
+                    orbWrap.classList.remove('listening');
+                    orbWrap.classList.add('speaking');
+                    statusText.textContent = 'در حال صحبت...';
+                }
+            }
+
+            if (data.serverContent?.turnComplete) {
+                orbWrap.classList.remove('speaking');
+                statusText.textContent = 'در حال گوش دادن...';
+            }
+
+            if (data.serverContent?.interrupted) {
+                // The model was interrupted by the user talking - stop
+                // whatever audio is still queued for playback.
+                stopQueuedPlayback();
+                orbWrap.classList.remove('speaking');
+            }
+        };
+
+        ws.onerror = () => {
+            if (!liveState || liveState.closing) return;
+            showToast('در ارتباط صوتی خطایی رخ داد.', 'error');
+            endLiveCall();
+        };
+
+        ws.onclose = (closeEvent) => {
+            if (!liveState || liveState.closing) return;
+            // Known Gemini 3.1 Flash Live issue (Google forum, Aug
+            // 2026): certain googleSearch invocations close the
+            // session with code 1007 "invalid argument" instead of
+            // just failing that tool call - and because the session-
+            // resumption context still contains the same pending
+            // question, a naive reconnect-and-resume just dies again
+            // the same way. The only workaround reported to actually
+            // recover is reconnecting as a FRESH session (not resumed)
+            // with the googleSearch tool removed. We do that silently,
+            // once - if the fresh reconnect itself also fails, we give
+            // up and close normally rather than looping forever.
+            if (closeEvent && closeEvent.code === 1007 && liveState.searchEnabled !== false && !liveState.searchCrashRetried) {
+                liveState.searchCrashRetried = true;
+                liveState.searchEnabled = false;
+                statusText.textContent = 'در حال اتصال مجدد...';
+                attachLiveWebSocketHandlers(statusText, orbWrap);
+                return;
+            }
+            endLiveCall();
+        };
     }
 
     // AudioWorkletProcessor source for the mic pipeline. This runs on the
@@ -5254,6 +5466,7 @@
         const orbWrap = document.getElementById('liveOrbWrap');
         overlay.classList.remove('open');
         orbWrap.classList.remove('speaking', 'listening');
+        try { document.getElementById('liveCallSettingsPanel')?.classList.remove('open'); } catch (_) {}
     }
 
     // ===== نقطه‌ی وضعیت روی آیکون تب مرورگر =====
@@ -7932,6 +8145,37 @@
     </div>
     <div class="live-status-text" id="liveStatusText">در حال اتصال...</div>
     <div class="live-call-subtitle"><i class="ph-fill ph-sparkle"></i> گفتگوی صوتی با هوش مصنوعی</div>
+
+    <!-- Voice/language/search settings panel. Editable before a call
+         starts (from the composer's call button area) and, since none of
+         these three require re-sending anything mid-turn, also usable
+         mid-call - a change just applies starting from the next call
+         (voice/language can't be changed on an already-open Live
+         session; there's no API for that), except the search toggle
+         which takes effect on the very next reconnect if the 1007-crash
+         fallback fires. -->
+    <button class="live-settings-btn" id="liveSettingsBtn" onclick="toggleLiveCallSettings(event)" title="تنظیمات صدا و زبان">
+        <i class="ph-fill ph-sliders-horizontal"></i>
+    </button>
+    <div class="live-call-settings-panel" id="liveCallSettingsPanel">
+        <div class="live-settings-row">
+            <span class="live-settings-label">زبان صحبت</span>
+            <select id="liveLanguageSelect" class="live-settings-select" onchange="onLiveLanguageChange(this.value)"></select>
+        </div>
+        <div class="live-settings-row">
+            <span class="live-settings-label">صدا و لحن</span>
+            <select id="liveVoiceSelect" class="live-settings-select" onchange="onLiveVoiceChange(this.value)"></select>
+        </div>
+        <div class="live-settings-row">
+            <span class="live-settings-label">جست‌وجوی وب</span>
+            <label class="live-settings-toggle">
+                <input type="checkbox" id="liveSearchToggle" onchange="onLiveSearchToggleChange(this.checked)">
+                <span class="live-settings-toggle-track"></span>
+            </label>
+        </div>
+        <div class="live-settings-hint">تغییر زبان/صدا از تماس بعدی اعمال می‌شود.</div>
+    </div>
+
     <div class="live-call-controls">
         <button class="live-mute-btn" id="liveMuteBtn" onclick="toggleLiveMute()" title="قطع/وصل میکروفن">
             <i class="ph-fill ph-microphone" id="liveMuteIcon"></i>
@@ -7941,5 +8185,50 @@
         </button>
     </div>
 </div>
+<script>
+    // Populate the call settings panel's selects once at load, then keep
+    // them in sync with the persisted prefs (LIVE_VOICE_OPTIONS,
+    // LIVE_LANGUAGE_OPTIONS, getLiveVoicePref/getLiveLanguagePref, etc.
+    // are all defined earlier, near buildLiveSetupMessage).
+    function populateLiveCallSettingsPanel() {
+        const langSel = document.getElementById('liveLanguageSelect');
+        const voiceSel = document.getElementById('liveVoiceSelect');
+        const searchToggle = document.getElementById('liveSearchToggle');
+        if (!langSel || !voiceSel || !searchToggle) return;
+
+        if (!langSel.options.length) {
+            LIVE_LANGUAGE_OPTIONS.forEach(l => {
+                const opt = document.createElement('option');
+                opt.value = l.code; opt.textContent = l.label;
+                langSel.appendChild(opt);
+            });
+        }
+        if (!voiceSel.options.length) {
+            LIVE_VOICE_OPTIONS.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.name; opt.textContent = `${v.name} — ${v.style}`;
+                voiceSel.appendChild(opt);
+            });
+        }
+        langSel.value = getLiveLanguagePref();
+        voiceSel.value = getLiveVoicePref();
+        searchToggle.checked = liveSearchToggleEnabled;
+    }
+    function toggleLiveCallSettings(e) {
+        if (e) e.stopPropagation();
+        populateLiveCallSettingsPanel();
+        document.getElementById('liveCallSettingsPanel').classList.toggle('open');
+    }
+    function onLiveLanguageChange(code) { setLiveLanguagePref(code); }
+    function onLiveVoiceChange(name) { setLiveVoicePref(name); }
+    function onLiveSearchToggleChange(checked) { setLiveSearchToggle(checked); }
+    document.addEventListener('click', (e) => {
+        const panel = document.getElementById('liveCallSettingsPanel');
+        const btn = document.getElementById('liveSettingsBtn');
+        if (panel && panel.classList.contains('open') && !panel.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+            panel.classList.remove('open');
+        }
+    });
+</script>
 </body>
 </html>
