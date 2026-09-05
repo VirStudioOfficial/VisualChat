@@ -4788,13 +4788,13 @@
                 // connects to Gemini with a plain API key, so we need to
                 // send the full setup here ourselves.
                 //
-                // realtimeInputConfig.automaticActivityDetection is spelled
-                // out explicitly (rather than left at Gemini's defaults)
-                // because without it, turn-end detection was unreliable
-                // here: the model would sit waiting long after the user
-                // had gone silent. silenceDurationMs: 700 tells Gemini to
-                // commit end-of-speech after 700ms of quiet, instead of
-                // waiting indefinitely.
+                // automaticActivityDetection is disabled and turn
+                // boundaries are sent manually (activityStart/activityEnd)
+                // from beginMicStreaming's RMS-based VAD below. We switched
+                // to this after finding that constant background noise
+                // (an AC unit) kept Gemini's server-side VAD from ever
+                // seeing "silence", so it never closed the user's turn and
+                // sat waiting far longer than expected before responding.
                 ws.send(JSON.stringify({
                     setup: {
                         model: `models/${LIVE_MODEL_NAME}`,
@@ -4807,12 +4807,7 @@
                             thinkingConfig: { thinkingLevel: 'minimal' }
                         },
                         realtimeInputConfig: {
-                            automaticActivityDetection: {
-                                startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
-                                endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
-                                prefixPaddingMs: 150,
-                                silenceDurationMs: 700
-                            }
+                            automaticActivityDetection: { disabled: true }
                         }
                     }
                 }));
@@ -4882,9 +4877,46 @@
         const bufferSize = 4096;
         liveState.micProcessorNode = liveState.micContext.createScriptProcessor(bufferSize, 1, 1);
 
+        // --- Manual VAD state ---
+        // We do our own speech/silence detection here (RMS amplitude
+        // against a threshold) instead of relying on Gemini's server-side
+        // VAD, because constant background noise (e.g. an AC unit) reads
+        // to the server as "the user never stops talking" and the turn
+        // never closes. Google's own guidance for manual VAD: use at
+        // least 500ms of silence before ending the turn, or speech gets
+        // cut off during natural pauses - see
+        // https://ai.google.dev/gemini-api/docs/live-api/capabilities
+        const RMS_THRESHOLD = 0.02;      // roughly: quiet room noise floor
+        const SILENCE_HANG_MS = 600;     // silence needed before activityEnd
+        liveState.speaking = false;
+        liveState.lastVoiceTs = 0;
+
         liveState.micProcessorNode.onaudioprocess = (e) => {
             if (!liveState || liveState.muted || !liveState.ws || liveState.ws.readyState !== WebSocket.OPEN) return;
             const input = e.inputBuffer.getChannelData(0);
+
+            let sumSquares = 0;
+            for (let i = 0; i < input.length; i++) sumSquares += input[i] * input[i];
+            const rms = Math.sqrt(sumSquares / input.length);
+            const now = performance.now();
+            const isVoice = rms >= RMS_THRESHOLD;
+
+            if (isVoice) {
+                liveState.lastVoiceTs = now;
+                if (!liveState.speaking) {
+                    liveState.speaking = true;
+                    liveState.ws.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
+                }
+            } else if (liveState.speaking && (now - liveState.lastVoiceTs) >= SILENCE_HANG_MS) {
+                liveState.speaking = false;
+                liveState.ws.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
+            }
+
+            // Only stream audio while inside a detected speech turn - this
+            // is what keeps the constant AC hum from ever reaching Gemini
+            // as "the user is talking".
+            if (!liveState.speaking) return;
+
             const pcm16 = floatTo16BitPCM(input);
             const base64Audio = arrayBufferToBase64(pcm16.buffer);
             liveState.ws.send(JSON.stringify({
