@@ -4728,6 +4728,12 @@
     const LIVE_MODEL_NAME = 'gemini-3.1-flash-live-preview';
     const LIVE_SEND_SAMPLE_RATE = 16000;   // what we must send the model
     const LIVE_RECEIVE_SAMPLE_RATE = 24000; // what the model sends back
+    // How far ahead of "now" we schedule playback. Too small and any
+    // network jitter between chunks causes an audible gap (choppy/robotic
+    // speech); too large and there's a noticeable delay before the user
+    // hears anything after the model starts responding. 150ms is a
+    // reasonable middle ground for this kind of streamed audio.
+    const PLAYBACK_LOOKAHEAD_SEC = 0.15;
 
     let liveState = null; // holds everything for the active call, or null
 
@@ -4972,7 +4978,15 @@
         source.connect(liveState.playContext.destination);
 
         const now = liveState.playContext.currentTime;
-        const startAt = Math.max(now, liveState.playQueueTime);
+        // PLAYBACK_LOOKAHEAD_SEC holds a small cushion of scheduled-but-not-
+        // yet-playing audio at all times. Without it, the very first chunk
+        // (and any chunk that arrives a beat late over the network) starts
+        // playing at `now` with zero buffer - if the next chunk is even
+        // slightly delayed, there's a real silence gap before it can be
+        // scheduled, which is exactly the choppy/stuttering, word-by-word
+        // playback being reported. Starting the queue this far in the
+        // future gives later chunks room to arrive before their turn.
+        const startAt = Math.max(now + PLAYBACK_LOOKAHEAD_SEC, liveState.playQueueTime);
         source.start(startAt);
         liveState.playQueueTime = startAt + audioBuffer.duration;
     }
@@ -4980,8 +4994,8 @@
     function stopQueuedPlayback() {
         if (!liveState || !liveState.playContext) return;
         // Reset the schedule so any chunks arriving after an interruption
-        // start playing immediately instead of after already-queued (but
-        // now-irrelevant) audio.
+        // start playing after the same lookahead cushion as normal, instead
+        // of stacking on top of now-irrelevant already-queued audio.
         liveState.playQueueTime = liveState.playContext.currentTime;
     }
 
