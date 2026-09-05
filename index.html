@@ -1250,6 +1250,45 @@
         .action-btn:hover:not(:disabled) { filter: brightness(1.1); }
         .action-btn.stop-mode { background: var(--danger); animation: fadeIn 0.2s ease; }
 
+        /* ===== Gemini Live (voice chat) ===== */
+        .action-btn.mic-mode { background: var(--accent-grad); }
+        @keyframes micPulse {
+            0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); }
+            70% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--danger) 0%, transparent); }
+            100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 0%, transparent); }
+        }
+        .action-btn.live-active { background: var(--danger); animation: micPulse 1.6s infinite; }
+
+        .live-call-overlay {
+            position: fixed; inset: 0; z-index: 9999;
+            background: color-mix(in srgb, var(--bg-main) 92%, transparent);
+            backdrop-filter: blur(6px);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 28px;
+        }
+        .live-call-overlay.open { display: flex; }
+        .live-orb {
+            width: 128px; height: 128px; border-radius: 50%;
+            background: var(--accent-grad);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2.4rem; color: #fff;
+            transition: transform 0.15s ease;
+        }
+        .live-orb.speaking { animation: micPulse 1s infinite; }
+        .live-status-text { color: var(--text-main); font-size: 1rem; opacity: 0.85; }
+        .live-call-controls { display: flex; gap: 16px; }
+        .live-call-controls button {
+            width: 56px; height: 56px; border-radius: 50%; border: none;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.3rem; cursor: pointer; color: #fff;
+        }
+        .live-end-btn { background: var(--danger); }
+        .live-mute-btn { background: var(--bg-card, #333); color: var(--text-main); }
+        .live-mute-btn.muted { background: var(--accent-2); }
+
         /* REDESIGN v2 (مطابق نمونه‌ی درخواستی): فایل‌های غیرتصویری به‌صورت
            چیپ بزرگ‌تر با آیکون دایره‌ای توپر و دو خط متن (اسم + نوع فایل)
            نمایش داده می‌شوند؛ عکس‌ها یک thumbnail مربعیِ جدا و بزرگ‌تر با
@@ -2135,6 +2174,20 @@
                     <i class="ph-fill ph-paper-plane-tilt" id="actionIcon"></i>
                 </button>
 
+                <!-- Gemini Live full-screen call overlay -->
+                <div class="live-call-overlay" id="liveCallOverlay">
+                    <div class="live-orb" id="liveOrb"><i class="ph-fill ph-waveform"></i></div>
+                    <div class="live-status-text" id="liveStatusText">در حال اتصال...</div>
+                    <div class="live-call-controls">
+                        <button class="live-mute-btn" id="liveMuteBtn" onclick="toggleLiveMute()" title="قطع/وصل میکروفن">
+                            <i class="ph-fill ph-microphone" id="liveMuteIcon"></i>
+                        </button>
+                        <button class="live-end-btn" onclick="endLiveCall()" title="پایان تماس">
+                            <i class="ph-fill ph-phone-x"></i>
+                        </button>
+                    </div>
+                </div>
+
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
 
@@ -2789,6 +2842,7 @@
         updateFaviconStatus(false);
         loadSettings();
         initNotifSystem();
+        updateComposerActionIcon();
 
         // ===== آیکون‌های Lucide =====
         // چون خیلی از پیام‌ها/کارت‌ها به‌صورت دینامیک با innerHTML ساخته می‌شن،
@@ -2869,6 +2923,7 @@
 
     function autoResizeTextarea(textarea) {
         checkAutoConvertLongText(textarea);
+        updateComposerActionIcon();
         textarea.style.height = 'auto';
         const newHeight = Math.min(textarea.scrollHeight, 180);
         textarea.style.height = newHeight + 'px';
@@ -4144,6 +4199,7 @@
             await processIncomingFile(file);
         }
         event.target.value = '';
+        updateComposerActionIcon();
     }
 
     // یک آیتم موقت با وضعیت "در حال پردازش" به لیست پیش‌نمایش اضافه می‌کند و
@@ -4229,6 +4285,7 @@
         cancelledPreviewIds.add(id);
         const list = document.getElementById('filePreviewList');
         if (list && !list.children.length) list.classList.remove('has-items');
+        updateComposerActionIcon();
     }
 
     let filesProcessingCount = 0;
@@ -4513,6 +4570,7 @@
             showToast('پردازش فایل با خطا مواجه شد.', 'error');
         } finally {
             filesProcessingCount = Math.max(0, filesProcessingCount - 1);
+            updateComposerActionIcon();
         }
     }
 
@@ -4528,6 +4586,7 @@
         document.getElementById('fileInput').value = '';
         const list = document.getElementById('filePreviewList');
         if (list) { list.innerHTML = ''; list.classList.remove('has-items'); }
+        updateComposerActionIcon();
     }
 
     function setupFileDropAndPaste() {
@@ -4571,9 +4630,43 @@
         });
     }
 
+    // FEATURE (Gemini Live voice button): the composer's action button now
+    // has three faces depending on state:
+    //   - generating a reply  -> stop icon (existing behavior, unchanged)
+    //   - text box has content or files attached -> send icon (existing)
+    //   - text box is empty and nothing attached  -> microphone icon (new),
+    //     clicking it starts a Gemini Live voice call instead of sending.
+    // isGenerating always wins (you can't start a voice call mid-stream),
+    // and once a voice call is live the button itself is irrelevant because
+    // the full-screen call overlay takes over.
+    function composerHasContent() {
+        const inputField = document.getElementById("userInput");
+        const text = (inputField?.value || '').trim();
+        return !!text || (typeof selectedFilesData !== 'undefined' && selectedFilesData.length > 0) ||
+            (typeof codeFilesMemory !== 'undefined' && codeFilesMemory.length > 0);
+    }
+
+    function updateComposerActionIcon() {
+        if (isGenerating) return; // stop-mode owns the icon while generating
+        const actionBtn = document.getElementById("actionBtn");
+        const actionIcon = document.getElementById("actionIcon");
+        if (!actionBtn || !actionIcon) return;
+
+        if (composerHasContent()) {
+            actionBtn.classList.remove("mic-mode");
+            actionIcon.className = "ph-fill ph-paper-plane-tilt";
+            actionBtn.title = "ارسال";
+        } else {
+            actionBtn.classList.add("mic-mode");
+            actionIcon.className = "ph-fill ph-microphone";
+            actionBtn.title = "گفت‌وگوی صوتی";
+        }
+    }
+
     function handleActionClick() {
-        if (isGenerating) stopGeneration();
-        else sendMessage();
+        if (isGenerating) { stopGeneration(); return; }
+        if (!composerHasContent()) { startLiveCall(); return; }
+        sendMessage();
     }
 
     function setGeneratingState(generating) {
@@ -4587,17 +4680,279 @@
         attachBtn.disabled = generating;
 
         if (generating) {
+            actionBtn.classList.remove("mic-mode");
             actionBtn.classList.add("stop-mode");
             actionIcon.className = "ph-fill ph-stop";
             actionBtn.title = "توقف";
         } else {
             actionBtn.classList.remove("stop-mode");
-            actionIcon.className = "ph-fill ph-paper-plane-tilt";
-            actionBtn.title = "ارسال";
+            updateComposerActionIcon();
         }
 
         document.querySelectorAll('.brand-mark').forEach(el => el.classList.toggle('generating', generating));
         updateFaviconStatus(generating);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Gemini Live (voice chat)
+    |--------------------------------------------------------------------------
+    | Flow:
+    |   1. startLiveCall() asks our own backend (/api/live-token) for a
+    |      short-lived ephemeral token - the real GEMINI_API_KEY never
+    |      leaves the server.
+    |   2. Opens a WebSocket directly from the browser to Gemini Live using
+    |      that token, sends a setup message.
+    |   3. Captures mic audio via getUserMedia + AudioWorklet-free ScriptNode
+    |      (kept dependency-free), downsamples to 16kHz PCM16, base64-encodes
+    |      and streams it as realtimeInput chunks.
+    |   4. Incoming model audio (24kHz PCM16, base64) is queued and played
+    |      back through a second AudioContext.
+    |   5. endLiveCall() tears everything down (mic tracks, audio contexts,
+    |      socket) so nothing keeps running in the background.
+    */
+    const LIVE_WS_HOST = 'generativelanguage.googleapis.com';
+    const LIVE_SEND_SAMPLE_RATE = 16000;   // what we must send the model
+    const LIVE_RECEIVE_SAMPLE_RATE = 24000; // what the model sends back
+
+    let liveState = null; // holds everything for the active call, or null
+
+    async function startLiveCall() {
+        if (liveState) return; // already in a call
+        if (isGenerating) return; // don't collide with a text generation in flight
+
+        const overlay = document.getElementById('liveCallOverlay');
+        const statusText = document.getElementById('liveStatusText');
+        const orb = document.getElementById('liveOrb');
+        overlay.classList.add('open');
+        statusText.textContent = 'در حال گرفتن مجوز میکروفن...';
+
+        liveState = {
+            ws: null,
+            micStream: null,
+            micContext: null,
+            micSourceNode: null,
+            micProcessorNode: null,
+            playContext: null,
+            playQueueTime: 0,
+            muted: false,
+            closing: false
+        };
+
+        try {
+            // Mic permission first, so a denial doesn't waste a token fetch.
+            liveState.micStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+        } catch (err) {
+            statusText.textContent = 'دسترسی به میکروفن رد شد.';
+            showToast('برای گفت‌وگوی صوتی باید به میکروفن دسترسی بدی.', 'error');
+            setTimeout(() => endLiveCall(), 1200);
+            return;
+        }
+
+        statusText.textContent = 'در حال اتصال...';
+
+        let tokenData;
+        try {
+            const resp = await fetch('/api/live-token', { method: 'POST' });
+            tokenData = await resp.json();
+            if (!resp.ok || !tokenData?.token) {
+                throw new Error(tokenData?.error || 'خطا در دریافت توکن');
+            }
+        } catch (err) {
+            statusText.textContent = 'اتصال ناموفق بود.';
+            showToast('نتونستم به گفت‌وگوی صوتی وصل بشم. دوباره امتحان کن.', 'error');
+            setTimeout(() => endLiveCall(), 1200);
+            return;
+        }
+
+        try {
+            liveState.playContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: LIVE_RECEIVE_SAMPLE_RATE });
+            liveState.playQueueTime = liveState.playContext.currentTime;
+
+            const wsUrl = `wss://${LIVE_WS_HOST}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?access_token=${encodeURIComponent(tokenData.token)}`;
+            const ws = new WebSocket(wsUrl);
+            liveState.ws = ws;
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({
+                    setup: {
+                        model: `models/${tokenData.model}`,
+                        generationConfig: { responseModalities: ['AUDIO'] }
+                    }
+                }));
+            };
+
+            ws.onmessage = async (event) => {
+                let data;
+                try {
+                    const raw = event.data instanceof Blob ? await event.data.text() : event.data;
+                    data = JSON.parse(raw);
+                } catch (_) { return; }
+
+                if (data.setupComplete) {
+                    statusText.textContent = 'در حال گوش دادن...';
+                    beginMicStreaming();
+                    return;
+                }
+
+                const parts = data.serverContent?.modelTurn?.parts || [];
+                for (const part of parts) {
+                    const audioB64 = part.inlineData?.data;
+                    if (audioB64 && part.inlineData?.mimeType?.startsWith('audio/')) {
+                        playLiveAudioChunk(audioB64);
+                        orb.classList.add('speaking');
+                        statusText.textContent = 'در حال صحبت...';
+                    }
+                }
+
+                if (data.serverContent?.turnComplete) {
+                    orb.classList.remove('speaking');
+                    statusText.textContent = 'در حال گوش دادن...';
+                }
+
+                if (data.serverContent?.interrupted) {
+                    // The model was interrupted by the user talking - stop
+                    // whatever audio is still queued for playback.
+                    stopQueuedPlayback();
+                    orb.classList.remove('speaking');
+                }
+            };
+
+            ws.onerror = () => {
+                if (!liveState || liveState.closing) return;
+                showToast('در ارتباط صوتی خطایی رخ داد.', 'error');
+                endLiveCall();
+            };
+
+            ws.onclose = () => {
+                if (!liveState || liveState.closing) return;
+                endLiveCall();
+            };
+        } catch (err) {
+            statusText.textContent = 'اتصال ناموفق بود.';
+            setTimeout(() => endLiveCall(), 1200);
+        }
+    }
+
+    function beginMicStreaming() {
+        if (!liveState || !liveState.micStream) return;
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        liveState.micContext = new AudioCtx({ sampleRate: LIVE_SEND_SAMPLE_RATE });
+        liveState.micSourceNode = liveState.micContext.createMediaStreamSource(liveState.micStream);
+
+        // ScriptProcessorNode is deprecated but has zero build-step /
+        // dependency cost and is still supported everywhere - fine for a
+        // straightforward mic -> PCM16 pipeline like this one.
+        const bufferSize = 4096;
+        liveState.micProcessorNode = liveState.micContext.createScriptProcessor(bufferSize, 1, 1);
+
+        liveState.micProcessorNode.onaudioprocess = (e) => {
+            if (!liveState || liveState.muted || !liveState.ws || liveState.ws.readyState !== WebSocket.OPEN) return;
+            const input = e.inputBuffer.getChannelData(0);
+            const pcm16 = floatTo16BitPCM(input);
+            const base64Audio = arrayBufferToBase64(pcm16.buffer);
+            liveState.ws.send(JSON.stringify({
+                realtimeInput: {
+                    audio: {
+                        mimeType: `audio/pcm;rate=${LIVE_SEND_SAMPLE_RATE}`,
+                        data: base64Audio
+                    }
+                }
+            }));
+        };
+
+        liveState.micSourceNode.connect(liveState.micProcessorNode);
+        liveState.micProcessorNode.connect(liveState.micContext.destination);
+    }
+
+    function floatTo16BitPCM(float32Array) {
+        const buffer = new ArrayBuffer(float32Array.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < float32Array.length; i++) {
+            let s = Math.max(-1, Math.min(1, float32Array[i]));
+            view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        }
+        return view;
+    }
+
+    function arrayBufferToBase64(buffer) {
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary);
+    }
+
+    function playLiveAudioChunk(base64Audio) {
+        if (!liveState || !liveState.playContext) return;
+        const binary = atob(base64Audio);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+        // Incoming audio is raw PCM16 @ 24kHz, mono - decode manually into
+        // an AudioBuffer instead of decodeAudioData (which expects a full
+        // container format like wav/mp3, not headerless raw PCM).
+        const sampleCount = bytes.length / 2;
+        const audioBuffer = liveState.playContext.createBuffer(1, sampleCount, LIVE_RECEIVE_SAMPLE_RATE);
+        const channel = audioBuffer.getChannelData(0);
+        const view = new DataView(bytes.buffer);
+        for (let i = 0; i < sampleCount; i++) {
+            channel[i] = view.getInt16(i * 2, true) / 0x8000;
+        }
+
+        const source = liveState.playContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(liveState.playContext.destination);
+
+        const now = liveState.playContext.currentTime;
+        const startAt = Math.max(now, liveState.playQueueTime);
+        source.start(startAt);
+        liveState.playQueueTime = startAt + audioBuffer.duration;
+    }
+
+    function stopQueuedPlayback() {
+        if (!liveState || !liveState.playContext) return;
+        // Reset the schedule so any chunks arriving after an interruption
+        // start playing immediately instead of after already-queued (but
+        // now-irrelevant) audio.
+        liveState.playQueueTime = liveState.playContext.currentTime;
+    }
+
+    function toggleLiveMute() {
+        if (!liveState) return;
+        liveState.muted = !liveState.muted;
+        const icon = document.getElementById('liveMuteIcon');
+        const btn = document.getElementById('liveMuteBtn');
+        icon.className = liveState.muted ? 'ph-fill ph-microphone-slash' : 'ph-fill ph-microphone';
+        btn.classList.toggle('muted', liveState.muted);
+    }
+
+    function endLiveCall() {
+        if (!liveState) {
+            document.getElementById('liveCallOverlay').classList.remove('open');
+            return;
+        }
+        liveState.closing = true;
+
+        try { liveState.ws && liveState.ws.close(); } catch (_) {}
+        try { liveState.micProcessorNode && liveState.micProcessorNode.disconnect(); } catch (_) {}
+        try { liveState.micSourceNode && liveState.micSourceNode.disconnect(); } catch (_) {}
+        try { liveState.micContext && liveState.micContext.close(); } catch (_) {}
+        try { liveState.playContext && liveState.playContext.close(); } catch (_) {}
+        try { liveState.micStream && liveState.micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+
+        liveState = null;
+
+        const overlay = document.getElementById('liveCallOverlay');
+        const orb = document.getElementById('liveOrb');
+        overlay.classList.remove('open');
+        orb.classList.remove('speaking');
     }
 
     // ===== نقطه‌ی وضعیت روی آیکون تب مرورگر =====
