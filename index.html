@@ -2246,25 +2246,6 @@
                     <i class="ph-fill ph-paper-plane-tilt" id="actionIcon"></i>
                 </button>
 
-                <!-- Gemini Live full-screen call overlay -->
-                <div class="live-call-overlay" id="liveCallOverlay">
-                    <div class="live-orb-wrap" id="liveOrbWrap">
-                        <div class="live-orb-ring"></div>
-                        <div class="live-orb-ring"></div>
-                        <div class="live-orb" id="liveOrb"><i class="ph-fill ph-waveform"></i></div>
-                    </div>
-                    <div class="live-status-text" id="liveStatusText">در حال اتصال...</div>
-                    <div class="live-call-subtitle"><i class="ph-fill ph-sparkle"></i> گفتگوی صوتی با هوش مصنوعی</div>
-                    <div class="live-call-controls">
-                        <button class="live-mute-btn" id="liveMuteBtn" onclick="toggleLiveMute()" title="قطع/وصل میکروفن">
-                            <i class="ph-fill ph-microphone" id="liveMuteIcon"></i>
-                        </button>
-                        <button class="live-end-btn" onclick="endLiveCall()" title="پایان تماس">
-                            <i class="ph-fill ph-phone-x"></i>
-                        </button>
-                    </div>
-                </div>
-
                 <textarea id="userInput" placeholder="هرچی تو ذهنته بنویس..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResizeTextarea(this)"></textarea>
 
 
@@ -4811,6 +4792,33 @@
 
     let liveState = null; // holds everything for the active call, or null
 
+    // Builds a compact transcript of the current text chat so the Live
+    // voice call can pick up where the typed conversation left off,
+    // instead of starting with zero memory of it. Capped to the last N
+    // messages and a max character budget so a very long chat doesn't
+    // blow up the setup message or eat into the model's context/latency
+    // budget - full fidelity isn't the goal here, just enough for the
+    // model to know what was already discussed.
+    const LIVE_HISTORY_MAX_MESSAGES = 20;
+    const LIVE_HISTORY_MAX_CHARS = 6000;
+    function buildLiveCallHistoryContext() {
+        const hist = (chatHistoryData[currentChatId] || [])
+            .filter(m => !m.__virtualPersona && m.text);
+        if (!hist.length) return '';
+
+        const recent = hist.slice(-LIVE_HISTORY_MAX_MESSAGES);
+        let lines = recent.map(m => `${m.role === 'user' ? 'کاربر' : 'دستیار'}: ${m.text}`);
+        let text = lines.join('\n');
+        // Trim from the oldest side if still too long, rather than
+        // truncating mid-message from the end (which would cut off the
+        // most recent - and most relevant - context).
+        while (text.length > LIVE_HISTORY_MAX_CHARS && lines.length > 1) {
+            lines.shift();
+            text = lines.join('\n');
+        }
+        return text;
+    }
+
     async function startLiveCall() {
         if (liveState) return; // already in a call
         if (isGenerating) return; // don't collide with a text generation in flight
@@ -4841,7 +4849,13 @@
             // unit and Web Audio doesn't guarantee sample-accurate
             // gapless joins between separately-scheduled sources.
             muted: false,
-            closing: false
+            closing: false,
+            // Snapshot of the current chat's text history, captured now
+            // (before the call connects) rather than read lazily later,
+            // so it reflects exactly what was on screen when the user
+            // tapped the call button - not whatever the chat has grown to
+            // by the time onopen fires.
+            liveCallHistoryContext: buildLiveCallHistoryContext()
         };
 
         try {
@@ -4887,16 +4901,39 @@
                 // (an AC unit) kept Gemini's server-side VAD from ever
                 // seeing "silence", so it never closed the user's turn and
                 // sat waiting far longer than expected before responding.
+                // Without a systemInstruction here, the Live model had no
+                // persona, no identity answer, and no guardrails against
+                // making things up mid-sentence (e.g. rambling "happiness
+                // can be anything" instead of answering what was asked) -
+                // it was just raw Gemini with zero context. Reusing the
+                // same persona text as text-chat mode (virtualPersona,
+                // defined near ensureVirtualPersona above) keeps both
+                // modes consistent instead of the voice mode feeling like
+                // a completely different, less coherent assistant.
+                //
+                // liveCallHistoryContext (built just before the WS opened,
+                // see below) carries a transcript of whatever was already
+                // typed in this same chat, so starting a voice call mid-
+                // conversation continues it instead of starting fresh.
+                const historyBlock = liveState && liveState.liveCallHistoryContext
+                    ? `\n\nخلاصه‌ی گفتگوی متنی که همین الان با همین کاربر در همین چت داشتی (برای تداوم، نه برای تکرار کردنش):\n${liveState.liveCallHistoryContext}\n\nبر اساس این سابقه ادامه بده - اگر کاربر با اشاره‌ای مبهم ("همونی که گفتی"، "ادامه‌ی اون") صحبت را شروع کرد، منظورش همین سابقه‌ست.`
+                    : '';
                 ws.send(JSON.stringify({
                     setup: {
                         model: `models/${LIVE_MODEL_NAME}`,
+                        systemInstruction: {
+                            parts: [{ text: virtualPersona + '\n\nاین یک گفتگوی صوتی زنده است: پاسخ‌ها را کوتاه، محاوره‌ای و مستقیم بگو (نه بولت‌پوینت یا تیتر، چون شنیده می‌شوند نه خوانده)، دقیقاً به همان چیزی که کاربر پرسید جواب بده و از حرف زدن بی‌ربط یا پرکردن سکوت با جملات کلی خودداری کن.' + historyBlock }]
+                        },
                         generationConfig: {
                             responseModalities: ['AUDIO'],
-                            // 3.1 Flash Live uses thinkingLevel instead of
-                            // the old thinkingBudget. 'minimal' is what
-                            // Google recommends for lowest response latency
-                            // in real-time voice use cases.
-                            thinkingConfig: { thinkingLevel: 'minimal' }
+                            // Bumped up from 'minimal': with zero thinking
+                            // budget the model would sometimes answer a
+                            // completely different question than what was
+                            // asked (e.g. asked X, rambled about Y). 'low'
+                            // keeps latency close to minimal while giving
+                            // it enough room to actually parse the
+                            // question before answering.
+                            thinkingConfig: { thinkingLevel: 'low' }
                         },
                         realtimeInputConfig: {
                             automaticActivityDetection: { disabled: true }
@@ -7878,5 +7915,31 @@
     document.addEventListener('click',e=>{const wrap=document.querySelector('.api-usage-wrap'),p=document.getElementById('apiUsagePanel'); if(wrap&&p&&!wrap.contains(e.target)){p.classList.remove('active');clearInterval(timer);timer=null;}});
 })();
 </script>
+
+<!-- Gemini Live full-screen call overlay: kept as a direct child of
+     <body> (not nested inside .input-wrapper/.main-content) because
+     .main-content uses `overflow: hidden` + a fixed height (100dvh) to
+     manage its own scrolling chat area. A position:fixed descendant of
+     that container was still being clipped by that overflow once real
+     chat content was on screen (the mute/end-call buttons at the bottom
+     of the overlay got cut off) - moving it here removes it from that
+     containing block entirely so it always covers the full viewport. -->
+<div class="live-call-overlay" id="liveCallOverlay">
+    <div class="live-orb-wrap" id="liveOrbWrap">
+        <div class="live-orb-ring"></div>
+        <div class="live-orb-ring"></div>
+        <div class="live-orb" id="liveOrb"><i class="ph-fill ph-waveform"></i></div>
+    </div>
+    <div class="live-status-text" id="liveStatusText">در حال اتصال...</div>
+    <div class="live-call-subtitle"><i class="ph-fill ph-sparkle"></i> گفتگوی صوتی با هوش مصنوعی</div>
+    <div class="live-call-controls">
+        <button class="live-mute-btn" id="liveMuteBtn" onclick="toggleLiveMute()" title="قطع/وصل میکروفن">
+            <i class="ph-fill ph-microphone" id="liveMuteIcon"></i>
+        </button>
+        <button class="live-end-btn" onclick="endLiveCall()" title="پایان تماس">
+            <i class="ph-fill ph-phone-x"></i>
+        </button>
+    </div>
+</div>
 </body>
 </html>
