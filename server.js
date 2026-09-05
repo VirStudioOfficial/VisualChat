@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const chatHandler = require('./api/chat.js');
+const liveTokenHandler = require('./api/live-token.js');
 
 const app = express();
 const PORT = 3000;
@@ -12,6 +13,11 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Mount /api/chat route
 app.all('/api/chat', (req, res) => {
     chatHandler(req, res);
+});
+
+// Mount /api/live-token route (ephemeral token for Gemini Live voice chat)
+app.all('/api/live-token', (req, res) => {
+    liveTokenHandler(req, res);
 });
 
 // Mount /api/manifest.json route
