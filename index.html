@@ -4780,10 +4780,26 @@
                 // generationConfig were baked into the token), the proxy
                 // connects to Gemini with a plain API key, so we need to
                 // send the full setup here ourselves.
+                //
+                // realtimeInputConfig.automaticActivityDetection is spelled
+                // out explicitly (rather than left at Gemini's defaults)
+                // because without it, turn-end detection was unreliable
+                // here: the model would sit waiting long after the user
+                // had gone silent. silenceDurationMs: 700 tells Gemini to
+                // commit end-of-speech after 700ms of quiet, instead of
+                // waiting indefinitely.
                 ws.send(JSON.stringify({
                     setup: {
                         model: `models/${LIVE_MODEL_NAME}`,
-                        generationConfig: { responseModalities: ['AUDIO'] }
+                        generationConfig: { responseModalities: ['AUDIO'] },
+                        realtimeInputConfig: {
+                            automaticActivityDetection: {
+                                startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+                                endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
+                                prefixPaddingMs: 150,
+                                silenceDurationMs: 700
+                            }
+                        }
                     }
                 }));
             };
