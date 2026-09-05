@@ -6670,7 +6670,7 @@
 
             const loadOlderBtn = document.createElement('div');
             loadOlderBtn.className = 'load-older-messages';
-            loadOlderBtn.style.cssText = 'text-align:center;padding:10px 16px;margin:8px auto;max-width:fit-content;cursor:pointer;opacity:0.85;font-size:0.88em;border:1px solid var(--border-soft,rgba(255,255,255,0.15));border-radius:20px;transition:opacity .15s;';
+            loadOlderBtn.style.cssText = 'text-align:center;padding:10px 16px;margin:14px auto;max-width:fit-content;cursor:pointer;opacity:0.85;font-size:0.88em;border:1px solid color-mix(in srgb, var(--border-soft, rgba(255,255,255,0.15)) 60%, transparent);border-radius:20px;transition:opacity .15s;background:var(--bg-card);box-shadow:none;';
             loadOlderBtn.onmouseenter = () => { loadOlderBtn.style.opacity = '1'; };
             loadOlderBtn.onmouseleave = () => { loadOlderBtn.style.opacity = '0.85'; };
             loadOlderBtn.textContent = `بارگذاری ${remaining} پیام قدیمی‌تر`;
