@@ -892,7 +892,55 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 function looksLikeFileEditIntent(text) {
     const t = String(text || '').trim().toLowerCase();
     if (!t) return false;
-    return /(?:ویرایش|ادیت|تغییر بده|تغییرش بده|اضافه کن|اضافه‌|حذف کن|پاک کن|اصلاح کن|درست کن|پیاده کن|پیاده‌|بروزرسانی کن|آپدیت کن|به‌روز کن|جایگزین کن|بازنویسی کن|اضافه کردن|حذف کردن|تغییر دادن|اصلاح کردن|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor)/i.test(t);
+
+    // FIX (تشخیص غلط نیت ادیت از روی جملات پیشنهادی/شرطی/تعریف‌وتمجیدی):
+    // نسخه‌ی قبلی این تابع فقط چک می‌کرد آیا کلماتی مثل «اضافه کن»/«درست کن»/
+    // «بهبود» جایی در متن هست، بدون توجه به این‌که آن فعل واقعاً یک دستورِ
+    // مستقیمِ الان است یا فقط داخل جمله‌ای توصیفی/آینده/شرطی/تعارفی به کار
+    // رفته (مثال واقعی که این باگ را نشان داد: «اگه بخوای هر نقطه‌ای از کد یا
+    // پروژه‌ت نیاز به بررسی داشت، بهبود یا اضافه کردن قابلیتی داشت، فقط کافیه
+    // بهم پیام بدی» - اینجا کاربر چیزی نخواسته، فقط دارد پیشنهاد آینده می‌دهد).
+    // چنین جملاتی معمولاً با «اگه»/«اگر» شروع می‌شوند یا فعل ادیت را به شکل
+    // شرطی/آینده («می‌خوای»، «بخوای»، «داشت») می‌آورند، نه به‌صورت امری مستقیم.
+    // برای جلوگیری از فعال‌شدن اشتباهِ کل زنجیره‌ی read_block/write_block/
+    // verify_file، اول این الگوهای «نیت کاذب» را رد می‌کنیم.
+    // متن را بر اساس جداکننده‌های جمله (نقطه/تعجب/سؤال/کاما/«که») به بندهای
+    // کوچک می‌شکنیم و فعل ادیت را فقط در بندهایی که خودشان «شرطی/پیشنهادیِ
+    // آینده» نیستند جستجو می‌کنیم. این جلوی false-positive روی جملاتی مثل
+    // «اگه بخوای بهبود بدی یا قابلیت اضافه کنی، بهم بگو» را می‌گیرد، بدون
+    // این‌که به یک دستور مستقیم واقعی («این فایل رو ویرایش کن») حساسیت از
+    // دست بدهد.
+    const editVerbRe = /ویرایش|ادیت|تغییر بده|تغییرش بده|عوض کن|اضافه کن|اضافه‌|حذف کن|پاک کن|اصلاح کن|درست کن|پیاده کن|پیاده‌|بروزرسانی کن|آپدیت کن|به‌روز کن|جایگزین کن|بازنویسی کن|اضافه کردن|حذف کردن|تغییر دادن|اصلاح کردن|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor/i;
+    const conditionalMarkerRe = /(?:^|\s)(?:اگه|اگر)(?:\s|$)/i;
+    // نشانه‌ی این‌که بند شرطی صرفاً یک پیشنهاد/تعارف برای «بعداً» است، نه
+    // دستور همین الان (فعل شرطی/آینده مثل بخوای/داشت/خواستی + دعوت به پیام‌دادن).
+    const futureOfferRe = /بخوا(?:ی|د|م)|خواست(?:ی|ه|م)?|نیاز داشت(?:ی|ه)?|لازم شد|داشت(?:ی|ه)?|میخوای|می‌خوای/i;
+    const inviteToAskRe = /بگو|بگید|بگم|پیام بده|پیام بدید|پیام بدی|خبر بده|اطلاع بده|میگم|هستم|حاضرم|کمک(?:ت)? کنم|کمکت میکنم|کمکت می‌کنم|میل/i;
+
+    // متن را به بند‌های کوچک تقسیم می‌کنیم (نقطه، تعجب، سؤال، خط تیره، دو نقطه).
+    const clauses = t.split(/[.!؟\n]+/).filter(Boolean);
+
+    for (const clause of clauses) {
+        if (!editVerbRe.test(clause)) continue;
+
+        // اگر همین بند یا بند، خودش شرطی (اگه/اگر) است و علاوه‌براین نشانه‌ی
+        // «پیشنهاد آینده + دعوت به پیام‌دادن» را هم دارد، این یک دستور واقعی
+        // نیست - رد کن و برو سراغ بند بعدی.
+        if (conditionalMarkerRe.test(clause) && futureOfferRe.test(clause) && inviteToAskRe.test(t)) {
+            continue;
+        }
+        // اگر بند با «اگه/اگر» شروع شده و اصلاً فعل امریِ مستقل ندارد (یعنی
+        // کل بند در دل شرط است)، همچنان محتاط باش مگر به‌وضوح ساختار امری
+        // مستقیم باشد (فعل ادیت در انتهای بند، بدون ادامه‌ی شرط).
+        if (conditionalMarkerRe.test(clause)) {
+            const endsWithCommand = /(?:^|[^ا-ی])(?:ویرایش کن|ادیت کن|اصلاح کن|درست کن|عوض کن|اضافه کن|حذف کن|پاک کن|بازنویسی کن|بروزرسانی کن|آپدیت کن|جایگزین کن)\s*$/i.test(clause.trim());
+            if (!endsWithCommand) continue;
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 // FIX (ادعای موفقیت بعد از تغییرِ فقط یک رخداد از چند رخداد پراکنده):
@@ -3680,21 +3728,25 @@ async function handler(req, res) {
                     typeof f.content === 'string'
             );
 
-        // FIX (block-editing system silently never activated): fileEditIntent
-        // was gated on looksLikeFileEditIntent(text), a fixed Persian/English
-        // keyword regex. Any phrasing outside that list (or a message that
-        // just references "the file I gave you" without a listed verb) made
-        // this silently false even with a real attachment - the whole
-        // block-map/read_block/write_block/verify_file system then never
-        // activated, the "don't call get_archived_file when a file is
-        // attached" instruction never got injected either, and the request
-        // fell through to old, unreliable prose/archive behavior with no
-        // warning to the user or the model. A file being attached at all is
-        // a sufficient and much more robust signal: building the block map
-        // costs nothing when the user isn't actually asking for an edit
-        // (the model just never calls read_block/write_block), so there's no
-        // downside to always doing it whenever textFiles is non-empty.
-        const fileEditIntent = textFiles.length > 0;
+        // FIX (نسخه‌ی قبلی: صرفِ وجود فایل ضمیمه یعنی نیت ادیت):
+        // نسخه‌ی قبلی این خط `textFiles.length > 0` بود - یعنی همین که کاربر
+        // فقط یک فایل ضمیمه کند (حتی برای «نظرت راجب سایتم چیه؟» یا «این کد
+        // چیکار می‌کنه؟») کل سیستمِ اجباریِ ادیت (ابزارهای محدودشده به
+        // GEMINI_TOOLS_NO_SEARCH، دستورالعمل‌های سیستم‌پرامپتِ «تا verify_file
+        // نگیری اجازه‌ی پاسخ نهایی نداری»، و غیره) فعال می‌شد. توجیه اصلی این
+        // بود که «اگر کاربر واقعاً نخواهد ادیت کند، مدل صرفاً read_block/
+        // write_block را صدا نمی‌زند»، اما در عمل غلط از آب درآمد: فشارِ
+        // خودِ system prompt (که می‌گوید تا ویرایش/تأیید انجام نشود پاسخ نهایی
+        // مجاز نیست) مدل را وادار می‌کرد حتی برای یک سؤالِ نظرخواهی ساده به
+        // زور یک "ادیت" دست‌وپا کند و بعد ادعای انجامش را بکند - دقیقاً همان
+        // رفتاری که کاربر گزارش داد.
+        // راه‌حل: به‌جای «فایل ضمیمه شده = نیت ادیت»، از تشخیص واقعی نیتِ متنِ
+        // کاربر (looksLikeFileEditIntent) استفاده می‌کنیم - همان تابعی که
+        // بالای فایل تعریف شده و جملات شرطی/پیشنهادی/نظرخواهی را از دستورهای
+        // واقعی ادیت جدا می‌کند. اگر کاربر فقط نظر خواسته یا سؤال پرسیده،
+        // fileEditIntent باید false بماند تا مدل بتواند مستقیماً و بدون
+        // فشارِ زنجیره‌ی اجباریِ ادیت پاسخ بدهد.
+        const fileEditIntent = textFiles.length > 0 && looksLikeFileEditIntent(text);
 
         // See looksLikeScatteredPatternEdit above for why this exists:
         // only meaningful when there's actually a file to edit.
