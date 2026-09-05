@@ -82,8 +82,10 @@
          لاگین حالا با ریدایرکت به api/auth-start.js انجام می‌شود. -->
 
     <style>
-        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2; shape-rendering: geometricPrecision; }
-        [class*="ph-"] { vertical-align: -0.09em; }
+        .lucide-icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
+        i[class*="ph-"], i[class^="ph "], i[class*=" ph "] { font-family: "Phosphor" !important; -webkit-text-stroke: 0.3px currentColor; }
+        i.ph-fill { font-family: "Phosphor-Fill" !important; }
+        i.ph-bold { font-family: "Phosphor-Bold" !important; }
         :root {
             --bg-main: #1a1a1a;
             --bg-sidebar: #141414;
@@ -95,7 +97,7 @@
             --accent-grad: linear-gradient(135deg, #52525b, #71717a);
             --danger: #f87171;
             --text-main: #f4f6fb;
-            --text-muted: #a3a3a3;
+            --text-muted: #c7c7c7;
             --border: #2e2e2e;
             --border-soft: rgba(255,255,255,0.08);
             --shadow-a: rgba(0,0,0,0.3);
@@ -622,7 +624,7 @@
             padding: 6px;
             min-width: 200px;
             box-shadow: 0 12px 40px var(--shadow-b);
-            z-index: 100;
+            z-index: 2000;
             animation: fadeIn 0.2s ease;
         }
         .model-dropdown.active { display: block; }
@@ -1098,20 +1100,21 @@
 
         .icon-btn {
             color: var(--text-main);
-            opacity: 0.75;
-            font-size: 1.18rem;
+            opacity: 0.92;
+            font-size: 0.95rem;
             cursor: pointer;
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            transition: color 0.15s, background-color 0.15s, border-color 0.15s, opacity 0.15s;
+            transition: color 0.15s, background-color 0.15s, border-color 0.15s, opacity 0.15s, transform 0.1s;
         }
-        .icon-btn:hover:not(:disabled) { opacity: 1; background-color: var(--border-soft); }
-        .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .icon-btn:hover:not(:disabled) { opacity: 1; background-color: var(--border-soft); transform: scale(1.05); }
+        .icon-btn:active:not(:disabled) { transform: scale(0.95); }
+        .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
         /* ===== دکمه‌ی حالت تفکر (Think) ===== */
         .think-btn-wrap { position: relative; flex-shrink: 0; }
@@ -1711,11 +1714,11 @@
 
 /* ===== Virtual Chat UX upgrade ===== */
 :root { --msg-font-size: .92rem; --surface-2: rgba(255,255,255,.035); }
-body::after{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 45%,color-mix(in srgb, var(--accent-1) 2%, transparent) 50%,transparent 56%);opacity:.8}
 .header{backdrop-filter:blur(18px);background:color-mix(in srgb,var(--bg-main) 72%,transparent)}
-.home-screen{position:relative;overflow:hidden}
+.home-screen{position:relative;overflow:visible}
 .home-screen::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb, var(--accent-1) 12%, transparent),transparent 65%);filter:blur(10px);pointer-events:none}
-.home-text,.suggestion-chips,.home-mark{position:relative;z-index:1}
+.home-text,.suggestion-chips,.home-mark{position:relative;z-index:0}
+.model-dropdown.active { z-index: 3000 !important; }
 .suggestion-chip{box-shadow:0 8px 24px rgba(0,0,0,.08)}
 .message-wrapper{position:relative;gap:5px}
 .message.bot{font-size:var(--msg-font-size);line-height:1.92;max-width:100%;letter-spacing:.005em}
@@ -1993,7 +1996,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         </div>
     </div>
 
-    <div id="connectionStatus"><i class="lucide-icon" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span></div>
+    <div id="connectionStatus"><i class="ph ph-wifi-slash" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span></div>
 
     <div id="authOverlay">
         <div class="auth-card">
@@ -2030,29 +2033,29 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <span class="brand-mark"><i class="ph-fill ph-sparkle"></i></span>
                 <span class="brand-text">Virtual Chat</span>
             </div>
-            <button class="icon-btn sidebar-close-btn" onclick="toggleSidebar()" title="بستن پنل گفتگوها"><i class="lucide-icon" data-lucide="x"></i></button>
+            <button class="icon-btn sidebar-close-btn" onclick="toggleSidebar()" title="بستن پنل گفتگوها"><i class="ph ph-x" data-lucide="x"></i></button>
         </div>
 
         <div class="user-profile" id="userProfile">
             <div class="user-info"><div class="user-name" style="font-size:0.8rem; color:var(--text-muted);">مهمان</div></div>
             <div class="user-actions">
-                <button class="icon-btn" onclick="document.getElementById('authOverlay').classList.add('active')" title="ورود / ثبت‌نام (اختیاری - برای sync بین دستگاه‌ها)"><i class="lucide-icon" data-lucide="log-in"></i></button>
+                <button class="icon-btn" onclick="document.getElementById('authOverlay').classList.add('active')" title="ورود / ثبت‌نام (اختیاری - برای sync بین دستگاه‌ها)"><i class="ph ph-sign-in" data-lucide="log-in"></i></button>
             </div>
         </div>
 
         <button class="new-chat-btn" id="newChatBtn" onclick="startNewChat()">
-            <i class="lucide-icon" data-lucide="plus"></i> گفتگوی تازه
+            <i class="ph ph-plus" data-lucide="plus"></i> گفتگوی تازه
         </button>
         <div class="history-tools">
-            <button class="history-search-toggle" type="button" onclick="toggleHistorySearch()" title="جستجو بین گفتگوها"><i class="lucide-icon" data-lucide="search"></i></button>
+            <button class="history-search-toggle" type="button" onclick="toggleHistorySearch()" title="جستجو بین گفتگوها"><i class="ph ph-magnifying-glass" data-lucide="search"></i></button>
             <input id="historySearchInput" class="history-search-input" type="search" placeholder="جستجو بین گفتگوها..." oninput="filterHistory(this.value)" autocomplete="off">
-            <button class="history-select-toggle" id="historySelectToggle" type="button" onclick="toggleHistorySelectMode()" title="انتخاب چندتایی برای حذف"><i class="lucide-icon" data-lucide="list-checks"></i></button>
+            <button class="history-select-toggle" id="historySelectToggle" type="button" onclick="toggleHistorySelectMode()" title="انتخاب چندتایی برای حذف"><i class="ph ph-list-checks" data-lucide="list-checks"></i></button>
         </div>
         <div class="history-bulk-bar" id="historyBulkBar">
             <span class="history-bulk-count" id="historyBulkCount">۰ انتخاب شده</span>
             <div class="history-bulk-actions">
-                <button class="history-bulk-btn" type="button" title="انتخاب همه" onclick="selectAllHistoryItems()"><i class="lucide-icon" data-lucide="check-check"></i></button>
-                <button class="history-bulk-btn danger" type="button" title="حذف انتخاب‌شده‌ها" onclick="deleteSelectedHistoryItems()"><i class="lucide-icon" data-lucide="trash-2"></i></button>
+                <button class="history-bulk-btn" type="button" title="انتخاب همه" onclick="selectAllHistoryItems()"><i class="ph ph-checks" data-lucide="check-check"></i></button>
+                <button class="history-bulk-btn danger" type="button" title="حذف انتخاب‌شده‌ها" onclick="deleteSelectedHistoryItems()"><i class="ph ph-trash" data-lucide="trash-2"></i></button>
             </div>
         </div>
         <div class="history-list" id="historyList"></div>
@@ -2063,14 +2066,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <div class="chat-header">
             <div class="header-left">
                 <button class="menu-btn" onclick="toggleSidebar()" title="منو">
-                    <i class="lucide-icon" data-lucide="menu"></i>
+                    <i class="ph ph-list" data-lucide="menu"></i>
                 </button>
                 <span class="header-brand-text">Virtual Chat</span>
             </div>
             <div class="header-right">
                 <div class="notif-wrap" id="notifWrap">
                     <button class="icon-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="اعلان‌ها">
-                        <i class="lucide-icon" data-lucide="bell"></i>
+                        <i class="ph ph-bell" data-lucide="bell"></i>
                         <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
                         <span class="notif-status-dot" id="notifStatusDot" style="display:none;"></span>
                     </button>
@@ -2084,7 +2087,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
                 <div class="api-usage-wrap">
                     <button class="icon-btn" id="apiUsageBtn" onclick="toggleApiUsage(event)" title="مصرف API گوگل">
-                        <i class="lucide-icon" data-lucide="activity"></i>
+                        <i class="ph ph-pulse" data-lucide="activity"></i>
                     </button>
                     <div class="api-usage-panel" id="apiUsagePanel">
                         <div class="api-usage-head">
@@ -2097,10 +2100,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     </div>
                 </div>
                 <button class="icon-btn" id="chatSearchBtn" onclick="openChatSearch()" title="جستجو در گفتگو">
-                    <i class="lucide-icon" data-lucide="search"></i>
+                    <i class="ph ph-magnifying-glass" data-lucide="search"></i>
                 </button>
                 <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="تنظیمات">
-                    <i class="lucide-icon" data-lucide="settings-2"></i>
+                    <i class="ph ph-sliders" data-lucide="settings-2"></i>
                 </button>
             </div>
         </div>
@@ -2117,12 +2120,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
         <div class="input-wrapper" id="inputWrapper">
             <div class="command-menu" id="commandMenu">
-                <div class="command-item" onclick="runComposerCommand('web')"><span><i class="lucide-icon" data-lucide="globe"></i> جستجو در وب</span><span>/web</span></div>
-                <div class="command-item" onclick="runComposerCommand('code')"><span><i class="lucide-icon" data-lucide="code"></i> حالت کدنویسی</span><span>/code</span></div>
-                <div class="command-item" onclick="runComposerCommand('clear')"><span><i class="lucide-icon" data-lucide="eraser"></i> پاک کردن متن</span><span>/clear</span></div>
+                <div class="command-item" onclick="runComposerCommand('web')"><span><i class="ph ph-globe" data-lucide="globe"></i> جستجو در وب</span><span>/web</span></div>
+                <div class="command-item" onclick="runComposerCommand('code')"><span><i class="ph ph-code" data-lucide="code"></i> حالت کدنویسی</span><span>/code</span></div>
+                <div class="command-item" onclick="runComposerCommand('clear')"><span><i class="ph ph-eraser" data-lucide="eraser"></i> پاک کردن متن</span><span>/clear</span></div>
             </div>
             <div class="composer-hint"><kbd>Enter</kbd> ارسال <span>·</span> <kbd>Shift</kbd>+<kbd>Enter</kbd> خط جدید <span>·</span> / فرمان‌ها</div>
-            <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="lucide-icon" data-lucide="arrow-down"></i></button>
+            <button class="scroll-latest-btn" id="scrollLatestBtn" onclick="scrollToLatest()" title="رفتن به جدیدترین پیام"><i class="ph ph-arrow-down" data-lucide="arrow-down"></i></button>
             <div class="input-box">
                 <div id="filePreviewList" class="file-preview-bar"></div>
                 <div id="codeFilesBar" style="flex-wrap:wrap; gap:6px;"></div>
@@ -2137,59 +2140,59 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
                 <input type="file" id="fileInput" hidden multiple onchange="handleFileSelect(event)">
                 <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
-                    <i class="lucide-icon" data-lucide="plus"></i>
+                    <i class="ph ph-plus" data-lucide="plus"></i>
                 </button>
 
                 <div class="think-btn-wrap" id="thinkModeBtn">
                     <button class="think-btn" id="thinkToggleBtn" type="button" onclick="toggleThinkPanel(event)" title="حالت تفکر">
-                        <i class="lucide-icon" data-lucide="brain"></i>
+                        <i class="ph ph-brain" data-lucide="brain"></i>
                         <span class="think-label" id="thinkBtnLabel">تفکر</span>
                     </button>
                     <div class="think-panel" id="thinkPanel">
                         <div class="think-panel-title">سطح تفکر مدل</div>
                         <div class="think-option" data-level="off" onclick="setThinkLevel('off')">
                             <span>خاموش</span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                            <span class="item-check"><i class="ph ph-check" data-lucide="check"></i></span>
                         </div>
                         <div class="think-option" data-level="low" onclick="setThinkLevel('low')">
                             <span>کم</span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                            <span class="item-check"><i class="ph ph-check" data-lucide="check"></i></span>
                         </div>
                         <div class="think-option" data-level="medium" onclick="setThinkLevel('medium')">
                             <span>متوسط</span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                            <span class="item-check"><i class="ph ph-check" data-lucide="check"></i></span>
                         </div>
                         <div class="think-option" data-level="high" onclick="setThinkLevel('high')">
                             <span>زیاد</span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                            <span class="item-check"><i class="ph ph-check" data-lucide="check"></i></span>
                         </div>
                     </div>
                 </div>
 
                 <div class="model-selector composer-model-selector" id="modelSelector" onclick="toggleModelDropdown()">
                     <span class="model-name" id="modelDisplayName">Virtual Bot 1.6</span>
-                    <span class="model-chevron"><i class="lucide-icon" data-lucide="chevron-up"></i></span>
+                    <span class="model-chevron"><i class="ph ph-caret-up" data-lucide="chevron-up"></i></span>
                     <div class="model-dropdown" id="modelDropdown">
                         <div class="model-dropdown-item" data-model="gemini-3.5-flash-lite" onclick="selectModel(this, 'Virtual Bot 1.1', 'gemini-3.5-flash-lite')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.1</div>
                                 <div class="item-desc">سریع‌ترین پاسخ‌ها</div>
                             </span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                            <span class="item-check"><i class="ph ph-check" data-lucide="check"></i></span>
                         </div>
                         <div class="model-dropdown-item active" data-model="gemini-3.6-flash" onclick="selectModel(this, 'Virtual Bot 1.6', 'gemini-3.6-flash')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.6</div>
                                 <div class="item-desc">جدیدترین مدل</div>
                             </span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                            <span class="item-check"><i class="ph ph-check" data-lucide="check"></i></span>
                         </div>
                         <div class="model-dropdown-item" data-model="gemini-3.1-pro-preview" onclick="selectModel(this, 'Virtual Bot 1.3', 'gemini-3.1-pro-preview')">
                             <span>
                                 <div class="item-name">Virtual Bot 1.3</div>
                                 <div class="item-desc">مناسب کدنویسی</div>
                             </span>
-                            <span class="item-check"><i class="lucide-icon" data-lucide="check"></i></span>
+                            <span class="item-check"><i class="ph ph-check" data-lucide="check"></i></span>
                         </div>
                     </div>
                 </div>
@@ -2201,7 +2204,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     <div class="chat-search" id="chatSearchPanel" role="dialog" aria-label="جستجو در گفتگو">
         <div class="chat-search-row">
-            <button class="msg-action" type="button" onclick="closeChatSearch()" title="بستن"><i class="lucide-icon" data-lucide="x"></i></button>
+            <button class="msg-action" type="button" onclick="closeChatSearch()" title="بستن"><i class="ph ph-x" data-lucide="x"></i></button>
             <input id="chatSearchInput" type="search" placeholder="جستجو داخل همین گفتگو..." oninput="searchInCurrentChat(this.value)">
             <span class="chat-search-count" id="chatSearchCount"></span>
         </div>
@@ -2213,23 +2216,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="settings-nav">
                 <div class="settings-nav-title">تنظیمات</div>
                 <div class="settings-nav-item active" data-page="general" onclick="switchSettingsPage('general', this)">
-                    <i class="lucide-icon" data-lucide="settings"></i><span>عمومی</span>
+                    <i class="ph ph-gear-six" data-lucide="settings"></i><span>عمومی</span>
                 </div>
                 <div class="settings-nav-item" data-page="appearance" onclick="switchSettingsPage('appearance', this)">
-                    <i class="lucide-icon" data-lucide="palette"></i><span>ظاهر</span>
+                    <i class="ph ph-palette" data-lucide="palette"></i><span>ظاهر</span>
                 </div>
                 <div class="settings-nav-item" data-page="chat-tools" onclick="switchSettingsPage('chat-tools', this)">
-                    <i class="lucide-icon" data-lucide="message-square"></i><span>ابزار گفتگو</span>
+                    <i class="ph ph-chat-square" data-lucide="message-square"></i><span>ابزار گفتگو</span>
                 </div>
                 <div class="settings-nav-item" data-page="support" onclick="switchSettingsPage('support', this)">
-                    <i class="lucide-icon" data-lucide="life-buoy"></i><span>پشتیبانی</span>
+                    <i class="ph ph-lifebuoy" data-lucide="life-buoy"></i><span>پشتیبانی</span>
                 </div>
             </div>
 
             <div class="settings-main">
                 <div class="settings-header">
-                    <h2 id="settingsPageTitle"><i class="lucide-icon" data-lucide="settings"></i> عمومی</h2>
-                    <button class="icon-btn" type="button" onclick="closeSettings()" title="بستن"><i class="lucide-icon" data-lucide="x"></i></button>
+                    <h2 id="settingsPageTitle"><i class="ph ph-gear-six" data-lucide="settings"></i> عمومی</h2>
+                    <button class="icon-btn" type="button" onclick="closeSettings()" title="بستن"><i class="ph ph-x" data-lucide="x"></i></button>
                 </div>
 
                 <div class="settings-body">
@@ -2248,7 +2251,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                             <div class="segmented" id="themeSegmented">
                                 <button class="segmented-btn" data-value="light"><i class="ph-fill ph-sun"></i> روشن</button>
                                 <button class="segmented-btn" data-value="dark"><i class="ph-fill ph-moon-stars"></i> تاریک</button>
-                                <button class="segmented-btn" data-value="auto"><i class="lucide-icon" data-lucide="contrast"></i> خودکار</button>
+                                <button class="segmented-btn" data-value="auto"><i class="ph ph-circle-half" data-lucide="contrast"></i> خودکار</button>
                             </div>
                         </div>
 
@@ -2267,9 +2270,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                         <div class="settings-section">
                             <div class="settings-label">ابزار گفتگو</div>
                             <div class="chat-empty-tools">
-                                <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="lucide-icon" data-lucide="file-down"></i> خروجی Markdown</button>
-                                <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="lucide-icon" data-lucide="copy"></i> خروجی متن</button>
-                                <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="lucide-icon" data-lucide="trash-2"></i> پاک کردن گفتگو</button>
+                                <button class="mini-tool" type="button" onclick="exportCurrentChat('md')"><i class="ph ph-file-arrow-down" data-lucide="file-down"></i> خروجی Markdown</button>
+                                <button class="mini-tool" type="button" onclick="exportCurrentChat('txt')"><i class="ph ph-copy" data-lucide="copy"></i> خروجی متن</button>
+                                <button class="mini-tool" type="button" onclick="clearCurrentChat()"><i class="ph ph-trash" data-lucide="trash-2"></i> پاک کردن گفتگو</button>
                             </div>
                         </div>
                     </div>
@@ -2292,10 +2295,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 
     <script>
         const SETTINGS_PAGE_TITLES = {
-            'general': { icon: 'settings', label: 'عمومی' },
+            'general': { icon: 'gear-six', label: 'عمومی' },
             'appearance': { icon: 'palette', label: 'ظاهر' },
-            'chat-tools': { icon: 'message-square', label: 'ابزار گفتگو' },
-            'support': { icon: 'life-buoy', label: 'پشتیبانی' }
+            'chat-tools': { icon: 'chat-square', label: 'ابزار گفتگو' },
+            'support': { icon: 'lifebuoy', label: 'پشتیبانی' }
         };
         function switchSettingsPage(page, navEl) {
             document.querySelectorAll('.settings-nav-item').forEach(el => el.classList.remove('active'));
@@ -2306,8 +2309,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             const meta = SETTINGS_PAGE_TITLES[page];
             const titleEl = document.getElementById('settingsPageTitle');
             if (meta && titleEl) {
-                titleEl.innerHTML = `<i class="lucide-icon" data-lucide="${meta.icon}"></i> ${meta.label}`;
-                if (typeof lucide !== 'undefined') lucide.createIcons();
+                titleEl.innerHTML = `<i class="ph ph-${meta.icon}"></i> ${meta.label}`;
             }
             const body = document.querySelector('.settings-body');
             if (body) body.scrollTop = 0;
@@ -3397,7 +3399,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             <div class="user-info"><div class="user-name">${nameToDisplay}</div></div>
             <div class="user-actions">
                 <button class="icon-btn" onclick="switchAccount()" title="تغییر حساب"><i class="ph-bold ph-arrows-clockwise"></i></button>
-                <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="lucide-icon" data-lucide="log-out" style="color:var(--danger);"></i></button>
+                <button class="icon-btn" onclick="logoutUser()" title="خروج"><i class="ph ph-sign-out" data-lucide="log-out" style="color:var(--danger);"></i></button>
             </div>
         `;
         const titleEl = document.getElementById('welcomeHomeTitle');
@@ -4030,8 +4032,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         bar.classList.add('has-items');
         bar.innerHTML = codeFilesMemory.map(f => `
             <span class="file-preview" style="display:inline-flex;position:relative;" onclick="openTextFileEditor('${f.name.replace(/'/g, "\\'")}')">
-                <button class="fp-remove" type="button" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="lucide-icon" data-lucide="x"></i></button>
-                <span class="fp-icon-wrap"><i class="lucide-icon fp-type-icon" data-lucide="file-code-2"></i></span>
+                <button class="fp-remove" type="button" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="ph ph-x" data-lucide="x"></i></button>
+                <span class="fp-icon-wrap"><i class="ph ph-file-code fp-type-icon" data-lucide="file-code-2"></i></span>
                 <span class="fp-text">
                     <span class="fp-name">${escapeHtml(f.name)}</span>
                     <span class="file-status">${getFileTypeLabel(f.name)}</span>
@@ -4140,10 +4142,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         row.style.display = 'flex';
         row.id = id;
         row.innerHTML = `
-            <button class="fp-remove" type="button" onclick="removeFileItem('${id}')" title="حذف"><i class="lucide-icon" data-lucide="x"></i></button>
+            <button class="fp-remove" type="button" onclick="removeFileItem('${id}')" title="حذف"><i class="ph ph-x" data-lucide="x"></i></button>
             <img class="fp-thumb" src="" alt="" style="display:none;">
             <div class="fp-icon-wrap">
-                <i class="lucide-icon fp-type-icon" data-lucide="${getFileTypeIcon(name)}"></i>
+                <i class="ph ph-${getFileTypeIcon(name)} fp-type-icon"></i>
             </div>
             <div class="fp-text">
                 <span class="fp-name">${escapeHtml(name || 'فایل بدون‌نام')}</span>
@@ -4607,7 +4609,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         }
 
         if (activeLoadingDiv && activeLoadingDiv.isConnected) {
-            activeLoadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
+            activeLoadingDiv.innerHTML = '<span class="stopped-state"><i class="ph ph-square" data-lucide="square"></i> پاسخ متوقف شد</span>';
         }
 
         setGeneratingState(false);
@@ -4705,12 +4707,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             } else if (f.type && f.type.startsWith('video/')) {
                 userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${f.base64}" type="${f.type}"></video>`;
             } else {
-                userContentHtml += `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="lucide-icon" data-lucide="file"></i> ${escapeHtml(f.name)}</span>`;
+                userContentHtml += `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="ph ph-file" data-lucide="file"></i> ${escapeHtml(f.name)}</span>`;
             }
         }
         if (codeFilesMemory.length > 0) {
             userContentHtml += codeFilesMemory.map(f =>
-                `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}</span>`
+                `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="ph ph-file-code" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}</span>`
             ).join('');
         }
 
@@ -4945,7 +4947,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <button class="more-details-btn" type="button" onclick="toggleErrorDetails('${detailId}')">جزئیات بیشتر</button>
                 <div class="error-details" id="${detailId}" style="display:none;">
                     ${rows.join('')}
-                    <button class="code-action" type="button" title="کپی جزئیات" onclick="copyErrorDetails(this)" data-detail="${encodedDetail}"><i class="lucide-icon" data-lucide="copy"></i></button>
+                    <button class="code-action" type="button" title="کپی جزئیات" onclick="copyErrorDetails(this)" data-detail="${encodedDetail}"><i class="ph ph-copy" data-lucide="copy"></i></button>
                 </div>`;
         }
 
@@ -4954,7 +4956,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const retryButtonHtml = canRetry
             ? `<button class="retry-btn" type="button" data-retry="${retryData}" onclick="retryFromButton(this)">دوباره تلاش کن</button>`
             : `<span class="retry-disabled-note">این خطا قابل تکرار خودکار نیست.</span>`;
-        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" title="کپی پیام" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="lucide-icon" data-lucide="copy"></i></button></div>`;
+        loadingDiv.innerHTML = `<div class="error-message"><i class="ph-fill ph-warning-circle"></i> ${escapeHtml(message)}</div>${detailsHtml}<div class="retry-row">${retryButtonHtml}<button class="code-action" type="button" title="کپی پیام" onclick="copyErrorDetails(this)" data-detail="${encodedMessage}"><i class="ph ph-copy" data-lucide="copy"></i></button></div>`;
         if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
         lastFailedRequest = request;
         if (typeof showToast === 'function') showToast(message, 'error');
@@ -4970,7 +4972,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const text = decodeURIComponent(btn.dataset.detail || '');
         try { await navigator.clipboard.writeText(text); }
         catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i>'; setTimeout(() => btn.innerHTML = old, 1200);
+        const old = btn.innerHTML; btn.innerHTML = '<i class="ph ph-check" data-lucide="check"></i>'; setTimeout(() => btn.innerHTML = old, 1200);
         if (typeof showToast === 'function') showToast('جزئیات خطا کپی شد', 'success');
     }
 
@@ -5557,7 +5559,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 // continuation of this stopped/unanswered turn (see fix above).
                 loadingDiv.classList.remove('is-streaming');
                 removePushedUserTurnIfUnanswered();
-                loadingDiv.innerHTML = '<span class="stopped-state"><i class="lucide-icon" data-lucide="square"></i> پاسخ متوقف شد</span>';
+                loadingDiv.innerHTML = '<span class="stopped-state"><i class="ph ph-square" data-lucide="square"></i> پاسخ متوقف شد</span>';
             } else {
                 loadingDiv.classList.remove('is-streaming');
                 removePushedUserTurnIfUnanswered();
@@ -5623,7 +5625,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             .replace(/__([^_]+)__/g, '<strong>$1</strong>')
             // FEATURE: کارت/چیپ Entity - نحو ویژه {{entity:نام}} یک بج کوچک
             // با آیکون پازل رندر می‌کند (برای اشاره به یک مفهوم/محصول/شخص مهم).
-            .replace(/\{\{entity:([^}]+)\}\}/g, '<span class="entity-chip"><i class="lucide-icon" data-lucide="puzzle"></i>$1</span>')
+            .replace(/\{\{entity:([^}]+)\}\}/g, '<span class="entity-chip"><i class="ph ph-puzzle-piece" data-lucide="puzzle"></i>$1</span>')
             // ایتالیک: تک‌ستاره/تک‌آندرلاین (بعد از بولد پردازش می‌شود که با ** تداخل نکند)
             .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
             .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>')
@@ -5646,7 +5648,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
     async function copyCode(btn) {
         const code = decodeURIComponent(btn.dataset.code || '');
         try { await navigator.clipboard.writeText(code); } catch { const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old=btn.innerHTML; btn.innerHTML='<i class="lucide-icon" data-lucide="check"></i>'; setTimeout(()=>{btn.innerHTML=old;},1200);
+        const old=btn.innerHTML; btn.innerHTML='<i class="ph ph-check" data-lucide="check"></i>'; setTimeout(()=>{btn.innerHTML=old;},1200);
     }
 
     // FIX (requested): previously only HTML/"runnable" code blocks had a
@@ -5922,9 +5924,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <div class="code-card-head">
                     <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد</span>
                     <div class="code-actions">
-                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
-                        <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
-                        <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i></button>
+                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="ph ph-code" data-lucide="code"></i> نمایش کد کامل</button>
+                        <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="ph ph-copy" data-lucide="copy"></i></button>
+                        <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="ph ph-download-simple" data-lucide="download"></i></button>
                     </div>
                 </div>
                 <div class="edited-file-meta">${sizeKb} KB &middot; ${lineCount} خط &middot; آماده</div>
@@ -6081,9 +6083,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 <div class="code-card-head">
                     <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> ${appliedCount} تغییر روی «${escapeHtml(fileName)}»${failNote}${fuzzyNote}</span>
                     <div class="code-actions">
-                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="lucide-icon" data-lucide="code"></i> نمایش کد کامل</button>
-                        <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
-                        <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="lucide-icon" data-lucide="download"></i></button>
+                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="ph ph-code" data-lucide="code"></i> نمایش کد کامل</button>
+                        <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="ph ph-copy" data-lucide="copy"></i></button>
+                        <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="ph ph-download-simple" data-lucide="download"></i></button>
                     </div>
                 </div>
                 <div class="edited-file-meta">${sizeKb} KB &middot; آماده</div>
@@ -6118,7 +6120,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const code = decodeURIComponent(btn.dataset.code || '');
         try { await navigator.clipboard.writeText(code); }
         catch { const ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-        const old = btn.innerHTML; btn.innerHTML = '<i class="lucide-icon" data-lucide="check"></i>';
+        const old = btn.innerHTML; btn.innerHTML = '<i class="ph ph-check" data-lucide="check"></i>';
         setTimeout(() => btn.innerHTML = old, 1200);
         if (typeof showToast === 'function') showToast('محتوای فایل کپی شد', 'success');
     }
@@ -6185,7 +6187,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         if (!html || html.indexOf('data:') === -1) return { html, bytesFreed: 0, changed: false };
         let bytesFreed = 0;
         let changed = false;
-        const placeholder = '<span class="pruned-media-notice" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;color:var(--text-muted);"><i class="lucide-icon" data-lucide="image-off"></i> فایل ضمیمه (برای آزاد شدن حافظه حذف شد)</span>';
+        const placeholder = '<span class="pruned-media-notice" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.82em;color:var(--text-muted);"><i class="ph ph-image-broken" data-lucide="image-off"></i> فایل ضمیمه (برای آزاد شدن حافظه حذف شد)</span>';
         const newHtml = html.replace(/(<(?:img|source)\b[^>]*\bsrc=")data:[^"]*(")/gi, (match, pre, post) => {
             bytesFreed += match.length;
             changed = true;
@@ -6451,11 +6453,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             item.dataset.chatId = id;
             const isChecked = selectedHistoryIds.has(id);
             item.innerHTML = `
-                <div class="history-item-checkbox ${isChecked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleHistoryItemSelected('${id}')"><i class="lucide-icon" data-lucide="check"></i></div>
-                ${chats[id].pinned ? '<i class="lucide-icon" data-lucide="pin" style="color:var(--accent-2);"></i>' : '<i class="lucide-icon" data-lucide="message-circle"></i>'}
+                <div class="history-item-checkbox ${isChecked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleHistoryItemSelected('${id}')"><i class="ph ph-check" data-lucide="check"></i></div>
+                ${chats[id].pinned ? '<i class="ph ph-push-pin" data-lucide="pin" style="color:var(--accent-2);"></i>' : '<i class="ph ph-chat-circle" data-lucide="message-circle"></i>'}
                 <span>${escapeHtml(title)}</span>
                 <button class="icon-btn history-item-menu-btn" type="button" title="گزینه‌ها" onclick="event.stopPropagation(); toggleHistoryItemMenu('${id}', this)">
-                    <i class="lucide-icon" data-lucide="more-vertical"></i>
+                    <i class="ph ph-dots-three-vertical" data-lucide="more-vertical"></i>
                 </button>
             `;
             item.onclick = () => {
@@ -6491,9 +6493,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         menu.className = 'history-item-menu';
         menu.dataset.chatId = chatId;
         menu.innerHTML = `
-            <button type="button" data-action="pin"><i class="lucide-icon" data-lucide="pin"></i> ${chat.pinned ? 'برداشتن پین' : 'پین کردن'}</button>
-            <button type="button" data-action="rename"><i class="lucide-icon" data-lucide="pencil"></i> تغییر نام</button>
-            <button type="button" data-action="delete" class="danger"><i class="lucide-icon" data-lucide="trash-2"></i> حذف گفتگو</button>
+            <button type="button" data-action="pin"><i class="ph ph-push-pin" data-lucide="pin"></i> ${chat.pinned ? 'برداشتن پین' : 'پین کردن'}</button>
+            <button type="button" data-action="rename"><i class="ph ph-pencil-simple" data-lucide="pencil"></i> تغییر نام</button>
+            <button type="button" data-action="delete" class="danger"><i class="ph ph-trash" data-lucide="trash-2"></i> حذف گفتگو</button>
         `;
 
         document.body.appendChild(menu);
@@ -6756,14 +6758,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         const bar = document.createElement('div');
         bar.className = 'message-actions';
         const copy = document.createElement('button');
-        copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="lucide-icon" data-lucide="copy"></i>';
-        copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="lucide-icon" data-lucide="check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
+        copy.className='msg-action'; copy.type='button'; copy.title='کپی پیام'; copy.innerHTML='<i class="ph ph-copy" data-lucide="copy"></i>';
+        copy.onclick=async()=>{const text=msg.innerText;try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()} const old=copy.innerHTML;copy.innerHTML='<i class="ph ph-check" data-lucide="check"></i>';setTimeout(()=>copy.innerHTML=old,1100)};
         bar.appendChild(copy);
         if(sender==='bot'){
-            const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="lucide-icon" data-lucide="rotate-cw"></i>';
+            const regen=document.createElement('button');regen.className='msg-action';regen.type='button';regen.title='دوباره تولید کن';regen.innerHTML='<i class="ph ph-arrow-clockwise" data-lucide="rotate-cw"></i>';
             regen.onclick=()=>regenerateMessage(wrapper);bar.appendChild(regen);
         } else {
-            const edit=document.createElement('button');edit.className='msg-action';edit.type='button';edit.title='ویرایش و ارسال دوباره';edit.innerHTML='<i class="lucide-icon" data-lucide="pencil"></i>';
+            const edit=document.createElement('button');edit.className='msg-action';edit.type='button';edit.title='ویرایش و ارسال دوباره';edit.innerHTML='<i class="ph ph-pencil-simple" data-lucide="pencil"></i>';
             edit.onclick=()=>editUserMessage(wrapper);bar.appendChild(edit);
         }
         wrapper.appendChild(bar);
@@ -6955,7 +6957,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                         <div class="code-card-head">
                             <span>${escapeHtml(lang||'code')}</span>
                             <div class="code-actions">
-                                <button class="code-action" type="button" title="کپی کد" onclick="copyCode(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
+                                <button class="code-action" type="button" title="کپی کد" onclick="copyCode(this)" data-code="${encoded}"><i class="ph ph-copy" data-lucide="copy"></i></button>
                             </div>
                         </div>
                         <pre><code>${escapeHtml(rawCode)}</code></pre>
@@ -6965,10 +6967,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 const fileLabel=`code.${ext}`;
                 return `<div class="code-card code-card-collapsed">
                     <div class="code-card-head">
-                        <span class="code-card-filelabel"><i class="lucide-icon" data-lucide="file-code-2"></i> ${escapeHtml(fileLabel)}</span>
+                        <span class="code-card-filelabel"><i class="ph ph-file-code" data-lucide="file-code-2"></i> ${escapeHtml(fileLabel)}</span>
                         <div class="code-actions">
-                            <button class="code-action" type="button" title="کپی کد" onclick="copyCode(this)" data-code="${encoded}"><i class="lucide-icon" data-lucide="copy"></i></button>
-                            <button class="code-action" type="button" title="دانلود فایل" onclick="downloadCodeAsFile(this)" data-code="${encoded}" data-lang="${lang}"><i class="lucide-icon" data-lucide="download"></i></button>
+                            <button class="code-action" type="button" title="کپی کد" onclick="copyCode(this)" data-code="${encoded}"><i class="ph ph-copy" data-lucide="copy"></i></button>
+                            <button class="code-action" type="button" title="دانلود فایل" onclick="downloadCodeAsFile(this)" data-code="${encoded}" data-lang="${lang}"><i class="ph ph-download-simple" data-lucide="download"></i></button>
                         </div>
                     </div>
                     <div class="code-card-meta">${lineCount} خط ${lang?('· '+escapeHtml(lang)):''}</div>
@@ -7152,12 +7154,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 if (pill.classList.contains('show')) {
                     // Only show the "back online" pill if we were previously offline.
                     pill.classList.add('reconnected');
-                    pill.innerHTML = '<i class="lucide-icon" data-lucide="wifi"></i><span>اتصال اینترنت برقرار شد</span>';
+                    pill.innerHTML = '<i class="ph ph-wifi-high" data-lucide="wifi"></i><span>اتصال اینترنت برقرار شد</span>';
                     hideTimer = setTimeout(() => pill.classList.remove('show'), 2200);
                 }
             } else {
                 pill.classList.remove('reconnected');
-                pill.innerHTML = '<i class="lucide-icon" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span>';
+                pill.innerHTML = '<i class="ph ph-wifi-slash" data-lucide="wifi-off"></i><span>اتصال اینترنت قطع شده</span>';
                 pill.classList.add('show');
             }
         }
