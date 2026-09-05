@@ -4897,8 +4897,8 @@
     // blow up the setup message or eat into the model's context/latency
     // budget - full fidelity isn't the goal here, just enough for the
     // model to know what was already discussed.
-    const LIVE_HISTORY_MAX_MESSAGES = 20;
-    const LIVE_HISTORY_MAX_CHARS = 6000;
+    const LIVE_HISTORY_MAX_MESSAGES = 12;
+    const LIVE_HISTORY_MAX_CHARS = 3000;
     function buildLiveCallHistoryContext() {
         const hist = (chatHistoryData[currentChatId] || [])
             .filter(m => !m.__virtualPersona && m.text);
@@ -4966,30 +4966,11 @@
     function getLiveLanguagePref() { return localStorage.getItem('virtual_live_language') || 'fa-IR'; }
     function setLiveVoicePref(name) { localStorage.setItem('virtual_live_voice', name); }
     function setLiveLanguagePref(code) { localStorage.setItem('virtual_live_language', code); }
-    // Whether to offer the model the googleSearch tool for the NEXT call.
-    // Defaults on since the whole point of asking for it was searching
-    // during voice chats; the call settings panel can turn it off, and a
-    // 1007 crash (see reconnectLiveCallWithoutSearch) turns it off
-    // automatically for the current call only, without touching this
-    // persisted preference.
-    let liveSearchToggleEnabled = localStorage.getItem('virtual_live_search') !== 'off';
-    function setLiveSearchToggle(enabled) {
-        liveSearchToggleEnabled = enabled;
-        localStorage.setItem('virtual_live_search', enabled ? 'on' : 'off');
-    }
 
     // Builds the setup message from current state - pulled into its own
-    // function so a post-crash reconnect (see the googleSearch 1007 handling
-    // in ws.onmessage) can rebuild an equivalent setup rather than
-    // duplicating this whole block. `opts.withSearch` lets a reconnect drop
-    // the googleSearch tool specifically, since Google's own bug reports
-    // (gemini-3.1-flash-live-preview, Aug 2026) show a session that died
-    // from a googleSearch call will just die again on resume if the tool is
-    // still declared - see the comment on ws.onmessage's toolCall/1007
-    // handling below for the full story.
+    // function so it can be reused if a reconnect is ever needed.
     function buildLiveSetupMessage(opts) {
         opts = opts || {};
-        const withSearch = opts.withSearch !== false;
         const historyBlock = liveState && liveState.liveCallHistoryContext
             ? `\n\nخلاصه‌ی گفتگوی متنی که همین الان با همین کاربر در همین چت داشتی (برای تداوم، نه برای تکرار کردنش):\n${liveState.liveCallHistoryContext}\n\nبر اساس این سابقه ادامه بده - اگر کاربر با اشاره‌ای مبهم ("همونی که گفتی"، "ادامه‌ی اون") صحبت را شروع کرد، منظورش همین سابقه‌ست.`
             : '';
@@ -5001,16 +4982,6 @@
         // language to speak.
         const languageBlock = `\n\nزبان گفتار: همیشه و فقط به ${langOpt.label} صحبت کن، حتی اگر کاربر به زبان دیگری صحبت کرد، مگر اینکه صراحتاً بخواهد زبان را عوض کنی.`;
         const tools = [];
-        if (withSearch) {
-            // Real, documented Live API tool - see
-            // https://ai.google.dev/gemini-api/docs/live-api/tools. Known
-            // issue: certain queries with this tool enabled make Gemini
-            // 3.1 Flash Live close the whole session with code 1007
-            // (Google forum thread, Aug 2026) instead of just failing that
-            // one tool call - handled via the reconnect-without-search
-            // fallback in ws.onclose below, not solvable from our side.
-            tools.push({ googleSearch: {} });
-        }
         // A real functionDeclarations tool the model can call on its own
         // initiative to end the call - e.g. if the user says "خب همینه،
         // خداحافظ" or the conversation naturally concludes. This is
@@ -5031,7 +5002,7 @@
             setup: {
                 model: `models/${LIVE_MODEL_NAME}`,
                 systemInstruction: {
-                    parts: [{ text: virtualPersona + '\n\nاین یک گفتگوی صوتی زنده است: پاسخ‌ها را کوتاه، محاوره‌ای و مستقیم بگو (نه بولت‌پوینت یا تیتر، چون شنیده می‌شوند نه خوانده)، دقیقاً به همان چیزی که کاربر پرسید جواب بده و از حرف زدن بی‌ربط یا پرکردن سکوت با جملات کلی خودداری کن. اگر برای جواب دادن نیاز به اطلاعات به‌روز (قیمت، اخبار، هرچیز وابسته به زمان) بود، از ابزار جست‌وجو استفاده کن.' + languageBlock + historyBlock }]
+                    parts: [{ text: virtualPersona + '\n\nاین یک گفتگوی صوتی زنده است: پاسخ‌ها را کوتاه، محاوره‌ای و مستقیم بگو (نه بولت‌پوینت یا تیتر، چون شنیده می‌شوند نه خوانده)، دقیقاً به همان چیزی که کاربر پرسید جواب بده و از حرف زدن بی‌ربط یا پرکردن سکوت با جملات کلی خودداری کن.\n\nمهم: فقط در همان اولین جمله‌ای که در کل این تماس می‌گویی مجاز به سلام/احوالپرسی هستی، نه بعد از آن. بعد از شروع تماس، هر پیام بعدی کاربر (چه سوال باشد چه جمله‌ی جدید) را مستقیماً و بدون تکرار سلام، صبح‌به‌خیر، یا هر نوع احوالپرسی دیگر جواب بده - حتی اگر مکث طولانی افتاده باشد یا موضوع عوض شده باشد، این ادامه‌ی همان یک تماس است نه شروع یک مکالمه‌ی جدید.' + languageBlock + historyBlock }]
                 },
                 generationConfig: {
                     responseModalities: ['AUDIO'],
@@ -5088,12 +5059,6 @@
             // gapless joins between separately-scheduled sources.
             muted: false,
             closing: false,
-            // Whether the googleSearch tool is currently offered to the
-            // model - starts from the user's toggle in the call settings,
-            // gets forced to false permanently for this call if the
-            // known 1007-crash-on-search bug fires (see ws.onclose).
-            searchEnabled: liveSearchToggleEnabled,
-            searchCrashRetried: false,
             // Snapshot of the current chat's text history, captured now
             // (before the call connects) rather than read lazily later,
             // so it reflects exactly what was on screen when the user
@@ -5159,7 +5124,7 @@
             // (an AC unit) kept Gemini's server-side VAD from ever
             // seeing "silence", so it never closed the user's turn and
             // sat waiting far longer than expected before responding.
-            ws.send(JSON.stringify(buildLiveSetupMessage({ withSearch: liveState.searchEnabled !== false })));
+            ws.send(JSON.stringify(buildLiveSetupMessage()));
         };
 
         ws.onmessage = async (event) => {
@@ -5176,7 +5141,7 @@
                 // path re-fires setupComplete mid-call and a beep there
                 // would sound like a random glitch to the user).
                 if (!liveState.micProcessorNode) {
-                    if (!liveState.searchCrashRetried) playCallToneEffect('connect');
+                    playCallToneEffect('connect');
                     beginMicStreaming();
                 }
                 return;
@@ -5236,24 +5201,6 @@
 
         ws.onclose = (closeEvent) => {
             if (!liveState || liveState.closing) return;
-            // Known Gemini 3.1 Flash Live issue (Google forum, Aug
-            // 2026): certain googleSearch invocations close the
-            // session with code 1007 "invalid argument" instead of
-            // just failing that tool call - and because the session-
-            // resumption context still contains the same pending
-            // question, a naive reconnect-and-resume just dies again
-            // the same way. The only workaround reported to actually
-            // recover is reconnecting as a FRESH session (not resumed)
-            // with the googleSearch tool removed. We do that silently,
-            // once - if the fresh reconnect itself also fails, we give
-            // up and close normally rather than looping forever.
-            if (closeEvent && closeEvent.code === 1007 && liveState.searchEnabled !== false && !liveState.searchCrashRetried) {
-                liveState.searchCrashRetried = true;
-                liveState.searchEnabled = false;
-                statusText.textContent = 'در حال اتصال مجدد...';
-                attachLiveWebSocketHandlers(statusText, orbWrap);
-                return;
-            }
             endLiveCall();
         };
     }
@@ -5311,17 +5258,30 @@
 
         liveState.micProcessorNode = new AudioWorkletNode(liveState.micContext, 'mic-capture-processor');
 
-        // --- Manual VAD state ---
+        // --- Manual VAD state with adaptive noise gate ---
         // We do our own speech/silence detection here (RMS amplitude
         // against a threshold) instead of relying on Gemini's server-side
-        // VAD, because constant background noise (e.g. an AC unit) reads
-        // to the server as "the user never stops talking" and the turn
-        // never closes. Google's own guidance for manual VAD: use at
-        // least 500ms of silence before ending the turn, or speech gets
-        // cut off during natural pauses - see
+        // VAD, because constant background noise (e.g. an AC unit, a fan,
+        // street noise) reads to the server as "the user never stops
+        // talking" and the turn never closes. Google's own guidance for
+        // manual VAD: use at least 500ms of silence before ending the
+        // turn, or speech gets cut off during natural pauses - see
         // https://ai.google.dev/gemini-api/docs/live-api/capabilities
-        const RMS_THRESHOLD = 0.02;      // roughly: quiet room noise floor
-        const SILENCE_HANG_MS = 600;     // silence needed before activityEnd
+        //
+        // A single fixed RMS_THRESHOLD doesn't work well across rooms: too
+        // low and a noisy room never reads as "silence" (turn never ends,
+        // or user's own noise gets streamed as if it were speech); too
+        // high and a quiet room needs the user to nearly shout before
+        // being heard at all. Instead we track a running estimate of the
+        // room's noise floor and require the signal to rise meaningfully
+        // above THAT before counting as voice - so it stays useful whether
+        // the room is dead silent or has a constant hum.
+        let noiseFloor = 0.006;              // seeded low, adapts up/down fast
+        const NOISE_FLOOR_RISE_RATE = 0.15;  // how fast the floor tracks upward when it's quiet
+        const NOISE_FLOOR_FALL_RATE = 0.02;  // slower to fall, so a brief loud noise doesn't drag the floor up permanently
+        const VOICE_MARGIN = 2.2;            // signal must exceed noiseFloor * this to count as voice
+        const MIN_VOICE_RMS = 0.012;         // absolute floor so a totally silent room doesn't trigger on tiny fluctuations
+        const SILENCE_HANG_MS = 600;         // silence needed before activityEnd
         liveState.speaking = false;
         liveState.lastVoiceTs = 0;
         const orbWrap = document.getElementById('liveOrbWrap');
@@ -5335,7 +5295,18 @@
             for (let i = 0; i < input.length; i++) sumSquares += input[i] * input[i];
             const rms = Math.sqrt(sumSquares / input.length);
             const now = performance.now();
-            const isVoice = rms >= RMS_THRESHOLD;
+
+            const voiceThreshold = Math.max(noiseFloor * VOICE_MARGIN, MIN_VOICE_RMS);
+            const isVoice = rms >= voiceThreshold;
+
+            // Only adapt the noise floor from frames that AREN'T currently
+            // being treated as speech - otherwise the user's own voice
+            // would drag the floor up and the gate would slowly become
+            // deaf to them mid-sentence.
+            if (!isVoice) {
+                const rate = rms > noiseFloor ? NOISE_FLOOR_RISE_RATE : NOISE_FLOOR_FALL_RATE;
+                noiseFloor += (rms - noiseFloor) * rate;
+            }
 
             if (isVoice) {
                 liveState.lastVoiceTs = now;
@@ -5357,8 +5328,8 @@
             }
 
             // Only stream audio while inside a detected speech turn - this
-            // is what keeps the constant AC hum from ever reaching Gemini
-            // as "the user is talking".
+            // is what keeps constant background noise from ever reaching
+            // Gemini as "the user is talking".
             if (!liveState.speaking) return;
 
             const pcm16 = floatTo16BitPCM(input);
@@ -8223,13 +8194,6 @@
             <span class="live-settings-label">صدا و لحن</span>
             <select id="liveVoiceSelect" class="live-settings-select" onchange="onLiveVoiceChange(this.value)"></select>
         </div>
-        <div class="live-settings-row">
-            <span class="live-settings-label">جست‌وجوی وب</span>
-            <label class="live-settings-toggle">
-                <input type="checkbox" id="liveSearchToggle" onchange="onLiveSearchToggleChange(this.checked)">
-                <span class="live-settings-toggle-track"></span>
-            </label>
-        </div>
         <div class="live-settings-hint">تغییر زبان/صدا از تماس بعدی اعمال می‌شود.</div>
     </div>
 
@@ -8250,8 +8214,7 @@
     function populateLiveCallSettingsPanel() {
         const langSel = document.getElementById('liveLanguageSelect');
         const voiceSel = document.getElementById('liveVoiceSelect');
-        const searchToggle = document.getElementById('liveSearchToggle');
-        if (!langSel || !voiceSel || !searchToggle) return;
+        if (!langSel || !voiceSel) return;
 
         if (!langSel.options.length) {
             LIVE_LANGUAGE_OPTIONS.forEach(l => {
@@ -8269,7 +8232,6 @@
         }
         langSel.value = getLiveLanguagePref();
         voiceSel.value = getLiveVoicePref();
-        searchToggle.checked = liveSearchToggleEnabled;
     }
     function toggleLiveCallSettings(e) {
         if (e) e.stopPropagation();
@@ -8278,7 +8240,6 @@
     }
     function onLiveLanguageChange(code) { setLiveLanguagePref(code); }
     function onLiveVoiceChange(name) { setLiveVoicePref(name); }
-    function onLiveSearchToggleChange(checked) { setLiveSearchToggle(checked); }
     document.addEventListener('click', (e) => {
         const panel = document.getElementById('liveCallSettingsPanel');
         const btn = document.getElementById('liveSettingsBtn');
