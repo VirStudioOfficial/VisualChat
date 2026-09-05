@@ -1971,7 +1971,7 @@
         .sidebar.collapsed { width:0; min-width:0; padding-left:0; padding-right:0; border:0; overflow:hidden; }
         .sidebar > * { transition: opacity 0.2s ease; }
         .sidebar.collapsed > * { opacity:0; pointer-events:none; }
-        .menu-btn { display:flex !important; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; }
+        .menu-btn { display:flex !important; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px; font-size: 0.95rem; }
         .menu-btn:hover { background:var(--bg-card); }
         .chat-header { min-height:58px; }
         .message { line-height:1.85; }
@@ -2199,7 +2199,7 @@
                  needsVerification برمی‌گرداند. این فرم مخفی است تا وقتی
                  showVerifyStep() آن را باز کند. -->
             <form class="auth-form" id="authVerifyForm" style="display:none" onsubmit="return handleVerifySubmit(event)">
-                <p id="authVerifyDesc" style="font-size:14px;color:#666;margin:0 0 8px;">یک کد ۶ رقمی به ایمیلت فرستادیم. کد تا ۱۵ دقیقه معتبره.</p>
+                <p id="authVerifyDesc" style="font-size:14px;color:#666;margin:0 0 8px;">یک کد ۶ رقمی به ایمیلت فرستادیم. کد تا ۱۵ دقیقه معتبره.<br>پیدا نکردی؟ پوشه‌ی اسپم/جانک رو هم چک کن.</p>
                 <input type="text" id="authCodeInput" placeholder="کد ۶ رقمی" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code" required>
                 <div class="auth-error-msg" id="authVerifyErrorMsg"></div>
                 <button type="submit" class="auth-submit-btn" id="authVerifySubmitBtn">تایید کد</button>
@@ -6498,6 +6498,23 @@
                 revealRafId = requestAnimationFrame(revealTick);
             };
 
+            // FIX (پیام متوقف‌شده بعد از تعویض تب): requestAnimationFrame در
+            // تب‌های پس‌زمینه توسط مرورگر متوقف یا به‌شدت محدود می‌شود، پس
+            // این افکت تایپ لحظه‌به‌لحظه در حین بودن روی تب دیگر عملاً
+            // فریز به‌نظر می‌رسد (خودِ دریافت پاسخ از سرور ادامه دارد، فقط
+            // نمایش بصری آن متوقف شده). با گوش‌دادن به visibilitychange،
+            // به‌محض برگشت به تب، بلافاصله یک رندر کامل و فوری انجام
+            // می‌دهیم تا کاربر منتظر تکمیل انیمیشن نماند.
+            const catchUpOnVisible = () => {
+                if (document.visibilityState !== 'visible') return;
+                if (requestId !== activeRequestId) return;
+                const liveView = stripFileEditBlock(fullReply).displayText;
+                revealedChars = liveView.length;
+                renderRevealed(performance.now(), true);
+                startRevealLoop();
+            };
+            document.addEventListener('visibilitychange', catchUpOnVisible);
+
             const flushLiveRender = () => {
                 liveRenderTimer = null;
                 startRevealLoop();
@@ -6751,6 +6768,8 @@
             setTimeout(() => refreshRecentChatsSummaryInBackground(), 1000);
         } finally {
             clearTimeout(watchdogId);
+            if (revealRafId) { cancelAnimationFrame(revealRafId); revealRafId = null; }
+            document.removeEventListener('visibilitychange', catchUpOnVisible);
             // مطمئن شو این پرچم در هیچ مسیر خروجی (موفق/خطا/Stop) روشن
             // نمی‌ماند، وگرنه ناظر آیکون‌ها برای همیشه غیرفعال باقی می‌ماند.
             window.__isStreamingReply = false;
