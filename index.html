@@ -5183,6 +5183,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
             // Capture it here so the success handler below can render the
             // same edited-file card the old file-edit-block path used to.
             let streamEditedFiles = null;
+            let streamUnresolvedEditFailure = null;
             let liveRenderTimer = null;
             let streamEnded = false;
             // FIX (فریز UI حین استریم): تا وقتی این پرچم روشنه، ناظر
@@ -5325,6 +5326,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     if (parsed.done && Array.isArray(parsed.editedFiles) && parsed.editedFiles.length) {
                         streamEditedFiles = parsed.editedFiles;
                     }
+                    if (parsed.done && parsed.unresolvedEditFailure) {
+                        streamUnresolvedEditFailure = parsed.unresolvedEditFailure;
+                    }
                 }
             }
 
@@ -5355,6 +5359,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                     // missing here. Mirror that same extraction here.
                     if (parsed.done && Array.isArray(parsed.editedFiles) && parsed.editedFiles.length) {
                         streamEditedFiles = parsed.editedFiles;
+                    }
+                    if (parsed.done && parsed.unresolvedEditFailure) {
+                        streamUnresolvedEditFailure = parsed.unresolvedEditFailure;
                     }
                 } catch (_) {}
             }
@@ -5434,10 +5441,25 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;background:lin
                 // was never any real edit to have failed. mergedTextFiles is
                 // this exact request's attached/merged text files (captured
                 // above, before the request was sent).
+                // FIX (regex-based claimsSuccess missed real false-success
+                // cases): matching Persian success phrases in the model's
+                // own prose is unreliable - the model can claim success in
+                // countless phrasings (casual nicknames, emoji, paraphrase)
+                // that never match a fixed regex, so genuine false-success
+                // replies slipped through with no warning at all (this is
+                // exactly the bug the user reported). The server already
+                // determines this precisely from real tool-call state (see
+                // unresolvedEditFailure in chat.js: it fires only when the
+                // user attached an editable file AND write_block/apply_edit
+                // was either never called or every call was rejected AND no
+                // file was actually patched) - trust that signal instead of
+                // re-guessing it from text here.
                 const hadEditableFileThisRequest = Array.isArray(mergedTextFiles) && mergedTextFiles.length > 0;
-                const claimsSuccess = hadEditableFileThisRequest && /با موفقیت (ذخیره|ویرایش|اعمال)|تغییرات? (اعمال|ذخیره) شد|فایل .* (ذخیره|ویرایش) شد/.test(displayText || '');
-                if (claimsSuccess && (!edits || !edits.length) && (!streamEditedFiles || !streamEditedFiles.length)) {
-                    finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">احتمالاً مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده.</div></div>`;
+                if (hadEditableFileThisRequest && streamUnresolvedEditFailure && (!edits || !edits.length) && (!streamEditedFiles || !streamEditedFiles.length)) {
+                    const failedNames = Array.isArray(streamUnresolvedEditFailure.files)
+                        ? streamUnresolvedEditFailure.files.map(f => escapeHtml(f.name)).join('، ')
+                        : '';
+                    finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">${failedNames ? `فایل(های) «${failedNames}» ویرایش نشدند. ` : ''}مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده یا فایل را مجدداً پیوست کن.</div></div>`;
                 }
 
                 loadingDiv.innerHTML = finalHtml;
