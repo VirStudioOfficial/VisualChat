@@ -886,7 +886,7 @@
         .message.bot li { margin: 0.45rem 0; padding-right: 0.2rem; }
         .message.bot code { font-family: Consolas, monospace; background: color-mix(in srgb, var(--accent-1) 12%, transparent); padding: 2px 6px; border-radius: 6px; direction: ltr; unicode-bidi: plaintext; }
         .code-card { margin: 1.15rem 0; border: 1px solid var(--border); border-radius: 14px; background: var(--code-bg); direction: ltr; text-align: left; display: flex; flex-direction: column; min-height: 0; }
-        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); }
+        .code-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; min-height: 20px; background:var(--code-head-bg-solid); border-bottom:1px solid var(--border); font-size:0.78rem; color:var(--text-muted); border-radius: 14px 14px 0 0; box-shadow: 0 3px 10px rgba(0,0,0,0.25); flex-shrink: 0; backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 2; }
         /* FIX (هدر کارت کد هنگام اسکرول یک فاصله‌ی ثابت و اشتباه از بالا داشت):
            راه‌حل قبلی (top: 28px روی خودِ هدر) یک عدد ثابت بود که با پدینگ
            بالای #chatBox هم‌خوانی نداشت - آن پدینگ در سایزهای مختلف صفحه
@@ -5875,8 +5875,17 @@
             }
         }
         if (codeFilesMemory.length > 0) {
+            // FIX (edit-loses-code-files bug): قبلاً این اسپن فقط اسم فایل
+            // را نشان می‌داد و محتوای واقعی (f.content) هیچ‌جای DOM ذخیره
+            // نمی‌شد - درحالی‌که خودِ codeFilesMemory محتوای کامل را دارد.
+            // نتیجه: در editUserMessage هیچ راهی برای بازیابی محتوای فایل
+            // متنی/کد نبود و کاربر مجبور می‌شد آن را از نو آپلود کند. حالا
+            // محتوا را در data-content (با encodeURIComponent، برای امنیت
+            // در برابر نویسه‌های خاص/کوتیشن داخل کد) مستقیماً روی همان اسپن
+            // ذخیره می‌کنیم تا editUserMessage بتواند بدون درخواست مجدد از
+            // کاربر، فایل را دقیقاً به همان شکل بازیابی و دوباره ضمیمه کند.
             userContentHtml += codeFilesMemory.map(f =>
-                `<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="ph ph-file-code" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}</span>`
+                `<br><span class="file-chip-code" data-content="${escapeAttr(encodeURIComponent(f.content || ''))}" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="ph ph-file-code" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}</span>`
             ).join('');
         }
 
@@ -8099,6 +8108,7 @@
         // exactly like a fresh upload), and keep only the real text.
         const clone = msgEl.cloneNode(true);
         const restoredFiles = [];
+        const restoredCodeFiles = [];
 
         clone.querySelectorAll('img').forEach(img => {
             restoredFiles.push({ name: 'image.jpg', type: 'image/jpeg', base64: img.getAttribute('src') || '' });
@@ -8109,6 +8119,30 @@
             restoredFiles.push({ name: 'video.webm', type, base64: source.getAttribute('src') || '' });
         });
         clone.querySelectorAll('video').forEach(v => v.remove());
+        // FIX (edit-loses-code-files bug): اسپن‌های فایل کد/متن (که خط
+        // ~5877 هنگام ساخت پیام با کلاس file-chip-code و data-content
+        // ساخته می‌شوند) حالا محتوای کامل فایل را در data-content
+        // (encodeURIComponent شده) دارند. این‌ها را جدا از اسپن‌های
+        // فایل باینری (که آیکون data-lucide="file" ساده دارند و هرگز
+        // محتوایی در DOM ندارند) بازیابی می‌کنیم، تا مستقیم به
+        // codeFilesMemory برگردند - دقیقاً مثل یک آپلود تازه - بدون نیاز
+        // به هشدار یا آپلود مجدد از کاربر. پیام‌های قدیمی‌تر که قبل از
+        // این فیکس ذخیره شده‌اند و data-content ندارند، همچنان به مسیر
+        // قدیمی (هشدار + از دست رفتن محتوا) می‌افتند - راهی برای بازیابی
+        // محتوایی که اصلاً ذخیره نشده وجود ندارد.
+        clone.querySelectorAll('span.file-chip-code').forEach(span => {
+            const name = span.textContent.trim() || 'file.txt';
+            const encodedContent = span.getAttribute('data-content');
+            if (encodedContent !== null) {
+                let content = '';
+                try { content = decodeURIComponent(encodedContent); } catch (_) { content = ''; }
+                restoredCodeFiles.push({ name, content });
+            } else {
+                // اسپن قدیمی بدون data-content - محتوایی برای بازیابی نیست.
+                restoredFiles.push({ name, type: guessMimeType(name), base64: '' });
+            }
+            span.remove();
+        });
         clone.querySelectorAll('span').forEach(span => {
             // Only the file-chip spans have this icon; message text never does.
             if (span.querySelector('i[data-lucide="file"]')) {
@@ -8121,10 +8155,10 @@
 
         const text = clone.innerText || clone.textContent || '';
 
-        // File-chip attachments (non-image/video) have no base64 recorded in
-        // the DOM, so we can't actually resend their binary content — warn
-        // the user instead of silently sending a message that looks
-        // attached but isn't.
+        // File-chip attachments (non-image/video, non-code) have no base64
+        // recorded in the DOM, so we can't actually resend their binary
+        // content — warn the user instead of silently sending a message
+        // that looks attached but isn't.
         const filesWithoutData = restoredFiles.filter(f => !f.base64);
         const filesWithData = restoredFiles.filter(f => f.base64);
 
@@ -8142,6 +8176,18 @@
                 });
                 return { __previewId: previewId, name: f.name, type: f.type, base64: f.base64 };
             });
+        }
+
+        // FIX (edit-loses-code-files bug): فایل‌های کد/متنِ بازیابی‌شده
+        // (data-content معتبر داشتند) را مستقیم جایگزین codeFilesMemory
+        // می‌کنیم - قبلی‌ها پاک می‌شوند تا با فایل‌های همین پیام (نه فایل‌های
+        // یک پیام دیگر که ممکن است هنوز در حافظه مانده باشند) جایگزین شوند.
+        clearCodeFilesMemory();
+        if (restoredCodeFiles.length > 0) {
+            restoredCodeFiles.forEach(f => {
+                codeFilesMemory.push({ name: f.name, content: f.content, mode: 'text' });
+            });
+            if (typeof renderCodeFilesBar === 'function') renderCodeFilesBar();
         }
 
         const input=document.getElementById('userInput'); input.value=text.trim(); autoResizeTextarea(input); input.focus();
