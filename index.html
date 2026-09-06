@@ -5277,19 +5277,17 @@
                 // setup.generation_config: Cannot find field" (code 1007)
                 // - confirmed against gemini-3.1-flash-live-preview.
                 //
-                // FIX (transcript shows wrong language, e.g. Korean/
-                // Spanish/Italian text while the spoken reply was
-                // correct): this is a known upstream issue where the
-                // transcription sub-model - separate from the main
-                // audio model - guesses the spoken language per-turn
-                // instead of respecting it. Passing languageCode
-                // explicitly (matching the user's Live language
-                // preference) gives it a real hint instead of an empty
-                // config, which upstream reports show reduces (though
-                // does not fully eliminate - this is a Google-side bug)
-                // how often it locks onto the wrong language.
-                inputAudioTranscription: { languageCode: langOpt.code },
-                outputAudioTranscription: { languageCode: langOpt.code },
+                // TRIED AND REVERTED: adding languageCode here (to fight
+                // the known upstream bug where the transcription
+                // sub-model guesses the wrong language) gets rejected by
+                // THIS model with "Unknown name \"languageCode\" at
+                // 'setup.input_audio_transcription': Cannot find field"
+                // (code 1007) - confirmed live against
+                // gemini-3.1-flash-live-preview on 2026-09-06. That field
+                // is real for other Live models/SDK versions but not
+                // accepted here, so these must stay empty objects.
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
                 tools: tools,
                 realtimeInputConfig: {
                     automaticActivityDetection: { disabled: true }
@@ -5548,6 +5546,22 @@
         liveState.micContext = new AudioCtx({ sampleRate: LIVE_SEND_SAMPLE_RATE });
         liveState.micSourceNode = liveState.micContext.createMediaStreamSource(liveState.micStream);
 
+        // Real noise reduction, stage 1: a high-pass filter cut at 100Hz.
+        // Human voice fundamentals sit at ~85Hz and up, but low rumble
+        // (AC/fan hum, desk vibration through the mic stand, wind/breath
+        // hitting the capsule, electrical hum) lives mostly below that -
+        // filtering it out here, in the native audio graph before any of
+        // our own code sees the signal, is cheaper and cleaner than the
+        // browser's own noiseSuppression (which works on the whole band
+        // and can leave the voice sounding processed/robotic). A gentle
+        // 12dB/octave (Q=0.707, "no resonance bump") slope so it doesn't
+        // thin out low male voices, just strips genuine sub-vocal rumble.
+        liveState.micHighpassNode = liveState.micContext.createBiquadFilter();
+        liveState.micHighpassNode.type = 'highpass';
+        liveState.micHighpassNode.frequency.value = 100;
+        liveState.micHighpassNode.Q.value = 0.707;
+        liveState.micSourceNode.connect(liveState.micHighpassNode);
+
         const workletBlobUrl = URL.createObjectURL(new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }));
         try {
             await liveState.micContext.audioWorklet.addModule(workletBlobUrl);
@@ -5711,7 +5725,34 @@
                 return;
             }
 
-            const pcm16 = floatTo16BitPCM(input);
+            // Real noise reduction, stage 2: a soft gate applied WITHIN an
+            // already-open speech turn. The turn-level VAD above is
+            // coarse (all-or-nothing per turn) - it correctly keeps
+            // background noise from opening a turn at all, but once a
+            // turn IS open (the user is talking), quiet in-between-word
+            // gaps and low-level residual hiss/hum still ride along at
+            // full volume in every frame we send, which is exactly what
+            // ends up competing with the actual words in what the model
+            // hears. Rather than hard-muting those frames (which can
+            // chop syllable tails and sound choppy), scale them down
+            // smoothly: frames well above the voice threshold pass at
+            // full volume, frames near/below it get progressively
+            // quieter, and the two are cross-faded rather than switched,
+            // so there's no audible click at the transition.
+            const gateFloor = voiceThreshold * 0.6; // below this, fully attenuated
+            const gateCeil = voiceThreshold * 1.4;  // at/above this, full volume
+            let gateGain;
+            if (rms <= gateFloor) gateGain = 0.15; // never fully zero - avoids a hard on/off click
+            else if (rms >= gateCeil) gateGain = 1.0;
+            else gateGain = 0.15 + (rms - gateFloor) / (gateCeil - gateFloor) * 0.85;
+
+            let gatedInput = input;
+            if (gateGain < 1.0) {
+                gatedInput = new Float32Array(input.length);
+                for (let i = 0; i < input.length; i++) gatedInput[i] = input[i] * gateGain;
+            }
+
+            const pcm16 = floatTo16BitPCM(gatedInput);
             const base64Audio = arrayBufferToBase64(pcm16.buffer);
             liveState.ws.send(JSON.stringify({
                 realtimeInput: {
@@ -5725,7 +5766,10 @@
 
         // The worklet node still needs to be connected into the graph for
         // its process() to be pulled, even though we don't use its output.
-        liveState.micSourceNode.connect(liveState.micProcessorNode);
+        // Routed through the high-pass filter (not the raw source) so
+        // every sample the worklet sees has already had sub-vocal rumble
+        // stripped out.
+        liveState.micHighpassNode.connect(liveState.micProcessorNode);
     }
 
     function floatTo16BitPCM(float32Array) {
@@ -5865,6 +5909,7 @@
 
         try { liveState.ws && liveState.ws.close(); } catch (_) {}
         try { liveState.micProcessorNode && liveState.micProcessorNode.disconnect(); } catch (_) {}
+        try { liveState.micHighpassNode && liveState.micHighpassNode.disconnect(); } catch (_) {}
         try { liveState.micSourceNode && liveState.micSourceNode.disconnect(); } catch (_) {}
         try { liveState.micContext && liveState.micContext.close(); } catch (_) {}
         try { liveState.playProcessorNode && liveState.playProcessorNode.disconnect(); } catch (_) {}
