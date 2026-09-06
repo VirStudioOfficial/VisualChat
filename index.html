@@ -5604,7 +5604,19 @@
         // both so quieter onsets still cross the gate.
         const VOICE_MARGIN = 1.6;            // signal must exceed noiseFloor * this to count as voice
         const MIN_VOICE_RMS = 0.008;         // absolute floor so a totally silent room doesn't trigger on tiny fluctuations
-        const SILENCE_HANG_MS = 500;         // silence needed before activityEnd
+        const SILENCE_HANG_MS = 400;         // silence needed before activityEnd
+        // LATENCY TUNING (2026-09-07): lowered from 600ms originally to
+        // 500ms (word-onset fix) to 400ms now. Every extra 100ms here is
+        // 100ms of guaranteed, deliberate delay added to EVERY turn,
+        // separate from network/model latency - it's a hard floor on
+        // response time, not something a faster connection can hide.
+        // Google's own guidance for manual VAD says "at least 500ms" to
+        // avoid cutting speech off during natural pauses, so 400ms is a
+        // deliberate small trade: faster turn-end detection in exchange
+        // for a slightly higher chance a mid-sentence breathing pause
+        // gets misread as the end of the turn. If that starts happening
+        // often (sentences visibly cut short), raise this back toward
+        // 500-600ms rather than pushing it lower still.
         // FIX (clipped word onset): audio is only ever sent to Gemini
         // AFTER `liveState.speaking` flips true, but that flip only
         // happens once a frame's RMS crosses the voice threshold - so the
