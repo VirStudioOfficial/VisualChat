@@ -7468,6 +7468,22 @@
         clearCodeFilesMemory();
         lastCodeFilesForEdit = [];
         lastFailedRequest = null;
+        // FIX (پیام‌های چت قدیمی داخل چت تازه ذخیره می‌شدند): startNewChat
+        // فقط chatBox.innerHTML رو خالی می‌کرد، ولی chatBox.__olderWrappersBuffer
+        // یه property جاوااسکریپتیه که با innerHTML='' پاک نمی‌شه. یعنی اگه
+        // کاربر یه چت طولانی (>PAGE_SIZE پیام) باز کرده باشه (که این بافر رو
+        // پر می‌کنه) و بعد دکمه‌ی «چت جدید» رو بزنه، بافرِ چت قبلی دست‌نخورده
+        // روی همون chatBox می‌موند. اولین باری که کاربر توی این چت تازه پیام
+        // می‌فرستاد، saveCurrentChat (که کورکورانه از chatBox.__olderWrappersBuffer
+        // استفاده می‌کنه) همون پیام‌های چتِ قبلی رو مستقیماً داخل HTML چت
+        // تازه ذخیره می‌کرد - حتی بدون این‌که کاربر هیچ دکمه‌ای کلیک کنه.
+        // نتیجه: یه چتِ تازه با ۵-۶ پیام واقعی، ولی HTML ذخیره‌شده‌ش
+        // آلوده به ده‌ها پیام از یه گفتگوی کاملاً نامرتبط بود.
+        const chatBoxForNewChat = document.getElementById("chatBox");
+        if (chatBoxForNewChat) {
+            chatBoxForNewChat.__olderWrappersBuffer = [];
+            chatBoxForNewChat.__olderWrappersBufferChatId = currentChatId;
+        }
         renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
     }
@@ -7607,7 +7623,20 @@
         // HTML اضافه می‌کنیم و خودِ دکمه‌ی بارگذاری را از HTML ذخیره‌شده
         // حذف می‌کنیم - بدون اینکه چیزی واقعاً به DOM/چیزی که کاربر می‌بیند
         // اضافه شود.
-        const olderBuffer = Array.isArray(chatBox.__olderWrappersBuffer) ? chatBox.__olderWrappersBuffer : [];
+        // FIX (پیام‌های چت دیگر داخل چت تازه ذخیره می‌شدند): اینجا قبلاً
+        // chatBox.__olderWrappersBuffer رو کورکورانه (بدون هیچ چکی) به‌عنوان
+        // بافرِ متعلق به currentChatId فرض می‌کرد. اما این یه property
+        // جاوااسکریپتی روی خودِ عنصر DOM #chatBox هست، نه چیزی که مسیرهایی
+        // مثل startNewChat (که فقط chatBox.innerHTML رو خالی می‌کنه) پاک
+        // کنن. یعنی اگه کاربر یه چت طولانی رو باز می‌کرد (بافر پر می‌شد) و
+        // بعد «چت جدید» می‌زد، اولین saveCurrentChat توی چتِ تازه، بافرِ
+        // چتِ قبلی رو مستقیماً به‌عنوان بخشی از تاریخچه‌ی چتِ تازه ذخیره
+        // می‌کرد - بدون این‌که کاربر هیچ دکمه‌ای کلیک کرده باشه. حالا فقط
+        // وقتی از بافر استفاده می‌کنیم که شناسه‌ی ذخیره‌شده‌ش با
+        // currentChatId یکی باشه.
+        const olderBuffer = (chatBox.__olderWrappersBufferChatId === currentChatId && Array.isArray(chatBox.__olderWrappersBuffer))
+            ? chatBox.__olderWrappersBuffer
+            : [];
         const bufferedHtml = olderBuffer.map(w => w.outerHTML).join('');
         const clone = chatBox.cloneNode(true);
         clone.querySelectorAll('.load-older-messages').forEach(el => el.remove());
@@ -7971,7 +8000,15 @@
         // استفاده می‌شد، پیام‌های چت اشتباه (چت قبلی) نمایش داده می‌شدند.
         // راه‌حل: همیشه - چه چت طولانی باشد چه کوتاه - قبل از تصمیم درباره‌ی
         // pagination، بافر را صریحاً برای چت تازه ریست می‌کنیم.
+        // FIX (پیام‌های چت دیگر داخل چت تازه ذخیره/نمایش داده می‌شدند):
+        // صرفِ خالی کردنِ بافر کافی نیست، چون هر مصرف‌کننده‌ی این بافر
+        // (saveCurrentChat، دکمه‌ی «بارگذاری قدیمی‌تر») باید بتونه مطمئن
+        // بشه بافری که می‌خونه واقعاً متعلق به همین چته، نه یه چتِ دیگه که
+        // بعداً بدون از مسیر loadChat عبور کردن (مثلاً startNewChat) روی
+        // همون عنصر chatBox باقی مونده. برای همین کنار خودِ بافر، شناسه‌ی
+        // چتی که این بافر بهش تعلق داره رو هم ذخیره می‌کنیم.
         chatBox.__olderWrappersBuffer = [];
+        chatBox.__olderWrappersBufferChatId = id;
 
         if (allWrappers.length <= PAGE_SIZE) {
             allWrappers.forEach(w => chatBox.appendChild(w));
@@ -7983,6 +8020,7 @@
             // بافر پیام‌های قدیمی‌تر - توی DOM نیست، فقط نگه داشته می‌شه
             // تا وقتی کاربر واقعاً درخواستشون رو بده.
             chatBox.__olderWrappersBuffer = olderWrappers;
+            chatBox.__olderWrappersBufferChatId = id;
 
             const loadOlderBtn = document.createElement('div');
             loadOlderBtn.className = 'load-older-messages';
@@ -7991,6 +8029,12 @@
             loadOlderBtn.onmouseleave = () => { loadOlderBtn.style.opacity = '0.85'; };
             loadOlderBtn.textContent = `بارگذاری ${remaining} پیام قدیمی‌تر`;
             loadOlderBtn.onclick = () => {
+                // FIX: قبل از استفاده از بافر، مطمئن می‌شیم که این بافر
+                // واقعاً برای همین چتیه که الان بازه (id همون چتیه که این
+                // دکمه موقع ساختنش براش ساخته شده) - نه یه چتِ دیگه که بعداً
+                // (مثلاً با startNewChat یا هر مسیر دیگه‌ای) روی chatBox
+                // نشسته باشه.
+                if (chatBox.__olderWrappersBufferChatId !== id) { loadOlderBtn.remove(); return; }
                 const buffer = chatBox.__olderWrappersBuffer || [];
                 if (!buffer.length) { loadOlderBtn.remove(); return; }
                 const prevScrollHeight = chatBox.scrollHeight;
