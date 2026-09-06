@@ -8076,10 +8076,28 @@
         repairLoadedChatButtons(chatBox);
         renderHistoryList();
         if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+        // FIX (اسکرول کاربر یه بار به‌صورت خودکار به پایین برمی‌گشت): این
+        // تابع باید فقط لحظه‌ی باز شدنِ چت اسکرول رو به ته ببره، نه هر وقت
+        // که واقعاً اجرا می‌شه. setTimeout(..., 120) قبلاً بدون قید‌وشرط بعد
+        // از ۱۲۰ میلی‌ثانیه scrollTop رو به ته می‌برد - اگر کاربر توی همون
+        // ۱۲۰ میلی‌ثانیه (مثلاً همون لحظه که چت باز شده) دستی اسکرول رو به
+        // بالا (مثلاً نزدیک دکمه‌ی «بارگذاری قدیمی‌تر») برده بود، این تایمر
+        // معلق بدون توجه به تلاش کاربر، یهو اسکرول رو دوباره به ته می‌کشید.
+        // چون این فقط یه‌بار (تا رفرشِ بعدی/لودِ بعدیِ چت) اتفاق می‌افتاد،
+        // دقیقاً همون رفتارِ گزارش‌شده رو توضیح می‌ده. راه‌حل: قبل از اجرای
+        // تایمرِ تاخیری، بررسی می‌کنیم که کاربر در همین فاصله اسکرول رو
+        // دستی جابه‌جا نکرده باشه (یعنی همچنان همون‌جایی هست که خودِ ما
+        // گذاشته بودیمش، نزدیک ته چت).
         const scrollToBottom = () => { chatBox.scrollTop = chatBox.scrollHeight; };
         scrollToBottom();
         requestAnimationFrame(scrollToBottom);
-        setTimeout(scrollToBottom, isInitialLoad ? 120 : 0);
+        const distanceFromBottomAtLoad = () => chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+        setTimeout(() => {
+            // اگه فاصله‌ی فعلی از ته چت زیاده (یعنی کاربر خودش دستی اسکرول
+            // رو جابه‌جا کرده)، دیگه به زور به ته چت برنمی‌گردونیمش.
+            if (distanceFromBottomAtLoad() > 80) return;
+            scrollToBottom();
+        }, isInitialLoad ? 120 : 0);
     }
 
 
