@@ -5501,9 +5501,30 @@
         let noiseFloor = 0.006;              // seeded low, adapts up/down fast
         const NOISE_FLOOR_RISE_RATE = 0.15;  // how fast the floor tracks upward when it's quiet
         const NOISE_FLOOR_FALL_RATE = 0.02;  // slower to fall, so a brief loud noise doesn't drag the floor up permanently
-        const VOICE_MARGIN = 2.2;            // signal must exceed noiseFloor * this to count as voice
-        const MIN_VOICE_RMS = 0.012;         // absolute floor so a totally silent room doesn't trigger on tiny fluctuations
-        const SILENCE_HANG_MS = 600;         // silence needed before activityEnd
+        // FIX (garbled/wrong transcripts, e.g. "سلام" heard as noise or a
+        // different language entirely): VOICE_MARGIN=2.2 / MIN_VOICE_RMS=0.012
+        // were too strict for the first, quieter consonant of a word (e.g.
+        // the "س" in "سلام" carries less RMS energy than the vowel after
+        // it), so soft speech onsets were being classified as silence and
+        // never streamed at all - the model only ever heard the tail of
+        // the utterance, which is exactly what produces a reply to a
+        // different question/language than what was actually said. Lowered
+        // both so quieter onsets still cross the gate.
+        const VOICE_MARGIN = 1.6;            // signal must exceed noiseFloor * this to count as voice
+        const MIN_VOICE_RMS = 0.008;         // absolute floor so a totally silent room doesn't trigger on tiny fluctuations
+        const SILENCE_HANG_MS = 500;         // silence needed before activityEnd
+        // FIX (clipped word onset): audio is only ever sent to Gemini
+        // AFTER `liveState.speaking` flips true, but that flip only
+        // happens once a frame's RMS crosses the voice threshold - so the
+        // ~256ms frame that *caused* the flip (which contains the actual
+        // start of the word) was being detected but never transmitted,
+        // only silent frames before it were skipped, and playback would
+        // then start mid-word. This ring buffer keeps a rolling window of
+        // recent raw frames; the moment speech is detected we flush that
+        // pre-roll first, so the word's true onset reaches the model
+        // instead of being permanently lost.
+        const PREROLL_FRAMES = 3;            // ~3 frames x 4096 samples @16kHz ≈ 768ms of pre-roll
+        const prerollBuffer = [];
         // Safety valve: if a "speech turn" runs uninterrupted past this,
         // force-close it even without a real silence gap. Without this, a
         // sustained noise that sits just above the adaptive threshold
@@ -5550,6 +5571,22 @@
                     liveState.speaking = true;
                     liveState.speechStartTs = now;
                     liveState.ws.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
+                    // Flush the pre-roll (the frames right before this one,
+                    // which is where the actual word onset lives) so it
+                    // reaches the model instead of being dropped. Oldest
+                    // first, so playback order is preserved.
+                    for (const frame of prerollBuffer) {
+                        const preRollPcm16 = floatTo16BitPCM(frame);
+                        liveState.ws.send(JSON.stringify({
+                            realtimeInput: {
+                                audio: {
+                                    mimeType: `audio/pcm;rate=${LIVE_SEND_SAMPLE_RATE}`,
+                                    data: arrayBufferToBase64(preRollPcm16.buffer)
+                                }
+                            }
+                        }));
+                    }
+                    prerollBuffer.length = 0;
                     // Barge-in: if the model's own audio is still playing
                     // out loud right when we detect the user starting to
                     // talk, stop it LOCALLY immediately rather than
@@ -5587,8 +5624,14 @@
 
             // Only stream audio while inside a detected speech turn - this
             // is what keeps constant background noise from ever reaching
-            // Gemini as "the user is talking".
-            if (!liveState.speaking) return;
+            // Gemini as "the user is talking". While NOT speaking, keep a
+            // short rolling pre-roll instead of just discarding the frame,
+            // so the word-onset fix above has something to flush.
+            if (!liveState.speaking) {
+                prerollBuffer.push(input);
+                if (prerollBuffer.length > PREROLL_FRAMES) prerollBuffer.shift();
+                return;
+            }
 
             const pcm16 = floatTo16BitPCM(input);
             const base64Audio = arrayBufferToBase64(pcm16.buffer);
