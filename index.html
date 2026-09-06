@@ -7997,7 +7997,34 @@
         // همه‌چیز از همون chats[id].html که از قبل توی حافظه/IndexedDB هست
         // خونده می‌شه. این باعث می‌شه باز کردن یک چت خیلی طولانی همون‌قدر
         // سبک بمونه که یک چت تازه.
+        // FIX (کاربر خواست: شمارش pagination فقط بر اساس پیام‌های کاربر
+        // باشه، نه مجموع کاربر+ربات): قبلاً PAGE_SIZE=15 یعنی «۱۵ تا
+        // message-wrapper» بود، که چون هر پیامِ کاربر معمولاً یه جوابِ
+        // ربات هم داره، عملاً یعنی «~۷-۸ پیامِ واقعیِ کاربر» قبل از اینکه
+        // دکمه‌ی بارگذاری ظاهر بشه - نه ۱۵ تا. راه‌حلِ ثابت (مثلاً
+        // PAGE_SIZE=30) شکننده‌ست چون فرض می‌کنه هر پیامِ کاربر دقیقاً یه
+        // جواب داره؛ اگه یه پیام خطا بخوره/جواب نگیره یا حالت‌های دیگه
+        // (مثل چند پیامِ کاربر پشتِ‌هم) پیش بیاد، شمارش دوباره اشتباه
+        // میشه. به‌جاش یه تابع کمکی می‌سازیم که از انتهای لیستِ
+        // message-wrapperها می‌شماره و دقیقاً وقتی متوقف میشه که به
+        // PAGE_SIZE اُمین پیامِ *کاربر* (نه هر پیامی) برسه - همه‌ی
+        // پیام‌های ربات/سیستمی که بینشون هست هم به‌طور طبیعی همراه میان،
+        // بدون اینکه خودشون جزو شمارش حساب بشن.
         const PAGE_SIZE = 15;
+        // از انتها به‌سمتِ اول می‌شماریم تا به PAGE_SIZE پیامِ کاربر
+        // برسیم؛ ایندکسِ برگشتی یعنی «از این ایندکس به بعد، صفحه‌ی
+        // فعلی/اخیر است». اگر کل آرایه کمتر از PAGE_SIZE پیامِ کاربر
+        // داشته باشد، 0 برمی‌گردد (یعنی همه‌چیز در صفحه‌ی اخیر است).
+        function findCutoffForUserPageSize(wrappers, userPageSize) {
+            let userCount = 0;
+            for (let i = wrappers.length - 1; i >= 0; i--) {
+                if (wrappers[i].classList && wrappers[i].classList.contains('user')) {
+                    userCount++;
+                    if (userCount >= userPageSize) return i;
+                }
+            }
+            return 0;
+        }
         const parser = document.createElement('div');
         parser.innerHTML = fullHtml;
         const allWrappers = Array.from(parser.children);
@@ -8028,63 +8055,71 @@
         chatBox.__olderWrappersBuffer = [];
         chatBox.__olderWrappersBufferChatId = id;
 
-        if (allWrappers.length <= PAGE_SIZE) {
-            allWrappers.forEach(w => chatBox.appendChild(w));
+        if (allWrappers.length === 0) {
+            // چتِ خالی - چیزی برای صفحه‌بندی نیست.
         } else {
-            const remaining = allWrappers.length - PAGE_SIZE;
-            const olderWrappers = allWrappers.slice(0, remaining);
-            const recentWrappers = allWrappers.slice(remaining);
+            const cutoff = findCutoffForUserPageSize(allWrappers, PAGE_SIZE);
+            if (cutoff === 0) {
+                allWrappers.forEach(w => chatBox.appendChild(w));
+            } else {
+                const remaining = cutoff;
+                const olderWrappers = allWrappers.slice(0, remaining);
+                const recentWrappers = allWrappers.slice(remaining);
+                const remainingUserCount = olderWrappers.filter(w => w.classList && w.classList.contains('user')).length;
 
-            // بافر پیام‌های قدیمی‌تر - توی DOM نیست، فقط نگه داشته می‌شه
-            // تا وقتی کاربر واقعاً درخواستشون رو بده.
-            chatBox.__olderWrappersBuffer = olderWrappers;
-            chatBox.__olderWrappersBufferChatId = id;
+                // بافر پیام‌های قدیمی‌تر - توی DOM نیست، فقط نگه داشته می‌شه
+                // تا وقتی کاربر واقعاً درخواستشون رو بده.
+                chatBox.__olderWrappersBuffer = olderWrappers;
+                chatBox.__olderWrappersBufferChatId = id;
 
-            const loadOlderBtn = document.createElement('div');
-            loadOlderBtn.className = 'load-older-messages';
-            loadOlderBtn.style.cssText = 'text-align:center;padding:10px 16px;margin:14px auto;max-width:fit-content;cursor:pointer;opacity:0.85;font-size:0.88em;border:1px solid color-mix(in srgb, var(--border-soft, rgba(255,255,255,0.15)) 60%, transparent);border-radius:20px;transition:opacity .15s;background:var(--bg-card);box-shadow:none;';
-            loadOlderBtn.onmouseenter = () => { loadOlderBtn.style.opacity = '1'; };
-            loadOlderBtn.onmouseleave = () => { loadOlderBtn.style.opacity = '0.85'; };
-            loadOlderBtn.textContent = `بارگذاری ${remaining} پیام قدیمی‌تر`;
-            loadOlderBtn.onclick = () => {
-                // FIX: قبل از استفاده از بافر، مطمئن می‌شیم که این بافر
-                // واقعاً برای همین چتیه که الان بازه (id همون چتیه که این
-                // دکمه موقع ساختنش براش ساخته شده) - نه یه چتِ دیگه که بعداً
-                // (مثلاً با startNewChat یا هر مسیر دیگه‌ای) روی chatBox
-                // نشسته باشه.
-                if (chatBox.__olderWrappersBufferChatId !== id) { loadOlderBtn.remove(); return; }
-                const buffer = chatBox.__olderWrappersBuffer || [];
-                if (!buffer.length) { loadOlderBtn.remove(); return; }
-                const prevScrollHeight = chatBox.scrollHeight;
-                const nextBatch = buffer.splice(Math.max(0, buffer.length - PAGE_SIZE));
-                // FIX (ترتیب پیام‌ها بعد از «بارگذاری قدیمی‌تر» برعکس می‌شد):
-                // insertAdjacentElement('afterend', w) هر بار عنصر رو دقیقاً
-                // بعد از خودِ loadOlderBtn می‌ذاره. چون nextBatch به ترتیب
-                // زمانی (قدیمی‌تر اول) بود، حلقه‌ی forEach با همون ترتیب
-                // insert می‌کرد و هر پیامِ جدیدتر جای پیامِ قبلی‌ای که تازه
-                // اضافه شده بود رو (بلافاصله بعد از دکمه) می‌گرفت - یعنی کل
-                // بسته برعکس می‌شد (آخرین پیامِ nextBatch اول از همه، درست
-                // بعد از دکمه، می‌نشست). راه‌حل: هر عنصر رو بعد از *آخرین
-                // عنصریِ که همین الان insert شده* بذاریم، نه همیشه بعد از
-                // خودِ دکمه - این‌طوری ترتیبِ زمانیِ اصلی حفظ می‌شه.
-                let insertAfter = loadOlderBtn;
-                nextBatch.forEach(w => {
-                    w.classList.add('no-entry-anim');
-                    insertAfter.insertAdjacentElement('afterend', w);
-                    insertAfter = w;
-                });
-                repairLoadedChatButtons(chatBox);
-                if (buffer.length) {
-                    loadOlderBtn.textContent = `بارگذاری ${buffer.length} پیام قدیمی‌تر`;
-                } else {
-                    loadOlderBtn.remove();
-                }
-                // موقعیت اسکرول رو حفظ کن تا با اضافه شدن پیام‌های بالا، دید کاربر نپره
-                chatBox.scrollTop += (chatBox.scrollHeight - prevScrollHeight);
-            };
+                const loadOlderBtn = document.createElement('div');
+                loadOlderBtn.className = 'load-older-messages';
+                loadOlderBtn.style.cssText = 'text-align:center;padding:10px 16px;margin:14px auto;max-width:fit-content;cursor:pointer;opacity:0.85;font-size:0.88em;border:1px solid color-mix(in srgb, var(--border-soft, rgba(255,255,255,0.15)) 60%, transparent);border-radius:20px;transition:opacity .15s;background:var(--bg-card);box-shadow:none;';
+                loadOlderBtn.onmouseenter = () => { loadOlderBtn.style.opacity = '1'; };
+                loadOlderBtn.onmouseleave = () => { loadOlderBtn.style.opacity = '0.85'; };
+                loadOlderBtn.textContent = `بارگذاری ${remainingUserCount} پیام قدیمی‌تر`;
+                loadOlderBtn.onclick = () => {
+                    // FIX: قبل از استفاده از بافر، مطمئن می‌شیم که این بافر
+                    // واقعاً برای همین چتیه که الان بازه (id همون چتیه که این
+                    // دکمه موقع ساختنش براش ساخته شده) - نه یه چتِ دیگه که بعداً
+                    // (مثلاً با startNewChat یا هر مسیر دیگه‌ای) روی chatBox
+                    // نشسته باشه.
+                    if (chatBox.__olderWrappersBufferChatId !== id) { loadOlderBtn.remove(); return; }
+                    const buffer = chatBox.__olderWrappersBuffer || [];
+                    if (!buffer.length) { loadOlderBtn.remove(); return; }
+                    const prevScrollHeight = chatBox.scrollHeight;
+                    const bufferCutoff = findCutoffForUserPageSize(buffer, PAGE_SIZE);
+                    const nextBatch = buffer.splice(bufferCutoff);
+                    // FIX (ترتیب پیام‌ها بعد از «بارگذاری قدیمی‌تر» برعکس می‌شد):
+                    // insertAdjacentElement('afterend', w) هر بار عنصر رو دقیقاً
+                    // بعد از خودِ loadOlderBtn می‌ذاره. چون nextBatch به ترتیب
+                    // زمانی (قدیمی‌تر اول) بود، حلقه‌ی forEach با همون ترتیب
+                    // insert می‌کرد و هر پیامِ جدیدتر جای پیامِ قبلی‌ای که تازه
+                    // اضافه شده بود رو (بلافاصله بعد از دکمه) می‌گرفت - یعنی کل
+                    // بسته برعکس می‌شد (آخرین پیامِ nextBatch اول از همه، درست
+                    // بعد از دکمه، می‌نشست). راه‌حل: هر عنصر رو بعد از *آخرین
+                    // عنصریِ که همین الان insert شده* بذاریم، نه همیشه بعد از
+                    // خودِ دکمه - این‌طوری ترتیبِ زمانیِ اصلی حفظ می‌شه.
+                    let insertAfter = loadOlderBtn;
+                    nextBatch.forEach(w => {
+                        w.classList.add('no-entry-anim');
+                        insertAfter.insertAdjacentElement('afterend', w);
+                        insertAfter = w;
+                    });
+                    repairLoadedChatButtons(chatBox);
+                    const bufferUserCount = buffer.filter(w => w.classList && w.classList.contains('user')).length;
+                    if (buffer.length) {
+                        loadOlderBtn.textContent = `بارگذاری ${bufferUserCount} پیام قدیمی‌تر`;
+                    } else {
+                        loadOlderBtn.remove();
+                    }
+                    // موقعیت اسکرول رو حفظ کن تا با اضافه شدن پیام‌های بالا، دید کاربر نپره
+                    chatBox.scrollTop += (chatBox.scrollHeight - prevScrollHeight);
+                };
 
-            chatBox.appendChild(loadOlderBtn);
-            recentWrappers.forEach(w => chatBox.appendChild(w));
+                chatBox.appendChild(loadOlderBtn);
+                recentWrappers.forEach(w => chatBox.appendChild(w));
+            }
         }
 
         chatBox.querySelectorAll('.message-wrapper').forEach(w => w.classList.add('no-entry-anim'));
