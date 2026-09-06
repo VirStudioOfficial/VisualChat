@@ -3251,10 +3251,28 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     note: 'مدل حداقل یک بار write_block روی این فایل(ها) را امتحان کرد و رد شد (فایل نامعتبر می‌شد)، و در نهایت بدون هیچ ویرایش موفقی به پایان رسید. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، آن ادعا مربوط به این فایل(ها) نیست - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
                 };
             } else if (hadEditableFiles && writeBlockCallCount === 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
+                // FIX (هشدار غلط وقتی کاربر صریحاً گفته دست نزن): این شرط
+                // قبلاً فقط بر اساس «فایل قابل‌ویرایش بود ولی write_block
+                // صدا زده نشد» تصمیم می‌گرفت، بدون این‌که واقعاً متن پاسخ
+                // نهایی مدل را بخواند. نتیجه: وقتی کاربر صریحاً می‌گفت «این
+                // رو فعلاً کاری نکن»/«دست نزن» و مدل هم صادقانه با همین مضمون
+                // جواب می‌داد («هیچ تغییری ندادم، حواسم هست»)، این هشدار
+                // به‌غلط فعال می‌شد و کلاینت پیام گمراه‌کننده‌ی «ادعای
+                // ذخیره‌سازی دروغین ثبت شد» را نشان می‌داد - درحالی‌که مدل
+                // اصلاً چنین ادعایی نکرده بود. حالا قبل از فعال‌کردن این
+                // فلگ، متن نهایی را با چند الگوی ساده‌ی فارسی/انگلیسیِ
+                // «ادعای انجام‌شدن تغییر» می‌سنجیم؛ اگر متن خودش صریحاً
+                // می‌گوید که تغییری نداده یا کاری نکرده، هشدار فعال نمی‌شود.
+                const finalTextSoFar = textParts.join('');
+                const claimsChangeDone = /(تغییر(ات)?[^.!؟\n]{0,20}(اعمال|انجام)\s*(دادم|شد|کردم)|ویرایش[^.!؟\n]{0,20}(انجام|اعمال)\s*(دادم|شد|کردم)|(changes?|edits?)\s+(applied|made|done)|(i\'ve|i have)\s+(updated|edited|changed|fixed))/i.test(finalTextSoFar);
+                const explicitlyDidNothing = /(هیچ\s*تغییری?\s*(روش|رو|را)?\s*ندادم|کاری\s*(روش|رو|را)?\s*نکردم|دست\s*نزدم|بدون\s*تغییر|didn\'t\s+(change|touch|edit|modify)|no\s+changes?\s+(were\s+)?made)/i.test(finalTextSoFar);
+
+                if (claimsChangeDone && !explicitlyDidNothing) {
                 unresolvedEditFailure = {
                     files: [...editStates.keys()].map(name => ({ name, rejectedAttempts: 0, lastReason: null })),
                     note: 'کاربر فایلی برای ویرایش در دسترس مدل قرار داده بود، اما مدل حتی یک‌بار هم write_block را روی آن صدا نزد - یعنی هیچ تلاشی برای اعمال تغییر واقعی انجام نشده. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، این ادعا نادرست است - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
                 };
+                }
             }
             if (unresolvedEditFailure) {
                 log.warn('agent.unresolved_edit_failure', {
