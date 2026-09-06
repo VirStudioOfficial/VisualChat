@@ -8039,9 +8039,21 @@
                 if (!buffer.length) { loadOlderBtn.remove(); return; }
                 const prevScrollHeight = chatBox.scrollHeight;
                 const nextBatch = buffer.splice(Math.max(0, buffer.length - PAGE_SIZE));
+                // FIX (ترتیب پیام‌ها بعد از «بارگذاری قدیمی‌تر» برعکس می‌شد):
+                // insertAdjacentElement('afterend', w) هر بار عنصر رو دقیقاً
+                // بعد از خودِ loadOlderBtn می‌ذاره. چون nextBatch به ترتیب
+                // زمانی (قدیمی‌تر اول) بود، حلقه‌ی forEach با همون ترتیب
+                // insert می‌کرد و هر پیامِ جدیدتر جای پیامِ قبلی‌ای که تازه
+                // اضافه شده بود رو (بلافاصله بعد از دکمه) می‌گرفت - یعنی کل
+                // بسته برعکس می‌شد (آخرین پیامِ nextBatch اول از همه، درست
+                // بعد از دکمه، می‌نشست). راه‌حل: هر عنصر رو بعد از *آخرین
+                // عنصریِ که همین الان insert شده* بذاریم، نه همیشه بعد از
+                // خودِ دکمه - این‌طوری ترتیبِ زمانیِ اصلی حفظ می‌شه.
+                let insertAfter = loadOlderBtn;
                 nextBatch.forEach(w => {
                     w.classList.add('no-entry-anim');
-                    loadOlderBtn.insertAdjacentElement('afterend', w);
+                    insertAfter.insertAdjacentElement('afterend', w);
+                    insertAfter = w;
                 });
                 repairLoadedChatButtons(chatBox);
                 if (buffer.length) {
