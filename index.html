@@ -1410,6 +1410,72 @@
             font-size: 0.85rem;
             max-width: 170px;
         }
+        /* FIX (ugly native <select> dropdown scrollbar, e.g. the voice
+           picker with 30 options): a native <select>'s open list is
+           rendered by the OS, not the page, so it can't be restyled or
+           have its scrollbar removed with CSS - hence this custom
+           dropdown (a button + an absolutely-positioned list) which is
+           regular page content and fully themeable, including the
+           scrollbar itself. No background box behind the scrollbar
+           thumb/track (transparent, per request) - just a thin themed
+           thumb so it stays visible on both light and dark backgrounds
+           without adding a separate colored strip down the side. */
+        .live-custom-select { position: relative; max-width: 170px; width: 170px; }
+        .live-custom-select-btn {
+            width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            background: var(--bg-input, var(--bg-main));
+            color: var(--text-main);
+            border: 1px solid var(--border-soft, rgba(255,255,255,0.09));
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-align: right;
+        }
+        .live-custom-select-btn:hover { border-color: var(--accent-2); }
+        .live-custom-select-btn .live-custom-select-caret {
+            transition: transform 0.15s ease; opacity: 0.7; flex: 0 0 auto; font-size: 0.75em;
+        }
+        .live-custom-select.open .live-custom-select-btn .live-custom-select-caret { transform: rotate(180deg); }
+        .live-custom-select-list {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 0; right: 0;
+            max-height: 220px;
+            overflow-y: auto;
+            background: var(--bg-card);
+            border: 1px solid var(--border-soft, rgba(255,255,255,0.09));
+            border-radius: 12px;
+            padding: 6px;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.3);
+            z-index: 5;
+            /* Firefox: thin themed thumb, fully transparent track (no
+               background strip behind it). */
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-soft, rgba(255,255,255,0.25)) transparent;
+        }
+        .live-custom-select.open .live-custom-select-list { display: block; }
+        /* Webkit (Chrome/Safari/Edge): same intent - narrow thumb, no
+           track background, so it reads as part of the panel rather
+           than a separate scrollbar box. */
+        .live-custom-select-list::-webkit-scrollbar { width: 6px; background: transparent; }
+        .live-custom-select-list::-webkit-scrollbar-track { background: transparent; }
+        .live-custom-select-list::-webkit-scrollbar-thumb {
+            background: var(--border-soft, rgba(255,255,255,0.25));
+            border-radius: 999px;
+        }
+        .live-custom-select-list::-webkit-scrollbar-thumb:hover { background: var(--text-muted, rgba(255,255,255,0.4)); }
+        .live-custom-select-option {
+            padding: 7px 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .live-custom-select-option:hover { background: var(--bg-card-hover, var(--bg-input)); }
+        .live-custom-select-option.selected { background: var(--accent-2); color: #fff; }
         .live-settings-toggle { position: relative; width: 42px; height: 24px; display: inline-block; }
         .live-settings-toggle input { opacity: 0; width: 0; height: 0; }
         .live-settings-toggle-track {
@@ -5210,8 +5276,20 @@
                 // with "Unknown name inputAudioTranscription at
                 // setup.generation_config: Cannot find field" (code 1007)
                 // - confirmed against gemini-3.1-flash-live-preview.
-                inputAudioTranscription: {},
-                outputAudioTranscription: {},
+                //
+                // FIX (transcript shows wrong language, e.g. Korean/
+                // Spanish/Italian text while the spoken reply was
+                // correct): this is a known upstream issue where the
+                // transcription sub-model - separate from the main
+                // audio model - guesses the spoken language per-turn
+                // instead of respecting it. Passing languageCode
+                // explicitly (matching the user's Live language
+                // preference) gives it a real hint instead of an empty
+                // config, which upstream reports show reduces (though
+                // does not fully eliminate - this is a Google-side bug)
+                // how often it locks onto the wrong language.
+                inputAudioTranscription: { languageCode: langOpt.code },
+                outputAudioTranscription: { languageCode: langOpt.code },
                 tools: tools,
                 realtimeInputConfig: {
                     automaticActivityDetection: { disabled: true }
@@ -8768,11 +8846,23 @@
     <div class="live-call-settings-panel" id="liveCallSettingsPanel">
         <div class="live-settings-row">
             <span class="live-settings-label">زبان صحبت</span>
-            <select id="liveLanguageSelect" class="live-settings-select" onchange="onLiveLanguageChange(this.value)"></select>
+            <div class="live-custom-select" id="liveLanguageSelect">
+                <button type="button" class="live-custom-select-btn" onclick="toggleLiveCustomSelect(event, 'liveLanguageSelect')">
+                    <span class="live-custom-select-current"></span>
+                    <i class="ph-fill ph-caret-down live-custom-select-caret"></i>
+                </button>
+                <div class="live-custom-select-list"></div>
+            </div>
         </div>
         <div class="live-settings-row">
             <span class="live-settings-label">صدا و لحن</span>
-            <select id="liveVoiceSelect" class="live-settings-select" onchange="onLiveVoiceChange(this.value)"></select>
+            <div class="live-custom-select" id="liveVoiceSelect">
+                <button type="button" class="live-custom-select-btn" onclick="toggleLiveCustomSelect(event, 'liveVoiceSelect')">
+                    <span class="live-custom-select-current"></span>
+                    <i class="ph-fill ph-caret-down live-custom-select-caret"></i>
+                </button>
+                <div class="live-custom-select-list"></div>
+            </div>
         </div>
         <div class="live-settings-hint">تغییر زبان/صدا از تماس بعدی اعمال می‌شود.</div>
     </div>
@@ -8787,45 +8877,75 @@
     </div>
 </div>
 <script>
-    // Populate the call settings panel's selects once at load, then keep
-    // them in sync with the persisted prefs (LIVE_VOICE_OPTIONS,
+    // Populate the call settings panel's custom dropdowns once at load,
+    // then keep them in sync with the persisted prefs (LIVE_VOICE_OPTIONS,
     // LIVE_LANGUAGE_OPTIONS, getLiveVoicePref/getLiveLanguagePref, etc.
     // are all defined earlier, near buildLiveSetupMessage).
+    //
+    // These used to be native <select> elements. Replaced with a plain
+    // button + absolutely-positioned list (see .live-custom-select CSS)
+    // because a native <select>'s open dropdown is rendered by the OS,
+    // not the page - there is no CSS that can restyle or slim down that
+    // scrollbar, only this can.
+    function liveCustomSelectConfig(id) {
+        if (id === 'liveLanguageSelect') {
+            return { options: LIVE_LANGUAGE_OPTIONS.map(l => ({ value: l.code, label: l.label })), get: getLiveLanguagePref, set: setLiveLanguagePref };
+        }
+        return { options: LIVE_VOICE_OPTIONS.map(v => ({ value: v.name, label: `${v.name} — ${v.style}` })), get: getLiveVoicePref, set: setLiveVoicePref };
+    }
+    function renderLiveCustomSelect(id) {
+        const root = document.getElementById(id);
+        if (!root) return;
+        const cfg = liveCustomSelectConfig(id);
+        const currentVal = cfg.get();
+        const list = root.querySelector('.live-custom-select-list');
+        const currentLabelEl = root.querySelector('.live-custom-select-current');
+        list.innerHTML = '';
+        cfg.options.forEach(o => {
+            const item = document.createElement('div');
+            item.className = 'live-custom-select-option' + (o.value === currentVal ? ' selected' : '');
+            item.textContent = o.label;
+            item.onclick = (e) => {
+                e.stopPropagation();
+                cfg.set(o.value);
+                root.classList.remove('open');
+                renderLiveCustomSelect(id); // refresh label + selected highlight
+            };
+            list.appendChild(item);
+        });
+        const currentOpt = cfg.options.find(o => o.value === currentVal) || cfg.options[0];
+        if (currentLabelEl && currentOpt) currentLabelEl.textContent = currentOpt.label;
+    }
     function populateLiveCallSettingsPanel() {
-        const langSel = document.getElementById('liveLanguageSelect');
-        const voiceSel = document.getElementById('liveVoiceSelect');
-        if (!langSel || !voiceSel) return;
-
-        if (!langSel.options.length) {
-            LIVE_LANGUAGE_OPTIONS.forEach(l => {
-                const opt = document.createElement('option');
-                opt.value = l.code; opt.textContent = l.label;
-                langSel.appendChild(opt);
-            });
-        }
-        if (!voiceSel.options.length) {
-            LIVE_VOICE_OPTIONS.forEach(v => {
-                const opt = document.createElement('option');
-                opt.value = v.name; opt.textContent = `${v.name} — ${v.style}`;
-                voiceSel.appendChild(opt);
-            });
-        }
-        langSel.value = getLiveLanguagePref();
-        voiceSel.value = getLiveVoicePref();
+        renderLiveCustomSelect('liveLanguageSelect');
+        renderLiveCustomSelect('liveVoiceSelect');
+    }
+    function toggleLiveCustomSelect(e, id) {
+        if (e) e.stopPropagation();
+        const root = document.getElementById(id);
+        if (!root) return;
+        const isOpen = root.classList.contains('open');
+        // Only one dropdown open at a time - opening one closes the other.
+        document.querySelectorAll('.live-custom-select.open').forEach(el => el.classList.remove('open'));
+        if (!isOpen) root.classList.add('open');
     }
     function toggleLiveCallSettings(e) {
         if (e) e.stopPropagation();
         populateLiveCallSettingsPanel();
         document.getElementById('liveCallSettingsPanel').classList.toggle('open');
     }
-    function onLiveLanguageChange(code) { setLiveLanguagePref(code); }
-    function onLiveVoiceChange(name) { setLiveVoicePref(name); }
     document.addEventListener('click', (e) => {
         const panel = document.getElementById('liveCallSettingsPanel');
         const btn = document.getElementById('liveSettingsBtn');
         if (panel && panel.classList.contains('open') && !panel.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
             panel.classList.remove('open');
         }
+        // Clicking anywhere outside an open custom dropdown (but still
+        // inside the settings panel, e.g. the other dropdown's button)
+        // should also close it.
+        document.querySelectorAll('.live-custom-select.open').forEach(el => {
+            if (!el.contains(e.target)) el.classList.remove('open');
+        });
     });
 </script>
 </body>
