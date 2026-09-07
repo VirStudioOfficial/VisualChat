@@ -5196,14 +5196,20 @@
     // that's the actually-supported mechanism for this model, not a
     // guess.
     const LIVE_LANGUAGE_OPTIONS = [
-        { code: 'fa-IR', label: 'فارسی' },
-        { code: 'en-US', label: 'English (US)' },
-        { code: 'ar-EG', label: 'العربية' },
-        { code: 'fr-FR', label: 'Français' },
-        { code: 'de-DE', label: 'Deutsch' },
-        { code: 'es-US', label: 'Español' },
-        { code: 'hi-IN', label: 'हिन्दी' },
-        { code: 'tr-TR', label: 'Türkçe' }
+        // "label" is what the settings dropdown shows the user; "speakLabel"
+        // is what actually goes into the system-instruction sentence the
+        // model reads. For Persian these must differ: "فارسی" alone is
+        // ambiguous between Iranian Farsi, Afghan Dari and Tajik, and the
+        // model was defaulting to Dari. Being explicit here fixes that
+        // without touching the (unsupported) languageCode field.
+        { code: 'fa-IR', label: 'فارسی', speakLabel: 'فارسی رسمی و معیار ایران (Iranian Farsi) - نه دری افغانستان و نه فارسی تاجیکستان' },
+        { code: 'en-US', label: 'English (US)', speakLabel: 'English (US)' },
+        { code: 'ar-EG', label: 'العربية', speakLabel: 'العربية المصرية' },
+        { code: 'fr-FR', label: 'Français', speakLabel: 'Français' },
+        { code: 'de-DE', label: 'Deutsch', speakLabel: 'Deutsch' },
+        { code: 'es-US', label: 'Español', speakLabel: 'Español' },
+        { code: 'hi-IN', label: 'हिन्दी', speakLabel: 'हिन्दी' },
+        { code: 'tr-TR', label: 'Türkçe', speakLabel: 'Türkçe' }
     ];
     function getLiveVoicePref() { return localStorage.getItem('virtual_live_voice') || 'Kore'; }
     function getLiveLanguagePref() { return localStorage.getItem('virtual_live_language') || 'fa-IR'; }
@@ -5223,7 +5229,7 @@
         // LIVE_LANGUAGE_OPTIONS above) - so the only real lever here is
         // telling the model plainly, in its own instructions, which
         // language to speak.
-        const languageBlock = `\n\nزبان گفتار: همیشه و فقط به ${langOpt.label} صحبت کن، حتی اگر کاربر به زبان دیگری صحبت کرد، مگر اینکه صراحتاً بخواهد زبان را عوض کنی.`;
+        const languageBlock = `\n\nزبان گفتار: همیشه و فقط به ${langOpt.speakLabel} صحبت کن، حتی اگر کاربر به زبان دیگری صحبت کرد، مگر اینکه صراحتاً بخواهد زبان را عوض کنی.`;
         const tools = [];
         // A real functionDeclarations tool the model can call on its own
         // initiative to end the call - e.g. if the user says "خب همینه،
