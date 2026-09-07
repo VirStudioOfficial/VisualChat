@@ -5178,21 +5178,11 @@
     // use to describe each one, shown in the picker so the choice means
     // something before you hear it.
     const LIVE_VOICE_OPTIONS = [
-        { name: 'Zephyr', style: 'روشن' }, { name: 'Puck', style: 'سرزنده' },
-        { name: 'Charon', style: 'آموزنده' }, { name: 'Kore', style: 'محکم' },
-        { name: 'Fenrir', style: 'پرشور' }, { name: 'Leda', style: 'جوان' },
-        { name: 'Orus', style: 'محکم' }, { name: 'Aoede', style: 'ملایم' },
-        { name: 'Callirrhoe', style: 'آسوده' }, { name: 'Autonoe', style: 'روشن' },
-        { name: 'Enceladus', style: 'آرام' }, { name: 'Iapetus', style: 'شفاف' },
-        { name: 'Umbriel', style: 'آسوده' }, { name: 'Algieba', style: 'نرم' },
-        { name: 'Despina', style: 'نرم' }, { name: 'Erinome', style: 'شفاف' },
-        { name: 'Algenib', style: 'خشن' }, { name: 'Rasalgethi', style: 'آموزنده' },
-        { name: 'Laomedeia', style: 'شاداب' }, { name: 'Achernar', style: 'نرم' },
-        { name: 'Alnilam', style: 'محکم' }, { name: 'Schedar', style: 'یکنواخت' },
-        { name: 'Gacrux', style: 'باتجربه' }, { name: 'Pulcherrima', style: 'رک' },
-        { name: 'Achird', style: 'دوستانه' }, { name: 'Zubenelgenubi', style: 'خودمانی' },
-        { name: 'Vindemiatrix', style: 'ملایم' }, { name: 'Sadachbia', style: 'پرانرژی' },
-        { name: 'Sadaltager', style: 'مطلع' }, { name: 'Sulafat', style: 'گرم' }
+        { name: 'Sulafat', style: 'گرم' }, { name: 'Kore', style: 'محکم' },
+        { name: 'Puck', style: 'سرزنده' }, { name: 'Aoede', style: 'ملایم' },
+        { name: 'Achird', style: 'دوستانه' }, { name: 'Zephyr', style: 'روشن' },
+        { name: 'Charon', style: 'آموزنده' }, { name: 'Callirrhoe', style: 'آسوده' },
+        { name: 'Vindemiatrix', style: 'ملایم' }, { name: 'Autonoe', style: 'روشن' }
     ];
     // Real BCP-47 language options Google documents as supported by the
     // Live API. Note: native-audio models (gemini-3.1-flash-live-preview
@@ -5221,7 +5211,7 @@
         { code: 'hi-IN', label: 'हिन्दी', speakLabel: 'हिन्दी' },
         { code: 'tr-TR', label: 'Türkçe', speakLabel: 'Türkçe' }
     ];
-    function getLiveVoicePref() { return localStorage.getItem('virtual_live_voice') || 'Kore'; }
+    function getLiveVoicePref() { return localStorage.getItem('virtual_live_voice') || 'Sulafat'; }
     function getLiveLanguagePref() { return localStorage.getItem('virtual_live_language') || 'fa-IR'; }
     function setLiveVoicePref(name) { localStorage.setItem('virtual_live_voice', name); }
     function setLiveLanguagePref(code) { localStorage.setItem('virtual_live_language', code); }
@@ -7189,7 +7179,21 @@
         }
         if (liveState.userBubbleEl) {
             const w = liveState.userBubbleEl.closest('.live-transcript-bubble');
-            if (w) w.classList.remove('live-transcript-bubble');
+            if (w) {
+                if (userText) {
+                    w.classList.remove('live-transcript-bubble');
+                } else {
+                    // This utterance never produced any transcript text at
+                    // all (too short/quiet for the transcribe model to
+                    // recognize anything, or VAD false-triggered on noise).
+                    // The bubble was reserved up front (see
+                    // ensureLiveTranscriptBubble) before we knew that, so
+                    // it's sitting in the chat empty - remove it entirely
+                    // rather than leaving a blank bubble with nothing in
+                    // it for the user to look at.
+                    w.remove();
+                }
+            }
         }
         liveState.pendingUserText = '';
         liveState.userBubbleEl = null;
