@@ -1991,19 +1991,26 @@ function validatePatchedContent(content, fileName) {
         } catch (error) {
             return { valid: false, reason: `سنتکس جاوااسکریپت بعد از این تغییر نامعتبر می‌شود: ${error?.message || error}` };
         }
-        // FIX: سنتکس معتبر بودن به معنای درست اجرا شدن نیست - این دو چک
-        // اضافه، مشکلات رایج runtime (نه syntax) را قبل از تحویل به کاربر
-        // می‌گیرند. اینها warning هستند نه رد قطعی patch (چون false
-        // positive دارند)، برای همین بخشی از reason برمی‌گردند تا مدل خودش
-        // تصمیم بگیرد لازم است اصلاح کند یا نه، ولی valid:false هم می‌شود
-        // تا مدل مجبور به بازبینی آگاهانه شود، نه نادیده گرفتن ساکت.
+        // FIX (نشتی کوتا: این دو چک هیچ‌وقت نباید جلوی تحویل نهایی را
+        // بگیرند): قبلاً این‌جا valid:false برمی‌گشت، و هر دو call-site
+        // (apply_edit/verify_file) هر valid:false را رد قطعی/بلاک سخت
+        // در نظر می‌گرفتند ("تا verify پاس نشود نمی‌توانی پاسخ نهایی
+        // بدهی") - یعنی وقتی این دو تشخیص heuristic (نه AST واقعی) روی
+        // یک فایل بزرگ و واقعی false positive می‌داد، مدل مجبور به
+        // apply_edit/verify_file های پیاپی می‌شد تا "مشکلی" را درست کند
+        // که اصلاً وجود نداشت - و هر دور اضافه یعنی کل فایل (این‌جا حدود
+        // ۹۴۰۰ خط) دوباره به‌عنوان ورودی فرستاده می‌شود. این دقیقاً چیزی
+        // بود که کوتای ۲۵۰هزار توکنی روزانه را در یک درخواست تمام می‌کرد.
+        // حالا این دو چک فقط در reason/warnings برمی‌گردند تا مدل خودش
+        // تصمیم بگیرد، اما valid همچنان true است - فقط سنتکس واقعاً
+        // نامعتبر (new Function می‌ترکد) باعث رد واقعی می‌شود.
         const tdzIssues = detectTemporalDeadZoneIssues(content);
         const undeclaredIssues = detectUndeclaredIdentifiers(content);
         const allIssues = [...tdzIssues, ...undeclaredIssues];
         if (allIssues.length > 0) {
             return {
-                valid: false,
-                reason: `سنتکس معتبر است، ولی بررسی اولیه‌ی کد این نکته‌(ها) را پیدا کرد که ممکن است باعث خطای واقعی هنگام اجرا شوند (نه لزوماً قطعی - اگر بعد از بازخوانی مطمئن شدی که مشکلی نیست، می‌توانی توضیح بده و رد کن):\n- ${allIssues.slice(0, 5).join('\n- ')}`
+                valid: true,
+                warning: `سنتکس معتبر است، ولی بررسی اولیه‌ی کد این نکته‌(ها) را پیدا کرد که ممکن است باعث خطای واقعی هنگام اجرا شوند (نه لزوماً قطعی - این فقط یک هشدار است، نیازی به apply_edit/verify_file اضافه نیست مگر خودت مطمئن باشی مشکل واقعی است):\n- ${allIssues.slice(0, 5).join('\n- ')}`
             };
         }
         return { valid: true };
@@ -2375,7 +2382,8 @@ async function executeToolCall(name, args, ctx) {
             name: state.name,
             editedName: found._editedName,
             layer: editResult.layer,
-            editCount: state.editCount
+            editCount: state.editCount,
+            hasWarning: !!validation.warning
         });
 
         return {
@@ -2383,6 +2391,10 @@ async function executeToolCall(name, args, ctx) {
             valid: true,
             file: state.name,
             editedName: found._editedName,
+            // FIX (نشتی کوتا): warning اینجا فقط اطلاع‌رسانیه، نه بلاک -
+            // مدل می‌تونه با دیدنش تصمیم بگیره اصلاح کنه یا نادیده بگیره،
+            // ولی مجبور به apply_edit/verify_file اضافه نیست.
+            ...(validation.warning ? { warning: validation.warning } : {}),
             note: 'تغییر با موفقیت اعمال و بررسی ساختاری شد (فایل کامل با این تغییر معتبر است). اگر بخش دیگری هم نیاز به تغییر دارد، apply_edit بعدی را صدا بزن. اگر این آخرین تغییر بود، می‌توانی مستقیماً پاسخ نهایی را بدهی - نیازی به صدا زدن verify_file جداگانه بعد از یک apply_edit موفق نیست، چون این نتیجه (valid:true) از قبل معادل آن است.'
         };
     }
@@ -2420,6 +2432,7 @@ async function executeToolCall(name, args, ctx) {
             file: state.name,
             editedName: found._editedName || state.name,
             editCount: state.editCount,
+            ...(validation.warning ? { warning: validation.warning } : {}),
             note: 'فایل بررسی شد و مشکل ساختاری ندارد. حالا می‌توانی پاسخ نهایی بدهی.'
         };
     }
