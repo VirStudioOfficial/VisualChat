@@ -4398,14 +4398,6 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
         | پاسخ B، یک دستورالعمل اضافه‌ی کوتاه‌تر/مستقیم‌تر بودن روی همان
         | systemText گذاشته می‌شود.
         */
-        // DEBUG (موقت - برای پیدا کردن اینکه چرا dual-response فعال نمی‌شود):
-        // مقدار دقیق و type فیلد dualResponseMode که از کلاینت رسیده را لاگ
-        // می‌کنیم، صرف‌نظر از اینکه true باشد یا نه - بعد از رفع مشکل قابل حذف است.
-        log.info('dual_response.flag_received', {
-            value: req.body?.dualResponseMode,
-            type: typeof req.body?.dualResponseMode
-        });
-
         if (req.body?.dualResponseMode === true) {
             try {
                 const systemTextA = systemText;
@@ -4431,7 +4423,19 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         searchState,
                         fileEditIntent,
                         scatteredPatternIntent,
-                        sharedRequestState,
+                        // FIX (ReferenceError: Cannot access 'sharedRequestState'
+                        // before initialization): این بلاک بالاتر از جایی است که
+                        // متغیر sharedRequestState با const در مسیرهای stream/
+                        // non-stream پایین‌تر تعریف می‌شود - در جاوااسکریپت،
+                        // ارجاع به یک const قبل از خط تعریفش (حتی در یک بلوک
+                        // دیگر از همان تابع) خطای temporal-dead-zone می‌دهد.
+                        // راه‌حل درست‌تر از فقط جابه‌جایی تعریف: چون پاسخ A و B
+                        // دو فراخوانی کاملاً مستقل و موازی runAgentLoop هستند
+                        // (نه دو تلاش retry از یک درخواست)، هرکدام باید state
+                        // خودش را داشته باشد - به اشتراک گذاشتن یک شیء بین دو
+                        // فراخوانی هم‌زمان می‌توانست باعث تداخل بین A و B شود
+                        // (مثلاً scatteredPatternProbed یکی، دیگری را هم مسکوت کند).
+                        sharedRequestState: { editStates: new Map() },
                         signal: dualAbortController.signal,
                         disableTools: hasVideoAttachment,
                         hasVideoAttachment,
