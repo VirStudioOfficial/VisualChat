@@ -5771,6 +5771,11 @@
                     // decides where one user bubble ends and the next
                     // begins.
                     finalizeLiveUserTranscript();
+                    // Reserve this utterance's spot in the chat DOM right
+                    // now, before any transcript text has arrived - see
+                    // ensureLiveTranscriptBubble's comment for why this
+                    // ordering matters.
+                    ensureLiveTranscriptBubble('user');
                     sendRealtimeInput({ activityStart: {} });
                     // Flush the pre-roll (the frames right before this one,
                     // which is where the actual word onset lives) so it
@@ -5811,6 +5816,11 @@
             } else if (liveState.speaking && (turnTooLong || (now - liveState.lastVoiceTs) >= SILENCE_HANG_MS)) {
                 liveState.speaking = false;
                 sendRealtimeInput({ activityEnd: {} });
+                // Reserve the model's bubble slot now, right as its turn
+                // begins, for the same DOM-ordering reason as the user
+                // side above - otherwise a fast model response can get its
+                // bubble placed before a still-arriving user transcript.
+                ensureLiveTranscriptBubble('model');
                 orbWrap.classList.remove('listening');
                 statusText.textContent = 'در حال گوش دادن...';
                 // A turn that had to be force-closed by the timeout means
@@ -7169,8 +7179,18 @@
         liveState.userBubbleEl = null;
     }
 
-    function upsertLiveTranscriptBubble(role, text) {
-        if (!liveState) return;
+    // Creates (or reuses) the placeholder bubble for a side without
+    // requiring any text yet - so its position in the chat DOM is reserved
+    // the instant we know a turn started (activityStart for the user side),
+    // rather than whenever the first bit of actual text happens to arrive
+    // over that side's connection. This is what keeps user/model bubbles
+    // in the right visual order even though they come from two separate
+    // WebSocket connections with independent, uncoordinated network
+    // latency - without this, whichever connection's text happened to
+    // arrive first got its bubble appended first, regardless of which side
+    // actually spoke first.
+    function ensureLiveTranscriptBubble(role) {
+        if (!liveState) return null;
         const cssClass = role === 'user' ? 'user' : 'bot';
         const key = role === 'user' ? 'userBubbleEl' : 'modelBubbleEl';
         if (!liveState[key] || !liveState[key].isConnected) {
@@ -7183,7 +7203,14 @@
             chatBox.appendChild(wrapperDiv);
             liveState[key] = msgDiv;
         }
-        liveState[key].textContent = text;
+        return liveState[key];
+    }
+
+    function upsertLiveTranscriptBubble(role, text) {
+        if (!liveState) return;
+        const el = ensureLiveTranscriptBubble(role);
+        if (!el) return;
+        el.textContent = text;
         const chatBox = document.getElementById('chatBox');
         chatBox.scrollTop = chatBox.scrollHeight;
     }
