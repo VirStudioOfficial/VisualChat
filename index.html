@@ -5568,10 +5568,18 @@
             // `inputTranscription` once Gemini's own turn boundary closes -
             // handling both keeps interim captions responsive while still
             // picking up anything that only shows up in the final message.
+            // NOTE: gemini-3.5-transcribe-live's interimInputTranscription
+            // (and the final inputTranscription) each carry the FULL text
+            // of the current utterance so far, not just a new delta chunk.
+            // Appending them (the old code did `+=`) double-counts every
+            // repeated/overlapping chunk, which is what produced
+            // duplicated text like "سلام.سلام". Replacing instead of
+            // appending keeps pendingUserText in sync with whatever
+            // Gemini's own running transcript currently says.
             const interimText = data.serverContent?.interimInputTranscription?.text;
             const finalText = data.serverContent?.inputTranscription?.text;
             if (interimText || finalText) {
-                liveState.pendingUserText = (liveState.pendingUserText || '') + (interimText || finalText);
+                liveState.pendingUserText = interimText || finalText;
                 upsertLiveTranscriptBubble('user', liveState.pendingUserText);
             }
             // This connection sends no audio input of its own, so it has no
