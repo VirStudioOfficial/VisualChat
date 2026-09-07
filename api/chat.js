@@ -1701,18 +1701,19 @@ const GEMINI_TOOLS = [
                 // نشان می‌دهد تا قبل از شروع، دامنه‌ی واقعی کار مشخص باشد.
                 name: 'find_in_file',
                 description:
-                    'همه‌ی خطوطی از فایل که شامل یک رشته یا الگوی مشخص هستند را با شماره خط برمی‌گرداند. ' +
-                    'برای فایل‌های بزرگ که فقط یک outline کوتاه از آن‌ها در پیام اولیه داری (نه محتوای ' +
-                    'کامل)، این ابزار اولین قدم اجباری هر ویرایش است - قبل از هر apply_edit روی چنین ' +
-                    'فایلی، حتماً همین‌جا رشته/الگوی مرتبط با درخواست کاربر (اسم رنگ، متغیر، تابع، یا ' +
-                    'متن ظاهری) را جستجو کن. همچنین همیشه قبل از شروع ویرایشی که ممکن است در چند جای ' +
-                    'پراکنده‌ی فایل تکرار شده باشد (مثلاً تغییر یک رنگ/متغیر/نام تابع که هم در CSS و هم ' +
-                    'در جاوااسکریپت استفاده شده، یا تغییر کل پالت رنگ یک تم) این ابزار را صدا بزن تا ' +
-                    'همه‌ی رخدادها را یکجا ببینی - نه اینکه فقط با یک apply_edit موفق فکر کنی همه‌جا عوض ' +
-                    'شده. نتیجه شماره خط دقیق هر رخداد را می‌دهد - این شماره‌ها را مستقیماً (بدون حدس ' +
-                    'زدن بازه‌ی دیگر) برای read_file_section بعدی استفاده کن. بعد از دیدن نتیجه، برای هر ' +
-                    'رخداد مرتبط یک apply_edit جدا صدا بزن؛ تا وقتی همه‌ی رخدادهای مرتبط با درخواست ' +
-                    'کاربر عوض نشده‌اند، پاسخ نهایی نده.',
+                    'همه‌ی خطوطی از فایل که شامل یک رشته یا الگوی مشخص هستند را با شماره خط برمی‌گرداند - ' +
+                    'به‌همراه چند خط context واقعی قبل و بعد هر رخداد (فیلد context) که معمولاً برای ' +
+                    'نوشتن مستقیم search در apply_edit کافی است، بدون نیاز به حدس زدن بازه‌ی خط یا صدا ' +
+                    'زدن read_file_section. برای فایل‌های بزرگ که فقط یک outline کوتاه از آن‌ها در پیام ' +
+                    'اولیه داری (نه محتوای کامل)، این ابزار اولین قدم اجباری هر ویرایش است - قبل از هر ' +
+                    'apply_edit روی چنین فایلی، حتماً همین‌جا رشته/الگوی مرتبط با درخواست کاربر (اسم ' +
+                    'رنگ، متغیر، تابع، یا متن ظاهری) را جستجو کن. همچنین همیشه قبل از شروع ویرایشی که ' +
+                    'ممکن است در چند جای پراکنده‌ی فایل تکرار شده باشد (مثلاً تغییر یک رنگ/متغیر/نام ' +
+                    'تابع که هم در CSS و هم در جاوااسکریپت استفاده شده، یا تغییر کل پالت رنگ یک تم) این ' +
+                    'ابزار را صدا بزن تا همه‌ی رخدادها را یکجا ببینی - نه اینکه فقط با یک apply_edit ' +
+                    'موفق فکر کنی همه‌جا عوض شده. بعد از دیدن نتیجه، برای هر رخداد مرتبط یک apply_edit ' +
+                    'جدا صدا بزن؛ تا وقتی همه‌ی رخدادهای مرتبط با درخواست کاربر عوض نشده‌اند، پاسخ ' +
+                    'نهایی نده.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -2108,6 +2109,17 @@ async function executeToolCall(name, args, ctx) {
     // رخدادهای یک رشته/الگو را با شماره خط یکجا برمی‌گرداند تا مدل قبل از
     // شروع، دامنه‌ی واقعی کار را ببیند - نه این‌که بعد از یک ویرایش موفق
     // تصور کند همه‌جا عوض شده.
+    //
+    // FIX (کوتای ورودی: مدل‌های کوچک مثل flash-lite بازه‌ی read_file_section
+    // را حدس می‌زدند نه از این ابزار کپی می‌کردند): گفتن "بازه را حدس نزن"
+    // در توضیح ابزار کافی نبود - مدل‌های سبک instruction را همیشه دقیق
+    // دنبال نمی‌کنند. راه‌حل قابل‌اتکاتر: خود این ابزار حالا چند خط context
+    // واقعی اطراف هر match را هم برمی‌گرداند (contextBefore/contextAfter)،
+    // طوری که مدل معمولاً اصلاً نیازی به صدا زدن جداگانه‌ی read_file_section
+    // (و حدس زدن بازه‌اش) ندارد - می‌تواند مستقیم از همین context برای
+    // نوشتن search در apply_edit استفاده کند. هر خطای "تگ بسته نشده" قبلی
+    // دقیقاً از همین حدس زدن بازه می‌آمد و هر بار یک round کامل اضافه با
+    // Gemini (و هزینه‌ی توکن کامل) به همراه داشت.
     if (name === 'find_in_file') {
         const fileName = String((args && args.file) || '').trim();
         const query = String((args && args.query) ?? '');
@@ -2132,11 +2144,21 @@ async function executeToolCall(name, args, ctx) {
 
         const lines = content.split('\n');
         const MAX_MATCHES = 200; // safety cap so a too-common query doesn't blow up the response
+        const CONTEXT_LINES = 8; // enough surrounding lines to write a unique apply_edit search without a separate read_file_section guess
+        const MAX_MATCHES_WITH_CONTEXT = 15; // only attach full context up to this many matches, to avoid ballooning the response on a very common query
         const matches = [];
         for (let i = 0; i < lines.length && matches.length < MAX_MATCHES; i++) {
             regex.lastIndex = 0;
             if (regex.test(lines[i])) {
-                matches.push({ line: i + 1, text: lines[i].length > 300 ? lines[i].slice(0, 300) + '…' : lines[i] });
+                const entry = { line: i + 1, text: lines[i].length > 300 ? lines[i].slice(0, 300) + '…' : lines[i] };
+                if (matches.length < MAX_MATCHES_WITH_CONTEXT) {
+                    const startIdx = Math.max(0, i - CONTEXT_LINES);
+                    const endIdx = Math.min(lines.length, i + CONTEXT_LINES + 1);
+                    entry.context = lines.slice(startIdx, endIdx).join('\n');
+                    entry.contextStartLine = startIdx + 1;
+                    entry.contextEndLine = endIdx;
+                }
+                matches.push(entry);
             }
         }
 
@@ -2154,7 +2176,7 @@ async function executeToolCall(name, args, ctx) {
                 ? `تعداد رخدادها از ${MAX_MATCHES} بیشتر بود؛ فقط ${MAX_MATCHES} مورد اول نشان داده شد.`
                 : (matches.length === 0
                     ? 'هیچ رخدادی پیدا نشد.'
-                    : 'برای هر رخداد که باید تغییر کند، یک apply_edit جدا با search دقیق همان خط (یا چند خط اطراف برای یکتا بودن) صدا بزن. تا وقتی همه‌ی رخدادهای مرتبط با درخواست کاربر تغییر نکرده‌اند، پاسخ نهایی نده.')
+                    : 'هر رخداد شامل یک فیلد context است که چند خط واقعی قبل و بعد آن خط را نشان می‌دهد (با contextStartLine/contextEndLine) - برای نوشتن search در apply_edit مستقیماً از همین context استفاده کن، نیازی به صدا زدن read_file_section نیست مگر این context برای یکتا بودن کافی نبود. برای هر رخداد که باید تغییر کند، یک apply_edit جدا صدا بزن. تا وقتی همه‌ی رخدادهای مرتبط با درخواست کاربر تغییر نکرده‌اند، پاسخ نهایی نده.')
         };
     }
 
