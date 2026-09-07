@@ -2008,6 +2008,20 @@
 .message.search-hit{box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent),0 0 28px color-mix(in srgb, var(--accent-2) 12%, transparent)}
 .command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
 .chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:color-mix(in srgb, var(--accent-1) 45%, transparent)}
+/* FEATURE (dual-response A/B - مرحله ۳): دو کارت پاسخ کنار هم برای انتخاب کاربر */
+.dual-response-wrap{display:flex;flex-direction:column;gap:10px;width:100%}
+.dual-response-hint{font-size:.74rem;color:var(--text-muted);padding:0 2px}
+.dual-response-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:720px){.dual-response-cards{grid-template-columns:1fr}}
+.dual-response-card{border:1px solid var(--border-soft);border-radius:14px;background:var(--bg-card);padding:12px 14px;display:flex;flex-direction:column;gap:10px;transition:.16s;cursor:pointer}
+.dual-response-card:hover{border-color:color-mix(in srgb, var(--accent-1) 50%, transparent);box-shadow:0 6px 22px var(--shadow-a)}
+.dual-response-card.picked{border-color:var(--accent-1);box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-1) 35%, transparent)}
+.dual-response-card-label{display:flex;align-items:center;justify-content:space-between;font-size:.78rem;font-weight:700;color:var(--text-muted)}
+.dual-response-card-body{font-size:var(--msg-font-size);line-height:1.85}
+.dual-response-pick-btn{align-self:flex-start;border:1px solid var(--border-soft);background:var(--bg-card-hover);color:var(--text-main);border-radius:9px;padding:7px 14px;font-size:.76rem;font-weight:600;cursor:pointer}
+.dual-response-pick-btn:hover{border-color:color-mix(in srgb, var(--accent-1) 55%, transparent)}
+.dual-response-card.picked .dual-response-pick-btn{background:var(--accent-1);color:#fff;border-color:var(--accent-1)}
+.dual-response-cards.decided .dual-response-card:not(.picked){opacity:.5;pointer-events:none}
 @media(max-width:768px){.message-actions{opacity:1;transform:none}.composer-hint{display:none}.chat-search{top:64px}.message.bot{line-height:1.85}}
 
     
@@ -6370,6 +6384,141 @@
         return cached?.summary || '';
     }
 
+    // FEATURE (dual-response A/B learning - مرحله ۵): خلاصه‌ی سبک‌شده‌ی
+    // ترجیحات کاربر (کوتاه/بلند بودن پاسخ) بین انتخاب‌های قبلی الف/ب.
+    // دقیقاً همان الگوی کش recentChatsSummary بالا: هیچ‌وقت جلوی ارسال
+    // پیام فعلی را نمی‌گیرد، از localStorage خوانده می‌شود و در پس‌زمینه
+    // (بعد از هر انتخاب کاربر) به‌روزرسانی می‌شود - نه در همان لحظه‌ی
+    // ارسال پیام، که فقط یک تأخیر بی‌فایده اضافه می‌کرد.
+    const RESPONSE_PREFERENCE_SUMMARY_KEY = 'virtual_response_preference_summary';
+    let responsePreferenceSummaryInFlight = false;
+
+    function getResponsePreferenceSummaryCache() {
+        try { return JSON.parse(localStorage.getItem(RESPONSE_PREFERENCE_SUMMARY_KEY) || 'null'); } catch (_) { return null; }
+    }
+
+    function setResponsePreferenceSummaryCache(entry) {
+        try { localStorage.setItem(RESPONSE_PREFERENCE_SUMMARY_KEY, JSON.stringify(entry)); } catch (_) {}
+    }
+
+    function getCachedResponsePreferenceSummaryText() {
+        const cached = getResponsePreferenceSummaryCache();
+        return cached?.summary || '';
+    }
+
+    // فقط برای کاربر لاگین‌شده معنا دارد (ترجیحات سمت سرور به owner_email
+    // وصل است) - برای مهمان بی‌صدا هیچ کاری نمی‌کند، مثل ذخیره‌ی انتخاب.
+    async function refreshResponsePreferenceSummaryInBackground() {
+        if (responsePreferenceSummaryInFlight) return;
+        if (!localStorage.getItem(AUTH_TOKEN_KEY)) return;
+        responsePreferenceSummaryInFlight = true;
+        try {
+            const resp = await authFetch('/api/preferences?action=analyze');
+            if (!resp.ok) return;
+            const data = await resp.json().catch(() => null);
+            if (data && typeof data.summary === 'string') {
+                setResponsePreferenceSummaryCache({ summary: data.summary, updatedAt: Date.now() });
+            }
+        } catch (_) {
+            // شکست بی‌سروصدا - این فیچر یادگیری اختیاری است.
+        } finally {
+            responsePreferenceSummaryInFlight = false;
+        }
+    }
+
+    // FEATURE (dual-response A/B - مرحله ۳): دو کارت پاسخ (الف/ب) را داخل
+    // loadingDiv (همان حباب پاسخ ربات که قبلاً لودینگ نشان می‌داد) رندر
+    // می‌کند. با کلیک روی هر کارت، همان پاسخ به‌عنوان پاسخ نهایی ثبت و در
+    // chatHistoryData ذخیره می‌شود و کارت دیگر غیرفعال/کم‌رنگ می‌شود.
+    // ذخیره‌ی انتخاب در Supabase (برای یادگیری ترجیحات - مرحله ۴) هنوز
+    // اضافه نشده؛ فعلاً فقط انتخاب محلی اعمال می‌شود.
+    function renderDualResponseCards(loadingDiv, textA, textB, chatIdAtRequestTime, userMessageText) {
+        const formattedA = typeof formatReply === 'function' ? formatReply(textA) : escapeHtml(textA);
+        const formattedB = typeof formatReply === 'function' ? formatReply(textB) : escapeHtml(textB);
+
+        loadingDiv.innerHTML = `
+            <div class="dual-response-wrap">
+                <div class="dual-response-hint">دو نسخه از پاسخ آماده شد — هرکدام را ترجیح می‌دی انتخاب کن:</div>
+                <div class="dual-response-cards">
+                    <div class="dual-response-card" data-variant="a">
+                        <div class="dual-response-card-label"><span>پاسخ الف</span></div>
+                        <div class="dual-response-card-body">${formattedA}</div>
+                        <button type="button" class="dual-response-pick-btn" data-variant="a">این رو ترجیح می‌دم</button>
+                    </div>
+                    <div class="dual-response-card" data-variant="b">
+                        <div class="dual-response-card-label"><span>پاسخ ب</span></div>
+                        <div class="dual-response-card-body">${formattedB}</div>
+                        <button type="button" class="dual-response-pick-btn" data-variant="b">این رو ترجیح می‌دم</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
+
+        const cardsEl = loadingDiv.querySelector('.dual-response-cards');
+        let decided = false;
+
+        const pick = (variant) => {
+            if (decided) return;
+            decided = true;
+            const chosenText = variant === 'a' ? textA : textB;
+            cardsEl.classList.add('decided');
+            cardsEl.querySelectorAll('.dual-response-card').forEach(card => {
+                card.classList.toggle('picked', card.getAttribute('data-variant') === variant);
+            });
+
+            // پاسخ انتخاب‌شده همان پاسخ نهایی این نوبت گفتگو است - در
+            // تاریخچه ذخیره می‌شود تا مدل در ادامه‌ی همین گفتگو به آن
+            // دسترسی داشته باشد، دقیقاً مثل هر پاسخ عادی دیگر.
+            if (chatHistoryData[chatIdAtRequestTime]) {
+                chatHistoryData[chatIdAtRequestTime].push({ role: 'model', text: chosenText });
+            }
+
+            // مرحله ۴: انتخاب کاربر (متن هر دو پاسخ + کدام انتخاب شد) در
+            // جدول response_preferences سوپابیس ذخیره می‌شود تا مرحله ۵
+            // بتواند از روی این‌ها یک خلاصه‌ی ترجیح بسازد. فقط برای
+            // کاربرهای لاگین‌شده معنا دارد (authFetch بدون توکن throw
+            // می‌کند) - برای مهمان‌ها بی‌صدا نادیده گرفته می‌شود، چون
+            // اصلاً حسابی وجود ندارد که ترجیح به آن نسبت داده شود.
+            (async () => {
+                try {
+                    await authFetch('/api/preferences', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            chatId: chatIdAtRequestTime,
+                            userMessage: userMessageText || '',
+                            responseA: textA,
+                            responseB: textB,
+                            chosen: variant
+                        })
+                    });
+                    // انتخاب تازه ذخیره شد - خلاصه‌ی ترجیح کش‌شده دیگر
+                    // به‌روز نیست، همین‌جا (در پس‌زمینه) رفرشش می‌کنیم تا
+                    // پیام‌های بعدی همین کاربر از آن استفاده کنند.
+                    refreshResponsePreferenceSummaryInBackground();
+                } catch (_) {
+                    // کاربر مهمان است یا خطای شبکه - این فیچر یادگیری
+                    // اختیاری است و نباید تجربه‌ی چت را مختل کند.
+                }
+            })();
+
+            console.log('✅ کاربر پاسخ', variant === 'a' ? 'الف' : 'ب', 'را انتخاب کرد');
+
+            try { saveCurrentChat(); } catch (_) {}
+        };
+
+        cardsEl.querySelectorAll('.dual-response-pick-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                pick(btn.getAttribute('data-variant'));
+            });
+        });
+        cardsEl.querySelectorAll('.dual-response-card').forEach(card => {
+            card.addEventListener('click', () => pick(card.getAttribute('data-variant')));
+        });
+    }
+
     function updateScrollLatestButton() {
         const chatBox = document.getElementById('chatBox');
         const btn = document.getElementById('scrollLatestBtn');
@@ -6659,6 +6808,23 @@
         let lastRevealTs = 0;
         let catchUpOnVisible = () => {};
 
+        // FEATURE (dual-response A/B mode - مرحله ۱): هر N پیام کاربر یک‌بار
+        // پرچم dualResponseMode به بک‌اند فرستاده می‌شود تا (در مرحله‌ی بعدی)
+        // دو پاسخ موازی تولید و برای انتخاب کاربر نمایش داده شود. فعلاً فقط
+        // شمارش و ارسال پرچم است؛ بک‌اند و UI انتخاب در مراحل بعدی اضافه می‌شوند.
+        // در حالت تست فعلاً روی هر ۵ پیام تنظیم شده - برای پروداکشن به ۵۰ برگردانید.
+        const DUAL_RESPONSE_INTERVAL = 5; // TODO: برای پروداکشن تغییر بده به 50
+        const dualResponseMode = (() => {
+            try {
+                if (isRetry) return false; // روی retry دوباره نشمار
+                const newCount = (parseInt(localStorage.getItem('vc_msg_count') || '0', 10) || 0) + 1;
+                localStorage.setItem('vc_msg_count', String(newCount));
+                const triggered = newCount % DUAL_RESPONSE_INTERVAL === 0;
+                if (triggered) console.log('🔀 dualResponseMode فعال شد - پیام شماره', newCount);
+                return triggered;
+            } catch (_) { return false; }
+        })();
+
         try {
             const response = await fetch('/api/chat', {
                 method: "POST",
@@ -6728,7 +6894,17 @@
                     // سرعت ارسال پیام فعلی افت نکنه. به‌روزرسانی خودش جدا و
                     // در پس‌زمینه (بعد از پایان همین درخواست) انجام می‌شود.
                     recentChatsSummary: getCachedRecentChatsSummaryText(),
-                    stream: true
+                    stream: true,
+                    // FEATURE (dual-response A/B mode - مرحله ۱): فقط پرچم؛
+                    // بک‌اند فعلاً به این مقدار توجهی نمی‌کند (مرحله ۲).
+                    dualResponseMode: dualResponseMode,
+                    // FEATURE (dual-response A/B learning - مرحله ۵): خلاصه‌ی
+                    // کش‌شده‌ی ترجیح کاربر بین انتخاب‌های قبلی الف/ب (اگر
+                    // موجود باشد) - بک‌اند این را از مرحله ۲ به هر دو
+                    // systemText تزریق می‌کند، هم وقتی dualResponseMode روشن
+                    // است هم (به‌صورت غیرمستقیم، چون systemText مشترک است)
+                    // برای پاسخ‌های عادی تک‌نسخه‌ای.
+                    responsePreferenceSummary: getCachedResponsePreferenceSummaryText()
                 }),
                 signal: currentAbortController.signal
             });
@@ -6749,6 +6925,25 @@
                 removePushedUserTurnIfUnanswered();
                 makeRetryError(loadingDiv, bodyDetail?.message || `خطای سرور (${response.status})`, request, bodyDetail || { type: 'network_error', stage: 'request', detail: `HTTP ${response.status}` });
                 setGeneratingState(false); saveCurrentChat(); return;
+            }
+
+            // FEATURE (dual-response A/B mode - مرحله ۲/۳): وقتی dualResponseMode
+            // فرستاده شده بود، بک‌اند به‌جای SSE استریم، یک JSON عادی با
+            // {dualResponse:true, responseA, responseB} برمی‌گرداند. این حالت
+            // را اینجا جدا می‌کنیم تا وارد مسیر reader استریم زیر نشود (که
+            // برای این پاسخ اصلاً معنا ندارد چون قبلاً کامل شده).
+            if (dualResponseMode) {
+                let dualJson = null;
+                try { dualJson = await response.clone().json(); } catch (_) {}
+                if (dualJson && dualJson.dualResponse === true) {
+                    renderDualResponseCards(loadingDiv, dualJson.responseA || '', dualJson.responseB || '', currentChatId, textPrompt);
+                    setGeneratingState(false); saveCurrentChat(); scrollToLatest();
+                    return;
+                }
+                // اگر بک‌اند به هر دلیلی به این حالت برنگشت (مثلاً چون
+                // dual-response شکست خورده و بی‌صدا به مسیر عادی افتاده -
+                // دقیقاً همان fallback سمت سرور)، همینجا به مسیر استریم عادی
+                // زیر ادامه می‌دهیم؛ چیزی که از قبل return نشده باشد.
             }
 
             // Stream the reply in as it arrives from the backend (SSE). Rendering the
@@ -8269,6 +8464,9 @@
         // خلاصه‌ی چت‌های اخیر رو از همین ابتدا (بدون بلاک کردن UI) در پس‌زمینه
         // آماده می‌کنیم تا اولین پیام کاربر در این سشن هم لحن درست رو ببینه.
         refreshRecentChatsSummaryInBackground();
+        // مرحله ۵: خلاصه‌ی ترجیح الف/ب هم از ابتدای سشن (فقط برای کاربر
+        // لاگین‌شده - تابع خودش این را چک می‌کند) در پس‌زمینه آماده می‌شود.
+        refreshResponsePreferenceSummaryInBackground();
     }
 
     function toggleHistorySearch() {
