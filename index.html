@@ -3457,9 +3457,25 @@
         // کاربر خودش از UI اکانت درخواست ورود/ثبت‌نام بدهد باز می‌شود.
         overlay.classList.remove('active');
         if (saved && token) {
-            currentUser = JSON.parse(saved);
-            if (!currentUser.customName) {
-                currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email, currentUser.name);
+            // FIX (total app failure on corrupted storage): JSON.parse
+            // here was unguarded - if 'virtual_chat_user' in localStorage
+            // ever became malformed (partial write, manual edit, storage
+            // corruption), this threw uncaught and initUserData() on the
+            // next line never ran at all, so chats never loaded and the
+            // user was stuck with no error message and no recovery path
+            // (the bad value was never cleared, so a reload wouldn't
+            // help either). Now we fall back to a guest session and wipe
+            // the bad entry so the app keeps working and self-heals.
+            try {
+                currentUser = JSON.parse(saved);
+                if (!currentUser.customName) {
+                    currentUser.customName = localStorage.getItem('virtual_user_custom_name') || extractNameFromEmail(currentUser.email, currentUser.name);
+                }
+            } catch (e) {
+                console.error('Corrupted virtual_chat_user in localStorage, resetting to guest session:', e);
+                localStorage.removeItem('virtual_chat_user');
+                localStorage.removeItem(AUTH_TOKEN_KEY);
+                currentUser = null;
             }
         }
         initUserData(); // اگر currentUser ست شده باشد چت‌های همان حساب، وگرنه چت‌های مهمان لود می‌شوند
