@@ -6505,20 +6505,58 @@
 
             console.log('✅ کاربر پاسخ', variant === 'a' ? 'الف' : 'ب', 'را انتخاب کرد');
 
-            try { saveCurrentChat(); } catch (_) {}
+            // FIX (بعد از انتخاب هیچ‌چیز جای کارت‌ها را نمی‌گرفت): قبلاً
+            // pick() فقط کلاس‌های picked/decided را اضافه می‌کرد و کار
+            // تمام می‌شد - خود loadingDiv.innerHTML هیچ‌وقت با پاسخ
+            // انتخاب‌شده جایگزین نمی‌شد، پس دو کارت برای همیشه همان‌جا
+            // می‌ماندند. حالا بعد از یک مکث کوتاه (تا کاربر ببیند کدام
+            // کارت هایلایت شد)، همان‌جا با یک حباب پاسخ عادی جایگزین
+            // می‌شود - دقیقاً مثل اینکه این متن از اول تنها پاسخ بود.
+            //
+            // FEATURE (انیمیشن حرف‌به‌حرف مثل حالت استریم عادی): این متن
+            // آماده و کامل است (استریم زنده نیست)، پس یک نسخه‌ی مستقل و
+            // ساده‌شده از همان حلقه‌ی reveal که در جریان استریم معمولی
+            // استفاده می‌شود اینجا هم پیاده شده - همان سرعت پایه
+            // (۱۲۰ کاراکتر/ثانیه) و همان منطق speedup برای متن‌های طولانی.
+            setTimeout(() => {
+                loadingDiv.classList.add('is-streaming');
+                let revealedChars = 0;
+                let lastTs = 0;
+                let rafId = null;
+                const tick = (ts) => {
+                    const dt = lastTs ? (ts - lastTs) : 16;
+                    lastTs = ts;
+                    const backlog = chosenText.length - revealedChars;
+                    const speedup = backlog > 300 ? 5 : backlog > 100 ? 2.5 : backlog > 20 ? 1.4 : 1;
+                    const charsThisFrame = Math.max(1, Math.round((dt / 1000) * 120 * speedup));
+                    revealedChars = Math.min(chosenText.length, revealedChars + charsThisFrame);
+                    const shown = chosenText.slice(0, revealedChars);
+                    let html = typeof formatReply === 'function' ? formatReply(shown) : escapeHtml(shown);
+                    if (revealedChars < chosenText.length) html += '<span class="stream-cursor"></span>';
+                    loadingDiv.innerHTML = html;
+                    scrollToLatest(false);
+                    if (revealedChars < chosenText.length) {
+                        rafId = requestAnimationFrame(tick);
+                    } else {
+                        loadingDiv.classList.remove('is-streaming');
+                        if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
+                        // FIX: saveCurrentChat() باید بعد از تمام شدن انیمیشن
+                        // صدا زده شود، وگرنه چون خودِ pick() هم‌زمان (بدون
+                        // صبر برای setTimeout بالا) saveCurrentChat را صدا
+                        // می‌زد، نسخه‌ی نصفه‌نمایش‌داده‌شده‌ی HTML به‌جای
+                        // متن کامل در localStorage/تاریخچه ذخیره می‌شد.
+                        try { saveCurrentChat(); } catch (_) {}
+                    }
+                };
+                rafId = requestAnimationFrame(tick);
+            }, 450);
         };
 
         cardsEl.querySelectorAll('.dual-response-pick-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-    console.log('🔴 CLICK RECEIVED', btn.getAttribute('data-variant'));
-    e.stopPropagation();
-    try {
-        pick(btn.getAttribute('data-variant'));
-        console.log('🟢 pick() finished without throwing');
-    } catch (err) {
-        console.error('🔥 pick() threw:', err);
-    }
-});
+                e.stopPropagation();
+                pick(btn.getAttribute('data-variant'));
+            });
         });
         cardsEl.querySelectorAll('.dual-response-card').forEach(card => {
             card.addEventListener('click', () => pick(card.getAttribute('data-variant')));
