@@ -5562,8 +5562,16 @@
                 data = JSON.parse(raw);
             } catch (_) { return; }
 
-            if (data.serverContent?.inputTranscription?.text) {
-                liveState.pendingUserText = (liveState.pendingUserText || '') + data.serverContent.inputTranscription.text;
+            // NOTE: gemini-3.5-transcribe-live streams incremental results
+            // under `interimInputTranscription`, not `inputTranscription`.
+            // A final/confirmed chunk may also arrive under
+            // `inputTranscription` once Gemini's own turn boundary closes -
+            // handling both keeps interim captions responsive while still
+            // picking up anything that only shows up in the final message.
+            const interimText = data.serverContent?.interimInputTranscription?.text;
+            const finalText = data.serverContent?.inputTranscription?.text;
+            if (interimText || finalText) {
+                liveState.pendingUserText = (liveState.pendingUserText || '') + (interimText || finalText);
                 upsertLiveTranscriptBubble('user', liveState.pendingUserText);
             }
             // This connection sends no audio input of its own, so it has no
