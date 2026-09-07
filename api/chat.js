@@ -3681,6 +3681,13 @@ async function handler(req, res) {
             // chat history itself - keeps this request exactly as fast as
             // before. Just a plain string; ignored if empty/missing.
             recentChatsSummary,
+            // FEATURE (dual-response A/B learning - مرحله ۵): خلاصه‌ی
+            // متنی کوتاهی که کلاینت از تحلیل انتخاب‌های قبلی کاربر بین
+            // پاسخ‌های الف/ب ساخته (از api/preferences.js?action=analyze،
+            // کش‌شده در localStorage). به systemText اصلی تزریق می‌شود تا
+            // سبک همه‌ی پاسخ‌های بعدی - نه فقط دفعات dual-response - با
+            // ترجیح کاربر همسو شود.
+            responsePreferenceSummary,
             // FEATURE (persistent file memory): archivedFileNames is cheap
             // (just strings) and always present so the system prompt can
             // tell the model what's available; archivedFiles carries the
@@ -4203,6 +4210,19 @@ ${recentChatsSummary.trim()}
 `;
         }
 
+        // FEATURE (dual-response A/B learning - مرحله ۵): این تزریق برای
+        // *همه‌ی* پاسخ‌ها اعمال می‌شود (نه فقط دفعات dualResponseMode) تا
+        // سبک کلی مدل با گذر زمان با ترجیح یادگرفته‌شده‌ی کاربر همسو شود.
+        // بلوک dual-response پایین‌تر همین systemText را پایه می‌گیرد، پس
+        // این خط را دوباره اضافه نمی‌کند - فقط دستورالعمل کوتاه‌تر/
+        // مستقیم‌تر بودن مخصوص پاسخ ب را روی همین اضافه می‌کند.
+        if (typeof responsePreferenceSummary === 'string' && responsePreferenceSummary.trim()) {
+            systemText += `
+ترجیحات یادگرفته‌شده از انتخاب‌های قبلی همین کاربر بین دو پاسخ پیشنهادی (سبک کلی پاسخ را با این همسو کن):
+${responsePreferenceSummary.trim()}
+`;
+        }
+
         systemText += `
 قالب‌بندی (فقط در صورت نیاز واقعی، نه همیشه):
 - ایتالیک: *متن* یا _متن_ | خط‌خورده: ~~متن~~ | لینک واقعی: [متن](https://...)
@@ -4358,6 +4378,86 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
             modelsToTry.push(
                 'gemini-3.5-flash-lite'
             );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | DUAL RESPONSE (A/B) MODE - مرحله ۲
+        |--------------------------------------------------------------------------
+        | وقتی کلاینت dualResponseMode:true بفرستد (هر N پیام یک‌بار، دیده
+        | شده در index.html)، به‌جای مسیر عادی stream/non-stream، دو پاسخ
+        | کامل و موازی تولید می‌کنیم و هر دو را یک‌جا در قالب JSON عادی
+        | (نه SSE) برمی‌گردانیم. عمداً از همان مسیر non-stream موجود
+        | runAgentLoop استفاده شده (onStep: null، بدون res.write) چون آن
+        | مسیر از قبل متن کامل نهایی را در agentResult.finalText جمع
+        | می‌کند - نیازی به تغییر منطق استریم اصلی نیست.
+        |
+        | پاسخ B نسخه‌ی کوتاه‌تر/مستقیم‌تر همان سبک A است (نه سبک متفاوت).
+        | ترجیحات قبلی کاربر (responsePreferenceSummary) از قبل بالاتر
+        | (قبل از این بلاک) داخل systemText تزریق شده - همین‌جا فقط برای
+        | پاسخ B، یک دستورالعمل اضافه‌ی کوتاه‌تر/مستقیم‌تر بودن روی همان
+        | systemText گذاشته می‌شود.
+        */
+        if (req.body?.dualResponseMode === true) {
+            try {
+                const systemTextA = systemText;
+                const systemTextB =
+                    systemText +
+                    `\n\nدستورالعمل ویژه این پاسخ: نسخه‌ی کوتاه‌تر، مستقیم‌تر و منطقی‌تر از همان سبک بالا بنویس - جملات کوتاه‌تر، مقدمه‌چینی کمتر، مستقیم برو سراغ جواب. همان لحن/شخصیت را حفظ کن، فقط طولانی‌نویسی و توضیح اضافه را حذف کن.\n`;
+
+                const dualDeadline = Date.now() + 60000; // ۶۰ ثانیه سقف کل، هر دو پاسخ باید در همین بازه کامل شوند
+                const dualAbortController = new AbortController();
+                const dualDeadlineTimer = setTimeout(() => dualAbortController.abort(), Math.max(0, dualDeadline - Date.now()));
+
+                const runOne = (variantSystemText) =>
+                    runAgentLoop({
+                        currentModel: MODEL_NAME,
+                        currentKey: geminiKeys[0],
+                        keyIndex: 1,
+                        systemText: variantSystemText,
+                        contents,
+                        tavilyKeys,
+                        archivedFiles,
+                        textFiles,
+                        searchCache,
+                        searchState,
+                        fileEditIntent,
+                        scatteredPatternIntent,
+                        sharedRequestState,
+                        signal: dualAbortController.signal,
+                        disableTools: hasVideoAttachment,
+                        hasVideoAttachment,
+                        thinkLevel,
+                        onStep: null
+                    });
+
+                const [resultA, resultB] = await Promise.all([
+                    runOne(systemTextA),
+                    runOne(systemTextB)
+                ]);
+
+                clearTimeout(dualDeadlineTimer);
+
+                log.info('request.completed', {
+                    mode: 'dual-response',
+                    model: MODEL_NAME,
+                    durationMs: Date.now() - requestStartedAt
+                });
+
+                return res.status(200).json({
+                    dualResponse: true,
+                    responseA: resultA.finalText || '',
+                    responseB: resultB.finalText || ''
+                });
+            } catch (dualErr) {
+                // FIX (نباید کل درخواست را خراب کند): اگر مسیر dual-response
+                // به هر دلیلی شکست بخورد، به‌جای برگرداندن خطا به کاربر،
+                // بی‌صدا rebrand می‌کنیم و اجازه می‌دهیم مسیر عادی
+                // stream/non-stream زیر همین درخواست را به‌صورت معمولی
+                // (تک‌پاسخی) جواب بدهد - تجربه‌ی کاربر هیچ‌وقت به‌خاطر این
+                // فیچر آزمایشی خراب نمی‌شود.
+                log.warn('dual_response.failed', { message: dualErr?.message || String(dualErr) });
+            }
         }
 
         /*
