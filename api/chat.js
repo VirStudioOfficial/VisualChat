@@ -1922,6 +1922,17 @@ function validatePatchedContent(content, fileName) {
                 const blanked = inner.replace(/[^\n]/g, ' ');
                 return `<${tagName}${attrs}>${blanked}</style>`;
             }
+        ).replace(
+            // FIX (false positive: literal tag-like text inside an HTML
+            // comment, e.g. "<!-- kept as a child of <body> because ... -->",
+            // was being read by the tag-matching regex below as a real
+            // opening/closing tag, corrupting the stack and producing a
+            // phantom "تگ بسته نشده" error on a file that was never
+            // actually broken). Blank out comment bodies the same way
+            // <script>/<style> contents are neutralized, preserving
+            // line numbers for error messages.
+            /<!--([\s\S]*?)-->/g,
+            (full, inner) => `<!--${inner.replace(/[^\n]/g, ' ')}-->`
         );
         if (scriptJsErrors.length > 0) {
             return { valid: false, reason: `سنتکس جاوااسکریپت داخل یک تگ <script> نامعتبر است: ${scriptJsErrors[0]}` };
