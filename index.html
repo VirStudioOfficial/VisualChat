@@ -5076,6 +5076,16 @@
     // WebSocket connections get blocked with a handshake timeout on some
     // networks; routing through a proxy hosted elsewhere fixes that.
     const LIVE_PROXY_WS_URL = 'wss://gemini-live-proxy-kmu4.onrender.com/live';
+    // Second, parallel connection through the SAME proxy (a different path
+    // on it - see the proxy-side changes needed in server.js) that talks to
+    // gemini-3.5-transcribe-live instead of the conversational model. Only
+    // this dedicated transcription model accepts an explicit languageCodes
+    // field, which is what actually fixes the Dari/wrong-language guesses
+    // in the on-screen transcript - the conversational model
+    // (LIVE_MODEL_NAME below) rejects that field outright (1007). The
+    // conversational connection still owns the mic and the spoken answer;
+    // this one only ever supplies the text shown for what the user said.
+    const LIVE_TRANSCRIBE_PROXY_WS_URL = 'wss://gemini-live-proxy-kmu4.onrender.com/transcribe';
     // Switched from gemini-2.5-flash-native-audio-preview-09-2025: that
     // model has a known, Google-acknowledged bug where it silently stops
     // producing audio mid-session (no error, socket stays open) - see
@@ -5371,6 +5381,7 @@
             if (!liveState) return; // call may have been ended while awaiting addModule
 
             attachLiveWebSocketHandlers(statusText, orbWrap);
+            attachTranscribeWebSocket();
         } catch (err) {
             statusText.textContent = 'اتصال ناموفق بود.';
             setTimeout(() => endLiveCall(), 1200);
@@ -5466,10 +5477,13 @@
             // turnComplete confirms that side is actually done - pushing
             // a half-formed sentence every chunk would spam the chat with
             // constantly-rewritten bubbles.
-            if (data.serverContent?.inputTranscription?.text) {
-                liveState.pendingUserText = (liveState.pendingUserText || '') + data.serverContent.inputTranscription.text;
-                upsertLiveTranscriptBubble('user', liveState.pendingUserText);
-            }
+            // NOTE: inputTranscription from THIS connection is intentionally
+            // ignored now - it's the model that guesses the wrong language
+            // (Dari/other scripts instead of Iranian Farsi) since this
+            // conversational model rejects an explicit languageCodes field.
+            // The user-side transcript is supplied instead by the parallel
+            // gemini-3.5-transcribe-live connection (see
+            // attachTranscribeWebSocket below), which does accept it.
             if (data.serverContent?.outputTranscription?.text) {
                 liveState.pendingModelText = (liveState.pendingModelText || '') + data.serverContent.outputTranscription.text;
                 upsertLiveTranscriptBubble('model', liveState.pendingModelText);
@@ -5507,6 +5521,62 @@
             if (!liveState || liveState.closing) return;
             endLiveCall();
         };
+    }
+
+    // Second, parallel WebSocket to gemini-3.5-transcribe-live (through the
+    // same Render proxy, different path) that exists ONLY to produce an
+    // accurate Persian transcript of what the user said. Kept fully
+    // separate from the conversational connection above: if this one fails
+    // to connect or drops mid-call, the actual voice conversation is
+    // unaffected - the user just temporarily loses the on-screen caption of
+    // their own side, same as before this feature existed.
+    function attachTranscribeWebSocket() {
+        let tws;
+        try {
+            tws = new WebSocket(LIVE_TRANSCRIBE_PROXY_WS_URL);
+        } catch (_) {
+            return; // no transcript mirroring this call; conversation itself is unaffected
+        }
+        liveState.transcribeWs = tws;
+
+        tws.onopen = () => {
+            tws.send(JSON.stringify({
+                setup: {
+                    model: 'models/gemini-3.5-transcribe-live',
+                    generationConfig: { responseModalities: ['TEXT'] },
+                    // The one field the conversational model rejects -
+                    // this dedicated transcription model documents and
+                    // accepts it, which is what actually pins the language
+                    // to Iranian Farsi instead of guessing Dari or an
+                    // unrelated script.
+                    inputAudioTranscription: { languageCodes: ['fa-IR'] }
+                }
+            }));
+        };
+
+        tws.onmessage = async (event) => {
+            if (!liveState) return;
+            let data;
+            try {
+                const raw = event.data instanceof Blob ? await event.data.text() : event.data;
+                data = JSON.parse(raw);
+            } catch (_) { return; }
+
+            if (data.serverContent?.inputTranscription?.text) {
+                liveState.pendingUserText = (liveState.pendingUserText || '') + data.serverContent.inputTranscription.text;
+                upsertLiveTranscriptBubble('user', liveState.pendingUserText);
+            }
+            // This connection sends no audio input of its own, so it has no
+            // model turns/model audio to react to - turnComplete on the
+            // conversational connection above is still what finalizes the
+            // chat bubble (finalizeLiveTranscriptTurn), not anything here.
+        };
+
+        // Silent on error/close by design: this is a best-effort caption
+        // feed, not a required part of the call. Losing it mid-call should
+        // never end or interrupt the actual conversation.
+        tws.onerror = () => {};
+        tws.onclose = () => {};
     }
 
     // AudioWorkletProcessor source for the mic pipeline. This runs on the
@@ -5656,6 +5726,19 @@
             if (!liveState || liveState.muted || !liveState.ws || liveState.ws.readyState !== WebSocket.OPEN) return;
             const input = e.data; // Float32Array, 4096 samples
 
+            // Sends a realtimeInput message to the conversational
+            // connection (always) and, if open, mirrors the exact same
+            // message to the transcribe-only connection - it needs the
+            // identical activityStart/audio/activityEnd sequence to
+            // produce a turn-aligned transcript of its own.
+            const sendRealtimeInput = (payload) => {
+                const json = JSON.stringify({ realtimeInput: payload });
+                liveState.ws.send(json);
+                if (liveState.transcribeWs && liveState.transcribeWs.readyState === WebSocket.OPEN) {
+                    liveState.transcribeWs.send(json);
+                }
+            };
+
             let sumSquares = 0;
             for (let i = 0; i < input.length; i++) sumSquares += input[i] * input[i];
             const rms = Math.sqrt(sumSquares / input.length);
@@ -5680,21 +5763,19 @@
                 if (!liveState.speaking) {
                     liveState.speaking = true;
                     liveState.speechStartTs = now;
-                    liveState.ws.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
+                    sendRealtimeInput({ activityStart: {} });
                     // Flush the pre-roll (the frames right before this one,
                     // which is where the actual word onset lives) so it
                     // reaches the model instead of being dropped. Oldest
                     // first, so playback order is preserved.
                     for (const frame of prerollBuffer) {
                         const preRollPcm16 = floatTo16BitPCM(frame);
-                        liveState.ws.send(JSON.stringify({
-                            realtimeInput: {
-                                audio: {
-                                    mimeType: `audio/pcm;rate=${LIVE_SEND_SAMPLE_RATE}`,
-                                    data: arrayBufferToBase64(preRollPcm16.buffer)
-                                }
+                        sendRealtimeInput({
+                            audio: {
+                                mimeType: `audio/pcm;rate=${LIVE_SEND_SAMPLE_RATE}`,
+                                data: arrayBufferToBase64(preRollPcm16.buffer)
                             }
-                        }));
+                        });
                     }
                     prerollBuffer.length = 0;
                     // Barge-in: if the model's own audio is still playing
@@ -5721,7 +5802,7 @@
                 }
             } else if (liveState.speaking && (turnTooLong || (now - liveState.lastVoiceTs) >= SILENCE_HANG_MS)) {
                 liveState.speaking = false;
-                liveState.ws.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
+                sendRealtimeInput({ activityEnd: {} });
                 orbWrap.classList.remove('listening');
                 statusText.textContent = 'در حال گوش دادن...';
                 // A turn that had to be force-closed by the timeout means
@@ -5772,14 +5853,12 @@
 
             const pcm16 = floatTo16BitPCM(gatedInput);
             const base64Audio = arrayBufferToBase64(pcm16.buffer);
-            liveState.ws.send(JSON.stringify({
-                realtimeInput: {
-                    audio: {
-                        mimeType: `audio/pcm;rate=${LIVE_SEND_SAMPLE_RATE}`,
-                        data: base64Audio
-                    }
+            sendRealtimeInput({
+                audio: {
+                    mimeType: `audio/pcm;rate=${LIVE_SEND_SAMPLE_RATE}`,
+                    data: base64Audio
                 }
-            }));
+            });
         };
 
         // The worklet node still needs to be connected into the graph for
@@ -5926,6 +6005,7 @@
         liveState.closing = true;
 
         try { liveState.ws && liveState.ws.close(); } catch (_) {}
+        try { liveState.transcribeWs && liveState.transcribeWs.close(); } catch (_) {}
         try { liveState.micProcessorNode && liveState.micProcessorNode.disconnect(); } catch (_) {}
         try { liveState.micHighpassNode && liveState.micHighpassNode.disconnect(); } catch (_) {}
         try { liveState.micSourceNode && liveState.micSourceNode.disconnect(); } catch (_) {}
