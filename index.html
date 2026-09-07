@@ -6510,9 +6510,15 @@
 
         cardsEl.querySelectorAll('.dual-response-pick-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                pick(btn.getAttribute('data-variant'));
-            });
+    console.log('🔴 CLICK RECEIVED', btn.getAttribute('data-variant'));
+    e.stopPropagation();
+    try {
+        pick(btn.getAttribute('data-variant'));
+        console.log('🟢 pick() finished without throwing');
+    } catch (err) {
+        console.error('🔥 pick() threw:', err);
+    }
+});
         });
         cardsEl.querySelectorAll('.dual-response-card').forEach(card => {
             card.addEventListener('click', () => pick(card.getAttribute('data-variant')));
