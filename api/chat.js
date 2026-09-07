@@ -1859,15 +1859,154 @@ function getFileLanguageFromName(fileName) {
 // round, no API call - run synchronously right after building the
 // candidate content and BEFORE it's accepted, so a broken patch is
 // rejected the same way a failed string-match patch always was.
+// FIX (مرحله ۲ - بررسی کد بدون اجرای واقعی): new Function() فقط خطای
+// نحوی (Syntax Error) را می‌گیرد - چیزی که واقعاً هنگام اجرا (Runtime)
+// خطا می‌دهد، مثل ارجاع به یک const/let قبل از خط تعریفش (temporal dead
+// zone - دقیقاً همان باگی که خودمان با sharedRequestState خوردیم)، یا
+// استفاده از متغیری که اصلاً هیچ‌جا تعریف نشده، از دید new Function
+// کاملاً «معتبر» به نظر می‌رسد چون parser فقط ساختار را چک می‌کند، نه
+// جریان واقعی مقداردهی را. این دو تابع بدون اجرای کد (فقط با آنالیز
+// متنی سبک، نه AST کامل - چون نصب یک پارسر واقعی مثل @babel/parser یک
+// وابستگی سنگین اضافه می‌کند) رایج‌ترین حالت این دو باگ را می‌گیرند.
+function detectTemporalDeadZoneIssues(content) {
+    // برای هر «const نام = ...» یا «let نام = ...»، تمام رخدادهای همان
+    // نام را قبل از این خط (در کل فایل) پیدا می‌کند - اگر رخدادی پیدا شد
+    // که خودش تعریف یک const/let/var دیگر یا پارامتر تابع نباشد، احتمال
+    // زیاد ارجاع زودهنگام (TDZ) است. این یک آنالیز ساده‌ی خط‌به‌خط است،
+    // نه data-flow واقعی - false positive نادر ممکن است (مثلاً نام تکراری
+    // در دو اسکوپ جدا)، برای همین پیام خطا «احتمالاً» می‌گوید، نه قطعی.
+    const declRe = /\b(const|let)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/g;
+    const issues = [];
+    let m;
+    while ((m = declRe.exec(content))) {
+        const varName = m[2];
+        const declEndIndex = m.index;
+        const before = content.slice(0, declEndIndex);
+        // رد کردن نام‌های خیلی رایج/کوتاه که false positive زیاد می‌دهند
+        if (varName.length <= 2) continue;
+        const usageRe = new RegExp(`\\b${varName}\\b`, 'g');
+        let um;
+        while ((um = usageRe.exec(before))) {
+            // اگر خودِ این رخداد هم یک تعریف (const/let/var/function/پارامتر) باشد، نادیده بگیر
+            const context = before.slice(Math.max(0, um.index - 20), um.index);
+            if (/(const|let|var|function|,|\(|\.)\s*$/.test(context)) continue;
+            issues.push(`متغیر «${varName}» احتمالاً قبل از خط تعریفش (با ${m[1]}) در جای دیگری از کد استفاده شده - در جاوااسکریپت این باعث خطای واقعی «Cannot access '${varName}' before initialization» هنگام اجرا می‌شود، حتی اگر سنتکس معتبر به‌نظر برسد.`);
+            break;
+        }
+    }
+    return issues;
+}
+
+function detectUndeclaredIdentifiers(content) {
+    // فقط برای شناسه‌هایی که به‌وضوح فراخوانی تابع محلی هستند (نامِ+پرانتز)
+    // چک می‌شود - نه هر شناسه‌ای - چون تشخیص قطعی «تعریف‌نشده بودن» بدون
+    // AST واقعی و بدون دانستن globalها/importها قابل‌اطمینان نیست. این فقط
+    // رایج‌ترین حالت را می‌گیرد: تابعی که جایی در همین فایل تعریف نشده و
+    // اسم شناخته‌شده‌ی جاوااسکریپت/مرورگر/Node هم نیست.
+    const KNOWN_GLOBALS = new Set(['console','Math','JSON','Object','Array','String','Number','Boolean','Promise','Map','Set','Date','RegExp','Error','TypeError','RangeError','Symbol','Function','Proxy','Reflect','WeakMap','WeakSet','parseInt','parseFloat','isNaN','isFinite','setTimeout','setInterval','clearTimeout','clearInterval','requestAnimationFrame','fetch','encodeURIComponent','decodeURIComponent','structuredClone','require','module','exports','process','Buffer','__dirname','__filename','document','window','navigator','localStorage','sessionStorage','alert','confirm','prompt']);
+    const definedNames = new Set();
+    let m;
+    const funcDeclRe = /\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+    while ((m = funcDeclRe.exec(content))) definedNames.add(m[1]);
+    const varAssignRe = /\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/g;
+    while ((m = varAssignRe.exec(content))) definedNames.add(m[1]);
+    const destructureRe = /\b(?:const|let|var)\s*\{([^}]+)\}\s*=/g;
+    while ((m = destructureRe.exec(content))) {
+        m[1].split(',').forEach(part => {
+            const name = part.split(':').pop().trim().replace(/=.*$/, '').trim();
+            if (name) definedNames.add(name);
+        });
+    }
+    // FIX (false positive روی متد‌های کلاس): class Foo { constructor() {},
+    // render() {}, ... } - این متدها با function/const تعریف نمی‌شوند، ولی
+    // فراخوانی‌شان (constructor به‌طور ضمنی با new، یا this.render()) کاملاً
+    // معتبر است. همه‌ی نام‌های متد داخل هر بلوک class را هم به definedNames
+    // اضافه می‌کنیم، و «class Foo» را هم مثل یک تابع/سازنده‌ی قابل new شدن
+    // در نظر می‌گیریم.
+    const classNameRe = /\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+    while ((m = classNameRe.exec(content))) definedNames.add(m[1]);
+    const classBodyRe = /\bclass\s+[a-zA-Z_$][a-zA-Z0-9_$]*[^{]*\{([\s\S]*?)\n\}/g;
+    while ((m = classBodyRe.exec(content))) {
+        const methodRe = /(?:^|\n)\s*(?:static\s+|async\s+|\*\s*|get\s+|set\s+)*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+        let mm;
+        while ((mm = methodRe.exec(m[1]))) definedNames.add(mm[1]);
+    }
+    definedNames.add('constructor');
+
+    const callRe = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+    const issues = [];
+    const seen = new Set();
+    while ((m = callRe.exec(content))) {
+        const name = m[1];
+        if (KNOWN_GLOBALS.has(name) || definedNames.has(name) || seen.has(name)) continue;
+        // کلمات کلیدی زبان که با پرانتز می‌آیند ولی فراخوانی تابع نیستند
+        if (['if','for','while','switch','catch','function','return','typeof','new','await','yield','super','async'].includes(name)) continue;
+        // اگر قبلش . باشد (متد یک آبجکت است، مثل obj.foo() یا this.foo())، بررسی نکن - ممکن است بیرون از این فایل یا در یک کلاس تعریف شده باشد
+        const before = content.slice(Math.max(0, m.index - 1), m.index);
+        if (before === '.') continue;
+        // نام کلاس با حرف بزرگ شروع می‌شود و معمولاً با «new» صدا زده می‌شود -
+        // اگر با new نیامده هم، احتمال زیاد یک کلاس/سازنده وارد‌شده از فایل
+        // دیگر است، نه یک اشتباه واقعی - برای کاهش false positive نادیده می‌گیریم.
+        if (/^[A-Z]/.test(name)) continue;
+        seen.add(name);
+        issues.push(`تابع «${name}(...)» فراخوانی شده ولی هیچ‌جای این فایل با function/const/let تعریف نشده - اگر این یک تابع سراسری شناخته‌شده یا import‌شده از جای دیگر نیست، احتمالاً یک اشتباه تایپی یا فراموشی تعریف تابع است.`);
+    }
+    return issues;
+}
+
+// FIX (مرحله ۲ - بررسی کد داخل بلوک‌های متنی، نه فقط فایل ویرایش‌شده):
+// وقتی مدل یک اسکریپت را مستقیم در متن پاسخ (```javascript ... ```)
+// می‌نویسد - نه با apply_edit روی یک فایل واقعی - verify_file اصلاً
+// درگیر نمی‌شود، پس همان دو باگ (TDZ/شناسه‌ی تعریف‌نشده) بی‌هیچ چکی به
+// کاربر می‌رسید. این تابع تمام بلوک‌های کد جاوااسکریپت داخل یک متن
+// مارک‌داون را استخراج و هرکدام را جدا با همان دو آنالیز چک می‌کند.
+function findCodeBlockIssues(markdownText) {
+    if (!markdownText || typeof markdownText !== 'string') return [];
+    const codeBlockRe = /```(javascript|js|jsx|node)\r?\n([\s\S]*?)```/gi;
+    const allIssues = [];
+    let m;
+    let blockIndex = 0;
+    while ((m = codeBlockRe.exec(markdownText))) {
+        blockIndex++;
+        const code = m[2];
+        if (!code || !code.trim()) continue;
+        let syntaxError = null;
+        try { new Function(code); } catch (error) { syntaxError = error?.message || String(error); }
+        if (syntaxError) {
+            allIssues.push(`بلوک کد شماره ${blockIndex}: سنتکس جاوااسکریپت نامعتبر است - ${syntaxError}`);
+            continue; // اگر سنتکس اصلاً نامعتبر است، آنالیز TDZ/شناسه روی آن بی‌معناست
+        }
+        const tdz = detectTemporalDeadZoneIssues(code);
+        const undeclared = detectUndeclaredIdentifiers(code);
+        [...tdz, ...undeclared].forEach(issue => allIssues.push(`بلوک کد شماره ${blockIndex}: ${issue}`));
+    }
+    return allIssues;
+}
+
 function validatePatchedContent(content, fileName) {
     const language = getFileLanguageFromName(fileName);
     if (language === 'javascript') {
         try {
             new Function(content);
-            return { valid: true };
         } catch (error) {
             return { valid: false, reason: `سنتکس جاوااسکریپت بعد از این تغییر نامعتبر می‌شود: ${error?.message || error}` };
         }
+        // FIX: سنتکس معتبر بودن به معنای درست اجرا شدن نیست - این دو چک
+        // اضافه، مشکلات رایج runtime (نه syntax) را قبل از تحویل به کاربر
+        // می‌گیرند. اینها warning هستند نه رد قطعی patch (چون false
+        // positive دارند)، برای همین بخشی از reason برمی‌گردند تا مدل خودش
+        // تصمیم بگیرد لازم است اصلاح کند یا نه، ولی valid:false هم می‌شود
+        // تا مدل مجبور به بازبینی آگاهانه شود، نه نادیده گرفتن ساکت.
+        const tdzIssues = detectTemporalDeadZoneIssues(content);
+        const undeclaredIssues = detectUndeclaredIdentifiers(content);
+        const allIssues = [...tdzIssues, ...undeclaredIssues];
+        if (allIssues.length > 0) {
+            return {
+                valid: false,
+                reason: `سنتکس معتبر است، ولی بررسی اولیه‌ی کد این نکته‌(ها) را پیدا کرد که ممکن است باعث خطای واقعی هنگام اجرا شوند (نه لزوماً قطعی - اگر بعد از بازخوانی مطمئن شدی که مشکلی نیست، می‌توانی توضیح بده و رد کن):\n- ${allIssues.slice(0, 5).join('\n- ')}`
+            };
+        }
+        return { valid: true };
     }
     if (language === 'html') {
         // FIX (باگ ریشه‌ای: </g> در وسط یک regex جاوااسکریپت مثل
@@ -3052,6 +3191,41 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         isRegex: true
                     }
                 });
+            }
+        }
+
+        // ENFORCEMENT (بررسی کد داخل متن پاسخ، قبل از تحویل نهایی): اگر
+        // مدل کد جاوااسکریپت را مستقیم در متن پاسخ نوشته (نه با
+        // apply_edit روی فایل)، هیچ verify_file ای برای آن اجرا نمی‌شود.
+        // مثل گیت‌های بالا (verify_file/find_in_file)، اینجا هم به‌جای
+        // اجازه دادن به پایان مستقیم، یک پیام سیستمی مصنوعی (نه یک ابزار
+        // واقعی - چون ابزاری برای «بازبینی متن» تعریف نکرده‌ایم) به مدل
+        // تزریق می‌شود تا خودش قبل از پاسخ نهایی، کدش را دوباره بخواند.
+        // فقط یک‌بار در کل درخواست فعال می‌شود (codeReviewProbed) که اگر
+        // مدل مشکل را واقعی نداند و توضیح بدهد، حلقه بی‌نهایت نشود.
+        if (
+            functionCalls.length === 0 &&
+            !disableTools &&
+            !sharedRequestState.codeReviewProbed
+        ) {
+            const currentText = textParts.join('');
+            const codeIssues = findCodeBlockIssues(currentText);
+            if (codeIssues.length > 0) {
+                sharedRequestState.codeReviewProbed = true;
+                log.info('agent.code_review_gate.forced', { issueCount: codeIssues.length, round });
+                // پیام کاربر ساختگی که مدل را وادار به یک دور دیگر می‌کند -
+                // متن فعلی (که مشکل دارد) به کاربر نمایش داده نمی‌شود، چون
+                // به‌جای return شدن، به round بعدی حلقه می‌رویم.
+                contents.push({ role: 'model', parts: [{ text: currentText }] });
+                contents.push({
+                    role: 'user',
+                    parts: [{
+                        text: `[بررسی خودکار قبل از تحویل] قبل از این‌که این پاسخ برای کاربر ارسال شود، کد داخل آن دوباره بررسی شد و این نکته(ها) پیدا شد که ممکن است باعث خطای واقعی هنگام اجرا شوند:\n- ${codeIssues.join('\n- ')}\n\nلطفاً کدت را دوباره با دقت بخوان. اگر واقعاً مشکلی هست، نسخه‌ی اصلاح‌شده را بنویس. اگر بعد از بازخوانی مطمئن شدی که این هشدار اشتباه بوده (false positive)، همان پاسخ قبلی را با اطمینان دوباره بده. در هر دو حالت، حین انجام این کار می‌توانی به کاربر بگویی که داری کدت را یک بار دیگر چک می‌کنی.`
+                    }]
+                });
+                // خالی کردن textParts این round تا متن دارای مشکل به finalText بیرون درز نکند
+                textParts.length = 0;
+                continue;
             }
         }
 
