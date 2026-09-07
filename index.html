@@ -8792,7 +8792,20 @@
     try { window.virtualPersona = upgradedPersona; } catch (_) {}
 
     function addMessageActions(wrapper, sender) {
-        if (!wrapper || wrapper.querySelector('.message-actions')) return;
+        if (!wrapper) return;
+        // FIX (dead copy/retry/rename-style buttons after reload/deploy):
+        // saved chat HTML (persisted via wrapper.innerHTML) captures the
+        // action buttons as markup, but .onclick is a JS property and is
+        // NEVER serialized into innerHTML. So a restored wrapper can
+        // already contain a `.message-actions` bar whose buttons look
+        // normal but have no click handler at all. The old guard here
+        // ("if it already exists, skip") treated that dead markup as
+        // "already wired" and left it dead forever - only brand-new
+        // messages (built fresh via appendMessage, never serialized)
+        // ever got real handlers. Always discard any existing bar and
+        // rebuild it fresh so handlers are (re)attached every time.
+        const existingBar = wrapper.querySelector('.message-actions');
+        if (existingBar) existingBar.remove();
         const msg = wrapper.querySelector('.message');
         if (!msg) return;
         const bar = document.createElement('div');
