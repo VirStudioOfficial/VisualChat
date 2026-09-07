@@ -5763,6 +5763,14 @@
                 if (!liveState.speaking) {
                     liveState.speaking = true;
                     liveState.speechStartTs = now;
+                    // Commit any transcript text still pending from the
+                    // PREVIOUS utterance before starting this new one - see
+                    // finalizeLiveUserTranscript's comment for why this
+                    // (our own VAD's speech-start edge), not the
+                    // transcribe model's own turn boundary, is what
+                    // decides where one user bubble ends and the next
+                    // begins.
+                    finalizeLiveUserTranscript();
                     sendRealtimeInput({ activityStart: {} });
                     // Flush the pre-roll (the frames right before this one,
                     // which is where the actual word onset lives) so it
@@ -6000,7 +6008,10 @@
         if (liveState.micProcessorNode) playCallToneEffect('disconnect');
         // Commit any still-in-progress transcript text (call hung up
         // mid-sentence) rather than silently dropping it - it's still a
-        // real part of the conversation that happened.
+        // real part of the conversation that happened. Both sides now
+        // have independent boundaries/finalizers (see
+        // finalizeLiveUserTranscript's comment), so both need calling here.
+        try { finalizeLiveUserTranscript(); } catch (_) {}
         try { finalizeLiveTranscriptTurn(); } catch (_) {}
         liveState.closing = true;
 
@@ -7124,6 +7135,40 @@
     // it appear once the whole sentence is done. Uses appendMessage's same
     // 'user'/'bot' classes so it looks identical to a normal typed
     // message; 'model' role here maps to the 'bot' CSS class.
+    // Finalizes ONLY the user-side transcript bubble into permanent chat
+    // history. Split out from finalizeLiveTranscriptTurn (which still
+    // handles the model side) because the two sides no longer share a turn
+    // boundary: the model side is finalized on the conversational
+    // connection's turnComplete, but the user side comes from the fully
+    // separate transcribe connection, which has its own internal turn
+    // segmentation that doesn't line up with ours. Relying on turnComplete
+    // for the user side too was causing two symptoms: text from a new
+    // utterance getting appended onto the previous bubble (transcribe
+    // model hadn't closed its own turn yet when we started talking again),
+    // and, less often, a short utterance being dropped entirely (its text
+    // arrived, got appended to pendingUserText, but the next turnComplete
+    // fired before upsertLiveTranscriptBubble's next paint, then got wiped
+    // by the following turn's reset). Finalizing here instead - the exact
+    // moment OUR OWN VAD (see beginMicStreaming) detects a new utterance
+    // starting - uses a boundary we actually control, so each utterance
+    // reliably becomes its own bubble regardless of the transcribe model's
+    // own timing.
+    function finalizeLiveUserTranscript() {
+        if (!liveState) return;
+        const userText = (liveState.pendingUserText || '').trim();
+        if (userText) {
+            chatHistoryData[currentChatId] = chatHistoryData[currentChatId] || [];
+            chatHistoryData[currentChatId].push({ role: 'user', text: userText });
+            try { saveCurrentChat(); } catch (_) {}
+        }
+        if (liveState.userBubbleEl) {
+            const w = liveState.userBubbleEl.closest('.live-transcript-bubble');
+            if (w) w.classList.remove('live-transcript-bubble');
+        }
+        liveState.pendingUserText = '';
+        liveState.userBubbleEl = null;
+    }
+
     function upsertLiveTranscriptBubble(role, text) {
         if (!liveState) return;
         const cssClass = role === 'user' ? 'user' : 'bot';
@@ -7143,40 +7188,30 @@
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // Commits whatever text accumulated on each side this turn into
-    // permanent chat history (so it survives reload/switching chats, same
-    // as a typed message) and clears the accumulators + bubble refs so
-    // the next turn starts a fresh bubble instead of appending onto the
-    // old one.
+    // Commits the model's accumulated text this turn into permanent chat
+    // history (so it survives reload/switching chats, same as a typed
+    // message) and clears its accumulator + bubble ref so the next turn
+    // starts a fresh bubble instead of appending onto the old one.
+    //
+    // NOTE: this handles the MODEL side only now. The user side has its
+    // own boundary and its own finalize function - see
+    // finalizeLiveUserTranscript above and the comment there for why.
     function finalizeLiveTranscriptTurn() {
         if (!liveState) return;
-        const userText = (liveState.pendingUserText || '').trim();
         const modelText = (liveState.pendingModelText || '').trim();
-        if (userText) {
-            chatHistoryData[currentChatId] = chatHistoryData[currentChatId] || [];
-            chatHistoryData[currentChatId].push({ role: 'user', text: userText });
-        }
         if (modelText) {
             chatHistoryData[currentChatId] = chatHistoryData[currentChatId] || [];
             chatHistoryData[currentChatId].push({ role: 'model', text: modelText });
-        }
-        if (userText || modelText) {
             try { saveCurrentChat(); } catch (_) {}
         }
-        // Stop the "still streaming" pulse animation on whatever bubbles
-        // this turn used - they're finalized now, so they should sit
-        // still like any other completed chat message.
-        if (liveState.userBubbleEl) {
-            const w = liveState.userBubbleEl.closest('.live-transcript-bubble');
-            if (w) w.classList.remove('live-transcript-bubble');
-        }
+        // Stop the "still streaming" pulse animation on the model bubble -
+        // it's finalized now, so it should sit still like any other
+        // completed chat message.
         if (liveState.modelBubbleEl) {
             const w = liveState.modelBubbleEl.closest('.live-transcript-bubble');
             if (w) w.classList.remove('live-transcript-bubble');
         }
-        liveState.pendingUserText = '';
         liveState.pendingModelText = '';
-        liveState.userBubbleEl = null;
         liveState.modelBubbleEl = null;
     }
 
