@@ -4398,6 +4398,14 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
         | پاسخ B، یک دستورالعمل اضافه‌ی کوتاه‌تر/مستقیم‌تر بودن روی همان
         | systemText گذاشته می‌شود.
         */
+        // DEBUG (موقت - برای پیدا کردن اینکه چرا dual-response فعال نمی‌شود):
+        // مقدار دقیق و type فیلد dualResponseMode که از کلاینت رسیده را لاگ
+        // می‌کنیم، صرف‌نظر از اینکه true باشد یا نه - بعد از رفع مشکل قابل حذف است.
+        log.info('dual_response.flag_received', {
+            value: req.body?.dualResponseMode,
+            type: typeof req.body?.dualResponseMode
+        });
+
         if (req.body?.dualResponseMode === true) {
             try {
                 const systemTextA = systemText;
