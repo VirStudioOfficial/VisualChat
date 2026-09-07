@@ -2478,11 +2478,53 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 }
                 return { file: state.name, totalLines: state.content.split(/\r?\n/).length, content: state.content };
             });
-            systemText += `\n\n[محتوای کامل فایل(های) - این محتوای واقعی فعلی است]\n${JSON.stringify(fileDumps, null, 2)}\n\n`;
+            // FIX (کوتای ورودی روی فایل‌های بزرگ): تزریق کامل محتوای فایل
+            // توی systemText یعنی هر تک تلاش (attempt) - حتی هر retry روی
+            // کلید بعدی وقتی کلید قبلی به rate-limit خورده - کل فایل را
+            // دوباره به‌عنوان ورودی می‌فرستد. روی فایل ۶ تا ۹ هزار خطی
+            // این به‌تنهایی می‌تواند سقف دقیقه‌ای ورودی توکن را رد کند،
+            // حتی بدون هیچ retry اضافه‌ای. آستانه‌ای گذاشته شده: فایل‌های
+            // زیر آن مثل قبل کامل تزریق می‌شوند (تغییری در تجربه‌ی
+            // فایل‌های کوچک نیست)، اما فایل‌های بزرگ‌تر فقط با یک outline
+            // سبک (خطوط اول + تعداد کل خطوط) معرفی می‌شوند و مدل موظف
+            // می‌شود قبل از apply_edit، با find_in_file/read_file_section
+            // فقط همان بخشی را که واقعاً برای این درخواست لازم دارد
+            // بخواند - نه کل فایل را. find_in_file/read_file_section از
+            // قبل روی state.content (نسخه‌ی کامل در حافظه‌ی سرور، نه چیزی
+            // که به مدل فرستاده می‌شود) کار می‌کنند، پس این تغییر هیچ
+            // قابلیتی را از دست نمی‌دهد - فقط چیزی که در ابتدا به‌عنوان
+            // ورودی فرستاده می‌شود را کوچک‌تر می‌کند.
+            const LARGE_FILE_LINE_THRESHOLD = 400;
+            const OUTLINE_PREVIEW_LINES = 60;
+            const largeFileDumps = [];
+            const normalFileDumps = [];
+            fileDumps.forEach(fd => {
+                if (fd.totalLines > LARGE_FILE_LINE_THRESHOLD) {
+                    const previewLines = fd.content.split(/\r?\n/).slice(0, OUTLINE_PREVIEW_LINES).join('\n');
+                    largeFileDumps.push({
+                        file: fd.file,
+                        totalLines: fd.totalLines,
+                        preview: previewLines
+                    });
+                } else {
+                    normalFileDumps.push(fd);
+                }
+            });
+
+            if (normalFileDumps.length > 0) {
+                systemText += `\n\n[محتوای کامل فایل(های) کوچک - این محتوای واقعی فعلی است]\n${JSON.stringify(normalFileDumps, null, 2)}\n\n`;
+            }
+            if (largeFileDumps.length > 0) {
+                systemText += `\n\n[فایل(های) بزرگ - فقط ${OUTLINE_PREVIEW_LINES} خط اول برای آشنایی با ساختار نشان داده شده، نه کل فایل]\n${JSON.stringify(largeFileDumps, null, 2)}\n\n` +
+                    'این فایل(ها) بزرگ هستند و کل محتوایشان اینجا فرستاده نشده تا مصرف توکن کنترل شود. قبل از هر apply_edit روی این فایل‌ها:\n' +
+                    '۱. اول find_in_file را با یک عبارت/regex مرتبط با درخواست کاربر (مثلاً اسم رنگ، نام متغیر، متن ظاهری) صدا بزن تا خط(های) دقیق مربوطه را با شماره خط پیدا کنی.\n' +
+                    '۲. اگر برای نوشتن search دقیق apply_edit به دیدن چند خط اطراف نیاز داری، read_file_section را با startLine/endLine (از نتیجه‌ی find_in_file) صدا بزن.\n' +
+                    '۳. هرگز حدس نزن محتوای دقیق یک خط را - همیشه از نتیجه‌ی find_in_file/read_file_section کپی کن.\n\n';
+            }
             if (fileEditIntent) {
                 systemText +=
                     'قوانین ویرایش فایل:\n' +
-                    '۱. برای تغییر، apply_edit را با search (متن دقیق موجود در محتوای بالا) و replace (متن جدید) صدا بزن. search باید چند خط اطراف تغییر را هم شامل شود تا در کل فایل یکتا باشد.\n' +
+                    '۱. برای تغییر، apply_edit را با search (متن دقیق موجود در محتوای بالا، یا در نتیجه‌ی find_in_file/read_file_section برای فایل‌های بزرگ) و replace (متن جدید) صدا بزن. search باید چند خط اطراف تغییر را هم شامل شود تا در کل فایل یکتا باشد.\n' +
                     '۲. هر apply_edit موفق خودش نتیجه‌ی اعتبارسنجی فایل کامل را در فیلد valid برمی‌گرداند. اگر آخرین تغییر لازم را زدی و valid:true گرفتی، مستقیم می‌توانی پاسخ نهایی را بدهی - نیازی به verify_file جداگانه نیست مگر بخواهی بدون تغییر جدید یک بار دیگر وضعیت فعلی را چک کنی.\n' +
                     '۳. اگر apply_edit به دلیل «پیدا نشدن» یا «ابهام» رد شد، از context هایی که در پاسخ خطا برمی‌گردد استفاده کن تا search را دقیق‌تر و یکتا کنی، سپس دوباره صدا بزن.\n' +
                     '۴. اگر فایل خیلی بزرگ است و برای نوشتن search دقیق نیاز به دیدن دوباره‌ی یک بخش خاص داری (نه محتوای بالا که ممکن است کوتاه‌شده باشد)، از read_file_section استفاده کن.\n' +
@@ -2491,7 +2533,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             log.info('file.edit_state.mapped', {
                 files: fileDumps.length,
                 names: fileDumps.map(x => x.file),
-                totalLines: fileDumps.map(x => x.totalLines)
+                totalLines: fileDumps.map(x => x.totalLines),
+                largeFiles: largeFileDumps.map(x => x.file)
             });
         } catch (error) {
             log.warn('file.edit_state.mapping_failed', {
