@@ -1783,7 +1783,11 @@ const GEMINI_TOOLS = [
                     'نتیجه‌ی اول ناقص بود یا سؤال چند بخش جدا دارد دوباره صدا بزن.\n' +
                     'زبان query: برای موضوعات جهانی/فنی/علمی/خارجی، انگلیسی بنویس (نتیجه را در پاسخ نهایی ' +
                     'به فارسی خلاصه کن). برای موضوعات مختص ایران (قیمت ارز داخلی، اخبار/قوانین ایران، ' +
-                    'ورزش و سلبریتی‌های ایرانی)، فارسی بنویس.',
+                    'ورزش و سلبریتی‌های ایرانی)، فارسی بنویس.\n' +
+                    'مهم: اگر کاربر خودش یک آدرس (URL) مشخص با http:// یا https:// داده و خواسته آن ' +
+                    'صفحه‌ی خاص خوانده/بررسی/خلاصه شود، این ابزار را صدا نزن - به‌جای آن read_url را با ' +
+                    'همان آدرس صدا بزن. web_search برای جستجوی یک موضوع در کل وب است، نه برای باز کردن ' +
+                    'یک لینک مشخص؛ دادن خودِ URL به‌عنوان query معمولاً نتیجه‌ی مفیدی برنمی‌گرداند.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1811,11 +1815,15 @@ const GEMINI_TOOLS = [
                 name: 'read_url',
                 description:
                     'محتوای متنی یک صفحه‌ی وب را از روی آدرس (URL) که کاربر داده می‌خواند و استخراج می‌کند. ' +
-                    'فقط زمانی صدا بزن که کاربر خودش یک لینک http/https مشخص در پیامش داده و از تو ' +
-                    'خواسته آن را بخوانی، خلاصه کنی، یا بر اساس محتوایش پاسخ بدهی - هرگز یک URL را ' +
-                    'حدس نزن یا خودت نساز. این ابزار برای جستجوی یک موضوع کلی در وب مناسب نیست (برای ' +
-                    'آن web_search را صدا بزن)؛ این ابزار فقط همان صفحه‌ی مشخصی را که کاربر لینکش را ' +
-                    'داده می‌خواند. اگر صفحه طولانی بود، فقط بخش ابتدایی متن اصلی برگردانده می‌شود.',
+                    'قانون ساده: اگر پیام کاربر شامل یک لینک http:// یا https:// است و از تو خواسته آن را ' +
+                    'بخوانی/بررسی کنی/بگویی چه چیزی رویش هست/خلاصه کنی (مثلاً «این لینک رو می‌تونی ' +
+                    'بخونی؟»، «این سایت رو چک کن»، «این صفحه چی میگه؟»)، همیشه این ابزار را با همان آدرس ' +
+                    'دقیق صدا بزن - حتی اگر مطمئن نیستی صفحه در دسترس است یا نه؛ خودِ ابزار این را ' +
+                    'بررسی و گزارش می‌کند. هرگز به‌جای این ابزار از web_search با خودِ URL به‌عنوان query ' +
+                    'استفاده نکن (نتیجه‌ی جستجوی وب برای یک آدرس خاص معمولاً بی‌ربط یا ناقص است، چون ' +
+                    'دارد در موردش جستجو می‌کند نه این‌که خودش را باز کند). هرگز یک URL را حدس نزن یا ' +
+                    'خودت نساز - فقط همان آدرسی که کاربر عیناً نوشته. اگر صفحه طولانی بود، فقط بخش ' +
+                    'ابتدایی متن اصلی برگردانده می‌شود.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -2526,6 +2534,36 @@ async function executeToolCall(name, args, ctx) {
     if (name === 'web_search') {
         const query = (args && args.query) || '';
         if (!query) return { error: 'query خالی بود.' };
+
+        // FIX (model calls web_search with a raw URL as the query instead
+        // of using read_url): searching Tavily FOR a specific URL string
+        // returns whatever pages happen to mention that URL/domain (often
+        // nothing relevant for a fresh, unindexed site) - not the actual
+        // page content. The model is instructed to use read_url instead,
+        // but that's a judgment call it can get wrong. This is a hard
+        // technical backstop: if the query is (essentially) just a URL,
+        // silently redirect to the real page-reading path instead of
+        // running a doomed-to-be-useless search that invites the model to
+        // hallucinate an answer from thin/irrelevant search results.
+        const trimmedQuery = query.trim();
+        const isBareUrl = /^https?:\/\/\S+$/i.test(trimmedQuery) && !/\s/.test(trimmedQuery);
+        if (isBareUrl) {
+            log.info('agent.tool.web_search.redirected_to_read_url', { url: trimmedQuery.slice(0, 200) });
+            const extracted = await fetchAndExtractUrl(trimmedQuery);
+            if (!extracted.ok) {
+                return {
+                    result: `[خواندن مستقیم این لینک ناموفق بود | ${extracted.code}] ${extracted.message}`,
+                    searchError: { code: extracted.code, status: extracted.status ?? null, retryable: false }
+                };
+            }
+            const pageText = extracted.truncated
+                ? extracted.text + '\n\n[... متن طولانی بود و کوتاه شد ...]'
+                : extracted.text;
+            return {
+                result: `[این نتیجه از خواندن مستقیم صفحه است، نه جستجوی وب]\nعنوان صفحه: ${extracted.title || 'نامشخص'}\n\n${pageText}`,
+                searchError: null
+            };
+        }
 
         log.info('agent.tool.web_search', { queryPreview: query.slice(0, 100) });
 
