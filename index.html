@@ -4654,7 +4654,11 @@
     function isMobileDevice() {
         const ua = navigator.userAgent || navigator.vendor || '';
         const isMobileUA = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua);
-        console.log('[attach-menu] isMobileDevice check | UA:', ua, '| isMobileUA:', isMobileUA);
+        // DIAGNOSTIC (موقت - بعد از رفع مشکل حذف شود): از alert() استفاده
+        // می‌کنیم چون یک پنجره‌ی وسط‌صفحه است که تا خودت OK نزنی نمی‌رود -
+        // برخلاف toast که ممکن است سریع محو شود یا کلاً دیده نشود، این را
+        // با هیچ دستگاهی (حتی بدون کنسول/USB debugging) نمی‌شود از دست داد.
+        alert('[تشخیص موبایل]\nUA: ' + ua + '\nisMobileUA: ' + isMobileUA);
         return isMobileUA;
     }
 
