@@ -6868,19 +6868,46 @@
         let lastRevealTs = 0;
         let catchUpOnVisible = () => {};
 
-        // FEATURE (dual-response A/B mode - مرحله ۱): هر N پیام کاربر یک‌بار
-        // پرچم dualResponseMode به بک‌اند فرستاده می‌شود تا (در مرحله‌ی بعدی)
-        // دو پاسخ موازی تولید و برای انتخاب کاربر نمایش داده شود. فعلاً فقط
-        // شمارش و ارسال پرچم است؛ بک‌اند و UI انتخاب در مراحل بعدی اضافه می‌شوند.
-        // در حالت تست فعلاً روی هر ۵ پیام تنظیم شده - برای پروداکشن به ۵۰ برگردانید.
-        const DUAL_RESPONSE_INTERVAL = 5; // TODO: برای پروداکشن تغییر بده به 50
+        // FEATURE (dual-response A/B mode - مرحله ۱): ترکیب دو محدودیت برای
+        // تصمیم اینکه آیا این پیام باید dualResponseMode باشد یا نه:
+        //   ۱) فاصله‌ی تصادفی (نه ثابت) بین DUAL_RESPONSE_MIN_GAP و
+        //      DUAL_RESPONSE_MAX_GAP پیام - هر بار که فعال شد، فاصله‌ی
+        //      بعدی دوباره تصادفی انتخاب می‌شود، پس کاربر نمی‌تواند الگوی
+        //      دقیق را حدس بزند.
+        //   ۲) سقف کلی DUAL_RESPONSE_LIFETIME_CAP بار برای کل عمر یک کاربر
+        //      (نه در روز/هفته) - بعد از رسیدن به این سقف، دیگر هرگز به
+        //      این کاربر نمایش داده نمی‌شود، حتی اگر هزاران پیام دیگر هم
+        //      بفرستد؛ این از خسته‌شدن کاربرهای قدیمی/پرمصرف جلوگیری می‌کند.
+        // FIX (شمارش ثابت «هر N پیام» قابل‌پیش‌بینی بود، و احتمال ثابت هم
+        // نامحدود روی کاربرهای پرمصرف تکرار می‌شد): جایگزین هر دوی این‌ها.
+        const DUAL_RESPONSE_MIN_GAP = 40;
+        const DUAL_RESPONSE_MAX_GAP = 70;
+        const DUAL_RESPONSE_LIFETIME_CAP = 10;
         const dualResponseMode = (() => {
             try {
-                if (isRetry) return false; // روی retry دوباره نشمار
+                if (isRetry) return false; // روی retry دوباره حساب نکن
+
+                const lifetimeShown = parseInt(localStorage.getItem('vc_dual_lifetime_shown') || '0', 10) || 0;
+                if (lifetimeShown >= DUAL_RESPONSE_LIFETIME_CAP) return false; // سقف کلی رد شده
+
                 const newCount = (parseInt(localStorage.getItem('vc_msg_count') || '0', 10) || 0) + 1;
                 localStorage.setItem('vc_msg_count', String(newCount));
-                const triggered = newCount % DUAL_RESPONSE_INTERVAL === 0;
-                if (triggered) console.log('🔀 dualResponseMode فعال شد - پیام شماره', newCount);
+
+                let nextTarget = parseInt(localStorage.getItem('vc_dual_next_target') || '0', 10) || 0;
+                if (nextTarget <= 0) {
+                    // اولین بار - یک هدف تصادفی بین min/max برای شروع تعیین کن.
+                    nextTarget = DUAL_RESPONSE_MIN_GAP + Math.floor(Math.random() * (DUAL_RESPONSE_MAX_GAP - DUAL_RESPONSE_MIN_GAP + 1));
+                    localStorage.setItem('vc_dual_next_target', String(nextTarget));
+                }
+
+                const triggered = newCount >= nextTarget;
+                if (triggered) {
+                    localStorage.setItem('vc_dual_lifetime_shown', String(lifetimeShown + 1));
+                    // فاصله‌ی بعدی را از همین نقطه دوباره تصادفی تعیین کن.
+                    const newTarget = newCount + DUAL_RESPONSE_MIN_GAP + Math.floor(Math.random() * (DUAL_RESPONSE_MAX_GAP - DUAL_RESPONSE_MIN_GAP + 1));
+                    localStorage.setItem('vc_dual_next_target', String(newTarget));
+                    console.log('🔀 dualResponseMode فعال شد - پیام شماره', newCount, '| نمایش', lifetimeShown + 1, 'از', DUAL_RESPONSE_LIFETIME_CAP, '| هدف بعدی: پیام', newTarget);
+                }
                 return triggered;
             } catch (_) { return false; }
         })();
