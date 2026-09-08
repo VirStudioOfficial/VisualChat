@@ -1042,6 +1042,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
+            position: relative;
         }
 
         /* REDESIGN (چیدمان جمع‌وجورتر نوار ورودی): ترتیب بصری در RTL از
@@ -2011,7 +2012,7 @@
    داده می‌شود (تشخیص بر اساس User-Agent + پشتیبانی لمس در isMobileDevice،
    نه عرض صفحه)؛ در دسکتاپ دکمه‌ی + دقیقاً مثل قبل مستقیم پیکر فایل عمومی
    را باز می‌کند. */
-.attach-menu{display:none;position:absolute;bottom:calc(100% + 8px);left:15px;width:240px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:21}
+.attach-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:0;width:240px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:21}
 .attach-menu.active{display:block}
 .attach-menu-item{padding:10px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:.85rem}
 .attach-menu-item:hover{background:var(--bg-card-hover)}
@@ -2445,19 +2446,17 @@
                 <input type="file" id="fileInput" hidden multiple onchange="handleFileSelect(event)">
                 <input type="file" id="imageInput" hidden multiple accept="image/*" onchange="handleFileSelect(event)">
                 <input type="file" id="videoInput" hidden multiple accept="video/*" onchange="handleFileSelect(event)">
-                <div style="position:relative;">
-                    <div class="attach-menu" id="attachMenu">
-                        <div class="attach-menu-item" onclick="attachMenuPick('file')"><i class="ph ph-file" data-lucide="file"></i> آپلود فایل</div>
-                        <div class="attach-menu-item" onclick="attachMenuPick('image')"><i class="ph ph-image" data-lucide="image"></i> آپلود تصویر</div>
-                        <div class="attach-menu-item" onclick="attachMenuPick('video')"><i class="ph ph-video" data-lucide="video"></i> آپلود ویدیو</div>
-                        <div class="attach-menu-recent" id="attachMenuRecent">
-                            <div class="attach-menu-recent-label">تصاویر اخیر</div>
-                        </div>
+                <div class="attach-menu" id="attachMenu">
+                    <div class="attach-menu-item" onclick="attachMenuPick('file')"><i class="ph ph-file" data-lucide="file"></i> آپلود فایل</div>
+                    <div class="attach-menu-item" onclick="attachMenuPick('image')"><i class="ph ph-image" data-lucide="image"></i> آپلود تصویر</div>
+                    <div class="attach-menu-item" onclick="attachMenuPick('video')"><i class="ph ph-video" data-lucide="video"></i> آپلود ویدیو</div>
+                    <div class="attach-menu-recent" id="attachMenuRecent">
+                        <div class="attach-menu-recent-label">تصاویر اخیر</div>
                     </div>
-                    <button class="icon-btn" id="attachBtn" onclick="handleAttachBtnClick()" title="افزودن فایل">
-                        <i class="ph ph-plus" data-lucide="plus"></i>
-                    </button>
                 </div>
+                <button class="icon-btn" id="attachBtn" onclick="handleAttachBtnClick()" title="افزودن فایل">
+                    <i class="ph ph-plus" data-lucide="plus"></i>
+                </button>
 
                 <div class="think-btn-wrap" id="thinkModeBtn">
                     <button class="think-btn" id="thinkToggleBtn" type="button" onclick="toggleThinkPanel(event)" title="حالت تفکر">
