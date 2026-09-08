@@ -515,6 +515,7 @@ function keyLabel(keys, key) {
 const MAX_HISTORY_TURNS = 30;       // most recent user+model turns kept verbatim (~15 user messages, since each user turn has a matching model turn)
 const MAX_HISTORY_CHARS = 30000;    // rough safety cap on total history text size
 const MAX_SEARCH_RESULT_CHARS = 12000; // safety cap on a single web_search result injected into context
+const MAX_URL_CONTENT_CHARS = 15000; // safety cap on extracted page text injected into context per read_url call
 
 function summarizeOldTurns(oldTurns) {
     if (!oldTurns.length) return null;
@@ -674,6 +675,163 @@ ${String(botText || '').slice(0, 500)}
 
     log.warn('chat.title_generation_fallback', { reason: 'title unavailable' });
     return fallback;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Read URL (read_url tool)
+|--------------------------------------------------------------------------
+*/
+
+// FIX (SSRF safety): read_url lets the model fetch any URL the user gives
+// it, from OUR server. Without a check here, a crafted/malicious URL could
+// be used to make our server hit internal/private network addresses
+// (cloud metadata endpoints, localhost, internal services) that are not
+// reachable from the outside otherwise. This is a best-effort hostname
+// check (not a full defense against DNS rebinding), but it blocks the
+// obvious cases and only allows plain http/https to public-looking hosts.
+function isUrlSafeToFetch(urlString) {
+    let parsed;
+    try {
+        parsed = new URL(urlString);
+    } catch (_) {
+        return { safe: false, reason: 'آدرس نامعتبر است.' };
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { safe: false, reason: 'فقط آدرس‌های http یا https پشتیبانی می‌شوند.' };
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    const blockedHosts = new Set(['localhost', '0.0.0.0', '::1']);
+    if (blockedHosts.has(hostname)) {
+        return { safe: false, reason: 'دسترسی به این آدرس مجاز نیست.' };
+    }
+    // Block loopback / private / link-local IPv4 ranges and raw IPv6
+    // loopback/private-ish ranges, plus common cloud metadata IP.
+    const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+        const [a, b] = [parseInt(ipv4[1], 10), parseInt(ipv4[2], 10)];
+        const isPrivate =
+            a === 127 ||                       // loopback
+            a === 10 ||                        // 10.0.0.0/8
+            (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+            (a === 192 && b === 168) ||         // 192.168.0.0/16
+            (a === 169 && b === 254);           // link-local / cloud metadata
+        if (isPrivate) {
+            return { safe: false, reason: 'دسترسی به این آدرس مجاز نیست.' };
+        }
+    }
+    if (hostname.endsWith('.internal') || hostname.endsWith('.local')) {
+        return { safe: false, reason: 'دسترسی به این آدرس مجاز نیست.' };
+    }
+    return { safe: true, url: parsed };
+}
+
+// Dependency-free HTML -> plain text extraction. Good enough for reading
+// articles/blog posts/docs pages; not a full readability/DOM parser, but
+// this project has no HTML-parsing dependency installed and pulling one
+// in for a single feature isn't worth it. Strategy: drop non-content tags
+// entirely (script/style/nav/header/footer/svg), then strip remaining
+// tags, unescape common HTML entities, and collapse whitespace.
+function extractTextFromHtml(html) {
+    let text = String(html || '');
+
+    // Drop tags whose content is never real page content.
+    text = text.replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe|title)\b[\s\S]*?<\/\1>/gi, ' ');
+    // Turn common block-level boundaries into line breaks before stripping
+    // tags, so the extracted text isn't one giant run-on paragraph.
+    text = text.replace(/<\/(p|div|section|article|li|h[1-6]|br|tr|blockquote)\b[^>]*>/gi, '\n');
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    // Strip all remaining tags.
+    text = text.replace(/<[^>]+>/g, ' ');
+    // Unescape the handful of entities that actually show up in body text.
+    const entities = {
+        '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>',
+        '&quot;': '"', '&#39;': "'", '&apos;': "'", '&mdash;': '—', '&ndash;': '–'
+    };
+    text = text.replace(/&(nbsp|amp|lt|gt|quot|#39|apos|mdash|ndash);/g, m => entities[m] || m);
+    text = text.replace(/&#(\d+);/g, (_, code) => {
+        try { return String.fromCodePoint(parseInt(code, 10)); } catch (_) { return ''; }
+    });
+    // Collapse excess whitespace left over from tag stripping.
+    text = text.replace(/[ \t]+/g, ' ').replace(/\n[ \t]*\n[ \t]*\n+/g, '\n\n').trim();
+    return text;
+}
+
+function extractTitleFromHtml(html) {
+    const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(String(html || ''));
+    return match ? extractTextFromHtml(match[1]).trim() : '';
+}
+
+async function fetchAndExtractUrl(urlString) {
+    const check = isUrlSafeToFetch(urlString);
+    if (!check.safe) {
+        return { ok: false, code: 'url_blocked', message: check.reason };
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    let response;
+    try {
+        try {
+            response = await fetch(check.url.toString(), {
+                method: 'GET',
+                redirect: 'follow',
+                signal: controller.signal,
+                headers: {
+                    // A plain default fetch UA gets blocked by some sites'
+                    // bot filters even for perfectly legitimate reads.
+                    'User-Agent': 'Mozilla/5.0 (compatible; VirtualChatBot/1.0; +read_url tool)'
+                }
+            });
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    } catch (error) {
+        if (error?.name === 'AbortError') {
+            return { ok: false, code: 'url_timeout', message: 'دریافت صفحه بیش از حد طول کشید.' };
+        }
+        return { ok: false, code: 'url_fetch_failed', message: `دریافت صفحه ناموفق بود: ${error?.message || error}` };
+    }
+
+    if (!response.ok) {
+        return {
+            ok: false,
+            code: 'url_http_error',
+            status: response.status,
+            message: `صفحه با خطای HTTP ${response.status} پاسخ داد.`
+        };
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!/text\/html|application\/xhtml\+xml|text\/plain/i.test(contentType)) {
+        return {
+            ok: false,
+            code: 'url_unsupported_content_type',
+            message: `نوع محتوای این صفحه (${contentType || 'نامشخص'}) قابل استخراج متن نیست (فقط صفحات HTML/متنی پشتیبانی می‌شوند).`
+        };
+    }
+
+    let html;
+    try {
+        html = await response.text();
+    } catch (error) {
+        return { ok: false, code: 'url_read_failed', message: `خواندن محتوای صفحه ناموفق بود: ${error?.message || error}` };
+    }
+
+    const title = extractTitleFromHtml(html);
+    let text = /text\/plain/i.test(contentType) ? html : extractTextFromHtml(html);
+
+    if (!text.trim()) {
+        return { ok: false, code: 'url_empty_content', message: 'متنی از این صفحه استخراج نشد (ممکن است محتوای آن کاملاً با جاوااسکریپت ساخته شود).' };
+    }
+
+    let truncated = false;
+    if (text.length > MAX_URL_CONTENT_CHARS) {
+        text = text.slice(0, MAX_URL_CONTENT_CHARS);
+        truncated = true;
+    }
+
+    return { ok: true, title, text, truncated, finalUrl: response.url || check.url.toString() };
 }
 
 /*
@@ -1642,6 +1800,34 @@ const GEMINI_TOOLS = [
                 }
             },
             {
+                // FEATURE (read a link the user gave): distinct from
+                // web_search - the user has already picked a specific
+                // URL and wants its actual page content read/summarized/
+                // used, not a fresh web search. Only call this when the
+                // user's message contains (or clearly refers to) a
+                // specific http(s) link they want read - never invent a
+                // URL, and never call this for a general topic search
+                // (use web_search for that instead).
+                name: 'read_url',
+                description:
+                    'محتوای متنی یک صفحه‌ی وب را از روی آدرس (URL) که کاربر داده می‌خواند و استخراج می‌کند. ' +
+                    'فقط زمانی صدا بزن که کاربر خودش یک لینک http/https مشخص در پیامش داده و از تو ' +
+                    'خواسته آن را بخوانی، خلاصه کنی، یا بر اساس محتوایش پاسخ بدهی - هرگز یک URL را ' +
+                    'حدس نزن یا خودت نساز. این ابزار برای جستجوی یک موضوع کلی در وب مناسب نیست (برای ' +
+                    'آن web_search را صدا بزن)؛ این ابزار فقط همان صفحه‌ی مشخصی را که کاربر لینکش را ' +
+                    'داده می‌خواند. اگر صفحه طولانی بود، فقط بخش ابتدایی متن اصلی برگردانده می‌شود.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        url: {
+                            type: 'string',
+                            description: 'آدرس کامل صفحه‌ای که کاربر داده (باید با http:// یا https:// شروع شود).'
+                        }
+                    },
+                    required: ['url']
+                }
+            },
+            {
                 // FEATURE (persistent file memory): the client keeps a
                 // permanent per-chat archive of every text/code file ever
                 // sent (in IndexedDB, well past the single "current message"
@@ -1839,6 +2025,9 @@ const GEMINI_TOOLS_NO_SEARCH = [
 function describeToolCall(name, args) {
     if (name === 'web_search') {
         return (args && args.reason) || `دارم درباره‌ی «${(args && args.query) || ''}» توی وب سرچ می‌کنم...`;
+    }
+    if (name === 'read_url') {
+        return `در حال خواندن محتوای لینک...`;
     }
     if (name === 'ask_user') {
         return 'قبل از ادامه، یه سؤال دارم...';
@@ -2362,6 +2551,32 @@ async function executeToolCall(name, args, ctx) {
         return {
             result: search.result,
             searchError: null
+        };
+    }
+
+    if (name === 'read_url') {
+        const url = (args && args.url) || '';
+        if (!url) return { error: 'آدرس (url) خالی بود.' };
+
+        log.info('agent.tool.read_url', { urlPreview: String(url).slice(0, 200) });
+
+        const extracted = await fetchAndExtractUrl(url);
+
+        if (!extracted.ok) {
+            log.warn('agent.tool.read_url.failed', { url: String(url).slice(0, 200), code: extracted.code, status: extracted.status || null });
+            return {
+                error: `[خواندن لینک ناموفق بود | ${extracted.code}] ${extracted.message}`
+            };
+        }
+
+        return {
+            title: extracted.title || null,
+            url: extracted.finalUrl,
+            content: extracted.text,
+            truncated: extracted.truncated,
+            note: extracted.truncated
+                ? 'متن این صفحه طولانی بود؛ فقط بخش ابتدایی آن در بالا آمده است.'
+                : undefined
         };
     }
 
