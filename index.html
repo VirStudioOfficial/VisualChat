@@ -2007,6 +2007,19 @@
 .chat-search.active{display:block}.chat-search-row{display:flex;align-items:center;gap:8px}.chat-search input{flex:1;color:var(--text-main);padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:10px;font-family:inherit}.chat-search-count{font-size:.72rem;color:var(--text-muted);white-space:nowrap}
 .message.search-hit{box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent),0 0 28px color-mix(in srgb, var(--accent-2) 12%, transparent)}
 .command-menu{display:none;position:absolute;bottom:calc(100% + 8px);right:15px;left:15px;max-width:520px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:20}.command-menu.active{display:block}.command-item{padding:9px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem}.command-item:hover{background:var(--bg-card-hover)}.command-item span:last-child{color:var(--text-muted);font-size:.72rem}
+/* FEATURE (منوی افزودن فایل موبایل): فقط زیر 768px نمایش داده می‌شود؛ در
+   دسکتاپ دکمه‌ی + دقیقاً مثل قبل مستقیم پیکر فایل عمومی را باز می‌کند. */
+.attach-menu{display:none;position:absolute;bottom:calc(100% + 8px);left:15px;width:240px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:14px;padding:7px;box-shadow:0 16px 45px var(--shadow-b);z-index:21}
+.attach-menu.active{display:block}
+.attach-menu-item{padding:10px 11px;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:.85rem}
+.attach-menu-item:hover{background:var(--bg-card-hover)}
+.attach-menu-item i{font-size:1.15rem;color:var(--text-muted)}
+.attach-menu-recent{display:none;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px 4px 2px;border-top:1px solid var(--border);margin-top:6px}
+.attach-menu-recent.has-items{display:grid}
+.attach-menu-recent-thumb{aspect-ratio:1;border-radius:8px;overflow:hidden;cursor:pointer;background:var(--bg-card);border:1px solid var(--border)}
+.attach-menu-recent-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.attach-menu-recent-label{grid-column:1/-1;font-size:.68rem;color:var(--text-muted);padding:0 2px 2px}
+@media (min-width:769px){.attach-menu{display:none !important}}
 .chat-empty-tools{display:flex;gap:8px;justify-content:center;margin-top:12px}.mini-tool{border:1px solid var(--border-soft);background:var(--bg-card);color:var(--text-main);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:.76rem}.mini-tool:hover{border-color:color-mix(in srgb, var(--accent-1) 45%, transparent)}
 /* FEATURE (dual-response A/B - مرحله ۳): دو کارت پاسخ کنار هم برای انتخاب کاربر */
 .dual-response-wrap{display:flex;flex-direction:column;gap:10px;width:100%}
@@ -2423,9 +2436,21 @@
 
 
                 <input type="file" id="fileInput" hidden multiple onchange="handleFileSelect(event)">
-                <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="افزودن فایل">
-                    <i class="ph ph-plus" data-lucide="plus"></i>
-                </button>
+                <input type="file" id="imageInput" hidden multiple accept="image/*" onchange="handleFileSelect(event)">
+                <input type="file" id="videoInput" hidden multiple accept="video/*" onchange="handleFileSelect(event)">
+                <div style="position:relative;">
+                    <div class="attach-menu" id="attachMenu">
+                        <div class="attach-menu-item" onclick="attachMenuPick('file')"><i class="ph ph-file" data-lucide="file"></i> آپلود فایل</div>
+                        <div class="attach-menu-item" onclick="attachMenuPick('image')"><i class="ph ph-image" data-lucide="image"></i> آپلود تصویر</div>
+                        <div class="attach-menu-item" onclick="attachMenuPick('video')"><i class="ph ph-video" data-lucide="video"></i> آپلود ویدیو</div>
+                        <div class="attach-menu-recent" id="attachMenuRecent">
+                            <div class="attach-menu-recent-label">تصاویر اخیر</div>
+                        </div>
+                    </div>
+                    <button class="icon-btn" id="attachBtn" onclick="handleAttachBtnClick()" title="افزودن فایل">
+                        <i class="ph ph-plus" data-lucide="plus"></i>
+                    </button>
+                </div>
 
                 <div class="think-btn-wrap" id="thinkModeBtn">
                     <button class="think-btn" id="thinkToggleBtn" type="button" onclick="toggleThinkPanel(event)" title="حالت تفکر">
@@ -4593,6 +4618,99 @@
         updateComposerActionIcon();
     }
 
+    // FEATURE (منوی افزودن فایل - دکمه‌ی +): در دسکتاپ رفتار قبلی دقیقاً حفظ
+    // شده (کلیک روی + مستقیم پیکر فایل عمومی سیستم را باز می‌کند). فقط زیر
+    // 768px (موبایل) با کلیک روی + یک منوی کوچک باز می‌شود با سه گزینه‌ی
+    // «آپلود فایل / تصویر / ویدیو» - هرکدام پیکر سیستم را با فیلتر مناسب
+    // (accept="image/*" یا "video/*") باز می‌کند تا گالری گوشی مستقیم با
+    // فیلتر درست باز شود. زیرش هم لیست چند تصویر آخری که کاربر خودش قبلاً
+    // در همین برنامه ارسال کرده نشان داده می‌شود (نه کل گالری گوشی - مرورگرها
+    // اصلاً اجازه‌ی خواندن مستقیم گالری دستگاه را بدون باز کردن پیکر سیستم
+    // نمی‌دهند؛ این یک محدودیت امنیتی استاندارد همه‌ی مرورگرهاست).
+    function handleAttachBtnClick() {
+        if (window.innerWidth > 768) {
+            document.getElementById('fileInput').click();
+            return;
+        }
+        const menu = document.getElementById('attachMenu');
+        const isOpening = !menu.classList.contains('active');
+        menu.classList.remove('active');
+        document.getElementById('commandMenu')?.classList.remove('active');
+        if (isOpening) {
+            renderRecentImagesInAttachMenu();
+            menu.classList.add('active');
+        }
+    }
+
+    function attachMenuPick(kind) {
+        document.getElementById('attachMenu')?.classList.remove('active');
+        const inputId = kind === 'image' ? 'imageInput' : kind === 'video' ? 'videoInput' : 'fileInput';
+        document.getElementById(inputId)?.click();
+    }
+
+    const RECENT_IMAGES_KEY = 'vc_recent_sent_images';
+    const RECENT_IMAGES_MAX = 8;
+
+    function rememberRecentImage(base64) {
+        try {
+            if (!base64) return;
+            let list = JSON.parse(localStorage.getItem(RECENT_IMAGES_KEY) || '[]');
+            if (!Array.isArray(list)) list = [];
+            list.unshift(base64);
+            list = list.slice(0, RECENT_IMAGES_MAX);
+            localStorage.setItem(RECENT_IMAGES_KEY, JSON.stringify(list));
+        } catch (_) { /* localStorage may be full/unavailable - not critical */ }
+    }
+
+    function renderRecentImagesInAttachMenu() {
+        const wrap = document.getElementById('attachMenuRecent');
+        if (!wrap) return;
+        let list = [];
+        try {
+            list = JSON.parse(localStorage.getItem(RECENT_IMAGES_KEY) || '[]');
+            if (!Array.isArray(list)) list = [];
+        } catch (_) { list = []; }
+
+        wrap.innerHTML = '<div class="attach-menu-recent-label">تصاویر اخیر ارسالی شما</div>';
+        wrap.classList.toggle('has-items', list.length > 0);
+        if (!list.length) return;
+
+        list.forEach((base64, idx) => {
+            const thumb = document.createElement('div');
+            thumb.className = 'attach-menu-recent-thumb';
+            thumb.innerHTML = `<img src="${base64}" alt="">`;
+            thumb.onclick = () => reattachRecentImage(base64);
+            wrap.appendChild(thumb);
+        });
+    }
+
+    // FIX (base64 نمی‌تواند مستقیماً به یک <input type=file> تزریق شود):
+    // برخلاف انتخاب واقعی فایل، اینجا از قبل base64 فشرده را داریم، پس به‌جای
+    // ساختن یک File جعلی و رد کردنش از کل مسیر پردازش تصویر (که دوباره آن
+    // را فشرده و base64 می‌کرد - کار اضافه و بی‌فایده)، مستقیم آن را با همان
+    // مسیر afzoodan-be-preview که processIncomingFile در پایان کارش انجام
+    // می‌دهد اضافه می‌کنیم.
+    function reattachRecentImage(base64) {
+        document.getElementById('attachMenu')?.classList.remove('active');
+        const currentFileCount = selectedFilesData.length + (Array.isArray(codeFilesMemory) ? codeFilesMemory.length : 0);
+        if (currentFileCount >= MAX_ATTACHED_FILES) {
+            showToast(`حداکثر ${MAX_ATTACHED_FILES} فایل در هر ارسال مجاز است.`, 'warning');
+            return;
+        }
+        const previewId = addFilePreviewItem('تصویر اخیر');
+        selectedFilesData.push({ __previewId: previewId, name: 'تصویر اخیر', type: 'image/jpeg', base64 });
+        updateFilePreviewItem(previewId, { status: 'تصویر آماده', statusClass: 'success', thumbSrc: base64 });
+        updateComposerActionIcon();
+    }
+
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('attachMenu');
+        const btn = document.getElementById('attachBtn');
+        if (!menu || !menu.classList.contains('active')) return;
+        if (menu.contains(e.target) || btn?.contains(e.target)) return;
+        menu.classList.remove('active');
+    });
+
     // یک آیتم موقت با وضعیت "در حال پردازش" به لیست پیش‌نمایش اضافه می‌کند و
     // شناسه‌ی یکتای همان آیتم رو برمی‌گردونه تا بعداً بشه وضعیتش رو آپدیت کرد.
     // این‌طوری وقتی چند فایل با هم انتخاب میشن، هر کدوم ردیف/وضعیت جدای خودشو
@@ -4845,6 +4963,7 @@
                 // kept and all sent to the backend.
                 selectedFilesData.push({ __previewId: previewId, name: file.name, type: 'image/jpeg', base64: compressedBase64 });
                 updateFilePreviewItem(previewId, { status: 'تصویر آماده', statusClass: 'success', thumbSrc: compressedBase64 });
+                rememberRecentImage(compressedBase64);
             } else if (isVideo) {
                 // Backend's hard limit on a single binary attachment's
                 // base64 length (kept in sync with MAX_BINARY_BASE64_CHARS
@@ -9021,7 +9140,7 @@
     const __oldHandleKeyDown = handleKeyDown;
     handleKeyDown = function(e){
         const input=e.target;
-        if(e.key==='Escape'){closeChatSearch();document.getElementById('commandMenu')?.classList.remove('active');return}
+        if(e.key==='Escape'){closeChatSearch();document.getElementById('commandMenu')?.classList.remove('active');document.getElementById('attachMenu')?.classList.remove('active');return}
         __oldHandleKeyDown(e);
     };
     document.getElementById('userInput')?.addEventListener('input',function(){
