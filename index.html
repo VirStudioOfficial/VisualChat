@@ -7059,6 +7059,15 @@
         if (payloadFiles && !Array.isArray(payloadFiles)) payloadFiles = [payloadFiles];
         if (!payloadFiles) payloadFiles = [];
         const requestId = ++activeRequestId;
+        // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
+        // activeRequestId فقط یک شمارنده‌ی محلی همین تب/بارگذاری صفحه است
+        // (بین کاربران/سشن‌های مختلف یکتا نیست)، پس نمی‌تواند مستقیماً
+        // کلید ذخیره‌ی سمت سرور باشد. یک شناسه‌ی واقعاً یکتا جدا می‌سازیم
+        // و همراه درخواست می‌فرستیم تا سرور پاسخ نهایی را زیر همین کلید
+        // نگه دارد (رجوع کنید به savePendingResponse در chat.js).
+        const serverRequestId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         setGeneratingState(true);
 
         // ===== FIX: safety-net watchdog. Some rare network failures (e.g. the
@@ -7326,6 +7335,10 @@
                     // در پس‌زمینه (بعد از پایان همین درخواست) انجام می‌شود.
                     recentChatsSummary: getCachedRecentChatsSummaryText(),
                     stream: true,
+                    // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب
+                    // پس‌زمینه): سرور پاسخ نهایی را زیر همین شناسه ذخیره
+                    // می‌کند تا catchUpOnVisible زیر بتواند بعداً بپرسد.
+                    requestId: serverRequestId,
                     // FEATURE (dual-response A/B mode - مرحله ۱): فقط پرچم؛
                     // بک‌اند فعلاً به این مقدار توجهی نمی‌کند (مرحله ۲).
                     dualResponseMode: dualResponseMode,
@@ -7509,6 +7522,11 @@
                 revealedChars = liveView.length;
                 renderRevealed(performance.now(), true);
                 startRevealLoop();
+                // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب
+                // پس‌زمینه): علاوه بر رندر فوری آنچه تا این لحظه محلی
+                // جمع شده، از سرور هم می‌پرسیم شاید کل پاسخ زودتر از
+                // اینکه reader تب throttle‌شده متوجه شود کامل شده باشد.
+                pollServerStatusOnVisible();
             };
             document.addEventListener('visibilitychange', catchUpOnVisible);
 
@@ -7524,6 +7542,110 @@
                 // پایان استریم، برای رساندن سریع به انتهای متن).
                 startRevealLoop();
                 if (force) { revealedChars = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText.length; renderRevealed(0, true); }
+            };
+
+            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
+            // منطق رندر نهایی (چه از پایان طبیعی استریم، چه از یک پاسخ
+            // بازیابی‌شده با ?mode=status بعد از برگشتن به تب) یکجا اینجاست
+            // تا هر دو مسیر دقیقاً همان کارت/تاریخچه/فایل‌آرشیو را بسازند.
+            const finishWithReply = (replyTextRaw, { gotAnyText, streamError, streamErrorDetail, streamEditedFiles, streamUnresolvedEditFailure }) => {
+                const reply = sanitizeVirtualIdentity(replyTextRaw);
+                if (gotAnyText && reply) {
+                    const historyText = reply;
+                    if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
+                    else {
+                        const last = chatHistoryData[currentChatId]?.at(-1);
+                        if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
+                    }
+                    pushedHistoryIndex = -1;
+                    lastFailedRequest = null;
+
+                    const { displayText: withoutEdit, edits } = stripFileEditBlock(reply);
+                    const { displayText, widget } = stripWidgetBlock(withoutEdit);
+                    let finalHtml = displayText ? formatReply(displayText) : '';
+                    finalHtml += buildFileEditResultHtml(edits);
+                    finalHtml += buildEditedFilesHtml(streamEditedFiles);
+                    finalHtml += renderWidgetIfPresent(widget);
+                    if (!finalHtml) finalHtml = formatReply('');
+
+                    if (Array.isArray(streamEditedFiles) && streamEditedFiles.length) {
+                        for (const f of streamEditedFiles) {
+                            if (f && typeof f.name === 'string' && typeof f.content === 'string') {
+                                try { saveFileToArchive(currentChatId, f.name, f.content); } catch (_) {}
+                            }
+                        }
+                    }
+
+                    const hadEditableFileThisRequest = Array.isArray(mergedTextFiles) && mergedTextFiles.length > 0;
+                    if (hadEditableFileThisRequest && streamUnresolvedEditFailure && (!edits || !edits.length) && (!streamEditedFiles || !streamEditedFiles.length)) {
+                        const failedNames = Array.isArray(streamUnresolvedEditFailure.files)
+                            ? streamUnresolvedEditFailure.files.map(f => escapeHtml(f.name)).join('، ')
+                            : '';
+                        finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">${failedNames ? `فایل(های) «${failedNames}» ویرایش نشدند. ` : ''}مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده یا فایل را مجدداً پیوست کن.</div></div>`;
+                    }
+
+                    loadingDiv.classList.remove('is-streaming');
+                    if (revealRafId) { cancelAnimationFrame(revealRafId); revealRafId = null; }
+                    loadingDiv.innerHTML = finalHtml;
+                    setGeneratingState(false); saveCurrentChat(); scrollToLatest();
+                } else {
+                    loadingDiv.classList.remove('is-streaming');
+                    removePushedUserTurnIfUnanswered();
+                    makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request, streamErrorDetail);
+                    setGeneratingState(false); saveCurrentChat();
+                }
+            };
+
+            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
+            // وقتی تب از پس‌زمینه به visible برمی‌گردد و هنوز در انتظار همین
+            // requestId هستیم، اول از سرور می‌پرسیم "این جواب کامل شد؟" -
+            // چون تا این لحظه ممکن است reader.read() به‌خاطر throttle شدن
+            // تب هرگز واقعاً resolve نشده باشد، با اینکه سرور از قبل کل
+            // پاسخ را تولید کرده بوده.
+            let statusPollInFlight = false;
+            const pollServerStatusOnVisible = async () => {
+                if (statusPollInFlight) return;
+                if (requestId !== activeRequestId) return;
+                if (streamEnded) return; // already finished normally, nothing to recover
+                statusPollInFlight = true;
+                try {
+                    const statusRes = await fetch(`/api/chat?mode=status&requestId=${encodeURIComponent(serverRequestId)}`, { method: 'GET' });
+                    if (requestId !== activeRequestId || streamEnded) return;
+                    if (!statusRes.ok) return;
+                    const statusJson = await statusRes.json().catch(() => null);
+                    if (!statusJson || !statusJson.ready || !statusJson.result) return;
+
+                    const result = statusJson.result;
+                    try { currentAbortController && currentAbortController.abort(); } catch (_) {}
+                    streamEnded = true;
+                    window.__isStreamingReply = false;
+                    if (revealRafId) { cancelAnimationFrame(revealRafId); revealRafId = null; }
+
+                    if (result.failed) {
+                        // سرور صراحتاً گفته این requestId شکست خورده (نه
+                        // فقط قطع تماس) - همینجا خطای واقعی‌اش را نشان بده،
+                        // نه پیام عمومی "پاسخی دریافت نشد".
+                        loadingDiv.classList.remove('is-streaming');
+                        removePushedUserTurnIfUnanswered();
+                        makeRetryError(loadingDiv, result.error?.message || 'خطایی رخ داد.', request, result.error || null);
+                        setGeneratingState(false); saveCurrentChat();
+                        return;
+                    }
+
+                    finishWithReply(result.text || '', {
+                        gotAnyText: !!(result.text && result.text.length),
+                        streamError: null,
+                        streamErrorDetail: null,
+                        streamEditedFiles: result.editedFiles || null,
+                        streamUnresolvedEditFailure: result.unresolvedEditFailure || null
+                    });
+                } catch (_) {
+                    // شکست در خودِ درخواست وضعیت (مثلاً آفلاین بودن لحظه‌ای) -
+                    // به گوش‌دادن عادی به استریم اصلی ادامه بده، دوباره تلاش
+                    // نکن مگر دفعه‌ی بعد که تب دوباره visible شود.
+                } finally {
+                    statusPollInFlight = false;
+                }
             };
 
             while (true) {
@@ -7658,111 +7780,18 @@
 
             if (requestId !== activeRequestId) return;
 
-            const reply = sanitizeVirtualIdentity(fullReply);
-            if (gotAnyText && reply) {
-                const historyText = reply;
-                if (!isRetry) chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
-                else {
-                    const last = chatHistoryData[currentChatId]?.at(-1);
-                    if (!last || last.role !== 'model') chatHistoryData[currentChatId].push({ role: 'model', text: historyText });
-                }
-                // Reply arrived and was saved right after the user turn -
-                // nothing left to clean up.
-                pushedHistoryIndex = -1;
-                lastFailedRequest = null;
-
-                const { displayText: withoutEdit, edits } = stripFileEditBlock(reply);
-                const { displayText, widget } = stripWidgetBlock(withoutEdit);
-                let finalHtml = displayText ? formatReply(displayText) : '';
-                finalHtml += buildFileEditResultHtml(edits);
-                finalHtml += buildEditedFilesHtml(streamEditedFiles);
-                finalHtml += renderWidgetIfPresent(widget);
-                if (!finalHtml) finalHtml = formatReply('');
-
-                // FIX (مدل نمی‌توانست از آخرین نسخه‌ی فایلی که خودش سرورساید
-                // ادیت کرده بود استفاده کند): streamEditedFiles (که از رویداد
-                // done:true با editedFiles می‌آید - همان مسیر واقعی apply_edit/
-                // write_block برای فایل‌های سنگین) فقط برای ساخت کارت HTML
-                // استفاده می‌شد؛ هیچ‌جا محتوای ویرایش‌شده به chatFileArchive
-                // نوشته نمی‌شد. یعنی درخواست بعدی، recentArchivedFiles همچنان
-                // نسخه‌ی قبل از ویرایش را برمی‌گرداند و مدل با get_archived_file
-                // فایل قدیمی می‌گرفت - دقیقاً همان چیزی که کاربر گزارش داد. هر
-                // فایل زیر نام اصلی‌اش (f.name، نه f.editedName که فقط برای
-                // نمایش/دانلود timestamp دارد) در آرشیو ذخیره می‌شود تا
-                // درخواست‌های بعدی که همان نام را صدا می‌زنند، نسخه‌ی تازه را ببینند.
-                if (Array.isArray(streamEditedFiles) && streamEditedFiles.length) {
-                    for (const f of streamEditedFiles) {
-                        if (f && typeof f.name === 'string' && typeof f.content === 'string') {
-                            try { saveFileToArchive(currentChatId, f.name, f.content); } catch (_) {}
-                        }
-                    }
-                }
-
-                // FIX (false "saved successfully" claim with no real edit):
-                // the model can hallucinate success language in prose (e.g.
-                // "با موفقیت ذخیره شد") while never actually calling
-                // write_block/verify_file - it just prints the whole file in
-                // a ```html fence instead (which formatReply then renders as
-                // a generic, non-downloadable code-card that looks similar
-                // but isn't the real edited-file card). This check used to
-                // look at `edits` (the legacy file-edit JSON block), which
-                // the block-based write_block/verify_file system never
-                // produces - so it never fired for this exact failure mode.
-                // Check the real block-based delivery channel instead.
-                // FIX (false positive on plain chat with no attached file):
-                // this check used to fire on ANY message containing success-
-                // sounding phrases (\u0630\u062e\u06cc\u0631\u0647/\u062b\u0628\u062a/\u0627\u0639\u0645\u0627\u0644 \u0634\u062f), even when the user
-                // never attached an editable file at all (e.g. casual chat
-                // that happens to mention "settings are saved"). The warning
-                // only makes sense when this specific request actually had
-                // at least one editable text file attached - otherwise there
-                // was never any real edit to have failed. mergedTextFiles is
-                // this exact request's attached/merged text files (captured
-                // above, before the request was sent).
-                // FIX (regex-based claimsSuccess missed real false-success
-                // cases): matching Persian success phrases in the model's
-                // own prose is unreliable - the model can claim success in
-                // countless phrasings (casual nicknames, emoji, paraphrase)
-                // that never match a fixed regex, so genuine false-success
-                // replies slipped through with no warning at all (this is
-                // exactly the bug the user reported). The server already
-                // determines this precisely from real tool-call state (see
-                // unresolvedEditFailure in chat.js: it fires only when the
-                // user attached an editable file AND write_block/apply_edit
-                // was either never called or every call was rejected AND no
-                // file was actually patched) - trust that signal instead of
-                // re-guessing it from text here.
-                const hadEditableFileThisRequest = Array.isArray(mergedTextFiles) && mergedTextFiles.length > 0;
-                if (hadEditableFileThisRequest && streamUnresolvedEditFailure && (!edits || !edits.length) && (!streamEditedFiles || !streamEditedFiles.length)) {
-                    const failedNames = Array.isArray(streamUnresolvedEditFailure.files)
-                        ? streamUnresolvedEditFailure.files.map(f => escapeHtml(f.name)).join('، ')
-                        : '';
-                    finalHtml += `<div class="code-card"><div class="code-card-head"><span><i class="ph-fill ph-warning" style="color:var(--warning);"></i> این پیام ادعای ذخیره‌سازی دارد اما هیچ ویرایش واقعی ثبت نشد</span></div><div style="padding:12px 14px; font-size:0.85rem; color:var(--text-muted);">${failedNames ? `فایل(های) «${failedNames}» ویرایش نشدند. ` : ''}مدل فایل را فقط در متن پاسخ توضیح داده یا بازنویسی کرده، نه واقعاً با write_block/verify_file اعمال کرده. لطفاً دوباره درخواست بده یا فایل را مجدداً پیوست کن.</div></div>`;
-                }
-
-                loadingDiv.classList.remove('is-streaming');
-                // FIX (کارت‌های ویرایش فایل بعد از پایان استریم گاهی نمایش
-                // داده نمی‌شدند تا رفرش صفحه): حلقه‌ی انیمیشن حرف‌به‌حرف
-                // (revealTick/rAF) با startRevealLoop() دوباره روشن مانده
-                // بود و می‌توانست یک فریم اضافه بعد از همین‌جا اجرا شود -
-                // آن فریم loadingDiv.innerHTML را دوباره با formatReply
-                // ساده (بدون buildEditedFilesHtml/buildFileEditResultHtml)
-                // بازنویسی می‌کرد، یعنی کارت فایل که همین الان با finalHtml
-                // ست شده بود از DOM پاک می‌شد. رفرش صفحه چون از chats[id].html
-                // ذخیره‌شده (که finalHtml درست در آن ذخیره شده بود) دوباره
-                // می‌خواند، مشکل را "درست می‌کرد" - اما فقط چون از اول یک
-                // منبع دیگر می‌خواند، نه چون خودِ باگ رفع شده بود. با لغو
-                // صریح rAF درست همین‌جا، هیچ فریم دیرهنگامی دیگر
-                // loadingDiv را overwrite نمی‌کند.
-                if (revealRafId) { cancelAnimationFrame(revealRafId); revealRafId = null; }
-                loadingDiv.innerHTML = finalHtml;
-                setGeneratingState(false); saveCurrentChat(); scrollToLatest();
-            } else {
-                loadingDiv.classList.remove('is-streaming');
-                removePushedUserTurnIfUnanswered();
-                makeRetryError(loadingDiv, streamError || 'پاسخی دریافت نشد.', request, streamErrorDetail);
-                setGeneratingState(false); saveCurrentChat();
-            }
+            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
+            // منطق رندر نهایی (موفق/ناموفق) به یک تابع مشترک منتقل شده تا
+            // catchUpOnVisible زیر - وقتی سرور می‌گوید این requestId کامل
+            // شده - بتواند دقیقاً همین رندر را با متن/فلگ‌های بازیابی‌شده
+            // از سرور صدا بزند، بدون تکرار این بلوک بزرگ.
+            finishWithReply(fullReply, {
+                gotAnyText,
+                streamError,
+                streamErrorDetail,
+                streamEditedFiles,
+                streamUnresolvedEditFailure
+            });
         } catch (error) {
             // If Stop was pressed, the request id changed and the UI was already updated.
             if (requestId !== activeRequestId) return;
