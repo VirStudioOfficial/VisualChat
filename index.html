@@ -1194,7 +1194,7 @@
         .think-option .item-check { color: var(--accent-2); opacity: 0; }
         .think-option.active .item-check { opacity: 1; }
         @media (max-width: 900px) {
-            .think-panel { right: auto; left: 0; }
+            .think-panel { right: 0; left: auto; }
         }
 
         .icon-btn.search-active {
@@ -2711,6 +2711,8 @@
     };
 
     function toggleModelDropdown() {
+        document.getElementById('thinkPanel')?.classList.remove('active');
+        document.getElementById('attachMenu')?.classList.remove('active');
         document.getElementById('modelDropdown').classList.toggle('active');
     }
 
@@ -2793,6 +2795,8 @@
 
     function toggleThinkPanel(e) {
         if (e) e.stopPropagation();
+        document.getElementById('modelDropdown')?.classList.remove('active');
+        document.getElementById('attachMenu')?.classList.remove('active');
         syncThinkOptionsForModel();
         renderThinkUI();
         document.getElementById('thinkPanel').classList.toggle('active');
@@ -4691,6 +4695,8 @@
         const isOpening = !menu.classList.contains('active');
         menu.classList.remove('active');
         document.getElementById('commandMenu')?.classList.remove('active');
+        document.getElementById('thinkPanel')?.classList.remove('active');
+        document.getElementById('modelDropdown')?.classList.remove('active');
         if (isOpening) {
             renderRecentImagesInAttachMenu();
             menu.classList.add('active');
