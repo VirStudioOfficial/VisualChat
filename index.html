@@ -927,11 +927,31 @@
         .clock-hand { position: absolute; left: 50%; bottom: 50%; transform-origin: bottom center; border-radius: 3px; background: var(--text-main); }
         .clock-hand-hour { width: 3px; height: 17px; margin-left: -1.5px; }
         .clock-hand-minute { width: 2px; height: 24px; margin-left: -1px; background: var(--accent-2); }
+        .clock-hand-second { width: 1px; height: 27px; margin-left: -0.5px; background: #ff5c5c; opacity: 0.85; }
+        .clock-hand { transition: transform 0.2s cubic-bezier(0.4, 2.2, 0.6, 1); }
         .clock-center-dot { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--accent-2); }
         .weather-widget-temp { font-size: 2rem; font-weight: 700; color: var(--text-main); direction: ltr; }
         .weather-widget-info { display: flex; flex-direction: column; gap: 3px; text-align: left; }
         .weather-widget-condition { font-size: 0.9rem; color: var(--text-main); }
         .weather-widget-loc { font-size: 0.78rem; color: var(--text-muted); }
+        .weather-widget { cursor: pointer; position: relative; transition: border-color 0.15s, transform 0.15s; }
+        .weather-widget:hover, .weather-widget:focus-visible { border-color: var(--accent-2); transform: translateY(-1px); }
+        .weather-widget:active { transform: translateY(0); }
+        .weather-widget-expand-hint { position: absolute; left: 10px; top: 10px; opacity: 0.45; color: var(--text-muted); }
+        .weather-widget-expand-hint svg { width: 15px; height: 15px; }
+        .weather-widget:hover .weather-widget-expand-hint { opacity: 0.85; }
+
+        /* ===== مودال نمودار دمای ساعتی ===== */
+        .hourly-temp-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.18s; padding: 16px; }
+        .hourly-temp-modal-overlay.open { opacity: 1; pointer-events: auto; }
+        .hourly-temp-modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 18px; padding: 20px 22px 16px; width: 100%; max-width: 640px; direction: rtl; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
+        .hourly-temp-modal-close { position: absolute; left: 14px; top: 12px; background: none; border: none; color: var(--text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer; width: 30px; height: 30px; border-radius: 50%; }
+        .hourly-temp-modal-close:hover { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-main); }
+        .hourly-temp-modal-title { font-size: 0.98rem; font-weight: 700; color: var(--text-main); margin-bottom: 12px; padding-left: 34px; }
+        .hourly-temp-modal-body { min-height: 180px; display: flex; align-items: center; justify-content: center; }
+        .hourly-temp-loading { color: var(--text-muted); font-size: 0.85rem; padding: 30px; }
+        .hourly-temp-error { color: var(--text-muted); font-size: 0.85rem; padding: 30px; }
+        .hourly-temp-chart-svg { width: 100%; height: auto; }
 
         .code-card-collapsed .code-card-filelabel { display:flex; align-items:center; gap:7px; text-transform:none; letter-spacing:normal; font-weight:600; color: var(--text-main); }
         .code-card-collapsed .code-card-meta { padding: 10px 14px 14px; font-size: 0.78rem; color: var(--text-muted); }
@@ -8125,14 +8145,17 @@
     function formatClockParts(timezone) {
         try {
             const now = new Date();
-            const timeStr = new Intl.DateTimeFormat('fa-IR', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+            const timeStr = new Intl.DateTimeFormat('fa-IR', { timeZone: timezone, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
             const offsetStr = new Intl.DateTimeFormat('en-US', { timeZone: timezone, timeZoneName: 'shortOffset' }).formatToParts(now).find(p => p.type === 'timeZoneName')?.value || '';
-            // ساعت/دقیقه به‌صورت عدد برای چرخاندن عقربه‌ها
+            // ساعت/دقیقه/ثانیه به‌صورت عدد برای چرخاندن عقربه‌ها - عقربه‌ی
+            // ثانیه اضافه شد تا ویجت واقعاً «زنده» به‌نظر برسد، نه فقط هر
+            // چند ثانیه یک‌بار پرش کند.
             const hh = Number(new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', hour12: false }).format(now)) % 24;
             const mm = Number(new Intl.DateTimeFormat('en-US', { timeZone: timezone, minute: 'numeric' }).format(now));
-            return { timeStr, offsetStr, hourDeg: (hh % 12) * 30 + mm * 0.5, minuteDeg: mm * 6 };
+            const ss = Number(new Intl.DateTimeFormat('en-US', { timeZone: timezone, second: 'numeric' }).format(now));
+            return { timeStr, offsetStr, hourDeg: (hh % 12) * 30 + mm * 0.5, minuteDeg: mm * 6 + ss * 0.1, secondDeg: ss * 6 };
         } catch (_) {
-            return { timeStr: '--:--', offsetStr: '', hourDeg: 0, minuteDeg: 0 };
+            return { timeStr: '--:--', offsetStr: '', hourDeg: 0, minuteDeg: 0, secondDeg: 0 };
         }
     }
 
@@ -8149,43 +8172,167 @@
             <div class="clock-widget-face">
                 <div class="clock-hand clock-hand-hour"></div>
                 <div class="clock-hand clock-hand-minute"></div>
+                <div class="clock-hand clock-hand-second"></div>
                 <div class="clock-center-dot"></div>
             </div>
         </div>`;
     }
 
-    // هر چند ثانیه عقربه‌ها/عدد ساعت همه‌ی ویجت‌های ساعتِ فعلاً روی صفحه را
-    // به‌روز می‌کند - چون این کارت‌ها ممکن است دقیقه‌ها روی صفحه بمانند
-    // (پیام‌های قدیمی‌تر هم همین کارت را دارند).
+    // FEATURE (ساعت زنده): قبلاً هر ۱۵ ثانیه آپدیت می‌شد (پرش محسوس)، حالا
+    // هر ثانیه - همراه با عقربه‌ی ثانیه‌ی جدید - برای حس واقعاً «زنده» و
+    // نرم چرخیدن.
     function tickAllClockWidgets() {
         document.querySelectorAll('.clock-widget[data-timezone]').forEach(el => {
             const tz = el.dataset.timezone;
             if (!tz) return;
-            const { timeStr, offsetStr, hourDeg, minuteDeg } = formatClockParts(tz);
+            const { timeStr, offsetStr, hourDeg, minuteDeg, secondDeg } = formatClockParts(tz);
             const timeEl = el.querySelector('.clock-widget-time');
             const offsetEl = el.querySelector('.clock-widget-offset');
             const hourHand = el.querySelector('.clock-hand-hour');
             const minuteHand = el.querySelector('.clock-hand-minute');
+            const secondHand = el.querySelector('.clock-hand-second');
             if (timeEl) timeEl.textContent = timeStr;
             if (offsetEl) offsetEl.textContent = offsetStr;
             if (hourHand) hourHand.style.transform = `rotate(${hourDeg}deg)`;
             if (minuteHand) minuteHand.style.transform = `rotate(${minuteDeg}deg)`;
+            if (secondHand) secondHand.style.transform = `rotate(${secondDeg}deg)`;
         });
     }
-    setInterval(tickAllClockWidgets, 15000);
+    setInterval(tickAllClockWidgets, 1000);
 
     function buildWeatherWidgetHtml(data) {
+        const id = `weather-widget-${Math.random().toString(36).slice(2)}`;
         const locLabel = [data.city, data.region, data.country].filter(Boolean).join('، ') || 'موقعیت نامشخص';
         const temp = (typeof data.tempC === 'number' && isFinite(data.tempC)) ? `${Math.round(data.tempC)}°` : '--°';
         const condition = data.condition || '';
-        return `<div class="mini-widget weather-widget">
+        return `<div class="mini-widget weather-widget" id="${id}" role="button" tabindex="0" data-city="${escapeAttr(data.city || '')}" data-region="${escapeAttr(data.region || '')}" data-country="${escapeAttr(data.country || '')}" title="برای دیدن دمای ساعت‌های مختلف امروز کلیک کن">
             <div class="weather-widget-temp">${escapeHtml(temp)}</div>
             <div class="weather-widget-info">
                 <div class="weather-widget-condition">${escapeHtml(condition)}</div>
                 <div class="weather-widget-loc">${escapeHtml(locLabel)}</div>
             </div>
+            <div class="weather-widget-expand-hint"><i data-lucide="chart-line"></i></div>
         </div>`;
     }
+
+    // FEATURE (نمودار دمای ساعتی با کلیک روی ویجت آب‌وهوا): با کلیک، شهر
+    // را geocode می‌کند (برای مختصات - چون ویجت فقط اسم شهر دارد)، بعد
+    // dمای هر ساعتِ *امروز* را از Open-Meteo (رایگان، بدون کلید، همان
+    // سرویسی که برای geocode/ساعت هم استفاده می‌شود) می‌گیرد و یک نمودار
+    // خطی ساده (SVG دستی، بدون کتابخانه‌ی جانبی) داخل یک مودال نشان می‌دهد.
+    async function fetchHourlyTempsForCity(city, country) {
+        const loc = await geocodeCity(city, country);
+        if (!loc) return null;
+        try {
+            const resp = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&hourly=temperature_2m&timezone=${encodeURIComponent(loc.timezone || 'auto')}&forecast_days=1`);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            const times = data?.hourly?.time;
+            const temps = data?.hourly?.temperature_2m;
+            if (!Array.isArray(times) || !Array.isArray(temps) || !times.length) return null;
+            return {
+                loc,
+                hours: times.map((t, i) => ({
+                    hour: new Date(t).getHours ? Number(t.slice(11, 13)) : i,
+                    tempC: temps[i]
+                })).filter(h => typeof h.tempC === 'number' && isFinite(h.tempC))
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function buildHourlyTempChartSvg(hours) {
+        if (!hours.length) return '';
+        const W = 600, H = 220, padL = 34, padR = 14, padT = 20, padB = 30;
+        const temps = hours.map(h => h.tempC);
+        const minT = Math.min(...temps), maxT = Math.max(...temps);
+        const span = Math.max(1, maxT - minT);
+        const plotW = W - padL - padR, plotH = H - padT - padB;
+        const xFor = (i) => padL + (i / Math.max(1, hours.length - 1)) * plotW;
+        const yFor = (t) => padT + plotH - ((t - minT) / span) * plotH;
+
+        // خطوط راهنمای دما (۳ سطح)
+        const gridLines = [0, 0.5, 1].map(f => {
+            const t = minT + f * span;
+            const y = yFor(t);
+            return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--border-color, #333)" stroke-width="1" stroke-dasharray="3,3" opacity="0.4"/>
+                <text x="${padL - 8}" y="${y + 4}" font-size="11" fill="var(--text-muted, #999)" text-anchor="end">${Math.round(t)}°</text>`;
+        }).join('');
+
+        const points = hours.map((h, i) => `${xFor(i)},${yFor(h.tempC)}`).join(' ');
+        const dots = hours.map((h, i) => {
+            const isNow = h.hour === new Date().getHours();
+            return `<circle cx="${xFor(i)}" cy="${yFor(h.tempC)}" r="${isNow ? 4.5 : 2.5}" fill="${isNow ? '#ff9f43' : 'var(--accent-2, #6c8cff)'}" />`;
+        }).join('');
+        // برچسب ساعت‌ها - هر ۳ ساعت یک‌بار برای شلوغ نشدن
+        const hourLabels = hours.map((h, i) => {
+            if (i % 3 !== 0) return '';
+            return `<text x="${xFor(i)}" y="${H - padB + 18}" font-size="10" fill="var(--text-muted, #999)" text-anchor="middle">${h.hour}</text>`;
+        }).join('');
+
+        return `<svg viewBox="0 0 ${W} ${H}" class="hourly-temp-chart-svg" xmlns="http://www.w3.org/2000/svg">
+            ${gridLines}
+            <polyline points="${points}" fill="none" stroke="var(--accent-2, #6c8cff)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+            ${dots}
+            ${hourLabels}
+        </svg>`;
+    }
+
+    function openHourlyTempModal() {
+        let overlay = document.getElementById('hourly-temp-modal-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'hourly-temp-modal-overlay';
+            overlay.className = 'hourly-temp-modal-overlay';
+            overlay.innerHTML = `<div class="hourly-temp-modal">
+                <button type="button" class="hourly-temp-modal-close" aria-label="بستن">×</button>
+                <div class="hourly-temp-modal-title"></div>
+                <div class="hourly-temp-modal-body"></div>
+            </div>`;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay || e.target.closest('.hourly-temp-modal-close')) {
+                    overlay.classList.remove('open');
+                }
+            });
+        }
+        overlay.classList.add('open');
+        return overlay;
+    }
+
+    async function handleWeatherWidgetClick(widgetEl) {
+        const city = widgetEl.dataset.city || '';
+        const country = widgetEl.dataset.country || '';
+        if (!city) return; // موقعیت نامشخص - چیزی برای geocode کردن نیست
+        const overlay = openHourlyTempModal();
+        const titleEl = overlay.querySelector('.hourly-temp-modal-title');
+        const bodyEl = overlay.querySelector('.hourly-temp-modal-body');
+        titleEl.textContent = `دمای ساعت‌های مختلف امروز - ${city}`;
+        bodyEl.innerHTML = `<div class="hourly-temp-loading"><span class="loader-dots"><span></span><span></span><span></span></span></div>`;
+
+        const result = await fetchHourlyTempsForCity(city, country);
+        if (!overlay.classList.contains('open')) return; // کاربر قبل از رسیدن جواب بسته
+        if (!result || !result.hours.length) {
+            bodyEl.innerHTML = `<div class="hourly-temp-error">داده‌ی دمای ساعتی پیدا نشد</div>`;
+            return;
+        }
+        titleEl.textContent = `دمای ساعت‌های مختلف امروز - ${[result.loc.city, result.loc.country].filter(Boolean).join('، ')}`;
+        bodyEl.innerHTML = buildHourlyTempChartSvg(result.hours);
+    }
+
+    // Delegation - چون ویجت‌های آب‌وهوا به‌صورت داینامیک (حین استریم/بعد از
+    // آن) اضافه می‌شوند، به‌جای بایند کردن جدا به هر کدام، یک شنونده روی
+    // کل صفحه کافی است.
+    document.addEventListener('click', (e) => {
+        const widgetEl = e.target.closest('.weather-widget');
+        if (widgetEl) handleWeatherWidgetClick(widgetEl);
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const widgetEl = e.target.closest('.weather-widget');
+        if (widgetEl) { e.preventDefault(); handleWeatherWidgetClick(widgetEl); }
+    });
 
     // نقطه‌ی ورودی: بلاک ویجت را از متن جدا کرده، HTML اولیه‌ی ویجت را
     // برمی‌گرداند (برای ساعتِ بدون شهر مشخص، چون گرفتن موقعیت async است، یک
