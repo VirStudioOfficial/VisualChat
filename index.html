@@ -915,6 +915,24 @@
         .code-card pre::-webkit-scrollbar { height: 8px; }
         .code-card pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
         .code-card-head span:first-child { text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: var(--accent-2); }
+
+        /* ===== ویجت ساعت/آب‌وهوا ===== */
+        .mini-widget { margin: 1rem 0; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); direction: rtl; text-align: right; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; max-width: 340px; }
+        .clock-widget-loading, .clock-widget-error { justify-content: center; color: var(--text-muted); font-size: 0.82rem; padding: 18px; }
+        .clock-widget-info { display: flex; flex-direction: column; gap: 2px; }
+        .clock-widget-time { font-size: 1.6rem; font-weight: 700; color: var(--text-main); direction: ltr; text-align: right; }
+        .clock-widget-loc { font-size: 0.82rem; color: var(--text-main); opacity: 0.85; }
+        .clock-widget-offset { font-size: 0.72rem; color: var(--text-muted); direction: ltr; }
+        .clock-widget-face { position: relative; width: 64px; height: 64px; border-radius: 50%; background: color-mix(in srgb, var(--accent-1) 10%, transparent); border: 1px solid var(--border); flex-shrink: 0; }
+        .clock-hand { position: absolute; left: 50%; bottom: 50%; transform-origin: bottom center; border-radius: 3px; background: var(--text-main); }
+        .clock-hand-hour { width: 3px; height: 17px; margin-left: -1.5px; }
+        .clock-hand-minute { width: 2px; height: 24px; margin-left: -1px; background: var(--accent-2); }
+        .clock-center-dot { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--accent-2); }
+        .weather-widget-temp { font-size: 2rem; font-weight: 700; color: var(--text-main); direction: ltr; }
+        .weather-widget-info { display: flex; flex-direction: column; gap: 3px; text-align: left; }
+        .weather-widget-condition { font-size: 0.9rem; color: var(--text-main); }
+        .weather-widget-loc { font-size: 0.78rem; color: var(--text-muted); }
+
         .code-card-collapsed .code-card-filelabel { display:flex; align-items:center; gap:7px; text-transform:none; letter-spacing:normal; font-weight:600; color: var(--text-main); }
         .code-card-collapsed .code-card-meta { padding: 10px 14px 14px; font-size: 0.78rem; color: var(--text-muted); }
 
@@ -7338,7 +7356,7 @@
                 // ولی نصف هزینه‌ی پارس کردن در هر فریمِ ۶۰fps را حذف می‌کند.
                 if (!force && ts && lastRenderTs && (ts - lastRenderTs) < 32) return;
                 lastRenderTs = ts || lastRenderTs;
-                const liveView = stripFileEditBlock(fullReply).displayText;
+                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
                 const clamped = Math.min(revealedChars, liveView.length);
                 if (!force && clamped === lastRenderedChars) return;
                 lastRenderedChars = clamped;
@@ -7352,7 +7370,7 @@
             const revealTick = (ts) => {
                 revealRafId = null;
                 if (requestId !== activeRequestId) return;
-                const liveView = stripFileEditBlock(fullReply).displayText;
+                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
                 const target = liveView.length;
                 if (revealedChars >= target) {
                     if (streamEnded) { renderRevealed(ts, true); return; }
@@ -7388,7 +7406,7 @@
             catchUpOnVisible = () => {
                 if (document.visibilityState !== 'visible') return;
                 if (requestId !== activeRequestId) return;
-                const liveView = stripFileEditBlock(fullReply).displayText;
+                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
                 revealedChars = liveView.length;
                 renderRevealed(performance.now(), true);
                 startRevealLoop();
@@ -7406,7 +7424,7 @@
                 // بماند؛ force هم یعنی همین الان یک فریم رندر کن (مثلاً در
                 // پایان استریم، برای رساندن سریع به انتهای متن).
                 startRevealLoop();
-                if (force) { revealedChars = stripFileEditBlock(fullReply).displayText.length; renderRevealed(0, true); }
+                if (force) { revealedChars = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText.length; renderRevealed(0, true); }
             };
 
             while (true) {
@@ -7442,7 +7460,7 @@
                                 `<div class="agent-step-label"><span class="agent-step-dot"></span>${escapeHtml(parsed.step)}</div>` +
                                 `<span class="loader-dots"><span></span><span></span><span></span></span>`;
                             if (fullReply) {
-                                const liveView = stripFileEditBlock(fullReply).displayText;
+                                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
                                 loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView)) + stepHtml;
                             } else {
                                 loadingDiv.innerHTML = stepHtml;
@@ -7524,7 +7542,7 @@
             await new Promise((resolve) => {
                 const waitForReveal = () => {
                     if (requestId !== activeRequestId) { resolve(); return; }
-                    const liveView = stripFileEditBlock(fullReply).displayText;
+                    const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
                     if (revealedChars >= liveView.length) { resolve(); return; }
                     requestAnimationFrame(waitForReveal);
                 };
@@ -7554,10 +7572,12 @@
                 pushedHistoryIndex = -1;
                 lastFailedRequest = null;
 
-                const { displayText, edits } = stripFileEditBlock(reply);
+                const { displayText: withoutEdit, edits } = stripFileEditBlock(reply);
+                const { displayText, widget } = stripWidgetBlock(withoutEdit);
                 let finalHtml = displayText ? formatReply(displayText) : '';
                 finalHtml += buildFileEditResultHtml(edits);
                 finalHtml += buildEditedFilesHtml(streamEditedFiles);
+                finalHtml += renderWidgetIfPresent(widget);
                 if (!finalHtml) finalHtml = formatReply('');
 
                 // FIX (مدل نمی‌توانست از آخرین نسخه‌ی فایلی که خودش سرورساید
@@ -7911,6 +7931,185 @@
         } catch (_) { edits = null; }
         const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
         return { displayText, edits };
+    }
+
+    // ===== ویجت ساعت/آب‌وهوا =====
+    // یک بلاک ```widget-clock ...``` یا ```widget-weather ...``` را از متن
+    // پاسخ جدا می‌کند (اگر باشد). مثل stripFileEditBlock، متن نمایشی بدون
+    // این بلاک است - کاربر هیچ‌وقت خودِ JSON را نمی‌بیند، فقط ویجت رندرشده را.
+    function stripWidgetBlock(text) {
+        const match = /```widget-(clock|weather)\s*([\s\S]*?)```/.exec(text || '');
+        if (!match) return { displayText: text || '', widget: null };
+        let data = null;
+        try { data = JSON.parse(match[2].trim()); } catch (_) { data = null; }
+        const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+        return { displayText, widget: data ? { type: match[1], data } : null };
+    }
+
+    // نام شهر/کشور را با Open-Meteo Geocoding (رایگان، بدون کلید) به
+    // مختصات و timezone واقعی تبدیل می‌کند. برای ویجت ساعت به کار می‌رود
+    // تا عدد ساعت را خودِ کلاینت با Intl.DateTimeFormat دقیق حساب کند، نه
+    // مدل که ممکن است زمان فعلی واقعی را نداند.
+    async function geocodeCity(city, country) {
+        try {
+            const q = [city, country].filter(Boolean).join(', ');
+            const resp = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=5&language=fa&format=json`);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            const results = Array.isArray(data.results) ? data.results : [];
+            if (!results.length) return null;
+            // اگر کشور هم مشخص شده، سعی کن نتیجه‌ای که کشورش هم می‌خواند را انتخاب کنی؛ وگرنه اولین نتیجه.
+            const match = country
+                ? results.find(r => (r.country || '').toLowerCase().includes(country.toLowerCase()) || (r.country_code || '').toLowerCase() === country.toLowerCase())
+                : null;
+            const best = match || results[0];
+            return {
+                latitude: best.latitude,
+                longitude: best.longitude,
+                timezone: best.timezone || 'UTC',
+                city: best.name || city,
+                country: best.country || country || '',
+                region: best.admin1 || ''
+            };
+        } catch (_) { return null; }
+    }
+
+    // موقعیت جغرافیایی خودِ کاربر (با اجازه‌ی مرورگر) را می‌گیرد و با
+    // reverse-geocoding به شهر/کشور/timezone تبدیل می‌کند - برای وقتی که
+    // کاربر شهر خاصی نگفته («ساعت چنده؟» بدون اسم شهر).
+    async function getUserLocationAsCity() {
+        const coords = await new Promise((resolve) => {
+            if (!navigator.geolocation) { resolve(null); return; }
+            navigator.geolocation.getCurrentPosition(
+                pos => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+                () => resolve(null),
+                { timeout: 8000, maximumAge: 300000 }
+            );
+        });
+        if (!coords) return null;
+        try {
+            const resp = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${coords.latitude}&longitude=${coords.longitude}&language=fa&format=json`);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            const best = Array.isArray(data.results) && data.results[0];
+            if (!best) return null;
+            return {
+                latitude: coords.latitude,
+                longitude: coords.longitude,
+                timezone: best.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+                city: best.name || '',
+                country: best.country || '',
+                region: best.admin1 || ''
+            };
+        } catch (_) {
+            // حتی اگر reverse-geocode شکست خورد، حداقل timezone محلی خودِ مرورگر را داریم.
+            return { latitude: coords.latitude, longitude: coords.longitude, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, city: '', country: '', region: '' };
+        }
+    }
+
+    function formatClockParts(timezone) {
+        try {
+            const now = new Date();
+            const timeStr = new Intl.DateTimeFormat('fa-IR', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+            const offsetStr = new Intl.DateTimeFormat('en-US', { timeZone: timezone, timeZoneName: 'shortOffset' }).formatToParts(now).find(p => p.type === 'timeZoneName')?.value || '';
+            // ساعت/دقیقه به‌صورت عدد برای چرخاندن عقربه‌ها
+            const hh = Number(new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', hour12: false }).format(now)) % 24;
+            const mm = Number(new Intl.DateTimeFormat('en-US', { timeZone: timezone, minute: 'numeric' }).format(now));
+            return { timeStr, offsetStr, hourDeg: (hh % 12) * 30 + mm * 0.5, minuteDeg: mm * 6 };
+        } catch (_) {
+            return { timeStr: '--:--', offsetStr: '', hourDeg: 0, minuteDeg: 0 };
+        }
+    }
+
+    function buildClockWidgetHtml(loc) {
+        const id = `clock-widget-${Math.random().toString(36).slice(2)}`;
+        const locLabel = [loc.city, loc.region, loc.country].filter(Boolean).join('، ') || 'موقعیت نامشخص';
+        const { timeStr, offsetStr } = formatClockParts(loc.timezone);
+        return `<div class="mini-widget clock-widget" id="${id}" data-timezone="${escapeAttr(loc.timezone || '')}">
+            <div class="clock-widget-info">
+                <div class="clock-widget-time">${escapeHtml(timeStr)}</div>
+                <div class="clock-widget-loc">${escapeHtml(locLabel)}</div>
+                <div class="clock-widget-offset">${escapeHtml(offsetStr)}</div>
+            </div>
+            <div class="clock-widget-face">
+                <div class="clock-hand clock-hand-hour"></div>
+                <div class="clock-hand clock-hand-minute"></div>
+                <div class="clock-center-dot"></div>
+            </div>
+        </div>`;
+    }
+
+    // هر چند ثانیه عقربه‌ها/عدد ساعت همه‌ی ویجت‌های ساعتِ فعلاً روی صفحه را
+    // به‌روز می‌کند - چون این کارت‌ها ممکن است دقیقه‌ها روی صفحه بمانند
+    // (پیام‌های قدیمی‌تر هم همین کارت را دارند).
+    function tickAllClockWidgets() {
+        document.querySelectorAll('.clock-widget[data-timezone]').forEach(el => {
+            const tz = el.dataset.timezone;
+            if (!tz) return;
+            const { timeStr, offsetStr, hourDeg, minuteDeg } = formatClockParts(tz);
+            const timeEl = el.querySelector('.clock-widget-time');
+            const offsetEl = el.querySelector('.clock-widget-offset');
+            const hourHand = el.querySelector('.clock-hand-hour');
+            const minuteHand = el.querySelector('.clock-hand-minute');
+            if (timeEl) timeEl.textContent = timeStr;
+            if (offsetEl) offsetEl.textContent = offsetStr;
+            if (hourHand) hourHand.style.transform = `rotate(${hourDeg}deg)`;
+            if (minuteHand) minuteHand.style.transform = `rotate(${minuteDeg}deg)`;
+        });
+    }
+    setInterval(tickAllClockWidgets, 15000);
+
+    function buildWeatherWidgetHtml(data) {
+        const locLabel = [data.city, data.region, data.country].filter(Boolean).join('، ') || 'موقعیت نامشخص';
+        const temp = (typeof data.tempC === 'number' && isFinite(data.tempC)) ? `${Math.round(data.tempC)}°` : '--°';
+        const condition = data.condition || '';
+        return `<div class="mini-widget weather-widget">
+            <div class="weather-widget-temp">${escapeHtml(temp)}</div>
+            <div class="weather-widget-info">
+                <div class="weather-widget-condition">${escapeHtml(condition)}</div>
+                <div class="weather-widget-loc">${escapeHtml(locLabel)}</div>
+            </div>
+        </div>`;
+    }
+
+    // نقطه‌ی ورودی: بلاک ویجت را از متن جدا کرده، HTML اولیه‌ی ویجت را
+    // برمی‌گرداند (برای ساعتِ بدون شهر مشخص، چون گرفتن موقعیت async است، یک
+    // ویجت موقتِ "در حال یافتن موقعیت..." برمی‌گرداند و بعد async آن را با
+    // ویجت واقعی جایگزین می‌کند).
+    function renderWidgetIfPresent(widget) {
+        if (!widget || !widget.data) return '';
+        if (widget.type === 'weather') {
+            return buildWeatherWidgetHtml(widget.data);
+        }
+        if (widget.type === 'clock') {
+            const hasCity = widget.data.city && widget.data.city.trim();
+            if (hasCity) {
+                const placeholderId = `clock-pending-${Math.random().toString(36).slice(2)}`;
+                geocodeCity(widget.data.city, widget.data.country).then(loc => {
+                    const el = document.getElementById(placeholderId);
+                    if (!el) return;
+                    if (loc) {
+                        el.outerHTML = buildClockWidgetHtml(loc);
+                    } else {
+                        el.outerHTML = `<div class="mini-widget clock-widget-error">موقعیت «${escapeHtml(widget.data.city)}» پیدا نشد</div>`;
+                    }
+                });
+                return `<div class="mini-widget clock-widget-loading" id="${placeholderId}"><span class="loader-dots"><span></span><span></span><span></span></span></div>`;
+            } else {
+                const placeholderId = `clock-pending-${Math.random().toString(36).slice(2)}`;
+                getUserLocationAsCity().then(loc => {
+                    const el = document.getElementById(placeholderId);
+                    if (!el) return;
+                    if (loc && loc.timezone) {
+                        el.outerHTML = buildClockWidgetHtml(loc);
+                    } else {
+                        el.outerHTML = `<div class="mini-widget clock-widget-error">اجازه‌ی دسترسی به موقعیت داده نشد</div>`;
+                    }
+                });
+                return `<div class="mini-widget clock-widget-loading" id="${placeholderId}"><span class="loader-dots"><span></span><span></span><span></span></span></div>`;
+            }
+        }
+        return '';
     }
 
     // هر {old,new} را با یک زنجیره‌ی چند مرحله‌ای (از دقیق‌ترین به مسامحه‌کارترین)
