@@ -7974,18 +7974,45 @@
         } catch (_) { return null; }
     }
 
-    // موقعیت جغرافیایی خودِ کاربر (با اجازه‌ی مرورگر) را می‌گیرد و با
-    // reverse-geocoding به شهر/کشور/timezone تبدیل می‌کند - برای وقتی که
-    // کاربر شهر خاصی نگفته («ساعت چنده؟» بدون اسم شهر).
+    // موقعیت تقریبی کاربر را از روی IP می‌گیرد (بدون popup اجازه، بدون
+    // نیاز به GPS/Wi-Fi سخت‌افزاری - روی هر دستگاهی از جمله PC با اتصال
+    // فقط-کابلی/LAN هم کار می‌کند). از ipapi.co استفاده می‌شود که رایگان
+    // و بدون کلید است و مستقیماً شهر/کشور/timezone را برمی‌گرداند (نیازی
+    // به reverse-geocoding جدا نیست).
+    async function getLocationFromIP() {
+        try {
+            const resp = await fetch('https://ipapi.co/json/');
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            if (!data || data.error || !data.timezone) return null;
+            return {
+                latitude: data.latitude,
+                longitude: data.longitude,
+                timezone: data.timezone,
+                city: data.city || '',
+                country: data.country_name || '',
+                region: data.region || ''
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // موقعیت جغرافیایی خودِ کاربر را می‌گیرد و با reverse-geocoding به
+    // شهر/کشور/timezone تبدیل می‌کند - برای وقتی که کاربر شهر خاصی نگفته
+    // («ساعت چنده؟» بدون اسم شهر).
+    // FIX (روش قبلی فقط navigator.geolocation/GPS مرورگر بود، که روی PC با
+    // اتصال LAN/کابلی - بدون Wi-Fi فعال - هیچ سیگنالی برای تخمین موقعیت
+    // ندارد و یا فوراً POSITION_UNAVAILABLE می‌دهد یا تا timeout هنگ
+    // می‌کند؛ همچنین یک popup اجازه‌ی دسترسی هم به کاربر نشان می‌داد که
+    // بسیاری از کاربران رد می‌کنند). حالا مستقیماً IP-based geolocation
+    // اولویت است - سریع، بدون popup، و روی هر دستگاه/اتصالی کار می‌کند.
+    // فقط اگر IP-based شکست خورد (نادر)، به GPS مرورگر برمی‌گردیم.
     async function getUserLocationAsCity() {
-        // FIX (پیام همیشه "اجازه‌ی دسترسی داده نشد" نشان می‌داد، حتی وقتی
-        // کاربر واقعاً اجازه داده بود): callback خطای قبلی هر نوع شکستی
-        // (رد شدن دسترسی، timeout، سرویس موقعیت خاموش، HTTP به‌جای HTTPS
-        // و غیره) را یکسان با resolve(null) قورت می‌داد، پس UI هیچ‌وقت
-        // نمی‌توانست تشخیص دهد واقعاً چه اتفاقی افتاده. حالا کد واقعی خطا
-        // (GeolocationPositionError.code: ۱=PERMISSION_DENIED،
-        // ۲=POSITION_UNAVAILABLE، ۳=TIMEOUT) نگه داشته می‌شود تا پیام
-        // درست‌تری نشان داده شود.
+        const ipLoc = await getLocationFromIP();
+        if (ipLoc) return ipLoc;
+
+        // Fallback: GPS/Wi-Fi مرورگر (کد قبلی) - فقط وقتی IP شکست خورد.
         let geoErrorCode = null;
         const coords = await new Promise((resolve) => {
             if (!navigator.geolocation) { geoErrorCode = 'unsupported'; resolve(null); return; }
@@ -7993,13 +8020,6 @@
             navigator.geolocation.getCurrentPosition(
                 pos => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
                 (err) => { geoErrorCode = err && typeof err.code === 'number' ? err.code : null; resolve(null); },
-                // FIX (کد ۳/timeout با ۸ ثانیه): برای این کاربرد فقط باید
-                // بفهمیم کاربر کدام شهر است، نه موقعیت متری‌دقیق - پس
-                // enableHighAccuracy را خاموش می‌کنیم (که خودش معمولاً باعث
-                // پاسخ خیلی سریع‌تر از طریق Wi-Fi/IP به‌جای صبر برای GPS
-                // واقعی می‌شود) و timeout را به ۱۵ ثانیه افزایش می‌دهیم تا
-                // روی گوشی‌هایی که GPS/سرویس موقعیتشان کند است هم فرصت
-                // کافی برای جواب دادن داشته باشند.
                 { timeout: 15000, maximumAge: 300000, enableHighAccuracy: false }
             );
         });
@@ -8019,7 +8039,6 @@
                 region: best.admin1 || ''
             };
         } catch (_) {
-            // حتی اگر reverse-geocode شکست خورد، حداقل timezone محلی خودِ مرورگر را داریم.
             return { latitude: coords.latitude, longitude: coords.longitude, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, city: '', country: '', region: '' };
         }
     }
@@ -8123,10 +8142,10 @@
                         // FIX: پیام دقیق‌تر بر اساس کد واقعی خطای Geolocation،
                         // نه یک متن ثابت که همیشه می‌گفت اجازه داده نشده.
                         const code = loc && loc.error;
-                        let msg = 'موقعیت مکانی در دسترس نبود';
-                        if (code === 1) msg = 'اجازه‌ی دسترسی به موقعیت رد شد - از تنظیمات مرورگر برای این سایت اجازه بده';
-                        else if (code === 2) msg = 'موقعیت مکانی قابل تشخیص نبود';
-                        else if (code === 3) msg = 'دریافت موقعیت مکانی بیش از حد طول کشید - دوباره امتحان کن';
+                        let msg = 'موقعیت مکانی تشخیص داده نشد - اسم شهرت رو بگو';
+                        if (code === 1) msg = 'اجازه‌ی دسترسی به موقعیت رد شد - اسم شهرت رو بگو یا از تنظیمات مرورگر اجازه بده';
+                        else if (code === 2) msg = 'موقعیت مکانی قابل تشخیص نبود - اسم شهرت رو بگو';
+                        else if (code === 3) msg = 'دریافت موقعیت مکانی بیش از حد طول کشید - اسم شهرت رو بگو یا دوباره امتحان کن';
                         else if (code === 'insecure') msg = 'این قابلیت فقط روی HTTPS کار می‌کند';
                         else if (code === 'unsupported') msg = 'مرورگرت از موقعیت مکانی پشتیبانی نمی‌کند';
                         el.outerHTML = `<div class="mini-widget clock-widget-error">${escapeHtml(msg)}</div>`;
