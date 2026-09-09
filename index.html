@@ -6400,17 +6400,30 @@
     }
 
     // ===== نقطه‌ی وضعیت روی آیکون تب مرورگر =====
-    // موقع تولید پاسخ قرمز، بعد از اتمام سبز — با کشیدن نسخه‌ی جدید
-    // favicon روی یک canvas مخفی و جایگزین کردن href لینک آیکون.
+    // FIX (تشخیص قرمز/سبز کنار هم گیج‌کننده بود، مخصوصاً در تب پس‌زمینه):
+    // قبلاً همیشه یک دایره روی آیکون بود - قرمز حین تولید، سبز بعد از اتمام -
+    // که در سایز کوچک favicon تشخیص رنگ از هم سخت است و کاربر مطمئن نمی‌شد
+    // کارش واقعاً تمام شده یا نه. حالا قانون ساده‌تر است: دایره فقط زمانی که
+    // در حال تولید هستیم روی آیکون می‌آید؛ به‌محض اتمام (موفق یا خطا)، آیکون
+    // دقیقاً به حالت اصلی/تمیز خودش برمی‌گردد - یعنی "بدون نقطه" = "کارت
+    // تمام شده"، نه یک رنگ دیگر که باید تشخیصش داد.
     let __faviconBaseImg = null;
+    let __faviconDefaultHref = null;
     function updateFaviconStatus(generating) {
         try {
             const link = document.getElementById('favicon');
             if (!link) return;
+            if (!__faviconDefaultHref) __faviconDefaultHref = link.href;
+
+            if (!generating) {
+                link.href = __faviconDefaultHref;
+                return;
+            }
+
             if (!__faviconBaseImg) {
                 __faviconBaseImg = new Image();
                 __faviconBaseImg.onload = () => updateFaviconStatus(generating);
-                __faviconBaseImg.src = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%236b7078%22/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2248%25%22%20stop-color%3D%22%233a3c42%22/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231d1f24%22/%3E%0A%20%20%20%20%3C/linearGradient%3E%0A%20%20%3C/defs%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22url%28%23g%29%22/%3E%0A%20%20%3Cpath%20d%3D%22M32%2014%20L36.2%2027.8%20L50%2032%20L36.2%2036.2%20L32%2050%20L27.8%2036.2%20L14%2032%20L27.8%2027.8%20Z%22%20fill%3D%22%23f1f3f5%22/%3E%0A%20%20%3Ccircle%20cx%3D%2249%22%20cy%3D%2215%22%20r%3D%224%22%20fill%3D%22%23b6bac1%22/%3E%0A%3C/svg%3E%0A';
+                __faviconBaseImg.src = __faviconDefaultHref;
                 return;
             }
             const canvas = document.createElement('canvas');
@@ -6423,7 +6436,7 @@
             ctx.fill();
             ctx.beginPath();
             ctx.arc(50, 50, 6.5, 0, Math.PI * 2);
-            ctx.fillStyle = generating ? '#ef4444' : '#22c55e';
+            ctx.fillStyle = '#ef4444';
             ctx.fill();
             link.href = canvas.toDataURL('image/png');
         } catch (e) {}
