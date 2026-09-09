@@ -7632,14 +7632,16 @@
             let backgroundStatusPollTimer = null;
             const startBackgroundStatusPoll = () => {
                 if (backgroundStatusPollTimer) return;
+                console.log('[bg-poll] started', { requestId, serverRequestId });
                 backgroundStatusPollTimer = setInterval(() => {
                     if (requestId !== activeRequestId || streamEnded) { stopBackgroundStatusPoll(); return; }
                     if (document.visibilityState !== 'hidden') return; // فقط وقتی واقعاً روی تب دیگری هستیم
+                    console.log('[bg-poll] tick -> checking server', { serverRequestId });
                     pollServerStatusOnVisible();
                 }, 4000);
             };
             stopBackgroundStatusPoll = () => {
-                if (backgroundStatusPollTimer) { clearInterval(backgroundStatusPollTimer); backgroundStatusPollTimer = null; }
+                if (backgroundStatusPollTimer) { clearInterval(backgroundStatusPollTimer); backgroundStatusPollTimer = null; console.log('[bg-poll] stopped', { serverRequestId }); }
             };
             onVisibilityChangeForBackgroundPoll = () => {
                 if (document.visibilityState === 'hidden') startBackgroundStatusPoll();
@@ -7730,10 +7732,12 @@
                 if (streamEnded) return; // already finished normally, nothing to recover
                 statusPollInFlight = true;
                 try {
+                    console.log('[status-poll] fetching...', { serverRequestId });
                     const statusRes = await fetch(`/api/chat?mode=status&requestId=${encodeURIComponent(serverRequestId)}`, { method: 'GET' });
                     if (requestId !== activeRequestId || streamEnded) return;
-                    if (!statusRes.ok) return;
+                    if (!statusRes.ok) { console.log('[status-poll] non-ok response', statusRes.status); return; }
                     const statusJson = await statusRes.json().catch(() => null);
+                    console.log('[status-poll] result', statusJson);
                     if (!statusJson || !statusJson.ready || !statusJson.result) return;
 
                     const result = statusJson.result;
