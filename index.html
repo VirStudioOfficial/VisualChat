@@ -5386,12 +5386,12 @@
             if (__titleRevertTimer) { clearTimeout(__titleRevertTimer); __titleRevertTimer = null; }
 
             if (generating) {
-                document.title = `⏳ در حال پاسخ... — ${__pageDefaultTitle}`;
+                document.title = `… ${__pageDefaultTitle}`;
                 return;
             }
 
             if (justFinished && document.visibilityState === 'hidden') {
-                document.title = `✅ پاسخ آماده شد — ${__pageDefaultTitle}`;
+                document.title = `• ${__pageDefaultTitle}`;
                 const revertOnFocus = () => {
                     if (document.visibilityState === 'visible') {
                         document.title = __pageDefaultTitle;
@@ -5401,7 +5401,7 @@
                 document.addEventListener('visibilitychange', revertOnFocus);
                 __titleRevertTimer = setTimeout(() => {
                     document.removeEventListener('visibilitychange', revertOnFocus);
-                    if (document.title.startsWith('✅')) document.title = __pageDefaultTitle;
+                    if (document.title.startsWith('•')) document.title = __pageDefaultTitle;
                 }, 5 * 60 * 1000);
                 return;
             }
