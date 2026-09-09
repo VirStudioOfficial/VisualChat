@@ -5373,6 +5373,44 @@
         sendMessage();
     }
 
+    // ===== عنوان تب (document.title) به‌عنوان سیگنال دوم، مستقل از favicon =====
+    // FIX (کاربر رو تب دیگری هست و از favicon کوچک متوجه اتمام نمی‌شود):
+    // نقطه‌ی روی favicon در یک تب پس‌زمینه بسیار کوچک و کم‌تشخیص است -
+    // مخصوصاً وقتی چند تب باز داری. عنوان تب (که در نوار تب‌های مرورگر با
+    // فونت خوانا نمایش داده می‌شود) سیگنال قابل‌اتکاءتری است.
+    let __pageDefaultTitle = null;
+    let __titleRevertTimer = null;
+    function updatePageTitleStatus(generating, justFinished = false) {
+        try {
+            if (__pageDefaultTitle === null) __pageDefaultTitle = document.title;
+            if (__titleRevertTimer) { clearTimeout(__titleRevertTimer); __titleRevertTimer = null; }
+
+            if (generating) {
+                document.title = `⏳ در حال پاسخ... — ${__pageDefaultTitle}`;
+                return;
+            }
+
+            if (justFinished && document.visibilityState === 'hidden') {
+                document.title = `✅ پاسخ آماده شد — ${__pageDefaultTitle}`;
+                const revertOnFocus = () => {
+                    if (document.visibilityState === 'visible') {
+                        document.title = __pageDefaultTitle;
+                        document.removeEventListener('visibilitychange', revertOnFocus);
+                    }
+                };
+                document.addEventListener('visibilitychange', revertOnFocus);
+                __titleRevertTimer = setTimeout(() => {
+                    document.removeEventListener('visibilitychange', revertOnFocus);
+                    if (document.title.startsWith('✅')) document.title = __pageDefaultTitle;
+                }, 5 * 60 * 1000);
+                return;
+            }
+
+            document.title = __pageDefaultTitle;
+        } catch (e) {}
+    }
+
+    let __wasGeneratingForTitle = false;
     function setGeneratingState(generating) {
         isGenerating = generating;
         const inputField = document.getElementById("userInput");
@@ -5395,6 +5433,8 @@
 
         document.querySelectorAll('.brand-mark').forEach(el => el.classList.toggle('generating', generating));
         updateFaviconStatus(generating);
+        updatePageTitleStatus(generating, !generating && __wasGeneratingForTitle);
+        __wasGeneratingForTitle = generating;
     }
 
     /*
@@ -6417,6 +6457,7 @@
 
             if (!generating) {
                 link.href = __faviconDefaultHref;
+                forceFaviconRepaint(link);
                 return;
             }
 
@@ -6439,6 +6480,27 @@
             ctx.fillStyle = '#ef4444';
             ctx.fill();
             link.href = canvas.toDataURL('image/png');
+            forceFaviconRepaint(link);
+        } catch (e) {}
+    }
+
+    // FIX (نقطه‌ی favicon در تب پس‌زمینه واقعاً به‌روزرسانی می‌شود ولی
+    // مرورگر تصویرش را دوباره رسم نمی‌کند تا خود تب فوکوس بگیرد): ست کردن
+    // link.href به یک data URL جدید از نظر DOM فوراً اعمال می‌شود، اما
+    // Chrome/Firefox رسم واقعی favicon را برای تب‌های پس‌زمینه به‌عنوان
+    // بهینه‌سازی به تأخیر می‌اندازند - یعنی کاربر همچنان رنگ/حالت قدیمی
+    // را می‌بیند تا خودش روی تب کلیک کند و آن لحظه مرورگر مجبور به رسم
+    // مجدد می‌شود (دقیقاً همان رفتاری که گزارش شد: قرمز می‌ماند تا کلیک).
+    // ترفند شناخته‌شده: با حذف و اضافه‌ی دوباره‌ی خودِ <link> به DOM،
+    // اکثر مرورگرها را مجبور به بازبینی/رسم فوری favicon می‌کند، حتی
+    // وقتی تب در پس‌زمینه است.
+    function forceFaviconRepaint(link) {
+        try {
+            const parent = link.parentNode;
+            if (!parent) return;
+            const next = link.nextSibling;
+            parent.removeChild(link);
+            parent.insertBefore(link, next);
         } catch (e) {}
     }
 
