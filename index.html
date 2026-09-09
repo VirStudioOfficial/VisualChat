@@ -6867,11 +6867,13 @@
         // نسخه‌ی A و B هم اجرا می‌شود.
         const strippedA0 = stripWidgetBlock(stripFileEditBlock(textA).displayText);
         const strippedB0 = stripWidgetBlock(stripFileEditBlock(textB).displayText);
-        const strippedA = stripSuggestionsBlock(strippedA0.displayText);
-        const strippedB = stripSuggestionsBlock(strippedB0.displayText);
+        const strippedA1 = stripSuggestionsBlock(strippedA0.displayText);
+        const strippedB1 = stripSuggestionsBlock(strippedB0.displayText);
+        const strippedA = stripMemoryBlock(strippedA1.displayText);
+        const strippedB = stripMemoryBlock(strippedB1.displayText);
 
-        const formattedA = (typeof formatReply === 'function' ? formatReply(strippedA.displayText) : escapeHtml(strippedA.displayText)) + renderWidgetIfPresent(strippedA0.widget) + renderSuggestionsIfPresent(strippedA.suggestions);
-        const formattedB = (typeof formatReply === 'function' ? formatReply(strippedB.displayText) : escapeHtml(strippedB.displayText)) + renderWidgetIfPresent(strippedB0.widget) + renderSuggestionsIfPresent(strippedB.suggestions);
+        const formattedA = (typeof formatReply === 'function' ? formatReply(strippedA.displayText) : escapeHtml(strippedA.displayText)) + renderWidgetIfPresent(strippedA0.widget) + renderSuggestionsIfPresent(strippedA1.suggestions);
+        const formattedB = (typeof formatReply === 'function' ? formatReply(strippedB.displayText) : escapeHtml(strippedB.displayText)) + renderWidgetIfPresent(strippedB0.widget) + renderSuggestionsIfPresent(strippedB1.suggestions);
 
         loadingDiv.innerHTML = `
             <div class="dual-response-wrap">
@@ -6903,6 +6905,14 @@
             cardsEl.querySelectorAll('.dual-response-card').forEach(card => {
                 card.classList.toggle('picked', card.getAttribute('data-variant') === variant);
             });
+
+            // FEATURE (حافظه‌ی بلندمدت کاربر): فقط از نسخه‌ی واقعاً
+            // انتخاب‌شده استخراج/ذخیره می‌کنیم - چون نسخه‌ی رد‌شده هرگز
+            // به کاربر به‌عنوان پاسخ نهایی نشان داده نشده.
+            try {
+                const { memoryItems } = stripMemoryBlock(chosenText);
+                if (memoryItems) saveUserMemoryItems(memoryItems);
+            } catch (_) {}
 
             // پاسخ انتخاب‌شده همان پاسخ نهایی این نوبت گفتگو است - در
             // تاریخچه ذخیره می‌شود تا مدل در ادامه‌ی همین گفتگو به آن
@@ -7453,7 +7463,11 @@
                     // systemText تزریق می‌کند، هم وقتی dualResponseMode روشن
                     // است هم (به‌صورت غیرمستقیم، چون systemText مشترک است)
                     // برای پاسخ‌های عادی تک‌نسخه‌ای.
-                    responsePreferenceSummary: getCachedResponsePreferenceSummaryText()
+                    responsePreferenceSummary: getCachedResponsePreferenceSummaryText(),
+                    // FEATURE (حافظه‌ی بلندمدت کاربر): رشته‌ی کش‌شده‌ی
+                    // key:value هایی که قبلاً از این کاربر ذخیره شده - دقیقاً
+                    // همان الگوی responsePreferenceSummary بالا.
+                    userMemoryContext: getCachedUserMemoryContextText()
                 }),
                 signal: currentAbortController.signal
             });
@@ -7503,7 +7517,8 @@
                     const fullReply = dualJson.text;
                     const { displayText: withoutEdit, edits } = stripFileEditBlock(fullReply);
                     const { displayText: withoutWidget, widget } = stripWidgetBlock(withoutEdit);
-                    const { displayText, suggestions } = stripSuggestionsBlock(withoutWidget);
+                    const { displayText: withoutSuggestions, suggestions } = stripSuggestionsBlock(withoutWidget);
+                    const { displayText, memoryItems } = stripMemoryBlock(withoutSuggestions);
                     let finalHtml = displayText ? formatReply(displayText) : '';
                     finalHtml += buildFileEditResultHtml(edits);
                     finalHtml += renderWidgetIfPresent(widget);
@@ -7511,6 +7526,7 @@
                     if (!finalHtml) finalHtml = formatReply('');
                     loadingDiv.innerHTML = finalHtml;
                     if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
+                    if (memoryItems) saveUserMemoryItems(memoryItems);
                     if (chatHistoryData[currentChatId]) {
                         chatHistoryData[currentChatId].push({ role: 'model', text: fullReply });
                     }
@@ -7575,7 +7591,7 @@
                 // ولی نصف هزینه‌ی پارس کردن در هر فریمِ ۶۰fps را حذف می‌کند.
                 if (!force && ts && lastRenderTs && (ts - lastRenderTs) < 32) return;
                 lastRenderTs = ts || lastRenderTs;
-                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
+                const liveView = stripMemoryBlock(stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText).displayText;
                 const clamped = Math.min(revealedChars, liveView.length);
                 if (!force && clamped === lastRenderedChars) return;
                 lastRenderedChars = clamped;
@@ -7589,7 +7605,7 @@
             const revealTick = (ts) => {
                 revealRafId = null;
                 if (requestId !== activeRequestId) return;
-                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
+                const liveView = stripMemoryBlock(stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText).displayText;
                 const target = liveView.length;
                 if (revealedChars >= target) {
                     if (streamEnded) { renderRevealed(ts, true); return; }
@@ -7625,7 +7641,7 @@
             catchUpOnVisible = () => {
                 if (document.visibilityState !== 'visible') return;
                 if (requestId !== activeRequestId) return;
-                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
+                const liveView = stripMemoryBlock(stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText).displayText;
                 revealedChars = liveView.length;
                 renderRevealed(performance.now(), true);
                 startRevealLoop();
@@ -7686,7 +7702,7 @@
                 // بماند؛ force هم یعنی همین الان یک فریم رندر کن (مثلاً در
                 // پایان استریم، برای رساندن سریع به انتهای متن).
                 startRevealLoop();
-                if (force) { revealedChars = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText.length; renderRevealed(0, true); }
+                if (force) { revealedChars = stripMemoryBlock(stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText).displayText.length; renderRevealed(0, true); }
             };
 
             // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
@@ -7707,13 +7723,15 @@
 
                     const { displayText: withoutEdit, edits } = stripFileEditBlock(reply);
                     const { displayText: withoutWidget, widget } = stripWidgetBlock(withoutEdit);
-                    const { displayText, suggestions } = stripSuggestionsBlock(withoutWidget);
+                    const { displayText: withoutSuggestions, suggestions } = stripSuggestionsBlock(withoutWidget);
+                    const { displayText, memoryItems } = stripMemoryBlock(withoutSuggestions);
                     let finalHtml = displayText ? formatReply(displayText) : '';
                     finalHtml += buildFileEditResultHtml(edits);
                     finalHtml += buildEditedFilesHtml(streamEditedFiles);
                     finalHtml += renderWidgetIfPresent(widget);
                     finalHtml += renderSuggestionsIfPresent(suggestions);
                     if (!finalHtml) finalHtml = formatReply('');
+                    if (memoryItems) saveUserMemoryItems(memoryItems);
 
                     if (Array.isArray(streamEditedFiles) && streamEditedFiles.length) {
                         for (const f of streamEditedFiles) {
@@ -7830,7 +7848,7 @@
                                 `<div class="agent-step-label"><span class="agent-step-dot"></span>${escapeHtml(parsed.step)}</div>` +
                                 `<span class="loader-dots"><span></span><span></span><span></span></span>`;
                             if (fullReply) {
-                                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
+                                const liveView = stripMemoryBlock(stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText).displayText;
                                 loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView)) + stepHtml;
                             } else {
                                 loadingDiv.innerHTML = stepHtml;
@@ -7923,7 +7941,7 @@
             // قبل متن کامل را نشان می‌دهد، پس چیزی از دست نمی‌رود.
             await new Promise((resolve) => {
                 const finishImmediately = () => {
-                    const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
+                    const liveView = stripMemoryBlock(stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText).displayText;
                     revealedChars = liveView.length;
                     renderRevealed(performance.now(), true);
                     resolve();
@@ -7932,7 +7950,7 @@
                 const waitForReveal = () => {
                     if (requestId !== activeRequestId) { resolve(); return; }
                     if (document.visibilityState === 'hidden') { finishImmediately(); return; }
-                    const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
+                    const liveView = stripMemoryBlock(stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText).displayText;
                     if (revealedChars >= liveView.length) { resolve(); return; }
                     requestAnimationFrame(waitForReveal);
                 };
@@ -8265,6 +8283,89 @@
         } catch (_) { data = null; }
         const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
         return { displayText, suggestions: data };
+    }
+
+    // ===== حافظه‌ی بلندمدت کاربر (widget-memory-save) =====
+    // یک بلاک ```widget-memory-save [...]``` را از متن جدا می‌کند. کاربر
+    // این بلاک را هرگز نمی‌بیند - فقط پشت‌صحنه با saveUserMemoryItems
+    // در Supabase (از طریق api/memory.js) ذخیره می‌شود، هیچ UI ندارد.
+    function stripMemoryBlock(text) {
+        const match = /```widget-memory-save\s*([\s\S]*?)```/.exec(text || '');
+        if (!match) return { displayText: text || '', memoryItems: null };
+        let data = null;
+        try {
+            const parsed = JSON.parse(match[1].trim());
+            if (Array.isArray(parsed)) {
+                data = parsed
+                    .filter(it => it && typeof it.key === 'string' && typeof it.value === 'string' && it.key.trim() && it.value.trim())
+                    .slice(0, 3);
+                if (!data.length) data = null;
+            }
+        } catch (_) { data = null; }
+        const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+        return { displayText, memoryItems: data };
+    }
+
+    // هر آیتم را جدا و بی‌صدا (بدون نمایش به کاربر) با PUT در api/memory.js
+    // ذخیره می‌کند. اگر کاربر مهمان باشد (authFetch بدون توکن throw می‌کند،
+    // دقیقاً مثل الگوی preferences)، بی‌سروصدا نادیده گرفته می‌شود - فقط
+    // کاربرهای لاگین‌شده این حافظه را دارند. خطاهای شبکه هم بی‌صدا قورت
+    // داده می‌شوند تا هرگز جریان چت اصلی را مختل نکنند.
+    async function saveUserMemoryItems(items) {
+        if (!Array.isArray(items) || !items.length) return;
+        if (!localStorage.getItem(AUTH_TOKEN_KEY)) return;
+        for (const item of items) {
+            try {
+                await authFetch('/api/memory', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: item.key, value: item.value })
+                });
+            } catch (_) {
+                // کاربر مهمان یا خطای شبکه - بی‌صدا رد شو، حافظه اختیاری است
+            }
+        }
+        // بعد از ذخیره‌ی موفق، کش محلی خلاصه‌ی حافظه را هم رفرش کن تا پیام
+        // بعدی همین session از این اطلاعات تازه آگاه باشد، نه فقط از دفعه‌ی
+        // بعدی که اپ باز می‌شود.
+        try { refreshUserMemoryContextInBackground(); } catch (_) {}
+    }
+
+    // ===== کش محلی خلاصه‌ی حافظه (شبیه دقیق الگوی
+    // virtual_response_preference_summary برای dual-response) =====
+    const USER_MEMORY_CONTEXT_KEY = 'virtual_user_memory_context';
+    let userMemoryContextInFlight = false;
+
+    function getUserMemoryContextCache() {
+        try { return JSON.parse(localStorage.getItem(USER_MEMORY_CONTEXT_KEY) || 'null'); } catch (_) { return null; }
+    }
+    function setUserMemoryContextCache(entry) {
+        try { localStorage.setItem(USER_MEMORY_CONTEXT_KEY, JSON.stringify(entry)); } catch (_) {}
+    }
+    function getCachedUserMemoryContextText() {
+        const cached = getUserMemoryContextCache();
+        return cached?.text || '';
+    }
+    // GET /api/memory را در پس‌زمینه صدا می‌زند و خروجی را به یک رشته‌ی
+    // ساده‌ی «کلید: مقدار» تبدیل می‌کند که مستقیماً در userMemoryContext
+    // به بک‌اند فرستاده می‌شود. برای کاربر مهمان بی‌صدا رد می‌شود - دقیقاً
+    // همان الگوی refreshResponsePreferenceSummaryInBackground.
+    async function refreshUserMemoryContextInBackground() {
+        if (userMemoryContextInFlight) return;
+        if (!localStorage.getItem(AUTH_TOKEN_KEY)) return;
+        userMemoryContextInFlight = true;
+        try {
+            const resp = await authFetch('/api/memory');
+            if (!resp.ok) return;
+            const data = await resp.json().catch(() => null);
+            const memory = Array.isArray(data?.memory) ? data.memory : [];
+            const text = memory.length ? memory.map(m => `- ${m.key}: ${m.value}`).join('\n') : '';
+            setUserMemoryContextCache({ text, updatedAt: Date.now() });
+        } catch (_) {
+            // شکست بی‌سروصدا - این فیچر یادگیری اختیاری است.
+        } finally {
+            userMemoryContextInFlight = false;
+        }
     }
 
     // نام شهر/کشور را با Open-Meteo Geocoding (رایگان، بدون کلید) به
@@ -9548,6 +9649,9 @@
         // مرحله ۵: خلاصه‌ی ترجیح الف/ب هم از ابتدای سشن (فقط برای کاربر
         // لاگین‌شده - تابع خودش این را چک می‌کند) در پس‌زمینه آماده می‌شود.
         refreshResponsePreferenceSummaryInBackground();
+        // FEATURE (حافظه‌ی بلندمدت کاربر): همینطور خلاصه‌ی حافظه‌ی کاربر -
+        // شبیه دقیق الگوی بالا، فقط برای کاربر لاگین‌شده.
+        refreshUserMemoryContextInBackground();
     }
 
     function toggleHistorySearch() {
