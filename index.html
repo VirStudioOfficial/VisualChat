@@ -3713,9 +3713,28 @@
                     const full = await fullResp.json().catch(() => null);
                     if (!full || !full.chat) continue;
 
+                    // FIX (عکس‌ها/ویدیوهای پیام بعد از sync ناپدید می‌شدند):
+                    // sanitizeHtmlForSync عمداً base64 سنگین را قبل از
+                    // ارسال به سرور با یک placeholder («[رسانه پیوست]»)
+                    // جایگزین می‌کند (برای رد نشدن از سقف حجم ورسل) - یعنی
+                    // نسخه‌ی سرور همیشه ناقص‌تر از نسخه‌ی کامل محلی در
+                    // IndexedDB است. قبلاً اینجا کورکورانه html سرور
+                    // جایگزین html محلی می‌شد، پس اگر updated_at سرور
+                    // جدیدتر بود (که معمولاً همینطوره، چون sync درست بعد
+                    // از ارسال پیام انجام می‌شود)، عکس واقعی محلی با
+                    // placeholder سرور بازنویسی و برای همیشه گم می‌شد. الان
+                    // اگر نسخه‌ی محلی موجود باشد و base64 واقعی بیشتری از
+                    // نسخه‌ی سرور داشته باشد، html محلی را نگه می‌داریم و
+                    // فقط بقیه‌ی فیلدها (عنوان/pin) را از سرور می‌گیریم.
+                    const serverHtml = full.chat.html || '';
+                    const localHasMoreMedia = localChat && typeof localChat.html === 'string' &&
+                        (localChat.html.match(/data:(image|video)\/[^;]+;base64,/g) || []).length >
+                        (serverHtml.match(/data:(image|video)\/[^;]+;base64,/g) || []).length;
+                    const resolvedHtml = localHasMoreMedia ? localChat.html : serverHtml;
+
                     chats[chatId] = {
                         title: full.chat.title || 'گفتگوی جدید',
-                        html: full.chat.html || '',
+                        html: resolvedHtml,
                         pinned: !!full.chat.pinned,
                         updatedAt: serverUpdatedAt
                     };
