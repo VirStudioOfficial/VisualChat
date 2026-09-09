@@ -588,7 +588,6 @@
             align-items: center;
             gap: 6px;
             background: var(--bg-card);
-            border: 1px solid var(--border-soft);
             border-radius: 12px;
             padding: 4px 10px;
             cursor: pointer;
@@ -598,7 +597,6 @@
             position: relative;
         }
         .model-selector:hover {
-            border-color: color-mix(in srgb, var(--accent-1) 40%, transparent);
             color: var(--text-main);
         }
         .model-selector .model-name {
@@ -1178,7 +1176,6 @@
             height: 34px;
             padding: 0 10px;
             border-radius: 999px;
-            border: 1px solid var(--border-soft);
             background: transparent;
             color: var(--text-muted);
             font-size: 0.76rem;
@@ -2028,6 +2025,10 @@
 .message.bot a.msg-link{color:var(--accent-1);text-decoration:underline;text-underline-offset:2px;word-break:break-all}
 .message.bot a.msg-link:hover{opacity:.82}
 .entity-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 8px;border-radius:999px;background:var(--bg-card);border:1px solid var(--border-soft);font-size:.85em;font-weight:600;color:var(--text-main);vertical-align:middle}
+.entity-chip i{font-size:.9em;color:var(--text-main)}
+.feature-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 8px;border-radius:999px;background:var(--bg-card);border:1px solid var(--border-soft);font-size:.85em;font-weight:600;color:var(--text-main);vertical-align:middle;cursor:pointer;transition:background .15s ease}
+.feature-chip:hover{background:var(--bg-card-hover)}
+.feature-chip i{font-size:.9em;color:#f5c518}
 .entity-chip i{font-size:.9em;color:var(--accent-1)}
 /* FEATURE: لیست تودرتو - هر سطح تورفتگی بیشتر یعنی یک <ul>/<ol> داخل <li> والدش */
 .message.bot li>ul,.message.bot li>ol{margin:.28rem 0 .28rem .1rem}
@@ -5695,6 +5696,16 @@
         };
     }
 
+    // FEATURE: چیپ‌های قابل‌کلیکِ «قابلیت اپ» (نحو {{feature:کلید:برچسب}}
+    // در پاسخ مدل) - کلیک روی هرکدام کاربر را مستقیم به همان قابلیت
+    // می‌برد، به‌جای اینکه فقط یک بج تزئینی باشد. کلید 'voice' فعلاً تنها
+    // مورد پشتیبانی‌شده است؛ کلید ناشناخته بی‌صدا نادیده گرفته می‌شود.
+    function openFeatureChip(key) {
+        if (key === 'voice') {
+            startLiveCall();
+        }
+    }
+
     async function startLiveCall() {
         if (liveState) return; // already in a call
         if (isGenerating) return; // don't collide with a text generation in flight
@@ -8177,9 +8188,14 @@
             .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="msg-link">$2</a>')
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
             .replace(/__([^_]+)__/g, '<strong>$1</strong>')
-            // FEATURE: کارت/چیپ Entity - نحو ویژه {{entity:نام}} یک بج کوچک
-            // با آیکون پازل رندر می‌کند (برای اشاره به یک مفهوم/محصول/شخص مهم).
-            .replace(/\{\{entity:([^}]+)\}\}/g, '<span class="entity-chip"><i class="ph ph-puzzle-piece" data-lucide="puzzle"></i>$1</span>')
+            // FEATURE: بج «اسم خاص» معمولی - نحو {{entity:نام}} - آیکون تگ
+            // (برای مفهوم/محصول/شخص مهمِ عادی، نه قابلیت‌های خودِ اپ).
+            .replace(/\{\{entity:([^}]+)\}\}/g, '<span class="entity-chip"><i class="ph ph-tag" data-lucide="tag"></i>$1</span>')
+            // FEATURE: بج «قابلیت اپ» - نحو {{feature:کلید:برچسب}} - آیکون
+            // اسپارکل + قابل کلیک؛ کلیک روی آن کاربر را مستقیم به همان
+            // قابلیت می‌برد (مثلاً voice → شروع تماس صوتی). کلیدهای
+            // پشتیبانی‌شده پایین در openFeatureChip تعریف شده‌اند.
+            .replace(/\{\{feature:([a-z_]+):([^}]+)\}\}/g, '<span class="feature-chip" onclick="openFeatureChip(\'$1\')"><i class="ph ph-sparkle" data-lucide="sparkles"></i>$2</span>')
             // ایتالیک: تک‌ستاره/تک‌آندرلاین (بعد از بولد پردازش می‌شود که با ** تداخل نکند)
             .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
             .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>')
