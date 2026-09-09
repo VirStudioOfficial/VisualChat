@@ -918,6 +918,10 @@
 
         /* ===== ویجت ساعت/آب‌وهوا ===== */
         .mini-widget { margin: 1rem 0; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); direction: rtl; text-align: right; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; max-width: 340px; }
+        .quick-suggestions-row { margin: 10px 0 2px; display: flex; flex-wrap: wrap; gap: 8px; direction: rtl; }
+        .quick-suggestion-btn { font-family: inherit; font-size: 0.85rem; line-height: 1.4; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary, inherit); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+        .quick-suggestion-btn:hover { background: var(--bg-hover, rgba(255,255,255,0.06)); border-color: var(--accent, var(--border)); }
+        .quick-suggestion-btn:active { transform: scale(0.97); }
         .clock-widget-loading, .clock-widget-error { justify-content: center; color: var(--text-muted); font-size: 0.82rem; padding: 18px; }
         .clock-widget-info { display: flex; flex-direction: column; gap: 2px; }
         .clock-widget-time { font-size: 1.6rem; font-weight: 700; color: var(--text-main); direction: ltr; text-align: right; }
@@ -6527,6 +6531,20 @@
         updateScrollLatestButton();
     }
 
+    // FEATURE (پیشنهاد سؤال بعدی): با کلیک روی یکی از دکمه‌های پیشنهادی زیر
+    // پیام ربات، دقیقاً همان رفتار تایپ‌کردن‌وفرستادن را شبیه‌سازی می‌کند -
+    // متن کامل پیشنهاد را در باکس ورودی می‌گذارد و sendMessage عادی را صدا
+    // می‌زند (همان مسیر همیشگی ارسال، بدون منطق موازی جدید).
+    function sendSuggestion(text) {
+        if (!text) return;
+        const inputField = document.getElementById("userInput");
+        if (!inputField) return;
+        inputField.value = text;
+        // برخی فریم‌ورک‌ها/لیسنرهای auto-resize به رویداد input گوش می‌دهند
+        inputField.dispatchEvent(new Event('input', { bubbles: true }));
+        sendMessage();
+    }
+
     async function sendMessage() {
         // FIX (double-submit race condition): setGeneratingState(true) only
         // runs later, inside sendToGemini(), after several async steps
@@ -6847,11 +6865,13 @@
         // معمولی رندر می‌کند. حالا دقیقاً همان دو مرحله‌ی مسیر عادی (جدا
         // کردن بلاک‌ها از متن نمایشی، سپس ساخت HTML واقعی ویجت) برای هر دو
         // نسخه‌ی A و B هم اجرا می‌شود.
-        const strippedA = stripWidgetBlock(stripFileEditBlock(textA).displayText);
-        const strippedB = stripWidgetBlock(stripFileEditBlock(textB).displayText);
+        const strippedA0 = stripWidgetBlock(stripFileEditBlock(textA).displayText);
+        const strippedB0 = stripWidgetBlock(stripFileEditBlock(textB).displayText);
+        const strippedA = stripSuggestionsBlock(strippedA0.displayText);
+        const strippedB = stripSuggestionsBlock(strippedB0.displayText);
 
-        const formattedA = (typeof formatReply === 'function' ? formatReply(strippedA.displayText) : escapeHtml(strippedA.displayText)) + renderWidgetIfPresent(strippedA.widget);
-        const formattedB = (typeof formatReply === 'function' ? formatReply(strippedB.displayText) : escapeHtml(strippedB.displayText)) + renderWidgetIfPresent(strippedB.widget);
+        const formattedA = (typeof formatReply === 'function' ? formatReply(strippedA.displayText) : escapeHtml(strippedA.displayText)) + renderWidgetIfPresent(strippedA0.widget) + renderSuggestionsIfPresent(strippedA.suggestions);
+        const formattedB = (typeof formatReply === 'function' ? formatReply(strippedB.displayText) : escapeHtml(strippedB.displayText)) + renderWidgetIfPresent(strippedB0.widget) + renderSuggestionsIfPresent(strippedB.suggestions);
 
         loadingDiv.innerHTML = `
             <div class="dual-response-wrap">
@@ -7482,10 +7502,12 @@
                 if (dualJson && dualJson.dualResponse === false && typeof dualJson.text === 'string') {
                     const fullReply = dualJson.text;
                     const { displayText: withoutEdit, edits } = stripFileEditBlock(fullReply);
-                    const { displayText, widget } = stripWidgetBlock(withoutEdit);
+                    const { displayText: withoutWidget, widget } = stripWidgetBlock(withoutEdit);
+                    const { displayText, suggestions } = stripSuggestionsBlock(withoutWidget);
                     let finalHtml = displayText ? formatReply(displayText) : '';
                     finalHtml += buildFileEditResultHtml(edits);
                     finalHtml += renderWidgetIfPresent(widget);
+                    finalHtml += renderSuggestionsIfPresent(suggestions);
                     if (!finalHtml) finalHtml = formatReply('');
                     loadingDiv.innerHTML = finalHtml;
                     if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
@@ -7553,7 +7575,7 @@
                 // ولی نصف هزینه‌ی پارس کردن در هر فریمِ ۶۰fps را حذف می‌کند.
                 if (!force && ts && lastRenderTs && (ts - lastRenderTs) < 32) return;
                 lastRenderTs = ts || lastRenderTs;
-                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
+                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
                 const clamped = Math.min(revealedChars, liveView.length);
                 if (!force && clamped === lastRenderedChars) return;
                 lastRenderedChars = clamped;
@@ -7567,7 +7589,7 @@
             const revealTick = (ts) => {
                 revealRafId = null;
                 if (requestId !== activeRequestId) return;
-                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
+                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
                 const target = liveView.length;
                 if (revealedChars >= target) {
                     if (streamEnded) { renderRevealed(ts, true); return; }
@@ -7603,7 +7625,7 @@
             catchUpOnVisible = () => {
                 if (document.visibilityState !== 'visible') return;
                 if (requestId !== activeRequestId) return;
-                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
+                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
                 revealedChars = liveView.length;
                 renderRevealed(performance.now(), true);
                 startRevealLoop();
@@ -7664,7 +7686,7 @@
                 // بماند؛ force هم یعنی همین الان یک فریم رندر کن (مثلاً در
                 // پایان استریم، برای رساندن سریع به انتهای متن).
                 startRevealLoop();
-                if (force) { revealedChars = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText.length; renderRevealed(0, true); }
+                if (force) { revealedChars = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText.length; renderRevealed(0, true); }
             };
 
             // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
@@ -7684,11 +7706,13 @@
                     lastFailedRequest = null;
 
                     const { displayText: withoutEdit, edits } = stripFileEditBlock(reply);
-                    const { displayText, widget } = stripWidgetBlock(withoutEdit);
+                    const { displayText: withoutWidget, widget } = stripWidgetBlock(withoutEdit);
+                    const { displayText, suggestions } = stripSuggestionsBlock(withoutWidget);
                     let finalHtml = displayText ? formatReply(displayText) : '';
                     finalHtml += buildFileEditResultHtml(edits);
                     finalHtml += buildEditedFilesHtml(streamEditedFiles);
                     finalHtml += renderWidgetIfPresent(widget);
+                    finalHtml += renderSuggestionsIfPresent(suggestions);
                     if (!finalHtml) finalHtml = formatReply('');
 
                     if (Array.isArray(streamEditedFiles) && streamEditedFiles.length) {
@@ -7806,7 +7830,7 @@
                                 `<div class="agent-step-label"><span class="agent-step-dot"></span>${escapeHtml(parsed.step)}</div>` +
                                 `<span class="loader-dots"><span></span><span></span><span></span></span>`;
                             if (fullReply) {
-                                const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
+                                const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
                                 loadingDiv.innerHTML = formatReply(sanitizeVirtualIdentity(liveView)) + stepHtml;
                             } else {
                                 loadingDiv.innerHTML = stepHtml;
@@ -7899,7 +7923,7 @@
             // قبل متن کامل را نشان می‌دهد، پس چیزی از دست نمی‌رود.
             await new Promise((resolve) => {
                 const finishImmediately = () => {
-                    const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
+                    const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
                     revealedChars = liveView.length;
                     renderRevealed(performance.now(), true);
                     resolve();
@@ -7908,7 +7932,7 @@
                 const waitForReveal = () => {
                     if (requestId !== activeRequestId) { resolve(); return; }
                     if (document.visibilityState === 'hidden') { finishImmediately(); return; }
-                    const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
+                    const liveView = stripSuggestionsBlock(stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText).displayText;
                     if (revealedChars >= liveView.length) { resolve(); return; }
                     requestAnimationFrame(waitForReveal);
                 };
@@ -8219,6 +8243,28 @@
         try { data = JSON.parse(match[2].trim()); } catch (_) { data = null; }
         const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
         return { displayText, widget: data ? { type: match[1], data } : null };
+    }
+
+    // ===== پیشنهاد سؤال بعدی (quick-reply suggestions) =====
+    // یک بلاک جداگانه ```widget-suggestions [...]``` را از متن جدا می‌کند.
+    // بلاک مستقل از stripWidgetBlock (که تک‌آبجکتی/clock-weather است) نگه
+    // داشته شده چون داده‌اش آرایه است و همیشه می‌تواند همراه با یک ویجت
+    // ساعت/آب‌وهوا هم در همان پیام حاضر باشد (دو بلاک جدا از هم).
+    function stripSuggestionsBlock(text) {
+        const match = /```widget-suggestions\s*([\s\S]*?)```/.exec(text || '');
+        if (!match) return { displayText: text || '', suggestions: null };
+        let data = null;
+        try {
+            const parsed = JSON.parse(match[1].trim());
+            if (Array.isArray(parsed)) {
+                data = parsed
+                    .filter(it => it && typeof it.label === 'string' && typeof it.text === 'string' && it.label.trim() && it.text.trim())
+                    .slice(0, 2);
+                if (!data.length) data = null;
+            }
+        } catch (_) { data = null; }
+        const displayText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+        return { displayText, suggestions: data };
     }
 
     // نام شهر/کشور را با Open-Meteo Geocoding (رایگان، بدون کلید) به
@@ -8558,6 +8604,33 @@
         }
         return '';
     }
+
+    // FEATURE (پیشنهاد سؤال بعدی): کارت‌های کوچک کلیک‌پذیر زیر پیام ربات
+    // می‌سازد. با کلیک، متن کامل (نه فقط برچسب) از طریق sendSuggestion به‌
+    // عنوان پیام کاربر ارسال می‌شود. این کارت‌ها بعد از کلیک ناپدید نمی‌شوند
+    // و جزو ثابت پیام ربات باقی می‌مانند (طبق تصمیم توافق‌شده).
+    function renderSuggestionsIfPresent(suggestions) {
+        if (!Array.isArray(suggestions) || !suggestions.length) return '';
+        const buttons = suggestions.map(s => {
+            const label = escapeHtml(s.label);
+            const textAttr = escapeHtml(s.text).replace(/"/g, '&quot;');
+            return `<button type="button" class="quick-suggestion-btn" data-suggestion-text="${textAttr}">${label}</button>`;
+        }).join('');
+        return `<div class="quick-suggestions-row">${buttons}</div>`;
+    }
+
+    // یک بار روی #chatBox (که همیشه در صفحه هست) delegate می‌شود - چون
+    // پیام‌ها/دکمه‌ها به‌صورت داینامیک اضافه می‌شوند و اگر روی خودِ دکمه‌ها
+    // مستقیم listener بگذاریم، هر بار باید دوباره وصل شود.
+    document.addEventListener('DOMContentLoaded', () => {
+        const chatBox = document.getElementById('chatBox');
+        if (!chatBox) return;
+        chatBox.addEventListener('click', (e) => {
+            const btn = e.target.closest('.quick-suggestion-btn');
+            if (!btn) return;
+            sendSuggestion(btn.dataset.suggestionText || '');
+        });
+    });
 
     // هر {old,new} را با یک زنجیره‌ی چند مرحله‌ای (از دقیق‌ترین به مسامحه‌کارترین)
     // اعمال می‌کند، تا وقتی مدل متن old را حرف‌به‌حرف کپی نکرده (که برای فایل‌های
