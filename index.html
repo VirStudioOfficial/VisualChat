@@ -2859,6 +2859,28 @@
     let isFirstMessage = true;
     let isGenerating = false;
     let isSearchEnabled = true; // سرچ خودکاره؛ تصمیم نهایی رو shouldSearchWeb() و بک‌اند می‌گیرن
+
+    // FEATURE (ویجت ساعت/آب‌وهوا - آگاهی سرور از موقعیت واقعی کاربر):
+    // مدل قبلاً فقط «ساعت به‌وقت تهران» را می‌دید و برای کاربرانی که واقعاً
+    // جای دیگری هستند (یا IP/VPN متفاوت دارند) همان را در متن آزاد پاسخ
+    // می‌نوشت - که با ویجت (که از IP واقعی می‌خواند) نمی‌خواند. حالا موقعیت
+    // تقریبی کاربر یک‌بار (با IP، بدون popup) روی کلاینت گرفته و کش می‌شود
+    // و با هر پیام به سرور فرستاده می‌شود تا مدل هم برای متن پاسخ (ساعت را
+    // حدس نزند) و هم برای آب‌وهوای بدون‌شهر («هوا چطوره؟» بدون اسم شهر)
+    // بداند کاربر تقریباً کجاست.
+    let cachedUserIPLocation = null;
+    let userIPLocationInFlight = null;
+    function primeUserIPLocation() {
+        if (cachedUserIPLocation || userIPLocationInFlight) return userIPLocationInFlight;
+        userIPLocationInFlight = getLocationFromIP().then(loc => {
+            cachedUserIPLocation = loc || null;
+            return cachedUserIPLocation;
+        }).catch(() => null);
+        return userIPLocationInFlight;
+    }
+    // از همان لحظه‌ی بارگذاری صفحه شروع به گرفتنش کن (پس‌زمینه، بدون تأخیر
+    // در اولین پیام کاربر - چون معمولاً تا کاربر شروع به تایپ کند آماده است).
+    primeUserIPLocation();
     let currentAbortController = null;
     let typeWriterInterval = null;
     let lastFailedRequest = null;
@@ -6720,8 +6742,21 @@
     // ذخیره‌ی انتخاب در Supabase (برای یادگیری ترجیحات - مرحله ۴) هنوز
     // اضافه نشده؛ فعلاً فقط انتخاب محلی اعمال می‌شود.
     function renderDualResponseCards(loadingDiv, textA, textB, chatIdAtRequestTime, userMessageText) {
-        const formattedA = typeof formatReply === 'function' ? formatReply(textA) : escapeHtml(textA);
-        const formattedB = typeof formatReply === 'function' ? formatReply(textB) : escapeHtml(textB);
+        // FIX (بلاک‌های widget-clock/widget-weather و ادیت فایل به‌صورت کد
+        // خام نمایش داده می‌شدند): برخلاف مسیر عادی پاسخ (که همیشه اول
+        // stripFileEditBlock و stripWidgetBlock را روی متن اجرا می‌کند و
+        // بعد ویجت واقعی را با renderWidgetIfPresent می‌سازد)، این تابع
+        // مستقیماً متن خام مدل - که هنوز شامل بلاک‌های ```widget-...``` یا
+        // بلاک‌های ادیت فایل است - را به formatReply می‌داد؛ formatReply
+        // این بلاک‌های خاص را نمی‌شناسد و آن‌ها را عیناً به‌صورت یک بلوک کد
+        // معمولی رندر می‌کند. حالا دقیقاً همان دو مرحله‌ی مسیر عادی (جدا
+        // کردن بلاک‌ها از متن نمایشی، سپس ساخت HTML واقعی ویجت) برای هر دو
+        // نسخه‌ی A و B هم اجرا می‌شود.
+        const strippedA = stripWidgetBlock(stripFileEditBlock(textA).displayText);
+        const strippedB = stripWidgetBlock(stripFileEditBlock(textB).displayText);
+
+        const formattedA = (typeof formatReply === 'function' ? formatReply(strippedA.displayText) : escapeHtml(strippedA.displayText)) + renderWidgetIfPresent(strippedA.widget);
+        const formattedB = (typeof formatReply === 'function' ? formatReply(strippedB.displayText) : escapeHtml(strippedB.displayText)) + renderWidgetIfPresent(strippedB.widget);
 
         loadingDiv.innerHTML = `
             <div class="dual-response-wrap">
@@ -7158,6 +7193,17 @@
             try {
                 if (isRetry) return false; // روی retry دوباره حساب نکن
 
+                // FIX (ویجت ساعت/آب‌وهوا و ادیت فایل به‌صورت کد خام تو
+                // کارت‌های dual-response نمایش داده می‌شدند): dual-response
+                // برای مقایسه‌ی دو سبک نوشتاری متن است، نه برای حالت‌هایی که
+                // پاسخ شامل یک بلاک ساختاری خاص (ویجت، ادیت فایل) است - در
+                // آن حالت‌ها یا کاربر باید همان یک ویجت/نتیجه‌ی ادیت را
+                // ببیند (نه دو نسخه‌ی «متفاوت» از یک واقعیت واحد)، یا اصلاً
+                // مقایسه‌ی سبک بی‌معناست. وقتی فایلی ضمیمه شده - یعنی
+                // تقریباً همیشه حالت ویرایش/بررسی کد - همینجا از اول
+                // dual-response را غیرفعال می‌کنیم.
+                if (mergedTextFiles.length > 0) return false;
+
                 const lifetimeShown = parseInt(localStorage.getItem('vc_dual_lifetime_shown') || '0', 10) || 0;
                 if (lifetimeShown >= DUAL_RESPONSE_LIFETIME_CAP) return false; // سقف کلی رد شده
 
@@ -7243,6 +7289,13 @@
                     archivedFiles: recentArchivedFiles(currentChatId)
                         .filter(f => !mergedTextFiles.some(mf => mf.name === f.name)),
                     webSearch: isSearchEnabled,
+                    // FEATURE (ویجت ساعت/آب‌وهوا): موقعیت تقریبی کاربر
+                    // (از IP، کش‌شده - primeUserIPLocation) تا مدل هم متن
+                    // آزاد پاسخ را بر اساس همین بنویسد (نه وقت تهران)، هم
+                    // برای «هوا چطوره؟» بدون اسم شهر بداند کدام شهر را
+                    // سرچ کند. اگر هنوز آماده نشده (خیلی نادر - اولین پیام
+                    // خیلی سریع)، null می‌رود و مدل مثل قبل رفتار می‌کند.
+                    userLocation: cachedUserIPLocation,
                     thinkLevel: currentThinkLevel,
                     history: chatHistoryData[currentChatId],
                     model: currentModel,
@@ -7295,6 +7348,32 @@
                 try { dualJson = await response.clone().json(); } catch (_) {}
                 if (dualJson && dualJson.dualResponse === true) {
                     renderDualResponseCards(loadingDiv, dualJson.responseA || '', dualJson.responseB || '', currentChatId, textPrompt);
+                    setGeneratingState(false); saveCurrentChat(); scrollToLatest();
+                    return;
+                }
+                // FIX (پاسخ حاوی ویجت/ادیت فایل بود و سرور آگاهانه به یک
+                // پاسخ تکی برگشته - نه SSE واقعی): این حالت را از حالت
+                // «dual-response واقعاً شکست خورده» جدا می‌کنیم؛ اینجا
+                // خودِ سرور عمداً JSON غیر-استریم با متن نهایی برگردانده
+                // (چون این پاسخ اصلاً برای مقایسه‌ی A/B مناسب نبود)، پس
+                // ادامه‌دادن به مسیر خواندن SSE زیر غلط است - آن مسیر منتظر
+                // chunk های event-stream می‌ماند که هرگز نمی‌آیند و
+                // درخواست را عملاً هنگ می‌کند. به‌جایش دقیقاً مثل یک پاسخ
+                // عادی کامل (با strip شدن بلاک‌های ویجت/ادیت + رندر ویجت
+                // واقعی، همان‌طور که مسیر عادی انجام می‌دهد) نمایشش می‌دهیم.
+                if (dualJson && dualJson.dualResponse === false && typeof dualJson.text === 'string') {
+                    const fullReply = dualJson.text;
+                    const { displayText: withoutEdit, edits } = stripFileEditBlock(fullReply);
+                    const { displayText, widget } = stripWidgetBlock(withoutEdit);
+                    let finalHtml = displayText ? formatReply(displayText) : '';
+                    finalHtml += buildFileEditResultHtml(edits);
+                    finalHtml += renderWidgetIfPresent(widget);
+                    if (!finalHtml) finalHtml = formatReply('');
+                    loadingDiv.innerHTML = finalHtml;
+                    if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') { try { lucide.createIcons(); } catch (_) {} }
+                    if (chatHistoryData[currentChatId]) {
+                        chatHistoryData[currentChatId].push({ role: 'model', text: fullReply });
+                    }
                     setGeneratingState(false); saveCurrentChat(); scrollToLatest();
                     return;
                 }
