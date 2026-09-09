@@ -955,6 +955,15 @@
         .hourly-temp-error { color: var(--text-muted); font-size: 0.85rem; padding: 30px; }
         .hourly-temp-chart-svg { width: 100%; height: auto; }
 
+        /* ===== لایت‌باکس بزرگ‌نمایی عکس (پیام‌ها و پیش‌نمایش ضمیمه) ===== */
+        .img-lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10050; opacity: 0; pointer-events: none; transition: opacity 0.18s; padding: 24px; }
+        .img-lightbox-overlay.open { opacity: 1; pointer-events: auto; }
+        .img-lightbox-overlay img { max-width: min(90vw, 900px); max-height: 88vh; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        .img-lightbox-close { position: absolute; top: 18px; left: 18px; background: rgba(255,255,255,0.1); border: none; color: #fff; font-size: 1.3rem; line-height: 1; cursor: pointer; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+        .img-lightbox-close:hover { background: rgba(255,255,255,0.2); }
+        .msg-inline-img { cursor: zoom-in; transition: opacity 0.12s; }
+        .msg-inline-img:hover { opacity: 0.9; }
+
         .code-card-collapsed .code-card-filelabel { display:flex; align-items:center; gap:7px; text-transform:none; letter-spacing:normal; font-weight:600; color: var(--text-main); }
         .code-card-collapsed .code-card-meta { padding: 10px 14px 14px; font-size: 0.78rem; color: var(--text-muted); }
 
@@ -4697,6 +4706,35 @@
         if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (_) {} }
     }
 
+    // FEATURE (بزرگ‌نمایی عکس با کلیک): وقتی کاربر روی عکسی که در پیام
+    // ضمیمه شده کلیک می‌کند، یک لایت‌باکس تمام‌صفحه باز می‌شود که همان
+    // عکس را در سایز بزرگ نشان می‌دهد - عکس اصلی/base64 هرگز تغییر
+    // نمی‌کند، فقط نمایش بزرگ‌تر است. با کلیک بیرون از عکس یا دکمه‌ی
+    // ضربدر بسته می‌شود.
+    function openImageLightbox(src) {
+        let overlay = document.getElementById('imgLightboxOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'imgLightboxOverlay';
+            overlay.className = 'img-lightbox-overlay';
+            overlay.innerHTML = `
+                <button class="img-lightbox-close" onclick="closeImageLightbox()" title="بستن"><i class="ph ph-x" data-lucide="x"></i></button>
+                <img id="imgLightboxImg" src="" alt="">
+            `;
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeImageLightbox();
+            });
+            document.body.appendChild(overlay);
+            if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (_) {} }
+        }
+        document.getElementById('imgLightboxImg').src = src;
+        requestAnimationFrame(() => overlay.classList.add('open'));
+    }
+    function closeImageLightbox() {
+        const overlay = document.getElementById('imgLightboxOverlay');
+        if (overlay) overlay.classList.remove('open');
+    }
+
     // FEATURE (auto-convert long text to file): کلیک روی چیپِ فایل متنی
     // (چه فایل واقعی آپلودشده، چه متن طولانی‌ای که خودکار تبدیل شده) یک
     // مودال ادیتور ساده باز می‌کند تا کاربر بتواند محتوا را بدون محدودیت
@@ -6641,7 +6679,7 @@
         // of only ever showing/sending the single last one.
         for (const f of selectedFilesData) {
             if (f.type && f.type.startsWith('image/')) {
-                userContentHtml += `<br><img src="${f.base64}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;">`;
+                userContentHtml += `<br><img src="${f.base64}" class="msg-inline-img" style="max-width:220px; max-height:220px; border-radius:8px; margin-top:8px;" onclick="openImageLightbox('${f.base64}')">`;
             } else if (f.type && f.type.startsWith('video/')) {
                 userContentHtml += `<br><video controls style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px;"><source src="${f.base64}" type="${f.type}"></video>`;
             } else {
