@@ -3868,6 +3868,7 @@
         try {
             await migrateLegacyChatStorage();
             await loadChatsFromIndexedDB();
+            recoverEmergencyLocalStorageSaves();
         } catch (e) {
             console.error('IndexedDB initialization failed:', e);
             const storageKey = currentUser ? `virtual_chat_${currentUser.email}` : 'virtual_chat_history';
@@ -3890,10 +3891,82 @@
     // تازه‌بارگذاری‌شده) هرگز به IndexedDB نمی‌رسید. pagehide/beforeunload
     // به‌عنوان یک safety-net همیشه یک saveCurrentChat سینک‌شده اجرا می‌کند
     // (اگر چتی باز و در حال تولید نباشد) تا آخرین وضعیت واقعی صفحه از دست نرود.
+    // FIX (رفرش/بستن تب هنوز گاهی آخرین پیام‌ها را از دست می‌داد، حتی با
+    // این safety-net): saveCurrentChat در نهایت queueChatSave را صدا می‌زند
+    // که idbPut (باز کردن دیتابیس + تراکنش + put، همه async) را اجرا
+    // می‌کند. مرورگرها هیچ تضمینی نمی‌دهند که کار async شروع‌شده داخل
+    // beforeunload/pagehide واقعاً قبل از خارج شدن از صفحه کامل شود -
+    // به‌خصوص در یک رفرش سخت (مثلاً بعد از دیپلوی جدید)، مرورگر می‌تواند
+    // تراکنش IndexedDB در حال اجرا را دقیقاً همان لحظه که ناوبری شروع
+    // می‌شود قطع کند. یعنی صدا زدن queueChatSave این‌جا هیچ تضمینی نمی‌داد -
+    // دقیقاً همان چیزی که کاربر گزارش داد (چت کامل پرید، فقط قسمتی که قبلاً
+    // واقعاً ذخیره شده بود ماند). localStorage.setItem برخلاف IndexedDB
+    // کاملاً synchronous است و مرورگر قبل از خروج از صفحه آن را کامل اجرا
+    // می‌کند - پس همین‌جا یک نسخه‌ی خام و فوری (JSON ساده، بدون صبر برای
+    // IndexedDB) در localStorage با کلید مخصوص هر چت نوشته می‌شود. در بار
+    // بعدی که initUserData/loadChatsFromIndexedDB اجرا می‌شود، اگر این
+    // نسخه‌ی اضطراری از نسخه‌ی IndexedDB جدیدتر باشد (بر اساس updatedAt)،
+    // جایگزینش می‌شود - یعنی حتی اگر idbPut اصلی هیچ‌وقت کامل نشده باشد،
+    // آخرین وضعیت واقعی صفحه از بین نمی‌رود.
+    function emergencySyncSaveToLocalStorage(chatId) {
+        try {
+            const chat = chats[chatId];
+            if (!chat) return;
+            const owner = getChatOwnerKey();
+            const key = `virtual_chat_emergency_${owner}_${chatId}`;
+            localStorage.setItem(key, JSON.stringify({
+                chatId: String(chatId),
+                title: chat.title || 'گفتگوی جدید',
+                html: chat.html || '',
+                pinned: !!chat.pinned,
+                updatedAt: chat.updatedAt || Date.now(),
+                history: chatHistoryData[chatId] || []
+            }));
+        } catch (e) {}
+    }
+
+    // بعد از هر بار بارگذاری موفق چت‌ها از IndexedDB، این‌جا localStorage
+    // را برای هر نسخه‌ی اضطراری باقی‌مانده (از یک رفرش/بستن ناقص قبلی)
+    // می‌گردد. اگر نسخه‌ی اضطراری از نسخه‌ی فعلی IndexedDB جدیدتر باشد
+    // (یعنی idbPut اصلی هیچ‌وقت کامل نشده بود)، جایگزینش می‌کند و دوباره
+    // در IndexedDB می‌نویسد تا از این به بعد نسخه‌ی اصلی هم درست شود؛ در
+    // هر صورت کلید اضطراری بعد از استفاده پاک می‌شود تا رشد بی‌رویه‌ی
+    // localStorage اتفاق نیفتد.
+    function recoverEmergencyLocalStorageSaves() {
+        try {
+            const owner = getChatOwnerKey();
+            const prefix = `virtual_chat_emergency_${owner}_`;
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (!key || !key.startsWith(prefix)) continue;
+                keysToRemove.push(key);
+                let saved;
+                try { saved = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { saved = null; }
+                if (!saved || !saved.chatId) continue;
+                const chatId = saved.chatId;
+                const localUpdatedAt = (chats[chatId] && chats[chatId].updatedAt) || 0;
+                if ((saved.updatedAt || 0) > localUpdatedAt) {
+                    chats[chatId] = {
+                        ...(chats[chatId] || {}),
+                        title: saved.title || 'گفتگوی جدید',
+                        html: saved.html || '',
+                        pinned: !!saved.pinned,
+                        updatedAt: saved.updatedAt || Date.now()
+                    };
+                    if (Array.isArray(saved.history)) chatHistoryData[chatId] = saved.history;
+                    queueChatSave(chatId);
+                }
+            }
+            keysToRemove.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+        } catch (e) {}
+    }
+
     function flushChatBeforeUnload() {
         try {
             if (currentChatId && chats[currentChatId] && !isGenerating) {
                 saveCurrentChat();
+                emergencySyncSaveToLocalStorage(currentChatId);
             }
         } catch (e) {}
     }
