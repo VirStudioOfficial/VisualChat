@@ -394,15 +394,19 @@ function pruneMemoryPendingResponses() {
 }
 
 async function savePendingResponse(requestId, payload) {
-    if (!requestId) return;
+    if (!requestId) {
+        log.warn('pending_response.save_skipped_no_id', {});
+        return;
+    }
     const serialized = JSON.stringify(payload);
 
     if (hasUsageKV()) {
         try {
             await usageKvCommand('SET', [`${PENDING_KV_PREFIX}:${requestId}`, serialized, 'EX', String(PENDING_TTL_SECONDS)]);
+            log.info('pending_response.saved', { requestId, bytes: serialized.length, storage: 'kv' });
             return;
         } catch (error) {
-            log.warn('pending_response.kv_write_failed', { message: error?.message || String(error) });
+            log.warn('pending_response.kv_write_failed', { requestId, message: error?.message || String(error) });
             // fall through to memory fallback so the feature still degrades gracefully
         }
     }
@@ -412,6 +416,7 @@ async function savePendingResponse(requestId, payload) {
         payload: serialized,
         expiresAt: Date.now() + PENDING_TTL_SECONDS * 1000
     });
+    log.info('pending_response.saved', { requestId, bytes: serialized.length, storage: 'memory-fallback' });
 }
 
 async function getPendingResponse(requestId) {
@@ -420,16 +425,18 @@ async function getPendingResponse(requestId) {
     if (hasUsageKV()) {
         try {
             const raw = await usageKvCommand('GET', [`${PENDING_KV_PREFIX}:${requestId}`]);
+            log.info('pending_response.read', { requestId, found: !!raw, storage: 'kv' });
             if (!raw) return null;
             try { return JSON.parse(raw); } catch (_) { return null; }
         } catch (error) {
-            log.warn('pending_response.kv_read_failed', { message: error?.message || String(error) });
+            log.warn('pending_response.kv_read_failed', { requestId, message: error?.message || String(error) });
             return null;
         }
     }
 
     pruneMemoryPendingResponses();
     const row = __pendingResponseMemory.get(String(requestId));
+    log.info('pending_response.read', { requestId, found: !!row, storage: 'memory-fallback' });
     if (!row) return null;
     try { return JSON.parse(row.payload); } catch (_) { return null; }
 }
@@ -4053,6 +4060,7 @@ async function handler(req, res) {
         if (!requestId) {
             return res.status(400).json({ error: { message: 'requestId لازم است.' } });
         }
+        log.info('pending_response.status_check', { requestId });
         const pending = await getPendingResponse(requestId);
         if (!pending) {
             // هنوز کامل نشده (یا اصلاً چنین requestId ای وجود نداشته/منقضی شده) -
