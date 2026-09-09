@@ -7978,15 +7978,25 @@
     // reverse-geocoding به شهر/کشور/timezone تبدیل می‌کند - برای وقتی که
     // کاربر شهر خاصی نگفته («ساعت چنده؟» بدون اسم شهر).
     async function getUserLocationAsCity() {
+        // FIX (پیام همیشه "اجازه‌ی دسترسی داده نشد" نشان می‌داد، حتی وقتی
+        // کاربر واقعاً اجازه داده بود): callback خطای قبلی هر نوع شکستی
+        // (رد شدن دسترسی، timeout، سرویس موقعیت خاموش، HTTP به‌جای HTTPS
+        // و غیره) را یکسان با resolve(null) قورت می‌داد، پس UI هیچ‌وقت
+        // نمی‌توانست تشخیص دهد واقعاً چه اتفاقی افتاده. حالا کد واقعی خطا
+        // (GeolocationPositionError.code: ۱=PERMISSION_DENIED،
+        // ۲=POSITION_UNAVAILABLE، ۳=TIMEOUT) نگه داشته می‌شود تا پیام
+        // درست‌تری نشان داده شود.
+        let geoErrorCode = null;
         const coords = await new Promise((resolve) => {
-            if (!navigator.geolocation) { resolve(null); return; }
+            if (!navigator.geolocation) { geoErrorCode = 'unsupported'; resolve(null); return; }
+            if (window.isSecureContext === false) { geoErrorCode = 'insecure'; resolve(null); return; }
             navigator.geolocation.getCurrentPosition(
                 pos => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-                () => resolve(null),
+                (err) => { geoErrorCode = err && typeof err.code === 'number' ? err.code : null; resolve(null); },
                 { timeout: 8000, maximumAge: 300000 }
             );
         });
-        if (!coords) return null;
+        if (!coords) return { error: geoErrorCode };
         try {
             const resp = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${coords.latitude}&longitude=${coords.longitude}&language=fa&format=json`);
             if (!resp.ok) return null;
@@ -8103,7 +8113,16 @@
                     if (loc && loc.timezone) {
                         el.outerHTML = buildClockWidgetHtml(loc);
                     } else {
-                        el.outerHTML = `<div class="mini-widget clock-widget-error">اجازه‌ی دسترسی به موقعیت داده نشد</div>`;
+                        // FIX: پیام دقیق‌تر بر اساس کد واقعی خطای Geolocation،
+                        // نه یک متن ثابت که همیشه می‌گفت اجازه داده نشده.
+                        const code = loc && loc.error;
+                        let msg = 'موقعیت مکانی در دسترس نبود';
+                        if (code === 1) msg = 'اجازه‌ی دسترسی به موقعیت رد شد - از تنظیمات مرورگر برای این سایت اجازه بده';
+                        else if (code === 2) msg = 'موقعیت مکانی قابل تشخیص نبود';
+                        else if (code === 3) msg = 'دریافت موقعیت مکانی بیش از حد طول کشید - دوباره امتحان کن';
+                        else if (code === 'insecure') msg = 'این قابلیت فقط روی HTTPS کار می‌کند';
+                        else if (code === 'unsupported') msg = 'مرورگرت از موقعیت مکانی پشتیبانی نمی‌کند';
+                        el.outerHTML = `<div class="mini-widget clock-widget-error">${escapeHtml(msg)}</div>`;
                     }
                 });
                 return `<div class="mini-widget clock-widget-loading" id="${placeholderId}"><span class="loader-dots"><span></span><span></span><span></span></span></div>`;
