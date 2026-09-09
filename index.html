@@ -7885,9 +7885,29 @@
             // پس‌زمینه کامل می‌شود) و سپس finalHtml را جایگزین می‌کنیم -
             // بدون ری‌استارت انیمیشن، چون بصری هیچ تفاوتی با آخرین فریمِ
             // حرف‌به‌حرف ندارد.
+            // FIX (پاسخ حین بودن روی تب دیگر تا کلیک نکردن "در حال پاسخ" می‌ماند):
+            // این انتظار قبلاً فقط با requestAnimationFrame پیش می‌رفت - اما
+            // مرورگرها rAF را در تب‌های پس‌زمینه تقریباً کاملاً متوقف می‌کنند
+            // (دقیقاً همان محدودیتی که در FIX بالای revealTick هم توضیح داده
+            // شده). یعنی وقتی استریم واقعی از سرور تمام می‌شد ولی کاربر روی
+            // تب دیگری بود، این Promise هرگز resolve نمی‌شد، پس finishWithReply
+            // (که setGeneratingState(false) و به‌تبع آن ریست عنوان/favicon را
+            // صدا می‌زند) هم اجرا نمی‌شد - تا لحظه‌ای که کاربر به تب برمی‌گشت و
+            // rAF دوباره فعال می‌شد. راه‌حل: وقتی تب پنهان است، منتظر انیمیشن
+            // حرف‌به‌حرف نمان - همان لحظه‌ی واقعی پایان استریم، متن کامل را
+            // یک‌جا رندر کن و ادامه بده؛ کاربر که برگردد catchUpOnVisible از
+            // قبل متن کامل را نشان می‌دهد، پس چیزی از دست نمی‌رود.
             await new Promise((resolve) => {
+                const finishImmediately = () => {
+                    const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
+                    revealedChars = liveView.length;
+                    renderRevealed(performance.now(), true);
+                    resolve();
+                };
+                if (document.visibilityState === 'hidden') { finishImmediately(); return; }
                 const waitForReveal = () => {
                     if (requestId !== activeRequestId) { resolve(); return; }
+                    if (document.visibilityState === 'hidden') { finishImmediately(); return; }
                     const liveView = stripWidgetBlock(stripFileEditBlock(fullReply).displayText).displayText;
                     if (revealedChars >= liveView.length) { resolve(); return; }
                     requestAnimationFrame(waitForReveal);
