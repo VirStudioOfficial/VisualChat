@@ -7602,8 +7602,44 @@
                 // جمع شده، از سرور هم می‌پرسیم شاید کل پاسخ زودتر از
                 // اینکه reader تب throttle‌شده متوجه شود کامل شده باشد.
                 pollServerStatusOnVisible();
+                stopBackgroundStatusPoll();
             };
             document.addEventListener('visibilitychange', catchUpOnVisible);
+
+            // FIX (تیتر/favicon فقط وقتی برمی‌گردی به‌روز می‌شدند، نه در
+            // لحظه‌ی واقعی اتمام حین بودن روی تب دیگر): pollServerStatusOnVisible
+            // فقط با رویداد visibilitychange (یعنی دقیقاً لحظه‌ی برگشتن)
+            // صدا زده می‌شد - یعنی تا وقتی خودِ کاربر تب را عوض نمی‌کرد،
+            // هیچ کدی اجرا نمی‌شد تا وضعیت "تمام شد" را کشف کند، حتی اگر
+            // پاسخ چند دقیقه قبل واقعاً آماده شده بود. نتیجه دقیقاً همان
+            // چیزی بود که گزارش شد: عنوان تب همیشه "در حال پاسخ..." نشان
+            // می‌داد تا لحظه‌ی برگشت. راه‌حل: وقتی تب پنهان می‌شود، یک
+            // polling دوره‌ای (هر ۴ ثانیه) در پس‌زمینه شروع می‌شود که با
+            // سرور چک می‌کند - اگر پاسخ همان لحظه (حین بودن کاربر روی تب
+            // دیگر) کامل شده باشد، setGeneratingState(false) از داخل
+            // finishWithReply همان لحظه صدا زده می‌شود و عنوان/favicon
+            // فوراً به‌روز می‌شوند - بدون نیاز به برگشتن کاربر به تب.
+            let backgroundStatusPollTimer = null;
+            const startBackgroundStatusPoll = () => {
+                if (backgroundStatusPollTimer) return;
+                backgroundStatusPollTimer = setInterval(() => {
+                    if (requestId !== activeRequestId || streamEnded) { stopBackgroundStatusPoll(); return; }
+                    if (document.visibilityState !== 'hidden') return; // فقط وقتی واقعاً روی تب دیگری هستیم
+                    pollServerStatusOnVisible();
+                }, 4000);
+            };
+            const stopBackgroundStatusPoll = () => {
+                if (backgroundStatusPollTimer) { clearInterval(backgroundStatusPollTimer); backgroundStatusPollTimer = null; }
+            };
+            const onVisibilityChangeForBackgroundPoll = () => {
+                if (document.visibilityState === 'hidden') startBackgroundStatusPoll();
+                else stopBackgroundStatusPoll();
+            };
+            document.addEventListener('visibilitychange', onVisibilityChangeForBackgroundPoll);
+            // اگر همین الان (لحظه‌ی شروع این پاسخ) کاربر از قبل روی تب
+            // دیگری بود، بلافاصله شروع کن - منتظر یک visibilitychange
+            // بعدی نمان.
+            if (document.visibilityState === 'hidden') startBackgroundStatusPoll();
 
             const flushLiveRender = () => {
                 liveRenderTimer = null;
@@ -7892,6 +7928,8 @@
             clearTimeout(watchdogId);
             if (revealRafId) { cancelAnimationFrame(revealRafId); revealRafId = null; }
             document.removeEventListener('visibilitychange', catchUpOnVisible);
+            document.removeEventListener('visibilitychange', onVisibilityChangeForBackgroundPoll);
+            stopBackgroundStatusPoll();
             // مطمئن شو این پرچم در هیچ مسیر خروجی (موفق/خطا/Stop) روشن
             // نمی‌ماند، وگرنه ناظر آیکون‌ها برای همیشه غیرفعال باقی می‌ماند.
             window.__isStreamingReply = false;
