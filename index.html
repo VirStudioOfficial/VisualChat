@@ -6997,24 +6997,44 @@
             // اصلاً حسابی وجود ندارد که ترجیح به آن نسبت داده شود.
             (async () => {
                 try {
-                    await authFetch('/api/preferences', {
+                    const resp = await authFetch('/api/preferences', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            chatId: chatIdAtRequestTime,
+                            // FIX (باگ سیستماتیک - همیشه 400 می‌گرفت):
+                            // currentChatId عدد است (Date.now()) نه رشته،
+                            // ولی بک‌اند صریحاً typeof chatId !== 'string'
+                            // را رد می‌کند. یعنی این PUT همیشه (برای همه‌ی
+                            // کاربرها، هر بار) با 400 fail می‌شد و چون
+                            // کاملاً بی‌صدا قورت داده می‌شد، هیچ‌وقت معلوم
+                            // نبود - کل فیچر یادگیری ترجیح الف/ب عملاً
+                            // هیچ‌وقت داده‌ای ذخیره نمی‌کرد. String() اینجا
+                            // رفعش می‌کند.
+                            chatId: String(chatIdAtRequestTime),
                             userMessage: userMessageText || '',
                             responseA: textA,
                             responseB: textB,
                             chosen: variant
                         })
                     });
+                    // FIX (همون الگوی silent-fail حافظه‌ی بلندمدت اینجا هم
+                    // بود): authFetch برای status غیر-401 چیزی throw
+                    // نمی‌کند، فقط resp غیر-ok برمی‌گرداند - یعنی خطای واقعی
+                    // (مثلاً 400 از یک body نامعتبر) هیچ‌وقت به این catch
+                    // نمی‌رسید و کاملاً نامرئی می‌ماند. حالا حداقل لاگ می‌شود.
+                    if (!resp.ok) {
+                        console.warn('preferences PUT failed', resp.status);
+                        return;
+                    }
                     // انتخاب تازه ذخیره شد - خلاصه‌ی ترجیح کش‌شده دیگر
                     // به‌روز نیست، همین‌جا (در پس‌زمینه) رفرشش می‌کنیم تا
                     // پیام‌های بعدی همین کاربر از آن استفاده کنند.
                     refreshResponsePreferenceSummaryInBackground();
-                } catch (_) {
+                } catch (e) {
                     // کاربر مهمان است یا خطای شبکه - این فیچر یادگیری
-                    // اختیاری است و نباید تجربه‌ی چت را مختل کند.
+                    // اختیاری است و نباید تجربه‌ی چت را مختل کند، ولی حداقل
+                    // در کنسول لاگ می‌شود.
+                    console.warn('preferences PUT threw', e?.message || e);
                 }
             })();
 
@@ -8389,19 +8409,30 @@
         if (!localStorage.getItem(AUTH_TOKEN_KEY)) return;
         for (const item of items) {
             try {
-                await authFetch('/api/memory', {
+                const resp = await authFetch('/api/memory', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ key: item.key, value: item.value })
                 });
-            } catch (_) {
-                // کاربر مهمان یا خطای شبکه - بی‌صدا رد شو، حافظه اختیاری است
+                // FIX (باگ حافظه‌ی بلندمدت قبلاً کاملاً بی‌صدا fail می‌شد):
+                // authFetch اگر status غیر 401 باشد (مثلاً 404 چون memory.js
+                // دیپلوی نشده، یا 500 خطای دیتابیس)، آن را throw نمی‌کند -
+                // فقط resp غیر-ok برمی‌گرداند. یعنی این try/catch هیچ‌وقت
+                // این حالت‌ها را نمی‌گرفت و خطا کاملاً نامرئی می‌ماند. حالا
+                // حداقل در کنسول لاگ می‌شود تا موقع دیباگ قابل مشاهده باشد.
+                if (!resp.ok) {
+                    console.warn('saveUserMemoryItems: PUT /api/memory failed', resp.status, item.key);
+                }
+            } catch (e) {
+                // کاربر مهمان یا خطای شبکه - جریان چت اصلی مختل نمی‌شود،
+                // ولی حداقل در کنسول لاگ می‌شود (به‌جای قورت کامل).
+                console.warn('saveUserMemoryItems: request threw', e?.message || e);
             }
         }
         // بعد از ذخیره‌ی موفق، کش محلی خلاصه‌ی حافظه را هم رفرش کن تا پیام
         // بعدی همین session از این اطلاعات تازه آگاه باشد، نه فقط از دفعه‌ی
         // بعدی که اپ باز می‌شود.
-        try { refreshUserMemoryContextInBackground(); } catch (_) {}
+        try { refreshUserMemoryContextInBackground(); } catch (e) { console.warn('refreshUserMemoryContextInBackground failed', e?.message || e); }
     }
 
     // ===== کش محلی خلاصه‌ی حافظه (شبیه دقیق الگوی
