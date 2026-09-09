@@ -7993,7 +7993,14 @@
             navigator.geolocation.getCurrentPosition(
                 pos => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
                 (err) => { geoErrorCode = err && typeof err.code === 'number' ? err.code : null; resolve(null); },
-                { timeout: 8000, maximumAge: 300000 }
+                // FIX (کد ۳/timeout با ۸ ثانیه): برای این کاربرد فقط باید
+                // بفهمیم کاربر کدام شهر است، نه موقعیت متری‌دقیق - پس
+                // enableHighAccuracy را خاموش می‌کنیم (که خودش معمولاً باعث
+                // پاسخ خیلی سریع‌تر از طریق Wi-Fi/IP به‌جای صبر برای GPS
+                // واقعی می‌شود) و timeout را به ۱۵ ثانیه افزایش می‌دهیم تا
+                // روی گوشی‌هایی که GPS/سرویس موقعیتشان کند است هم فرصت
+                // کافی برای جواب دادن داشته باشند.
+                { timeout: 15000, maximumAge: 300000, enableHighAccuracy: false }
             );
         });
         if (!coords) return { error: geoErrorCode };
