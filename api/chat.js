@@ -349,8 +349,89 @@ async function usageKvCommand(command, args = []) {
             return withScores ? rows.flatMap(r => [r.value, String(r.score)]) : rows;
         }
         case 'HGETALL': return client.hGetAll(args[0]);
+        case 'SET': {
+            // args: [key, value, 'EX', seconds] (matches the REST-style shape used elsewhere)
+            const exIdx = args.findIndex(a => String(a).toUpperCase() === 'EX');
+            const opts = exIdx !== -1 ? { EX: Number(args[exIdx + 1]) } : undefined;
+            return client.set(args[0], args[1], opts);
+        }
+        case 'GET': return client.get(args[0]);
+        case 'DEL': return client.del(args[0]);
         default: throw new Error(`Unsupported Redis command: ${command}`);
     }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Pending-response store (backgrounded-tab recovery)
+|--------------------------------------------------------------------------
+| FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه): وقتی کاربر
+| حین دریافت استریم به تب دیگری می‌رود، مرورگر تایمرها/event loop تب را
+| throttle می‌کند و fetch/reader ممکن است عملاً هرگز به نتیجه‌ی قابل‌اعتماد
+| نرسد - با اینکه سرور واقعاً پاسخ را کامل تولید کرده. بعد از اینکه یک
+| پاسخ کامل شد (چه موفق چه با خطا)، همان بسته‌ی نهایی را اینجا زیر
+| requestId کلاینت ذخیره می‌کنیم تا کلاینت با visibilitychange بتواند
+| بپرسد "این requestId چی شد؟" و در صورت آماده بودن، دقیقاً همان چیزی که
+| اگر استریم قطع نشده بود می‌دید را بازسازی کند (متن + ویجت + فایل‌های
+| ادیت‌شده + سایر فلگ‌های done).
+|
+| روی Vercel هر invocation می‌تواند instance متفاوتی باشد، پس یک Map
+| ساده‌ی in-memory بین درخواست پول و درخواست استریم اصلی مشترک نیست -
+| از همان لایه‌ی KV/Redis مشترک (بالا) استفاده می‌کنیم. اگر KV تنظیم
+| نشده باشد (فقط local dev)، به همان Map محلی برمی‌گردیم - قابل قبول
+| فقط چون در آن حالت هر دو درخواست معمولاً روی همان یک پروسه‌ی محلی
+| اجرا می‌شوند.
+*/
+const PENDING_KV_PREFIX = 'virtual-bot:pending-response:v1';
+const PENDING_TTL_SECONDS = 15 * 60; // 15 minutes
+const __pendingResponseMemory = new Map(); // requestId -> { payload, expiresAt } (local-dev fallback only)
+
+function pruneMemoryPendingResponses() {
+    const now = Date.now();
+    for (const [key, row] of __pendingResponseMemory.entries()) {
+        if (!row || row.expiresAt <= now) __pendingResponseMemory.delete(key);
+    }
+}
+
+async function savePendingResponse(requestId, payload) {
+    if (!requestId) return;
+    const serialized = JSON.stringify(payload);
+
+    if (hasUsageKV()) {
+        try {
+            await usageKvCommand('SET', [`${PENDING_KV_PREFIX}:${requestId}`, serialized, 'EX', String(PENDING_TTL_SECONDS)]);
+            return;
+        } catch (error) {
+            log.warn('pending_response.kv_write_failed', { message: error?.message || String(error) });
+            // fall through to memory fallback so the feature still degrades gracefully
+        }
+    }
+
+    pruneMemoryPendingResponses();
+    __pendingResponseMemory.set(String(requestId), {
+        payload: serialized,
+        expiresAt: Date.now() + PENDING_TTL_SECONDS * 1000
+    });
+}
+
+async function getPendingResponse(requestId) {
+    if (!requestId) return null;
+
+    if (hasUsageKV()) {
+        try {
+            const raw = await usageKvCommand('GET', [`${PENDING_KV_PREFIX}:${requestId}`]);
+            if (!raw) return null;
+            try { return JSON.parse(raw); } catch (_) { return null; }
+        } catch (error) {
+            log.warn('pending_response.kv_read_failed', { message: error?.message || String(error) });
+            return null;
+        }
+    }
+
+    pruneMemoryPendingResponses();
+    const row = __pendingResponseMemory.get(String(requestId));
+    if (!row) return null;
+    try { return JSON.parse(row.payload); } catch (_) { return null; }
 }
 
 function recordGoogleAttemptMemory(key, status) {
@@ -3948,7 +4029,7 @@ async function handler(req, res) {
 
     res.setHeader(
         'Access-Control-Allow-Methods',
-        'POST, OPTIONS'
+        'POST, GET, OPTIONS'
     );
 
     res.setHeader(
@@ -3962,6 +4043,26 @@ async function handler(req, res) {
 
     const usageGeminiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
         .split(',').map(k => k.trim()).filter(Boolean);
+
+    // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه): کلاینت
+    // با برگشتن به تب (visibilitychange) این را صدا می‌زند تا بپرسد یک
+    // requestId خاص کامل شده یا نه - بدون نیاز به یک route جداگانه که در
+    // Next.js با همین فایل (pages/api/chat.js) تداخل مسیر پیدا می‌کرد.
+    if (req.method === 'GET' && String(req.query?.mode || '') === 'status') {
+        const requestId = String(req.query?.requestId || '').trim();
+        if (!requestId) {
+            return res.status(400).json({ error: { message: 'requestId لازم است.' } });
+        }
+        const pending = await getPendingResponse(requestId);
+        if (!pending) {
+            // هنوز کامل نشده (یا اصلاً چنین requestId ای وجود نداشته/منقضی شده) -
+            // کلاینت این دو حالت را از هم جدا نمی‌کند مگر با گذشت watchdog
+            // خودش (۲۱۰ ثانیه)، پس همینجا فقط می‌گوییم "آماده نیست" و
+            // کلاینت به گوش‌دادن به استریم اصلی ادامه می‌دهد.
+            return res.status(200).json({ ready: false });
+        }
+        return res.status(200).json({ ready: true, result: pending });
+    }
 
     if (req.method === 'GET' && String(req.query?.mode || '') === 'usage') {
         return res.status(200).json({
@@ -4050,8 +4151,20 @@ async function handler(req, res) {
             // { city, region, country, timezone, latitude, longitude } یا
             // null است. فقط برای متن سیستم استفاده می‌شود، هرگز به کاربر
             // نمایش داده نمی‌شود.
-            userLocation: rawUserLocation
+            userLocation: rawUserLocation,
+            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
+            // شناسه‌ی یکتای این درخواست که کلاینت از activeRequestId خودش
+            // می‌سازد. اختیاری/مشتق‌ناپذیر از هیچ داده‌ی حساسی نیست - فقط
+            // کلید ذخیره‌ی موقت پاسخ نهایی در savePendingResponse/
+            // getPendingResponse زیر است. اگر ارسال نشود (کلاینت قدیمی)،
+            // این قابلیت فقط برای آن یک درخواست غیرفعال می‌ماند، هیچ رفتار
+            // دیگری تغییر نمی‌کند.
+            requestId: rawRequestId
         } = req.body || {};
+
+        const requestId = (typeof rawRequestId === 'string' || typeof rawRequestId === 'number')
+            ? String(rawRequestId).trim().slice(0, 128)
+            : null;
 
         const archivedFileNames = Array.isArray(rawArchivedFileNames) ? rawArchivedFileNames.filter(n => typeof n === 'string') : [];
         const archivedFiles = Array.isArray(rawArchivedFiles)
@@ -5082,6 +5195,14 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         // typing), but with live "در حال انجام..." steps
                         // along the way to fill that gap.
                         let searchWasPerformed = false;
+                        // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب
+                        // پس‌زمینه): نسخه‌ی جمع‌شده‌ی همان متنی که از طریق
+                        // SSE {text:...} به کلاینت می‌رود - نه agentResult.finalText
+                        // خام، چون آن ممکن است شامل بلاک‌های داخلی/متادیتا
+                        // باشد که هرگز عیناً استریم نشده‌اند. این همان چیزی
+                        // است که کلاینت اگر استریم را کامل می‌خواند در
+                        // fullReply خودش جمع می‌کرد.
+                        let streamedTextSoFar = '';
                         const requestSearchIntent = looksLikeWebSearchIntent(searchQueryBase || text);
 
                         // FIX (heavy code UX): code blocks now stream live,
@@ -5102,6 +5223,13 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
 
                             const emitText = (t) => {
                                 if (!t) return;
+                                // FEATURE (پاسخی دریافت نشد بعد از throttle
+                                // شدن تب پس‌زمینه): متن واقعی‌ای که به کلاینت
+                                // فرستاده می‌شود را همینجا هم جمع می‌کنیم تا
+                                // در پایان (چه موفق چه در مسیر askUser) دقیقاً
+                                // همان چیزی که کلاینت از استریم ساخته بود را
+                                // بتوانیم در savePendingResponse ذخیره کنیم.
+                                streamedTextSoFar += t;
                                 res.write(`data: ${JSON.stringify({ text: t })}\n\n`);
                                 if (typeof res.flush === 'function') res.flush();
                             };
@@ -5194,6 +5322,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         // itself, never passed through onChunk, so it still
                         // needs to be sent once here.
                         if (agentResult.askUser && agentResult.finalText) {
+                            streamedTextSoFar += agentResult.finalText;
                             res.write(
                                 `data: ${JSON.stringify({ text: agentResult.finalText })}\n\n`
                             );
@@ -5258,6 +5387,35 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                             mode: 'stream',
                             model: currentModel,
                             durationMs: Date.now() - requestStartedAt
+                        });
+
+                        // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب
+                        // پس‌زمینه): همان بسته‌ی نهایی‌ای که کلاینت از یک
+                        // استریم موفق می‌ساخت (متن + همان فلگ‌های done) را
+                        // زیر requestId ذخیره می‌کنیم تا اگر کلاینت به‌خاطر
+                        // throttle شدن تب این رویدادها را از دست داد، با
+                        // پرس‌وجوی ?mode=status بتواند دقیقاً همین را
+                        // بازسازی کند. fire-and-forget نیست چون Vercel
+                        // می‌تواند بلافاصله بعد از res.end() این invocation
+                        // را متوقف کند.
+                        await savePendingResponse(requestId, {
+                            text: streamedTextSoFar,
+                            done: true,
+                            finishReason: agentResult.finishReason,
+                            truncated,
+                            askUser: !!agentResult.askUser,
+                            ...(agentResult.finishReason === 'TOOL_LOOP_LIMIT' && agentResult.diagnostics
+                                ? { diagnostics: agentResult.diagnostics }
+                                : {}),
+                            ...(truncated && agentResult.partialFiles?.length
+                                ? { partialFiles: agentResult.partialFiles, canContinue: true }
+                                : {}),
+                            ...(agentResult.editedFiles?.length
+                                ? { editedFiles: agentResult.editedFiles }
+                                : {}),
+                            ...(agentResult.unresolvedEditFailure
+                                ? { unresolvedEditFailure: agentResult.unresolvedEditFailure }
+                                : {})
                         });
 
                         return res.end();
@@ -5365,23 +5523,35 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                 ` (actual attempts: ${attemptsTried})` +
                 (diagnosticsSummary ? `\n\n--- ردِ اجرای مدل ---\n${diagnosticsSummary}` : '');
 
+            const finalErrorPayload = {
+                message: allKeysExhaustedMessage,
+                type: classification.category,
+                category: classification.category,
+                retryable: classification.retryable,
+                retryAfterSeconds: classification.retryAfterSeconds ?? null,
+                stage: 'stream_generation',
+                detail: detailText,
+                ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {}),
+                ...(Array.isArray(lastError?.partialFiles) && lastError.partialFiles.length
+                    ? { partialFiles: lastError.partialFiles, canContinue: true }
+                    : {})
+            };
+
             res.write(
-                `data: ${JSON.stringify({
-                    error: {
-                        message: allKeysExhaustedMessage,
-                        type: classification.category,
-                        category: classification.category,
-                        retryable: classification.retryable,
-                        retryAfterSeconds: classification.retryAfterSeconds ?? null,
-                        stage: 'stream_generation',
-                        detail: detailText,
-                        ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {}),
-                        ...(Array.isArray(lastError?.partialFiles) && lastError.partialFiles.length
-                            ? { partialFiles: lastError.partialFiles, canContinue: true }
-                            : {})
-                    }
-                })}\n\n`
+                `data: ${JSON.stringify({ error: finalErrorPayload })}\n\n`
             );
+
+            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
+            // یک شکست واقعی (نه فقط قطع شدن تب کاربر) هم باید زیر همین
+            // requestId ذخیره شود - وگرنه کلاینتی که با ?mode=status
+            // پرس‌وجو می‌کند برای همیشه "هنوز آماده نیست" می‌بیند و منتظر
+            // چیزی می‌ماند که هرگز نمی‌آید، تا اینکه خودِ watchdog او را
+            // بعد از ۲۱۰ ثانیه با یک پیام عمومی (نه این خطای واقعی) ببندد.
+            await savePendingResponse(requestId, {
+                done: true,
+                failed: true,
+                error: finalErrorPayload
+            });
 
             return res.end();
         }
@@ -5630,6 +5800,26 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
             } catch (_) {
                 // Stream may already be broken/closed — nothing more we can do.
             }
+            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
+            // یک کرش واقعی وسط استریم هم باید زیر requestId ثبت شود، وگرنه
+            // یک کلاینتی که این لحظه در تب پس‌زمینه است برای ۲۱۰ ثانیه
+            // (تا watchdog خودش) فکر می‌کند هنوز در انتظار پاسخ است.
+            // متن جزئی این مسیر در دسترس نیست (خارج از closure استریم است)
+            // پس فقط شکست را علامت می‌زنیم - کلاینت با آن دقیقاً مثل خطای
+            // نهایی معمولی رفتار می‌کند.
+            try {
+                await savePendingResponse(requestId, {
+                    done: true,
+                    failed: true,
+                    error: {
+                        message: 'خطای داخلی سرور در میانه‌ی پاسخ. لطفاً دوباره امتحان کن.',
+                        type: 'internal_error',
+                        category: 'handler_mid_stream',
+                        stage: 'handler_mid_stream',
+                        detail: globalError?.message || String(globalError)
+                    }
+                });
+            } catch (_) {}
             if (!res.writableEnded) {
                 try { res.end(); } catch (_) {}
             }
