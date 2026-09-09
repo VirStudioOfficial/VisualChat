@@ -7436,26 +7436,39 @@
                 // dual-response را غیرفعال می‌کنیم.
                 if (mergedTextFiles.length > 0) return false;
 
+                // FIX (دوئل‌ریسپانس با یک «سلام» توی چت تازه فوراً ظاهر
+                // می‌شد): vc_msg_count/vc_dual_next_target قبلاً سراسری
+                // (بین همه‌ی چت‌ها) بودند - یعنی اگر کاربر قبلاً توی
+                // چت‌های دیگر مثلاً ۶۲ پیام فرستاده بود و هدف بعدی ۶۵ بود،
+                // فقط ۳ پیام در یک چت کاملاً تازه فوراً فایرش می‌کرد. از
+                // دید کاربر که فقط همان چت را می‌بیند، این یعنی «خیلی زود».
+                // الان این دو کلید per-chat هستند (کلید شامل chatId)، پس
+                // شمارش هر چت از صفر شروع می‌شود؛ فقط سقف کلی عمر
+                // (vc_dual_lifetime_shown) عمداً سراسری می‌ماند تا کاربر
+                // در طول کل حسابش بیش از حد سقف این کارت‌ها را نبیند.
+                const msgCountKey = `vc_msg_count:${currentChatId}`;
+                const nextTargetKey = `vc_dual_next_target:${currentChatId}`;
+
                 const lifetimeShown = parseInt(localStorage.getItem('vc_dual_lifetime_shown') || '0', 10) || 0;
                 if (lifetimeShown >= DUAL_RESPONSE_LIFETIME_CAP) return false; // سقف کلی رد شده
 
-                const newCount = (parseInt(localStorage.getItem('vc_msg_count') || '0', 10) || 0) + 1;
-                localStorage.setItem('vc_msg_count', String(newCount));
+                const newCount = (parseInt(localStorage.getItem(msgCountKey) || '0', 10) || 0) + 1;
+                localStorage.setItem(msgCountKey, String(newCount));
 
-                let nextTarget = parseInt(localStorage.getItem('vc_dual_next_target') || '0', 10) || 0;
+                let nextTarget = parseInt(localStorage.getItem(nextTargetKey) || '0', 10) || 0;
                 if (nextTarget <= 0) {
-                    // اولین بار - یک هدف تصادفی بین min/max برای شروع تعیین کن.
+                    // اولین بار توی همین چت - یک هدف تصادفی بین min/max برای شروع تعیین کن.
                     nextTarget = DUAL_RESPONSE_MIN_GAP + Math.floor(Math.random() * (DUAL_RESPONSE_MAX_GAP - DUAL_RESPONSE_MIN_GAP + 1));
-                    localStorage.setItem('vc_dual_next_target', String(nextTarget));
+                    localStorage.setItem(nextTargetKey, String(nextTarget));
                 }
 
                 const triggered = newCount >= nextTarget;
                 if (triggered) {
                     localStorage.setItem('vc_dual_lifetime_shown', String(lifetimeShown + 1));
-                    // فاصله‌ی بعدی را از همین نقطه دوباره تصادفی تعیین کن.
+                    // فاصله‌ی بعدی (همین چت) را از همین نقطه دوباره تصادفی تعیین کن.
                     const newTarget = newCount + DUAL_RESPONSE_MIN_GAP + Math.floor(Math.random() * (DUAL_RESPONSE_MAX_GAP - DUAL_RESPONSE_MIN_GAP + 1));
-                    localStorage.setItem('vc_dual_next_target', String(newTarget));
-                    console.log('🔀 dualResponseMode فعال شد - پیام شماره', newCount, '| نمایش', lifetimeShown + 1, 'از', DUAL_RESPONSE_LIFETIME_CAP, '| هدف بعدی: پیام', newTarget);
+                    localStorage.setItem(nextTargetKey, String(newTarget));
+                    console.log('🔀 dualResponseMode فعال شد - چت', currentChatId, '| پیام شماره', newCount, '| نمایش', lifetimeShown + 1, 'از', DUAL_RESPONSE_LIFETIME_CAP, '| هدف بعدی: پیام', newTarget);
                 }
                 return triggered;
             } catch (_) { return false; }
