@@ -7277,6 +7277,16 @@
         let revealRafId = null;
         let lastRevealTs = 0;
         let catchUpOnVisible = () => {};
+        // FIX (ReferenceError در finally روی مسیرهای return زودهنگام):
+        // این دو تابع قبلاً به‌صورت const داخل try (بعد از چند return
+        // زودهنگام مثل 429/!response.ok) تعریف می‌شدند، ولی finally در
+        // پایین همیشه اجرا می‌شود - حتی روی همان returnهای زودهنگام - و
+        // به آن‌ها ارجاع می‌داد؛ چون در آن مسیرها اصلاً تعریف نشده بودند،
+        // خطای "is not defined" می‌داد. دقیقاً مثل catchUpOnVisible بالا،
+        // اینجا با یک نسخه‌ی no-op از قبل تعریف می‌شوند تا در هر مسیر
+        // خروجی (حتی زودهنگام) امن باشند.
+        let onVisibilityChangeForBackgroundPoll = () => {};
+        let stopBackgroundStatusPoll = () => {};
 
         // FEATURE (dual-response A/B mode - مرحله ۱): ترکیب دو محدودیت برای
         // تصمیم اینکه آیا این پیام باید dualResponseMode باشد یا نه:
@@ -7628,10 +7638,10 @@
                     pollServerStatusOnVisible();
                 }, 4000);
             };
-            const stopBackgroundStatusPoll = () => {
+            stopBackgroundStatusPoll = () => {
                 if (backgroundStatusPollTimer) { clearInterval(backgroundStatusPollTimer); backgroundStatusPollTimer = null; }
             };
-            const onVisibilityChangeForBackgroundPoll = () => {
+            onVisibilityChangeForBackgroundPoll = () => {
                 if (document.visibilityState === 'hidden') startBackgroundStatusPoll();
                 else stopBackgroundStatusPoll();
             };
