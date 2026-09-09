@@ -7560,6 +7560,25 @@
                 finalHtml += buildEditedFilesHtml(streamEditedFiles);
                 if (!finalHtml) finalHtml = formatReply('');
 
+                // FIX (مدل نمی‌توانست از آخرین نسخه‌ی فایلی که خودش سرورساید
+                // ادیت کرده بود استفاده کند): streamEditedFiles (که از رویداد
+                // done:true با editedFiles می‌آید - همان مسیر واقعی apply_edit/
+                // write_block برای فایل‌های سنگین) فقط برای ساخت کارت HTML
+                // استفاده می‌شد؛ هیچ‌جا محتوای ویرایش‌شده به chatFileArchive
+                // نوشته نمی‌شد. یعنی درخواست بعدی، recentArchivedFiles همچنان
+                // نسخه‌ی قبل از ویرایش را برمی‌گرداند و مدل با get_archived_file
+                // فایل قدیمی می‌گرفت - دقیقاً همان چیزی که کاربر گزارش داد. هر
+                // فایل زیر نام اصلی‌اش (f.name، نه f.editedName که فقط برای
+                // نمایش/دانلود timestamp دارد) در آرشیو ذخیره می‌شود تا
+                // درخواست‌های بعدی که همان نام را صدا می‌زنند، نسخه‌ی تازه را ببینند.
+                if (Array.isArray(streamEditedFiles) && streamEditedFiles.length) {
+                    for (const f of streamEditedFiles) {
+                        if (f && typeof f.name === 'string' && typeof f.content === 'string') {
+                            try { saveFileToArchive(currentChatId, f.name, f.content); } catch (_) {}
+                        }
+                    }
+                }
+
                 // FIX (false "saved successfully" claim with no real edit):
                 // the model can hallucinate success language in prose (e.g.
                 // "با موفقیت ذخیره شد") while never actually calling
@@ -8254,13 +8273,16 @@
             // Keep the persistent chat archive synchronized too. This is
             // especially important when the edited file came from an older
             // message/archive rather than the current attachment.
-            const archiveList = (chatFileArchive && chatFileArchive[currentChatId]) || [];
-            const archiveEntry = archiveList.find(f => f.name === fileName);
-            if (archiveEntry) {
-                archiveEntry.content = content;
-                archiveEntry.savedAt = Date.now();
-                try { saveFileToArchive(currentChatId, fileName, content); } catch (_) {}
-            }
+            // FIX (فایل ادیت‌شده وقتی از قبل توی آرشیو نبود اصلاً ذخیره
+            // نمی‌شد): شرط قبلی if(archiveEntry) باعث می‌شد اگه فایل هنوز
+            // یک‌بار هم توی chatFileArchive ذخیره نشده بود (مثلاً همین الان
+            // برای اولین بار ضمیمه و ادیت شده)، نسخه‌ی ویرایش‌شده هیچ‌وقت
+            // به آرشیو نمی‌رفت - کاربر کارت ادیت‌شده رو می‌دید ولی درخواست
+            // بعدی همچنان یا فایل رو نداشت یا نسخه‌ی خیلی قدیمی‌تر رو
+            // برمی‌گردوند. حالا در هر صورت (چه از قبل بود چه نبود)
+            // saveFileToArchive صدا زده می‌شود که خودش هم درج و هم آپدیت
+            // را مدیریت می‌کند.
+            try { saveFileToArchive(currentChatId, fileName, content); } catch (_) {}
 
             // §6: Edited File Card — name, size, status, change count,
             // Copy/Download actions, and the full patched code itself
