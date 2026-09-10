@@ -6340,6 +6340,19 @@
         // instead of being permanently lost.
         const PREROLL_FRAMES = 3;            // ~3 frames x 4096 samples @16kHz ≈ 768ms of pre-roll
         const prerollBuffer = [];
+        // FIX (keyboard clicks / short taps falsely opening a turn): a
+        // single loud ~256ms frame (one keystroke, a knock, a cough) used
+        // to be enough on its own to flip `speaking` true and open a real
+        // turn with Gemini - which then gets one blip of noise, no actual
+        // words, and comes back with "متاسفم، نشنیدم چی گفتی". Real speech
+        // is never just one isolated loud frame; it's several in a row.
+        // So before actually opening the turn we now require the RMS to
+        // stay above threshold for a short minimum stretch first. This
+        // adds a small (deliberately tiny) delay to real speech, but it's
+        // one qualitatively different from a keystroke: talking naturally
+        // produces >120ms of continuous voiced sound, a click doesn't.
+        const MIN_SUSTAINED_VOICE_MS = 120;  // consecutive above-threshold time required before treating it as real speech
+        let candidateVoiceStartTs = 0;        // when the CURRENT above-threshold streak began (0 = not currently in one)
         // Safety valve: if a "speech turn" runs uninterrupted past this,
         // force-close it even without a real silence gap. Without this, a
         // sustained noise that sits just above the adaptive threshold
@@ -6393,9 +6406,24 @@
 
             const turnTooLong = liveState.speaking && (now - liveState.speechStartTs) >= MAX_TURN_MS;
 
+            // Track how long the signal has been continuously above
+            // threshold. Reset the streak the instant a frame drops back
+            // below it - a keyboard click is one frame, then silence, so
+            // its streak never has a chance to build up.
+            if (isVoice) {
+                if (!candidateVoiceStartTs) candidateVoiceStartTs = now;
+            } else {
+                candidateVoiceStartTs = 0;
+            }
+            const sustainedVoice = candidateVoiceStartTs && (now - candidateVoiceStartTs) >= MIN_SUSTAINED_VOICE_MS;
+
             if (isVoice && !turnTooLong) {
                 liveState.lastVoiceTs = now;
-                if (!liveState.speaking) {
+                // Already-open turns should keep listening on every voiced
+                // frame as before; only the transition INTO a turn needs
+                // the extra sustained-voice confirmation, so an ongoing
+                // sentence never gets held up by this.
+                if (!liveState.speaking && sustainedVoice) {
                     liveState.speaking = true;
                     liveState.speechStartTs = now;
                     // Commit any transcript text still pending from the
