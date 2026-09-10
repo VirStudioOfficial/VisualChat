@@ -5564,9 +5564,14 @@
     // Small seeded-ish noise helper: filtered (band-limited) noise shaped
     // with an attack/decay envelope reads much more like breath than raw
     // white noise, which sounds like static/hiss instead.
-    function synthesizeBreath() {
+    // midSentence=true produces a shorter, quieter breath suited to a
+    // brief natural pause inside a long sentence, as opposed to the
+    // fuller lead-in breath used before a turn starts.
+    function synthesizeBreath(midSentence) {
         const sr = LIVE_RECEIVE_SAMPLE_RATE;
-        const durationSec = 0.22 + Math.random() * 0.16; // ~220-380ms
+        const durationSec = midSentence
+            ? (0.10 + Math.random() * 0.08)   // ~100-180ms - quick catch-breath
+            : (0.22 + Math.random() * 0.16);  // ~220-380ms - fuller lead-in breath
         const n = Math.max(1, Math.round(sr * durationSec));
         const out = new Float32Array(n);
 
@@ -5596,9 +5601,14 @@
 
         // Attack/decay envelope: quick fade-in, gentle fade-out, peak
         // amplitude kept low relative to speech so it reads as breath
-        // texture rather than a competing sound.
+        // texture rather than a competing sound. Mid-sentence breaths are
+        // kept noticeably quieter than lead-in ones - a loud breath in
+        // the middle of a sentence reads as a gasp/interruption rather
+        // than natural speech texture.
         const attackN = Math.round(n * 0.18);
-        const peakAmp = 0.05 + Math.random() * 0.035; // subtle by design
+        const peakAmp = midSentence
+            ? (0.028 + Math.random() * 0.018)
+            : (0.05 + Math.random() * 0.035);
         for (let i = 0; i < n; i++) {
             let env;
             if (i < attackN) {
@@ -5654,12 +5664,12 @@
         return rendered.getChannelData(0).slice();
     }
 
-    function pickBreathSample() {
+    function pickBreathSample(midSentence) {
         if (liveBreathSamplesUser && liveBreathSamplesUser.length) {
             const pick = liveBreathSamplesUser[Math.floor(Math.random() * liveBreathSamplesUser.length)];
             return pick.slice(); // copy since it'll be transferred (detached)
         }
-        return synthesizeBreath();
+        return synthesizeBreath(midSentence);
     }
 
     let liveState = null; // holds everything for the active call, or null
@@ -6037,8 +6047,14 @@
                     // dropped mid-sentence.
                     if (LIVE_BREATH_ENABLED && liveState.awaitingTurnStart) {
                         liveState.awaitingTurnStart = false;
+                        // Fresh turn: reset mid-turn breath tracking so it
+                        // doesn't carry stale speaking/quiet state over
+                        // from the previous utterance.
+                        liveState.midTurnSamplesSinceBreath = 0;
+                        liveState.midTurnWasSpeaking = false;
+                        liveState.midTurnQuietStreak = 0;
                         try {
-                            const breath = pickBreathSample();
+                            const breath = pickBreathSample(false);
                             liveState.playProcessorNode.port.postMessage({ type: 'push', samples: breath }, [breath.buffer]);
                         } catch (_) {}
                     }
@@ -6605,7 +6621,73 @@
         for (let i = 0; i < sampleCount; i++) {
             floatSamples[i] = view.getInt16(i * 2, true) / 0x8000;
         }
+
+        // Mid-sentence breath injection: detect natural pause points
+        // WITHIN a long turn by looking at the actual audio energy of
+        // each incoming chunk, rather than the transcript text - the
+        // transcript stream and the audio stream aren't tightly time-
+        // aligned (text tends to arrive as soon as the model generates
+        // it, not in sync with when the worklet actually plays that
+        // audio back), so a text-based ".", "?" trigger would place the
+        // breath at the wrong moment relative to what's actually heard.
+        // Reacting to the audio itself keeps the breath glued to the
+        // real quiet spot regardless of any text/audio timing drift.
+        maybeInjectMidTurnBreath(floatSamples);
+
         liveState.playProcessorNode.port.postMessage({ type: 'push', samples: floatSamples }, [floatSamples.buffer]);
+    }
+
+    // Tuning for mid-turn breath detection. Kept as constants (not
+    // buried inline) so they're easy to retune by ear later.
+    const MIDTURN_BREATH_ENABLED = true;
+    const MIDTURN_LOUD_RMS = 0.05;     // chunk RMS above this counts as "was speaking"
+    const MIDTURN_QUIET_RMS = 0.015;   // chunk RMS below this counts as "natural pause"
+    const MIDTURN_MIN_GAP_SAMPLES = LIVE_RECEIVE_SAMPLE_RATE * 1.2; // don't breathe again within ~1.2s of speech-worth of audio
+    const MIDTURN_MIN_QUIET_CHUNKS = 1; // consecutive quiet chunks needed before it counts as a real pause (not just a dip)
+
+    function maybeInjectMidTurnBreath(floatSamples) {
+        if (!MIDTURN_BREATH_ENABLED || !LIVE_BREATH_ENABLED) return;
+        if (!liveState) return;
+
+        let sumSquares = 0;
+        for (let i = 0; i < floatSamples.length; i++) sumSquares += floatSamples[i] * floatSamples[i];
+        const rms = Math.sqrt(sumSquares / floatSamples.length);
+
+        // Track how many samples of audio have gone by since the model
+        // started this utterance/turn, and since the last breath we
+        // injected - both counted in decoded-sample terms (not wall
+        // clock) so it stays correct however fast/slow chunks arrive.
+        if (liveState.midTurnSamplesSinceBreath === undefined) liveState.midTurnSamplesSinceBreath = 0;
+        if (liveState.midTurnWasSpeaking === undefined) liveState.midTurnWasSpeaking = false;
+        if (liveState.midTurnQuietStreak === undefined) liveState.midTurnQuietStreak = 0;
+
+        liveState.midTurnSamplesSinceBreath += floatSamples.length;
+
+        if (rms >= MIDTURN_LOUD_RMS) {
+            liveState.midTurnWasSpeaking = true;
+            liveState.midTurnQuietStreak = 0;
+            return;
+        }
+
+        if (rms <= MIDTURN_QUIET_RMS) {
+            liveState.midTurnQuietStreak++;
+        } else {
+            liveState.midTurnQuietStreak = 0;
+            return; // in-between energy - not a clean pause, don't count it
+        }
+
+        const longEnoughSinceLastBreath = liveState.midTurnSamplesSinceBreath >= MIDTURN_MIN_GAP_SAMPLES;
+        const cameFromSpeech = liveState.midTurnWasSpeaking;
+        const quietEnoughStreak = liveState.midTurnQuietStreak >= MIDTURN_MIN_QUIET_CHUNKS;
+
+        if (cameFromSpeech && quietEnoughStreak && longEnoughSinceLastBreath) {
+            try {
+                const breath = pickBreathSample(/* midSentence */ true);
+                liveState.playProcessorNode.port.postMessage({ type: 'push', samples: breath }, [breath.buffer]);
+            } catch (_) {}
+            liveState.midTurnSamplesSinceBreath = 0;
+            liveState.midTurnWasSpeaking = false; // require another loud stretch before the next mid-turn breath
+        }
     }
 
     function stopQueuedPlayback() {
