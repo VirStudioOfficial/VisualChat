@@ -6134,7 +6134,25 @@
                     // accepts it, which is what actually pins the language
                     // to Iranian Farsi instead of guessing Dari or an
                     // unrelated script.
-                    inputAudioTranscription: { languageCodes: ['fa-IR'] }
+                    inputAudioTranscription: { languageCodes: ['fa-IR'] },
+                    // MUST match the conversational connection's setup.
+                    // Without this, this connection uses Gemini's own
+                    // server-side VAD to decide turn boundaries while we
+                    // ALSO send it manual activityStart/activityEnd events
+                    // (mirrored from beginMicStreaming's own VAD via
+                    // sendRealtimeInput). The two boundary sources fight -
+                    // this connection's own VAD doesn't reliably close the
+                    // previous turn before our manual activityStart for
+                    // the next one arrives, so it keeps treating new audio
+                    // as a continuation of the old utterance and re-emits
+                    // the same locked-in transcript text instead of
+                    // recognizing genuinely new speech. Disabling automatic
+                    // detection here makes this connection defer to the
+                    // exact same manual boundaries as the conversational
+                    // one, so each utterance gets its own clean turn.
+                    realtimeInputConfig: {
+                        automaticActivityDetection: { disabled: true }
+                    }
                 }
             }));
         };
