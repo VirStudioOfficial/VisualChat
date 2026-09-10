@@ -6274,6 +6274,23 @@
         liveState.micHighpassNode.Q.value = 0.707;
         liveState.micSourceNode.connect(liveState.micHighpassNode);
 
+        // Real noise reduction, stage 2: a gentle low-pass filter cut at
+        // ~4000Hz. Keyboard clicks/taps are short broadband transients
+        // with a lot of energy well above where voiced speech lives -
+        // most of what makes a consonant intelligible sits under ~4kHz,
+        // while a click's sharp "tick" character comes largely from
+        // energy above that. Rolling off the top end doesn't fix false
+        // turn-starts on its own, but it takes real energy away from
+        // exactly the kind of transient that used to spike the RMS meter
+        // hard enough to look like speech, without processing the voice
+        // band itself (a gentle 12dB/octave slope, same as the highpass
+        // above, so it doesn't sound muffled).
+        liveState.micLowpassNode = liveState.micContext.createBiquadFilter();
+        liveState.micLowpassNode.type = 'lowpass';
+        liveState.micLowpassNode.frequency.value = 4000;
+        liveState.micLowpassNode.Q.value = 0.707;
+        liveState.micHighpassNode.connect(liveState.micLowpassNode);
+
         const workletBlobUrl = URL.createObjectURL(new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }));
         try {
             await liveState.micContext.audioWorklet.addModule(workletBlobUrl);
@@ -6341,19 +6358,6 @@
         // instead of being permanently lost.
         const PREROLL_FRAMES = 3;            // ~3 frames x 4096 samples @16kHz ≈ 768ms of pre-roll
         const prerollBuffer = [];
-        // FIX (keyboard clicks / short taps falsely opening a turn): a
-        // single loud ~256ms frame (one keystroke, a knock, a cough) used
-        // to be enough on its own to flip `speaking` true and open a real
-        // turn with Gemini - which then gets one blip of noise, no actual
-        // words, and comes back with "متاسفم، نشنیدم چی گفتی". Real speech
-        // is never just one isolated loud frame; it's several in a row.
-        // So before actually opening the turn we now require the RMS to
-        // stay above threshold for a short minimum stretch first. This
-        // adds a small (deliberately tiny) delay to real speech, but it's
-        // one qualitatively different from a keystroke: talking naturally
-        // produces >120ms of continuous voiced sound, a click doesn't.
-        const MIN_SUSTAINED_VOICE_MS = 120;  // consecutive above-threshold time required before treating it as real speech
-        let candidateVoiceStartTs = 0;        // when the CURRENT above-threshold streak began (0 = not currently in one)
         // Safety valve: if a "speech turn" runs uninterrupted past this,
         // force-close it even without a real silence gap. Without this, a
         // sustained noise that sits just above the adaptive threshold
@@ -6407,24 +6411,9 @@
 
             const turnTooLong = liveState.speaking && (now - liveState.speechStartTs) >= MAX_TURN_MS;
 
-            // Track how long the signal has been continuously above
-            // threshold. Reset the streak the instant a frame drops back
-            // below it - a keyboard click is one frame, then silence, so
-            // its streak never has a chance to build up.
-            if (isVoice) {
-                if (!candidateVoiceStartTs) candidateVoiceStartTs = now;
-            } else {
-                candidateVoiceStartTs = 0;
-            }
-            const sustainedVoice = candidateVoiceStartTs && (now - candidateVoiceStartTs) >= MIN_SUSTAINED_VOICE_MS;
-
             if (isVoice && !turnTooLong) {
                 liveState.lastVoiceTs = now;
-                // Already-open turns should keep listening on every voiced
-                // frame as before; only the transition INTO a turn needs
-                // the extra sustained-voice confirmation, so an ongoing
-                // sentence never gets held up by this.
-                if (!liveState.speaking && sustainedVoice) {
+                if (!liveState.speaking) {
                     liveState.speaking = true;
                     liveState.speechStartTs = now;
                     // Commit any transcript text still pending from the
@@ -6545,10 +6534,10 @@
 
         // The worklet node still needs to be connected into the graph for
         // its process() to be pulled, even though we don't use its output.
-        // Routed through the high-pass filter (not the raw source) so
-        // every sample the worklet sees has already had sub-vocal rumble
-        // stripped out.
-        liveState.micHighpassNode.connect(liveState.micProcessorNode);
+        // Routed through both filters (not the raw source) so every
+        // sample the worklet sees has already had sub-vocal rumble and
+        // sharp high-frequency transients (clicks/taps) stripped out.
+        liveState.micLowpassNode.connect(liveState.micProcessorNode);
     }
 
     function floatTo16BitPCM(float32Array) {
@@ -6759,6 +6748,7 @@
         try { liveState.transcribeWs && liveState.transcribeWs.close(); } catch (_) {}
         try { liveState.micProcessorNode && liveState.micProcessorNode.disconnect(); } catch (_) {}
         try { liveState.micHighpassNode && liveState.micHighpassNode.disconnect(); } catch (_) {}
+        try { liveState.micLowpassNode && liveState.micLowpassNode.disconnect(); } catch (_) {}
         try { liveState.micSourceNode && liveState.micSourceNode.disconnect(); } catch (_) {}
         try { liveState.micContext && liveState.micContext.close(); } catch (_) {}
         try { liveState.playProcessorNode && liveState.playProcessorNode.disconnect(); } catch (_) {}
