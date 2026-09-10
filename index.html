@@ -9928,7 +9928,18 @@
 
         document.body.appendChild(menu);
         const rect = btnEl.getBoundingClientRect();
-        menu.style.top = (rect.bottom + 4 + window.scrollY) + 'px';
+        const menuRect = menu.getBoundingClientRect();
+        const menuHeight = menuRect.height || 130; // fallback در صورتی که هنوز layout نشده
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        // اگر جای کافی زیر دکمه نبود ولی بالای آن جا بود، منو رو به سمت
+        // بالا باز کن تا از کادر بیرون نزنه (مشکلِ چت‌های زیاد پایین صفحه).
+        if (spaceBelow < menuHeight + 8 && spaceAbove > spaceBelow) {
+            menu.style.top = (rect.top - menuHeight - 4 + window.scrollY) + 'px';
+        } else {
+            const top = Math.min(rect.bottom + 4, window.innerHeight - menuHeight - 8);
+            menu.style.top = (Math.max(8, top) + window.scrollY) + 'px';
+        }
         // RTL layout: anchor menu's right edge to the button's right edge.
         menu.style.right = (window.innerWidth - rect.right) + 'px';
 
