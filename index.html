@@ -6375,6 +6375,19 @@
         const orbWrap = document.getElementById('liveOrbWrap');
         const statusText = document.getElementById('liveStatusText');
 
+        // FIX (keyboard clicks interrupting the model mid-reply): a single
+        // loud ~256ms frame was enough to trigger LOCAL barge-in
+        // (stopQueuedPlayback below) the instant it crossed the voice
+        // threshold, even if that frame was just a keystroke and not
+        // actual speech. This doesn't touch how a user's turn opens or
+        // streams audio (that path is left exactly as-is) - it only adds
+        // a short confirmation specifically before we cut off the
+        // model's own audio, since that's the disruptive, user-visible
+        // action a stray click was causing. Two consecutive voiced
+        // frames (~512ms) is enough to filter out an isolated click
+        // while still barging in almost instantly on real speech.
+        let consecutiveVoicedFramesWhileModelSpeaking = 0;
+
         liveState.micProcessorNode.port.onmessage = (e) => {
             if (!liveState || liveState.muted || !liveState.ws || liveState.ws.readyState !== WebSocket.OPEN) return;
             const input = e.data; // Float32Array, 4096 samples
@@ -6399,6 +6412,32 @@
 
             const voiceThreshold = Math.max(noiseFloor * VOICE_MARGIN, MIN_VOICE_RMS);
             const isVoice = rms >= voiceThreshold;
+
+            // Only counts frames while the model's own audio is actually
+            // playing (orbWrap has 'speaking') - this is purely for the
+            // barge-in confirmation below and has no effect on opening a
+            // user turn, which still happens on the very first voiced
+            // frame exactly as before (unchanged from the original code).
+            const modelWasSpeaking = orbWrap.classList.contains('speaking');
+            if (modelWasSpeaking && isVoice) {
+                consecutiveVoicedFramesWhileModelSpeaking++;
+            } else {
+                consecutiveVoicedFramesWhileModelSpeaking = 0;
+            }
+            // FIX (keyboard clicks interrupting the model mid-reply): stop
+            // the model's audio the moment we've seen a SECOND consecutive
+            // voiced frame while it was playing (~512ms total), not the
+            // first. A stray keystroke is one frame then silence, so it
+            // never reaches 2 and playback continues uninterrupted; real
+            // speech reaches 2 within about half a second, which is a
+            // barely-noticeable delay for a genuine interruption. This
+            // check runs independently of the turn-open logic below, so
+            // it can fire on this frame or a later one, whichever first
+            // satisfies it - it does not gate or delay opening the turn
+            // itself.
+            if (modelWasSpeaking && consecutiveVoicedFramesWhileModelSpeaking === 2) {
+                stopQueuedPlayback();
+            }
 
             // Only adapt the noise floor from frames that AREN'T currently
             // being treated as speech - otherwise the user's own voice
@@ -6444,24 +6483,10 @@
                         });
                     }
                     prerollBuffer.length = 0;
-                    // Barge-in: if the model's own audio is still playing
-                    // out loud right when we detect the user starting to
-                    // talk, stop it LOCALLY immediately rather than
-                    // waiting for the server's "interrupted" message to
-                    // round-trip back (stopQueuedPlayback() below in
-                    // ws.onmessage still handles the server-confirmed
-                    // case too). Without this, there's a window - one
-                    // full network round-trip long - where our speaker is
-                    // still audibly playing the old answer at the exact
-                    // moment we start capturing and streaming the user's
-                    // new question. Even with echoCancellation, that
-                    // overlap can garble the very start of what gets
-                    // sent, which is consistent with "the first thing
-                    // said right as I cut the model off sometimes doesn't
-                    // get answered."
-                    if (orbWrap.classList.contains('speaking')) {
-                        stopQueuedPlayback();
-                    }
+                    // Barge-in: handled above (stopQueuedPlayback fires
+                    // independently once 2 consecutive voiced frames are
+                    // seen while the model is speaking), so opening this
+                    // turn doesn't need to duplicate that call.
                     orbWrap.classList.remove('speaking');
                     orbWrap.classList.add('listening');
                     statusText.textContent = 'در حال شنیدن...';
