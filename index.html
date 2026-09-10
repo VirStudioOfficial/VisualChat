@@ -5548,6 +5548,120 @@
     const LIVE_SEND_SAMPLE_RATE = 16000;   // what we must send the model
     const LIVE_RECEIVE_SAMPLE_RATE = 24000; // what the model sends back
 
+    // --- Breathing sound injection --------------------------------------
+    // Adds a short inhale-like sound right before the model starts speaking
+    // each new turn, so the voice reads less like a flat TTS stream and
+    // more like someone about to talk. Two sources are supported:
+    //   1. Synthesized (default, no assets needed) - see synthesizeBreath().
+    //   2. Real recorded breaths - call loadBreathSamplesFromFiles(fileList)
+    //      from the console (or wire up a file <input>) with one or more
+    //      short (200-500ms) breath .wav clips; once loaded they replace
+    //      the synthesized ones and are picked at random per turn.
+    // Toggle off entirely by setting this to false.
+    const LIVE_BREATH_ENABLED = true;
+    let liveBreathSamplesUser = null; // Float32Array[] @ LIVE_RECEIVE_SAMPLE_RATE, or null = use synthesized
+
+    // Small seeded-ish noise helper: filtered (band-limited) noise shaped
+    // with an attack/decay envelope reads much more like breath than raw
+    // white noise, which sounds like static/hiss instead.
+    function synthesizeBreath() {
+        const sr = LIVE_RECEIVE_SAMPLE_RATE;
+        const durationSec = 0.22 + Math.random() * 0.16; // ~220-380ms
+        const n = Math.max(1, Math.round(sr * durationSec));
+        const out = new Float32Array(n);
+
+        // Simple one-pole low-pass on white noise to take the harsh
+        // high-frequency hiss out and leave a softer "whoosh" character
+        // closer to actual breath noise (which is dominated by turbulent
+        // airflow in the ~200-800Hz range, not full-spectrum static).
+        let lp = 0;
+        const lpCoeff = 0.12; // lower = darker/softer breath
+        const raw = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            const white = Math.random() * 2 - 1;
+            lp += lpCoeff * (white - lp);
+            raw[i] = lp;
+        }
+
+        // A second, gentler high-pass removes DC/rumble buildup from the
+        // low-pass chain above so the breath doesn't sound like a low thud.
+        let hpPrev = 0, hpPrevIn = 0;
+        const hpCoeff = 0.985;
+        for (let i = 0; i < n; i++) {
+            const filtered = hpCoeff * (hpPrev + raw[i] - hpPrevIn);
+            hpPrevIn = raw[i];
+            hpPrev = filtered;
+            raw[i] = filtered;
+        }
+
+        // Attack/decay envelope: quick fade-in, gentle fade-out, peak
+        // amplitude kept low relative to speech so it reads as breath
+        // texture rather than a competing sound.
+        const attackN = Math.round(n * 0.18);
+        const peakAmp = 0.05 + Math.random() * 0.035; // subtle by design
+        for (let i = 0; i < n; i++) {
+            let env;
+            if (i < attackN) {
+                env = i / attackN;
+            } else {
+                const t = (i - attackN) / (n - attackN);
+                env = 1 - t; // linear decay to 0
+            }
+            out[i] = raw[i] * env * peakAmp;
+        }
+        return out;
+    }
+
+    // Decodes a list of uploaded/fetched audio Files/Blobs (any format the
+    // browser's decodeAudioData supports - wav/mp3/ogg) into mono Float32
+    // arrays resampled to LIVE_RECEIVE_SAMPLE_RATE, so they can be mixed
+    // straight into the playback worklet queue alongside model audio.
+    // Usage from devtools console once you have real breath clips:
+    //   const input = document.createElement('input');
+    //   input.type = 'file'; input.multiple = true; input.accept = 'audio/*';
+    //   input.onchange = () => loadBreathSamplesFromFiles(input.files);
+    //   input.click();
+    async function loadBreathSamplesFromFiles(fileList) {
+        const tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const results = [];
+        for (const file of fileList) {
+            try {
+                const arrBuf = await file.arrayBuffer();
+                const decoded = await tmpCtx.decodeAudioData(arrBuf);
+                const resampled = await resampleTo(decoded, LIVE_RECEIVE_SAMPLE_RATE);
+                results.push(resampled);
+            } catch (err) {
+                console.warn('breath sample failed to decode:', file.name, err);
+            }
+        }
+        try { tmpCtx.close(); } catch (_) {}
+        if (results.length) {
+            liveBreathSamplesUser = results;
+            console.log(`Loaded ${results.length} breath sample(s) - will be used instead of synthesized breath.`);
+        }
+        return results.length;
+    }
+    window.loadBreathSamplesFromFiles = loadBreathSamplesFromFiles;
+
+    async function resampleTo(audioBuffer, targetRate) {
+        const duration = audioBuffer.duration;
+        const offlineCtx = new OfflineAudioContext(1, Math.ceil(duration * targetRate), targetRate);
+        const src = offlineCtx.createBufferSource();
+        src.buffer = audioBuffer;
+        src.connect(offlineCtx.destination);
+        src.start();
+        const rendered = await offlineCtx.startRendering();
+        return rendered.getChannelData(0).slice();
+    }
+
+    function pickBreathSample() {
+        if (liveBreathSamplesUser && liveBreathSamplesUser.length) {
+            const pick = liveBreathSamplesUser[Math.floor(Math.random() * liveBreathSamplesUser.length)];
+            return pick.slice(); // copy since it'll be transferred (detached)
+        }
+        return synthesizeBreath();
+    }
+
     let liveState = null; // holds everything for the active call, or null
 
     // Short beep played on call connect/disconnect, synthesized on the fly
@@ -5882,6 +5996,9 @@
                     playCallToneEffect('connect');
                     beginMicStreaming();
                 }
+                // Arm the breath injector so the model's very first
+                // utterance of the call also gets a lead-in breath.
+                liveState.awaitingTurnStart = true;
                 return;
             }
 
@@ -5911,6 +6028,20 @@
             for (const part of parts) {
                 const audioB64 = part.inlineData?.data;
                 if (audioB64 && part.inlineData?.mimeType?.startsWith('audio/')) {
+                    // Inject a short breath sound right before the FIRST
+                    // audio chunk of a fresh turn (liveState.awaitingTurnStart
+                    // is set on connect and reset after turnComplete/
+                    // interrupted below) - this is the actual silence gap
+                    // right before the model starts talking, so the breath
+                    // reads as "about to speak" rather than randomly
+                    // dropped mid-sentence.
+                    if (LIVE_BREATH_ENABLED && liveState.awaitingTurnStart) {
+                        liveState.awaitingTurnStart = false;
+                        try {
+                            const breath = pickBreathSample();
+                            liveState.playProcessorNode.port.postMessage({ type: 'push', samples: breath }, [breath.buffer]);
+                        } catch (_) {}
+                    }
                     playLiveAudioChunk(audioB64);
                     orbWrap.classList.remove('listening');
                     orbWrap.classList.add('speaking');
@@ -5947,6 +6078,8 @@
                 // now final - commit both to permanent chat history (if
                 // non-empty) and reset the accumulators for the next turn.
                 finalizeLiveTranscriptTurn();
+                // Arm the breath injector for the next turn's first chunk.
+                liveState.awaitingTurnStart = true;
             }
 
             if (data.serverContent?.interrupted) {
@@ -5959,6 +6092,7 @@
                 stopQueuedPlayback();
                 orbWrap.classList.remove('speaking');
                 finalizeLiveTranscriptTurn();
+                liveState.awaitingTurnStart = true;
             }
         };
 
