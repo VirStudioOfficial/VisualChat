@@ -5895,6 +5895,19 @@
         if (liveState) return; // already in a call
         if (isGenerating) return; // don't collide with a text generation in flight
 
+        // FIX (پیام‌های ترنسکریپت ویس در گفتگوی تازه/خالی دیده نمی‌شدند تا
+        // خود کاربر اول یک پیام متنی می‌نوشت): وقتی گفتگو هنوز هیچ پیامی
+        // نداشته، صفحه در حالت «is-home» است که طبق CSS خود chat-box را
+        // display:none می‌کند (چون فقط صفحه‌ی خوش‌آمد نمایش داده می‌شود).
+        // startLiveCall قبلاً هیچ‌وقت از این حالت خارج نمی‌شد، پس حباب‌های
+        // ترنسکریپت داشتند به یک chat-box مخفی اضافه می‌شدند - در DOM
+        // بودند ولی هیچ‌وقت دیده نمی‌شدند تا اولین پیام متنی exitHomeLayout
+        // را صدا می‌زد. همون تابعی که پیام متنی استفاده می‌کند را همین‌جا
+        // هم صدا می‌زنیم تا از همون اول تماس، chat-box نمایان باشد.
+        if (document.body.classList.contains('is-home')) {
+            try { exitHomeLayout(); } catch (_) {}
+        }
+
         const overlay = document.getElementById('liveCallOverlay');
         const statusText = document.getElementById('liveStatusText');
         const orbWrap = document.getElementById('liveOrbWrap');
