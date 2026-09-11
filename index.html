@@ -263,6 +263,11 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
         @keyframes messageIn {
             from { opacity: 0; transform: translateY(10px) scale(0.985); }
             to { opacity: 1; transform: translateY(0) scale(1); }
@@ -9401,6 +9406,14 @@
     // handles the OLD old/new diff-block format for any code path that
     // still produces it) since there's no matching/applying to do - the
     // content is final as-is.
+    //
+    // FEATURE (دانلود پروژه به‌صورت ZIP): وقتی این round هم شامل فایل
+    // ساخته/ویرایش‌شده باشد (یعنی همینجا) و هم چت جاری بیش از یک فایل در
+    // آرشیوش داشته باشد (یعنی این احتمالاً بخشی از یک پروژه‌ی چندفایلیه، نه
+    // فقط یک فایل تکی)، یک دکمه‌ی «دانلود پروژه (ZIP)» هم زیر کارت(ها)
+    // اضافه می‌کنیم. این دکمه در لحظه‌ی کلیک (نه اینجا) کل chatFileArchive
+    // همین چت را zip می‌کند - پس همیشه شامل جدیدترین نسخه‌ی هر فایل است،
+    // حتی اگر بعد از این پیام دوباره ویرایش شده باشد.
     function buildEditedFilesHtml(editedFiles) {
         if (!editedFiles || !editedFiles.length) return '';
         let html = '';
@@ -9411,9 +9424,12 @@
             const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
             const lineCount = content ? content.split(/\r?\n/).length : 0;
             const codeCardId = `full-code-${Math.random().toString(36).slice(2)}`;
+            const isNew = f._isNewFile === true;
+            const headIcon = isNew ? 'ph-file-plus' : 'ph-file-check';
+            const headLabel = isNew ? `فایل «${escapeHtml(fileName)}» ساخته شد` : `فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد`;
             html += `<div class="code-card edited-file-card">
                 <div class="code-card-head">
-                    <span><i class="ph-fill ph-file-check" style="color:var(--success);"></i> فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد</span>
+                    <span><i class="ph-fill ${headIcon}" style="color:var(--success);"></i> ${headLabel}</span>
                     <div class="code-actions">
                         <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="ph ph-code" data-lucide="code"></i> نمایش کد کامل</button>
                         <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="ph ph-copy" data-lucide="copy"></i></button>
@@ -9424,7 +9440,80 @@
                 <pre id="${codeCardId}" class="full-code-view" style="display:none; max-height:480px; overflow:auto; margin:10px 0 0; padding:12px; background:var(--bg-secondary,#111); border-radius:8px; font-size:0.78rem; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(content)}</code></pre>
             </div>`;
         }
+
+        // فقط وقتی نشون بده که چت جاری چند فایل (پروژه) در آرشیوش داره -
+        // برای یک فایل تکی، دکمه‌های دانلود بالا کافی‌اند و یک زیپ تک‌فایلی
+        // اضافه‌ی بی‌فایده است.
+        const archived = (chatFileArchive && chatFileArchive[currentChatId]) || [];
+        const archiveNames = new Set(archived.map(f => f.name));
+        editedFiles.forEach(f => archiveNames.add(f.editedName || f.name));
+        if (archiveNames.size > 1) {
+            const zipBtnId = `zip-dl-${Math.random().toString(36).slice(2)}`;
+            html += `<div class="code-card project-zip-card">
+                <div class="code-card-head">
+                    <span><i class="ph-fill ph-folder-simple-star" style="color:var(--accent-2);"></i> ${archiveNames.size} فایل در این پروژه</span>
+                    <div class="code-actions">
+                        <button class="code-action" id="${zipBtnId}" onclick="downloadProjectZip(this, '${escapeAttr(currentChatId)}')"><i class="ph ph-file-zip" data-lucide="file-archive"></i> دانلود پروژه (ZIP)</button>
+                    </div>
+                </div>
+            </div>`;
+        }
         return html;
+    }
+
+    // Lazy-loads JSZip only when the user actually wants a zip, instead of
+    // paying the script cost on every page load.
+    let _jsZipLoadPromise = null;
+    function ensureJSZipLoaded() {
+        if (typeof JSZip !== 'undefined') return Promise.resolve();
+        if (_jsZipLoadPromise) return _jsZipLoadPromise;
+        _jsZipLoadPromise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+            s.onload = () => resolve();
+            s.onerror = () => { _jsZipLoadPromise = null; reject(new Error('JSZip load failed')); };
+            document.head.appendChild(s);
+        });
+        return _jsZipLoadPromise;
+    }
+
+    // Builds the zip from chatFileArchive[chatId] - which is the single
+    // source of truth accumulated over the whole chat (every attached,
+    // extracted, edited, or newly-created file gets saved there via
+    // saveFileToArchive, keyed by its full path-like name e.g.
+    // "src/utils/helper.js"). Folder structure comes for free: JSZip.file()
+    // creates any intermediate folders implied by slashes in the name.
+    async function downloadProjectZip(btn, chatId) {
+        const originalHtml = btn ? btn.innerHTML : '';
+        try {
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-spinner" style="animation:spin 0.8s linear infinite;"></i> در حال ساخت...'; }
+            await ensureJSZipLoaded();
+            const files = (chatFileArchive && chatFileArchive[chatId]) || [];
+            if (!files.length) { if (typeof showToast === 'function') showToast('فایلی برای زیپ کردن پیدا نشد', 'error'); return; }
+
+            const zip = new JSZip();
+            files.forEach(f => {
+                if (!f || !f.name || typeof f.content !== 'string') return;
+                // اسم فایل ممکنه با / یا \ شروع بشه یا از ../ استفاده کنه -
+                // برای امنیت (zip slip) و تمیزی، این‌ها رو نرمالایز می‌کنیم.
+                const cleanName = String(f.name).replace(/^[\\/]+/, '').replace(/\.\.[\\/]/g, '');
+                if (cleanName) zip.file(cleanName, f.content);
+            });
+
+            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            const chatTitle = (chats && chats[chatId] && chats[chatId].title) ? chats[chatId].title.replace(/[\\/:*?"<>|]/g, '-').slice(0, 60) : 'project';
+            a.download = `${chatTitle || 'project'}.zip`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+            if (typeof showToast === 'function') showToast('پروژه به‌صورت ZIP دانلود شد', 'success');
+        } catch (e) {
+            console.error('downloadProjectZip failed:', e);
+            if (typeof showToast === 'function') showToast('ساخت فایل ZIP با خطا مواجه شد', 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+        }
     }
 
     function buildFileEditResultHtml(edits) {
