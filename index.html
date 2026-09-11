@@ -5904,8 +5904,22 @@
         // بودند ولی هیچ‌وقت دیده نمی‌شدند تا اولین پیام متنی exitHomeLayout
         // را صدا می‌زد. همون تابعی که پیام متنی استفاده می‌کند را همین‌جا
         // هم صدا می‌زنیم تا از همون اول تماس، chat-box نمایان باشد.
+        // FIX (صفحه‌ی خوش‌آمد/home-screen همچنان روی صفحه می‌ماند و
+        // ترنسکریپت‌ها دیده نمی‌شدند تا کاربر یک پیام متنی می‌فرستاد):
+        // فیکس قبلی فقط exitHomeLayout() را صدا می‌زد، ولی آن تابع فقط
+        // کلاس is-home را برمی‌دارد و جای composer را جابه‌جا می‌کند - خودِ
+        // #homeScreen (هدر بزرگ خوش‌آمد) و نمایش #chatBox را دست نمی‌زند؛
+        // این دو مستقیماً و جداگانه توسط ارسال پیام متنی (خط ۶۹۷۸ به بعد)
+        // مدیریت می‌شوند. همان سه خط را اینجا هم اجرا می‌کنیم تا از همان
+        // ابتدای تماس، home-screen کنار برود و chat-box واقعاً نمایش داده
+        // شود - نه فقط از حالت is-home خارج شود.
         if (document.body.classList.contains('is-home')) {
-            try { exitHomeLayout(); } catch (_) {}
+            try {
+                document.getElementById("homeScreen").style.display = 'none';
+                document.getElementById("chatBox").style.display = 'flex';
+                exitHomeLayout();
+                isFirstMessage = false;
+            } catch (_) {}
         }
 
         const overlay = document.getElementById('liveCallOverlay');
