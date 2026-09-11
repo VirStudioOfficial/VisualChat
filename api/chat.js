@@ -3711,7 +3711,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     .map(f => ({
                         name: f.name,
                         editedName: f._editedName || f.name,
-                        content: f.content || ''
+                        content: f.content || '',
+                        // FIX (فلگ فایل جدید به کلاینت نمی‌رسید): _isNewFile
+                        // روی خودِ آبجکت textFiles ست می‌شد (در write_new_file)
+                        // اما اینجا فراموش شده بود در payload کپی بشه - کلاینت
+                        // همیشه کارت «ویرایش شد» را نشان می‌داد، حتی برای
+                        // فایل‌های تازه‌ساخته‌شده.
+                        _isNewFile: f._isNewFile === true
                     }));
                 // DIAGNOSTICS: خلاصه‌ی قابل‌فهم برای انسان (فارسی) که مستقیم
                 // در "جزئیات بیشتر" کاربر نشان داده می‌شود - نه فقط دیتای خام
@@ -3746,7 +3752,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     .map(f => ({
                         name: f.name,
                         editedName: f._editedName || f.name,
-                        content: f.content || ''
+                        content: f.content || '',
+                        _isNewFile: f._isNewFile === true
                     }))
                 : [];
             // FIX (verified edit never reached the client): write_block
@@ -3767,7 +3774,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 .map(f => ({
                     name: f.name,
                     editedName: f._editedName || f.name,
-                    content: f.content || ''
+                    content: f.content || '',
+                    _isNewFile: f._isNewFile === true
                 }));
 
             // FIX (ادعای دروغین موفقیت): اگر روی این درخواست حداقل یک
