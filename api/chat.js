@@ -2094,6 +2094,42 @@ const GEMINI_TOOLS = [
                     },
                     required: ['file']
                 }
+            },
+            {
+                // FEATURE (ساخت پروژه‌ی چندفایلی از صفر): apply_edit فقط
+                // روی فایل‌هایی کار می‌کند که از قبل در textFiles وجود
+                // دارند (ضمیمه‌شده یا از آرشیو خوانده‌شده) - هیچ ابزاری
+                // برای ساختن یک فایل کاملاً تازه (که کاربر هیچ‌وقت
+                // نفرستاده) وجود نداشت. این ابزار همان الگوی apply_edit را
+                // دنبال می‌کند (اعتبارسنجی سنتکسی، ثبت در textFiles/
+                // editStates تا verify_file هم رویش کار کند) اما به‌جای
+                // جایگزینی یک قطعه از فایل موجود، یک ورودی کاملاً جدید
+                // می‌سازد. مسیر پوشه‌ای (مثل src/utils/helper.js) مستقیماً
+                // بخشی از name است - هیچ ابزار جدای «ساخت پوشه» لازم
+                // نیست، چون در سیستم فایل تخت (نه واقعی) کلاینت، خودِ اسم
+                // مسیر کامل را حمل می‌کند و کلاینت موقع ساخت zip از روی
+                // همین جداکننده‌های / پوشه‌بندی واقعی می‌سازد.
+                name: 'write_new_file',
+                description:
+                    'یک فایل کاملاً جدید (که قبلاً وجود نداشته - نه توسط کاربر ارسال شده و نه در آرشیو ' +
+                    'این گفتگو) با محتوای کامل مشخص‌شده می‌سازد. فقط زمانی از این ابزار استفاده کن که ' +
+                    'کاربر واقعاً از تو خواسته یک پروژه/فایل/کد چندفایلی از صفر بسازی (مثلاً «یک اپ ' +
+                    'React با چند کامپوننت بساز»، «یک پروژه‌ی Node با چند فایل بساز») - نه برای تغییر ' +
+                    'یک فایل موجود (آن کار apply_edit است) و نه برای پاسخ‌های معمولی که کد را فقط در ' +
+                    'متن پاسخ نشان می‌دهی. برای ساختن یک ساختار پوشه‌ای، name را با / کامل بده (مثلاً ' +
+                    '«src/components/Button.jsx» یا «backend/routes/auth.js») - پوشه‌ها خودکار از روی ' +
+                    'همین مسیر ساخته می‌شوند، نیازی به ابزار جدای ساخت پوشه نیست. برای پروژه‌ای با چند ' +
+                    'فایل، این ابزار را یک‌بار برای هر فایل جداگانه صدا بزن (نه یک‌بار با همه‌ی فایل‌ها ' +
+                    'در یک محتوای واحد). اگر name دقیقاً با یکی از فایل‌های موجود (ضمیمه‌شده یا آرشیو) ' +
+                    'یکی باشد، این ابزار رد می‌شود - برای فایل موجود از apply_edit استفاده کن.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        name: { type: 'string', description: 'نام/مسیر کامل فایل جدید (می‌تواند شامل پوشه با / باشد، مثلاً src/App.jsx).' },
+                        content: { type: 'string', description: 'محتوای کامل فایل جدید.' }
+                    },
+                    required: ['name', 'content']
+                }
             }
         ]
     }
@@ -2139,6 +2175,9 @@ function describeToolCall(name, args) {
     }
     if (name === 'verify_file') {
         return `در حال بررسی نهایی فایل «${(args && args.file) || ''}»...`;
+    }
+    if (name === 'write_new_file') {
+        return `در حال ساختن فایل «${(args && args.name) || ''}»...`;
     }
     if (name === 'get_archived_file') {
         return `دارم فایل «${(args && args.name) || ''}» رو از آرشیو این گفتگو می‌خونم...`;
@@ -2618,6 +2657,81 @@ async function executeToolCall(name, args, ctx) {
         };
     }
 
+    if (name === 'write_new_file') {
+        // FEATURE (ساخت پروژه‌ی چندفایلی از صفر): برخلاف apply_edit که
+        // یک فایل از قبل موجود در ctx.textFiles را پیدا و ویرایش می‌کند،
+        // اینجا فایل اصلاً وجود ندارد - باید یک ورودی جدید در همان
+        // ساختار (textFiles + editStates) ساخته شود تا هم زنجیره‌ی
+        // verify_file رویش کار کند و هم در پایان با همان مکانیزم
+        // editedFiles/​_patched به کلاینت برسد (رجوع کن به collectResults
+        // پایین‌تر که هر دو apply_edit و write_new_file را یکسان جمع
+        // می‌کند).
+        const rawName = String((args && args.name) || '').trim();
+        const content = String((args && args.content) ?? '');
+
+        if (!rawName) {
+            return { success: false, error: 'نام فایل نمی‌تواند خالی باشد.' };
+        }
+        // FIX (path traversal / نام غیرمنطقی): جلوگیری از ../ یا مسیر
+        // مطلق که می‌تواند موقع ساخت zip سمت کلاینت به بیرون از پوشه‌ی
+        // پروژه اشاره کند. اسلش ابتدایی هم حذف می‌شود تا مسیر همیشه
+        // نسبی باقی بماند.
+        const cleanName = rawName.replace(/^\/+/, '').replace(/\.\.(\/|\\)/g, '');
+        if (!cleanName || cleanName !== rawName.replace(/^\/+/, '')) {
+            return { success: false, error: 'مسیر فایل نامعتبر است (نباید شامل .. یا مسیر مطلق باشد). یک مسیر نسبی ساده بده، مثلاً src/App.jsx.' };
+        }
+
+        const files = (ctx && Array.isArray(ctx.textFiles)) ? ctx.textFiles : [];
+        const existing = files.find(f => f && f.name === cleanName);
+        if (existing) {
+            return {
+                success: false,
+                error: `فایلی با نام «${cleanName}» از قبل در فایل‌های این درخواست وجود دارد - برای تغییرش از apply_edit استفاده کن، نه write_new_file.`
+            };
+        }
+
+        const validation = validatePatchedContent(content, cleanName);
+        if (!validation.valid) {
+            return {
+                success: false,
+                error: `این فایل رد شد چون معتبر نیست: ${validation.reason} content را اصلاح کن و دوباره write_new_file را صدا بزن.`
+            };
+        }
+
+        // FIX (اسم فایل تازه‌ساخته‌شده نباید _edited بگیرد): nextEditedFileName
+        // برای فایل *موجودی* که تغییر کرده طراحی شده (تا نسخه‌ی اصلی
+        // کاربر دست‌نخورده بماند) - برای یک فایل کاملاً تازه این منطقی
+        // نیست؛ کاربر همان اسم/مسیری که مدل انتخاب کرده را می‌خواهد
+        // (مثلاً src/App.jsx)، نه src/App_edited.jsx. پس اینجا
+        // برخلاف apply_edit، editedName همان name خودش است.
+        const newFile = {
+            name: cleanName,
+            content,
+            _patched: true,
+            _editedName: cleanName,
+            _isNewFile: true // برای تفکیک در خلاصه‌ی نهایی/لاگ از فایل ویرایش‌شده
+        };
+        files.push(newFile);
+        if (ctx) ctx.textFiles = files;
+
+        if (ctx && ctx.editStates) {
+            const state = createFileEditState(newFile);
+            state.verified = true;
+            state.editedName = cleanName;
+            ctx.editStates.set(cleanName, state);
+        }
+
+        log.info('agent.tool.write_new_file.success', { name: cleanName, bytes: content.length });
+
+        return {
+            success: true,
+            valid: true,
+            file: cleanName,
+            editedName: cleanName,
+            note: 'فایل جدید ساخته و اعتبارسنجی شد. اگر پروژه به فایل‌های دیگری هم نیاز دارد، write_new_file را دوباره برای هر کدام جداگانه صدا بزن. وقتی همه‌ی فایل‌های لازم ساخته شدند، می‌توانی پاسخ نهایی را بدهی.'
+        };
+    }
+
 
     if (name === 'web_search') {
         const query = (args && args.query) || '';
@@ -2981,9 +3095,21 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // the next key. Scope the long budget back down to rounds that
     // genuinely follow a heavy read (archive/block/chunk) or carry video,
     // same as before fileEditIntent was blanket-added.
+    // FIX (ساخت پروژه‌ی چندفایلی نیاز به مهلت بیشتر از حالت ویرایش دارد):
+    // هر write_new_file یک فایل کامل از صفر تولید می‌کند (نه فقط یک
+    // search/replace کوچک روی متن موجود)، و یک پروژه‌ی واقعی معمولاً چند
+    // فایل پشت‌سرهم در چند round جدا می‌خواهد - هر کدام به‌اندازه‌ی یک
+    // apply_edit سنگین (یا سنگین‌تر، چون کل فایل باید از صفر نوشته و
+    // اعتبارسنجی شود) وقت لازم دارد. طبق درخواست صریح کاربر، این حالت
+    // مهلت ۳۰۰ ثانیه‌ای می‌گیرد (نه فقط ۱۷۰ ثانیه‌ی سایر حالت‌های سنگین)
+    // چون تولید فایل جدید از صفر کار سخت‌تری نسبت به خواندن/ویرایش یک
+    // فایل موجود است.
+    const ROUND_TIMEOUT_PROJECT_CREATION_MS = 300000;
     const roundNeedsMoreTime = (round) =>
         hasVideoAttachment ||
         (round > 0 && (lastToolCallWasArchiveRead || lastToolCallWasSectionRead));
+    const roundNeedsProjectCreationTime = (round) =>
+        round > 0 && lastToolCallWasNewFileWrite;
     let lastToolCallWasArchiveRead = false;
     // FIX (dead flag): lastToolCallWasChunkRead tracked get_file_chunk,
     // which no longer exists in the block-based system - it was declared
@@ -2991,6 +3117,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // false. read_block is this system's equivalent heavy read and gets
     // the same "give the NEXT round more time" treatment archive reads do.
     let lastToolCallWasSectionRead = false;
+    let lastToolCallWasNewFileWrite = false;
 
     // DIAGNOSTICS (ردِ کامل اجرای عامل): برای هر round، یک رکورد ساختاریافته
     // نگه می‌داریم - نه فقط یک پیام خطای کلی در انتها. این آرایه همیشه (چه
@@ -3026,9 +3153,12 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // from sharedRequestState at the top of this function.
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-        const ROUND_TIMEOUT_MS = roundNeedsMoreTime(round) ? 170000 : 60000;
+        const ROUND_TIMEOUT_MS = roundNeedsProjectCreationTime(round)
+            ? ROUND_TIMEOUT_PROJECT_CREATION_MS
+            : (roundNeedsMoreTime(round) ? 170000 : 60000);
         lastToolCallWasArchiveRead = false; // consumed for this round; re-armed below only if this round's own tool call is an archive read
         lastToolCallWasSectionRead = false; // consumed for this round; re-armed below only if this round's own tool call is a section read
+        lastToolCallWasNewFileWrite = false; // consumed for this round; re-armed below only if this round's own tool call is write_new_file
         const roundStartedAt = Date.now();
         const roundEntry = {
             round: round + 1,
@@ -3874,6 +4004,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             if (call.name === 'web_search') scopedSearchState.result = result;
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
             if (call.name === 'read_file_section') lastToolCallWasSectionRead = true;
+            if (call.name === 'write_new_file') lastToolCallWasNewFileWrite = true;
 
             // DIAGNOSTICS: هر صدا زدن ابزار را با آرگومان‌های کلیدی (نه کل
             // محتوا - فقط اسم فایل/بازه‌ی خط/طول query، برای این‌که ردِ
