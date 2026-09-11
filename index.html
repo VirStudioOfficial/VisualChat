@@ -1552,6 +1552,9 @@
            normal completed message. */
         .live-transcript-bubble .message { animation: liveTranscriptPulse 1.6s ease-in-out infinite; }
         @keyframes liveTranscriptPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
+        /* پیام جایگزین وقتی تشخیص گفتار هیچ متنی برای این نوبت نداشته -
+           مورب و کم‌رنگ‌تر تا با یک پیام واقعی اشتباه گرفته نشود. */
+        .live-transcript-empty { font-style: italic; color: var(--text-muted, #aab3c5); }
 
         /* REDESIGN v2 (مطابق نمونه‌ی درخواستی): فایل‌های غیرتصویری به‌صورت
            چیپ بزرگ‌تر با آیکون دایره‌ای توپر و دو خط متن (اسم + نوع فایل)
@@ -8485,15 +8488,18 @@
                 if (userText) {
                     w.classList.remove('live-transcript-bubble');
                 } else {
-                    // This utterance never produced any transcript text at
-                    // all (too short/quiet for the transcribe model to
-                    // recognize anything, or VAD false-triggered on noise).
-                    // The bubble was reserved up front (see
-                    // ensureLiveTranscriptBubble) before we knew that, so
-                    // it's sitting in the chat empty - remove it entirely
-                    // rather than leaving a blank bubble with nothing in
-                    // it for the user to look at.
-                    w.remove();
+                    // FIX (کادر پیام کاربر کلاً حذف می‌شد و انگار کاربر
+                    // اصلاً چیزی نگفته بود): این اتفاق وقتی می‌افتد که مدل
+                    // تشخیص گفتار هیچ متنی برای این نوبت تولید نکرده
+                    // (صدای خیلی کوتاه/آهسته بوده، یا VAD با نویز اشتباهی
+                    // فعال شده). قبلاً کادر کاملاً از صفحه حذف می‌شد که به
+                    // کاربر هیچ بازخوردی نمی‌داد. حالا به‌جای حذف، همان
+                    // حباب را نگه می‌داریم و متن جایگزین «کلمه‌ای تشخیص
+                    // داده نشد» رو نشونش می‌دیم - با استایل کم‌رنگ/مورب که
+                    // مشخص باشد این یک ترنسکریپت واقعی نیست.
+                    liveState.userBubbleEl.textContent = 'کلمه‌ای تشخیص داده نشد';
+                    liveState.userBubbleEl.classList.add('live-transcript-empty');
+                    w.classList.remove('live-transcript-bubble');
                 }
             }
         }
