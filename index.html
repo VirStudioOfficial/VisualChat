@@ -6455,6 +6455,24 @@
             const soundsLikeVoice = rms > 0 && (lowBandRms / rms) >= LOW_BAND_RATIO_MIN;
             const isVoice = rms >= voiceThreshold && soundsLikeVoice;
 
+            // ===== DEBUG (TEMPORARY - remove after diagnosing) =====
+            // Logs one line per frame that crosses the RMS threshold,
+            // whether or not it also passed the spectral-shape check, so
+            // real numbers (not guesses) show what a keyboard click vs
+            // real speech actually looks like on this specific mic/room.
+            if (rms >= voiceThreshold) {
+                console.log('[live-vad-debug]', JSON.stringify({
+                    rms: +rms.toFixed(4),
+                    voiceThreshold: +voiceThreshold.toFixed(4),
+                    lowBandRms: +lowBandRms.toFixed(4),
+                    lowBandRatio: +(lowBandRms / rms).toFixed(3),
+                    soundsLikeVoice,
+                    isVoice,
+                    noiseFloor: +noiseFloor.toFixed(4)
+                }));
+            }
+            // ===== END DEBUG =====
+
             // Only counts frames while the model's own audio is actually
             // playing (orbWrap has 'speaking') - this is purely for the
             // barge-in confirmation below and has no effect on opening a
