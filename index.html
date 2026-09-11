@@ -3913,13 +3913,21 @@
         fileRecords.forEach(r => { chatFileArchive[r.chatId] = Array.isArray(r.files) ? r.files : []; });
     }
 
-    async function saveFileToArchive(chatId, name, content) {
+    async function saveFileToArchive(chatId, name, content, sourceArchive) {
         if (!chatId || !name || typeof content !== 'string') return;
         const owner = getChatOwnerKey();
         if (!chatFileArchive[chatId]) chatFileArchive[chatId] = [];
         const list = chatFileArchive[chatId];
         const idx = list.findIndex(f => f.name === name);
-        const entry = { name, content, savedAt: Date.now() };
+        // FEATURE (اسم درست فایل ZIP خروجی): sourceArchive (اسم zip اصلی‌ای
+        // که این فایل از داخلش اکسترکت شده، مثلاً "test-project.zip") را
+        // هم نگه می‌داریم تا downloadProjectZip بتواند به‌جای عنوان چت
+        // (که چیزی مثل «سلام...» است و ربطی به پروژه ندارد)، از همین اسم
+        // برای دانلود خروجی استفاده کند. اگر idx>=0 و ورودی جدید
+        // sourceArchive نداشت ولی قدیمی داشت (مثلاً یک apply_edit بعدی
+        // که این فیلد را پاس نمی‌دهد)، مقدار قبلی حفظ می‌شود.
+        const prevSourceArchive = idx >= 0 ? list[idx].sourceArchive : undefined;
+        const entry = { name, content, savedAt: Date.now(), sourceArchive: sourceArchive || prevSourceArchive };
         if (idx >= 0) list[idx] = entry; else list.push(entry);
         try {
             await idbPut(FILES_STORE, { id: `${owner}:${chatId}`, owner, chatId: String(chatId), files: list });
@@ -7103,9 +7111,33 @@
             // در برابر نویسه‌های خاص/کوتیشن داخل کد) مستقیماً روی همان اسپن
             // ذخیره می‌کنیم تا editUserMessage بتواند بدون درخواست مجدد از
             // کاربر، فایل را دقیقاً به همان شکل بازیابی و دوباره ضمیمه کند.
-            userContentHtml += codeFilesMemory.map(f =>
+            //
+            // FEATURE (کارت ساده‌ی zip در پیام ارسالی): مثل renderCodeFilesBar
+            // (نوار پیش از ارسال)، اینجا هم فایل‌های اکسترکت‌شده از یک zip
+            // (sourceArchive مشترک) باید فقط یک چیپ واحد بگیرند در حبابِ
+            // پیام کاربر - نه یکی به‌ازای هر فایل داخل zip. برای هر فایل
+            // منفرد آن، data-content جدا نگه می‌داریم (data-archive-files،
+            // آرایه‌ی JSON از {name, content}) تا اگر لازم شد ادیت پیام هنوز
+            // بتواند محتوای کامل هر فایل را بازیابی کند.
+            const zipGroupsForMsg = new Map(); // archiveName -> files[]
+            const singleFilesForMsg = [];
+            codeFilesMemory.forEach(f => {
+                if (f.sourceArchive) {
+                    if (!zipGroupsForMsg.has(f.sourceArchive)) zipGroupsForMsg.set(f.sourceArchive, []);
+                    zipGroupsForMsg.get(f.sourceArchive).push(f);
+                } else {
+                    singleFilesForMsg.push(f);
+                }
+            });
+
+            userContentHtml += singleFilesForMsg.map(f =>
                 `<br><span class="file-chip-code" data-content="${escapeAttr(encodeURIComponent(f.content || ''))}" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="ph ph-file-code" data-lucide="file-code-2"></i> ${escapeHtml(f.name)}</span>`
             ).join('');
+
+            userContentHtml += [...zipGroupsForMsg.entries()].map(([archiveName, files]) => {
+                const archiveJson = escapeAttr(JSON.stringify(files.map(f => ({ name: f.name, content: f.content || '' }))));
+                return `<br><span class="file-chip-code" data-archive-files="${archiveJson}" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.08);font-size:0.85em;"><i class="ph ph-file-zip" data-lucide="file-archive"></i> ${escapeHtml(archiveName)} <span style="opacity:0.65;">(${files.length} فایل)</span></span>`;
+            }).join('');
         }
 
         appendMessage('user', userContentHtml);
@@ -7710,7 +7742,7 @@
         const textPayloadFiles = payloadFiles
             .filter(f => f && f.mode === 'text' && typeof f.content === 'string')
             .map(f => ({ name: f.name, content: f.content, mode: 'text' }));
-        const mergedTextFiles = [...codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text' }))];
+        const mergedTextFiles = [...codeFilesMemory.map(f => ({ name: f.name, content: f.content, mode: 'text', sourceArchive: f.sourceArchive }))];
         for (const f of textPayloadFiles) {
             const idx = mergedTextFiles.findIndex(m => m.name === f.name);
             if (idx >= 0) mergedTextFiles[idx] = f; else mergedTextFiles.push(f);
@@ -7723,7 +7755,7 @@
         // wiped right after send. This is what makes a file's content still
         // findable many messages later.
         for (const f of mergedTextFiles) {
-            saveFileToArchive(currentChatId, f.name, f.content);
+            saveFileToArchive(currentChatId, f.name, f.content, f.sourceArchive);
         }
 
         // Binary attachments (images/videos/PDFs/etc) go through separately,
@@ -9456,58 +9488,58 @@
     // still produces it) since there's no matching/applying to do - the
     // content is final as-is.
     //
-    // FEATURE (دانلود پروژه به‌صورت ZIP): وقتی این round هم شامل فایل
-    // ساخته/ویرایش‌شده باشد (یعنی همینجا) و هم چت جاری بیش از یک فایل در
-    // آرشیوش داشته باشد (یعنی این احتمالاً بخشی از یک پروژه‌ی چندفایلیه، نه
-    // فقط یک فایل تکی)، یک دکمه‌ی «دانلود پروژه (ZIP)» هم زیر کارت(ها)
-    // اضافه می‌کنیم. این دکمه در لحظه‌ی کلیک (نه اینجا) کل chatFileArchive
-    // همین چت را zip می‌کند - پس همیشه شامل جدیدترین نسخه‌ی هر فایل است،
-    // حتی اگر بعد از این پیام دوباره ویرایش شده باشد.
+    // FEATURE (نمایش تکی فقط به‌درخواست کاربر / دانلود پروژه ZIP): پیش‌فرض
+    // فقط دکمه‌ی «دانلود پروژه (ZIP)» نشان داده می‌شود. اگر مدل صراحتاً
+    // برای یک یا چند فایل _showToUser:true فرستاده باشد (چون کاربر خواسته
+    // آن فایل‌ها را جدا/تکی ببیند - سقف ۵ فایل هم سمت سرور با
+    // capShowToUserFlag اعمال شده)، به‌جای دکمه‌ی ZIP، فقط همان کارت‌های
+    // تکی نشان داده می‌شوند (نه هر دو با هم - طبق تصمیم صریح کاربر).
     function buildEditedFilesHtml(editedFiles) {
         if (!editedFiles || !editedFiles.length) return '';
-        let html = '';
-        for (const f of editedFiles) {
-            const content = f.content || '';
-            const fileName = f.editedName || f.name || 'edited-file.txt';
-            const encoded = encodeURIComponent(content);
-            const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
-            const lineCount = content ? content.split(/\r?\n/).length : 0;
-            const codeCardId = `full-code-${Math.random().toString(36).slice(2)}`;
-            const isNew = f._isNewFile === true;
-            const headIcon = isNew ? 'ph-file-plus' : 'ph-file-check';
-            const headLabel = isNew ? `فایل «${escapeHtml(fileName)}» ساخته شد` : `فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد`;
-            html += `<div class="code-card edited-file-card">
-                <div class="code-card-head">
-                    <span><i class="ph-fill ${headIcon}" style="color:var(--success);"></i> ${headLabel}</span>
-                    <div class="code-actions">
-                        <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="ph ph-code" data-lucide="code"></i> نمایش کد کامل</button>
-                        <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="ph ph-copy" data-lucide="copy"></i></button>
-                        <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="ph ph-download-simple" data-lucide="download"></i></button>
+
+        const filesToShowIndividually = editedFiles.filter(f => f && f._showToUser === true);
+
+        if (filesToShowIndividually.length > 0) {
+            let html = '';
+            for (const f of filesToShowIndividually) {
+                const content = f.content || '';
+                const fileName = f.editedName || f.name || 'edited-file.txt';
+                const encoded = encodeURIComponent(content);
+                const sizeKb = (new Blob([content]).size / 1024).toFixed(1);
+                const lineCount = content ? content.split(/\r?\n/).length : 0;
+                const codeCardId = `full-code-${Math.random().toString(36).slice(2)}`;
+                const isNew = f._isNewFile === true;
+                const headIcon = isNew ? 'ph-file-plus' : 'ph-file-check';
+                const headLabel = isNew ? `فایل «${escapeHtml(fileName)}» ساخته شد` : `فایل «${escapeHtml(fileName)}» ویرایش و بررسی شد`;
+                html += `<div class="code-card edited-file-card">
+                    <div class="code-card-head">
+                        <span><i class="ph-fill ${headIcon}" style="color:var(--success);"></i> ${headLabel}</span>
+                        <div class="code-actions">
+                            <button class="code-action" onclick="toggleFullCodeView('${codeCardId}')"><i class="ph ph-code" data-lucide="code"></i> نمایش کد کامل</button>
+                            <button class="code-action" title="کپی" onclick="copyEditedFile(this)" data-code="${encoded}"><i class="ph ph-copy" data-lucide="copy"></i></button>
+                            <button class="code-action" title="دانلود" onclick="downloadEditedFile(this)" data-code="${encoded}" data-filename="${escapeAttr(fileName)}"><i class="ph ph-download-simple" data-lucide="download"></i></button>
+                        </div>
                     </div>
-                </div>
-                <div class="edited-file-meta">${sizeKb} KB &middot; ${lineCount} خط &middot; آماده</div>
-                <pre id="${codeCardId}" class="full-code-view" style="display:none; max-height:480px; overflow:auto; margin:10px 0 0; padding:12px; background:var(--bg-secondary,#111); border-radius:8px; font-size:0.78rem; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(content)}</code></pre>
-            </div>`;
+                    <div class="edited-file-meta">${sizeKb} KB &middot; ${lineCount} خط &middot; آماده</div>
+                    <pre id="${codeCardId}" class="full-code-view" style="display:none; max-height:480px; overflow:auto; margin:10px 0 0; padding:12px; background:var(--bg-secondary,#111); border-radius:8px; font-size:0.78rem; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(content)}</code></pre>
+                </div>`;
+            }
+            return html;
         }
 
-        // فقط وقتی نشون بده که چت جاری چند فایل (پروژه) در آرشیوش داره -
-        // برای یک فایل تکی، دکمه‌های دانلود بالا کافی‌اند و یک زیپ تک‌فایلی
-        // اضافه‌ی بی‌فایده است.
+        // حالت پیش‌فرض: فقط دکمه‌ی دانلود پروژه (ZIP)، بدون کارت‌های تکی.
+        const zipBtnId = `zip-dl-${Math.random().toString(36).slice(2)}`;
         const archived = (chatFileArchive && chatFileArchive[currentChatId]) || [];
         const archiveNames = new Set(archived.map(f => f.name));
         editedFiles.forEach(f => archiveNames.add(f.editedName || f.name));
-        if (archiveNames.size > 1) {
-            const zipBtnId = `zip-dl-${Math.random().toString(36).slice(2)}`;
-            html += `<div class="code-card project-zip-card">
-                <div class="code-card-head">
-                    <span><i class="ph-fill ph-folder-simple-star" style="color:var(--accent-2);"></i> ${archiveNames.size} فایل در این پروژه</span>
-                    <div class="code-actions">
-                        <button class="code-action" id="${zipBtnId}" onclick="downloadProjectZip(this, '${escapeAttr(currentChatId)}')"><i class="ph ph-file-zip" data-lucide="file-archive"></i> دانلود پروژه (ZIP)</button>
-                    </div>
+        return `<div class="code-card project-zip-card">
+            <div class="code-card-head">
+                <span><i class="ph-fill ph-folder-simple-star" style="color:var(--accent-2);"></i> ${archiveNames.size} فایل در این پروژه</span>
+                <div class="code-actions">
+                    <button class="code-action" id="${zipBtnId}" onclick="downloadProjectZip(this, '${escapeAttr(currentChatId)}')"><i class="ph ph-file-zip" data-lucide="file-archive"></i> دانلود پروژه (ZIP)</button>
                 </div>
-            </div>`;
-        }
-        return html;
+            </div>
+        </div>`;
     }
 
     // Lazy-loads JSZip only when the user actually wants a zip, instead of
@@ -9552,8 +9584,25 @@
             const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            const chatTitle = (chats && chats[chatId] && chats[chatId].title) ? chats[chatId].title.replace(/[\\/:*?"<>|]/g, '-').slice(0, 60) : 'project';
-            a.download = `${chatTitle || 'project'}.zip`;
+            // FIX (اسم فایل ZIP خروجی): قبلاً همیشه از عنوان چت (که چیزی
+            // مثل «سلام...» است، ربطی به پروژه ندارد) استفاده می‌شد. حالا
+            // اگر همه/بیشتر فایل‌های آرشیو از یک zip واحد اکسترکت شده‌اند
+            // (sourceArchive مشترک)، همان اسم اصلی zip کاربر استفاده
+            // می‌شود؛ فقط وقتی هیچ sourceArchive ای در کار نیست (مثلاً
+            // پروژه‌ای که کلاً با write_new_file از صفر ساخته شده، نه از
+            // یک zip آپلودی) به عنوان چت برمی‌گردیم.
+            const archiveNameCounts = new Map();
+            files.forEach(f => { if (f && f.sourceArchive) archiveNameCounts.set(f.sourceArchive, (archiveNameCounts.get(f.sourceArchive) || 0) + 1); });
+            let outputName = null;
+            if (archiveNameCounts.size) {
+                outputName = [...archiveNameCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+            }
+            if (!outputName) {
+                const chatTitle = (chats && chats[chatId] && chats[chatId].title) ? chats[chatId].title.replace(/[\\/:*?"<>|]/g, '-').slice(0, 60) : 'project';
+                outputName = `${chatTitle || 'project'}.zip`;
+            }
+            if (!/\.zip$/i.test(outputName)) outputName += '.zip';
+            a.download = outputName;
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 2000);
             if (typeof showToast === 'function') showToast('پروژه به‌صورت ZIP دانلود شد', 'success');
@@ -10637,8 +10686,26 @@
         // محتوایی که اصلاً ذخیره نشده وجود ندارد.
         clone.querySelectorAll('span.file-chip-code').forEach(span => {
             const name = span.textContent.trim() || 'file.txt';
+            const archiveJson = span.getAttribute('data-archive-files');
             const encodedContent = span.getAttribute('data-content');
-            if (encodedContent !== null) {
+            if (archiveJson !== null) {
+                // FEATURE (کارت ساده‌ی zip در پیام ارسالی): این اسپن یک
+                // گروه zip است (چندین فایل با sourceArchive مشترک) که در
+                // یک چیپ واحد نمایش داده شده - data-archive-files آرایه‌ی
+                // JSON کامل {name, content} هر فایل داخل zip را دارد.
+                // اسم چیپ خودِ archiveName است (بدون پرانتز تعداد فایل).
+                const archiveName = name.replace(/\s*\(\d+\s*فایل\)\s*$/, '').trim() || name;
+                try {
+                    const files = JSON.parse(archiveJson);
+                    if (Array.isArray(files)) {
+                        files.forEach(f => {
+                            if (f && typeof f.name === 'string' && typeof f.content === 'string') {
+                                restoredCodeFiles.push({ name: f.name, content: f.content, sourceArchive: archiveName });
+                            }
+                        });
+                    }
+                } catch (_) { /* پارس نشد - این گروه نادیده گرفته می‌شود */ }
+            } else if (encodedContent !== null) {
                 let content = '';
                 try { content = decodeURIComponent(encodedContent); } catch (_) { content = ''; }
                 restoredCodeFiles.push({ name, content });
@@ -10690,7 +10757,7 @@
         clearCodeFilesMemory();
         if (restoredCodeFiles.length > 0) {
             restoredCodeFiles.forEach(f => {
-                codeFilesMemory.push({ name: f.name, content: f.content, mode: 'text' });
+                codeFilesMemory.push({ name: f.name, content: f.content, mode: 'text', ...(f.sourceArchive ? { sourceArchive: f.sourceArchive } : {}) });
             });
             if (typeof renderCodeFilesBar === 'function') renderCodeFilesBar();
         }
