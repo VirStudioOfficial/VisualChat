@@ -1216,6 +1216,22 @@ function looksLikeScatteredPatternEdit(text) {
 | این جلوی اون مشکل "اسم خروجی با اسم ورودی یکیه و معلوم نیست کدوم ویرایش‌شده"
 | رو می‌گیره.
 */
+// FEATURE (سقف ۵ فایل برای نمایش تکی): مدل قرار است خودش show_to_user را
+// فقط وقتی true بگذارد که مجموعش از ۵ فایل بیشتر نشود (طبق توضیح ابزار)،
+// اما نباید کاملاً به رعایت مدل تکیه کرد - این تابع دفاع نهایی سمت سرور
+// است: اگر به هر دلیلی (اشتباه مدل، چند round جدا که هرکدام چندتا فایل
+// show_to_user:true دارند) مجموع از MAX_SHOW_TO_USER_FILES بیشتر شد، پرچم
+// را از همه‌شان پاک می‌کند تا کلاینت به‌جای شلوغی کارت‌های تکی، فقط دکمه‌ی
+// دانلود ZIP را نشان دهد - دقیقاً همان رفتار fallback که مدل باید در متن
+// پاسخ برای کاربر توضیح/عذرخواهی کند.
+const MAX_SHOW_TO_USER_FILES = 5;
+function capShowToUserFlag(files) {
+    const list = Array.isArray(files) ? files : [];
+    const shownCount = list.filter(f => f && f._showToUser === true).length;
+    if (shownCount <= MAX_SHOW_TO_USER_FILES) return list;
+    return list.map(f => (f && f._showToUser === true) ? { ...f, _showToUser: false } : f);
+}
+
 function nextEditedFileName(originalName) {
     const name = String(originalName || '').trim();
     if (!name) return 'edited_file';
@@ -2059,14 +2075,19 @@ const GEMINI_TOOLS = [
                     'کپی کن و دوباره صدا بزن. برای حذف یک بخش، replace را رشته‌ی خالی بده. این ابزار ' +
                     'خودش بعد از نوشتن، فایل کامل را اعتبارسنجی می‌کند و نتیجه را در فیلد valid ' +
                     'برمی‌گرداند - اگر این آخرین تغییری بود که نیاز داشتی و valid:true برگشت، دیگر ' +
-                    'نیازی به verify_file جداگانه نیست و می‌توانی مستقیم پاسخ نهایی را بدهی.',
+                    'نیازی به verify_file جداگانه نیست و می‌توانی مستقیم پاسخ نهایی را بدهی. ' +
+                    'show_to_user (اختیاری): پیش‌فرض کلاینت فقط یک دکمه‌ی «دانلود پروژه (ZIP)» ' +
+                    'نشان می‌دهد، نه کارت جدای هر فایل. اگر کاربر صراحتاً خواسته این فایل را جدا/تکی ' +
+                    'ببیند (نه فقط داخل zip)، true بده تا کارت مجزای همین فایل هم نمایش داده شود. اگر ' +
+                    'کاربر چیزی در این مورد نگفته، این پارامتر را اصلاً نده (یا false بگذار).',
                 parameters: {
                     type: 'object',
                     properties: {
                         file: { type: 'string', description: 'نام دقیق فایل هدف.' },
                         search: { type: 'string', description: 'متن دقیق موجود در فایل که باید جایگزین شود (چند خط برای یکتا بودن).' },
                         replace: { type: 'string', description: 'متن جدیدی که باید جایگزین search شود (برای حذف، رشته‌ی خالی).' },
-                        occurrence: { type: 'number', description: 'اختیاری - اگر search بیش از یک‌بار در فایل تکرار شده و عمداً همه یکسان‌اند، شماره‌ی نمونه‌ی موردنظر (از ۱ شروع) را بده.' }
+                        occurrence: { type: 'number', description: 'اختیاری - اگر search بیش از یک‌بار در فایل تکرار شده و عمداً همه یکسان‌اند، شماره‌ی نمونه‌ی موردنظر (از ۱ شروع) را بده.' },
+                        show_to_user: { type: 'boolean', description: 'اختیاری - true فقط اگر کاربر صراحتاً خواسته این فایل را جدا/تکی ببیند.' }
                     },
                     required: ['file', 'search', 'replace']
                 }
@@ -2121,12 +2142,20 @@ const GEMINI_TOOLS = [
                     'همین مسیر ساخته می‌شوند، نیازی به ابزار جدای ساخت پوشه نیست. برای پروژه‌ای با چند ' +
                     'فایل، این ابزار را یک‌بار برای هر فایل جداگانه صدا بزن (نه یک‌بار با همه‌ی فایل‌ها ' +
                     'در یک محتوای واحد). اگر name دقیقاً با یکی از فایل‌های موجود (ضمیمه‌شده یا آرشیو) ' +
-                    'یکی باشد، این ابزار رد می‌شود - برای فایل موجود از apply_edit استفاده کن.',
+                    'یکی باشد، این ابزار رد می‌شود - برای فایل موجود از apply_edit استفاده کن. ' +
+                    'show_to_user (اختیاری): پیش‌فرض کلاینت فقط یک دکمه‌ی «دانلود پروژه (ZIP)» ' +
+                    'نشان می‌دهد، نه کارت جدای هر فایل. اگر کاربر صراحتاً خواسته این فایل را جدا/تکی ' +
+                    'ببیند (نه فقط داخل zip)، true بده. مهم: اگر مجموع فایل‌هایی که در کل این نوبت ' +
+                    'قرار است show_to_user:true بگیرند از ۵ فایل بیشتر می‌شود، show_to_user را روی ' +
+                    'هیچ‌کدام true نگذار - در عوض در پاسخ نهایی متنی به کاربر توضیح بده/عذرخواهی کن که ' +
+                    'چون تعداد فایل‌ها زیاد است نمایش تکی ممکن نیست و باید از دکمه‌ی دانلود پروژه (ZIP) ' +
+                    'استفاده کند.',
                 parameters: {
                     type: 'object',
                     properties: {
                         name: { type: 'string', description: 'نام/مسیر کامل فایل جدید (می‌تواند شامل پوشه با / باشد، مثلاً src/App.jsx).' },
-                        content: { type: 'string', description: 'محتوای کامل فایل جدید.' }
+                        content: { type: 'string', description: 'محتوای کامل فایل جدید.' },
+                        show_to_user: { type: 'boolean', description: 'اختیاری - true فقط اگر کاربر صراحتاً خواسته این فایل را جدا/تکی ببیند و مجموع فایل‌های show_to_user این نوبت حداکثر ۵ تاست.' }
                     },
                     required: ['name', 'content']
                 }
@@ -2600,6 +2629,11 @@ async function executeToolCall(name, args, ctx) {
         found._patched = true;
         found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
         state.editedName = found._editedName;
+        // FEATURE (نمایش تکی به‌درخواست کاربر): پیش‌فرض کلاینت فقط دکمه‌ی
+        // دانلود ZIP را نشان می‌دهد؛ اگر مدل صراحتاً show_to_user:true
+        // بفرستد (چون کاربر خواسته این فایل را جدا ببیند)، این پرچم روی
+        // خودِ فایل ست می‌شود تا در payload نهایی هم برسد به کلاینت.
+        if (args && args.show_to_user === true) found._showToUser = true;
         if (ctx && ctx.rejectedWriteBlocksByFile) {
             ctx.rejectedWriteBlocksByFile.delete(state.name);
         }
@@ -2709,7 +2743,8 @@ async function executeToolCall(name, args, ctx) {
             content,
             _patched: true,
             _editedName: cleanName,
-            _isNewFile: true // برای تفکیک در خلاصه‌ی نهایی/لاگ از فایل ویرایش‌شده
+            _isNewFile: true, // برای تفکیک در خلاصه‌ی نهایی/لاگ از فایل ویرایش‌شده
+            _showToUser: args && args.show_to_user === true // نگاه کن به توضیح apply_edit
         };
         files.push(newFile);
         if (ctx) ctx.textFiles = files;
@@ -3706,7 +3741,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 // action that resumes editing from the already-patched
                 // content instead of starting the whole edit over from the
                 // original file.
-                const partialFiles = (Array.isArray(textFiles) ? textFiles : [])
+                const partialFiles = capShowToUserFlag((Array.isArray(textFiles) ? textFiles : [])
                     .filter(f => f && f._patched)
                     .map(f => ({
                         name: f.name,
@@ -3717,8 +3752,9 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         // اما اینجا فراموش شده بود در payload کپی بشه - کلاینت
                         // همیشه کارت «ویرایش شد» را نشان می‌داد، حتی برای
                         // فایل‌های تازه‌ساخته‌شده.
-                        _isNewFile: f._isNewFile === true
-                    }));
+                        _isNewFile: f._isNewFile === true,
+                        _showToUser: f._showToUser === true
+                    })));
                 // DIAGNOSTICS: خلاصه‌ی قابل‌فهم برای انسان (فارسی) که مستقیم
                 // در "جزئیات بیشتر" کاربر نشان داده می‌شود - نه فقط دیتای خام
                 // برای لاگ سرور. summarizeAgentTrace هر دو را می‌سازد.
@@ -3747,14 +3783,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // in-place on the matching textFiles entry, so surface them the
             // same way.
             const partialFilesOnCutoff = finishReason === 'MAX_TOKENS'
-                ? (Array.isArray(textFiles) ? textFiles : [])
+                ? capShowToUserFlag((Array.isArray(textFiles) ? textFiles : [])
                     .filter(f => f && f._patched)
                     .map(f => ({
                         name: f.name,
                         editedName: f._editedName || f.name,
                         content: f.content || '',
-                        _isNewFile: f._isNewFile === true
-                    }))
+                        _isNewFile: f._isNewFile === true,
+                        _showToUser: f._showToUser === true
+                    })))
                 : [];
             // FIX (verified edit never reached the client): write_block
             // mirrors its patched content onto the matching textFiles entry
@@ -3769,14 +3806,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // verified server-side but the user could never see or download
             // it. Send it here under editedFiles whenever any file was
             // patched, regardless of finishReason.
-            const editedFiles = (Array.isArray(textFiles) ? textFiles : [])
+            const editedFiles = capShowToUserFlag((Array.isArray(textFiles) ? textFiles : [])
                 .filter(f => f && f._patched)
                 .map(f => ({
                     name: f.name,
                     editedName: f._editedName || f.name,
                     content: f.content || '',
-                    _isNewFile: f._isNewFile === true
-                }));
+                    _isNewFile: f._isNewFile === true,
+                    _showToUser: f._showToUser === true
+                })));
 
             // FIX (ادعای دروغین موفقیت): اگر روی این درخواست حداقل یک
             // write_block رد شده (فایل هیچ‌وقت واقعاً پچ نشده - نه در
