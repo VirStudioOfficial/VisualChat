@@ -771,13 +771,7 @@ ${String(botText || '').slice(0, 500)}
 |--------------------------------------------------------------------------
 */
 
-// FIX (SSRF safety): read_url lets the model fetch any URL the user gives
-// it, from OUR server. Without a check here, a crafted/malicious URL could
-// be used to make our server hit internal/private network addresses
-// (cloud metadata endpoints, localhost, internal services) that are not
-// reachable from the outside otherwise. This is a best-effort hostname
-// check (not a full defense against DNS rebinding), but it blocks the
-// obvious cases and only allows plain http/https to public-looking hosts.
+// FIX: SSRF safety
 function isUrlSafeToFetch(urlString) {
     let parsed;
     try {
@@ -1139,23 +1133,7 @@ function looksLikeFileEditIntent(text) {
     const t = String(text || '').trim().toLowerCase();
     if (!t) return false;
 
-    // FIX (تشخیص غلط نیت ادیت از روی جملات پیشنهادی/شرطی/تعریف‌وتمجیدی):
-    // نسخه‌ی قبلی این تابع فقط چک می‌کرد آیا کلماتی مثل «اضافه کن»/«درست کن»/
-    // «بهبود» جایی در متن هست، بدون توجه به این‌که آن فعل واقعاً یک دستورِ
-    // مستقیمِ الان است یا فقط داخل جمله‌ای توصیفی/آینده/شرطی/تعارفی به کار
-    // رفته (مثال واقعی که این باگ را نشان داد: «اگه بخوای هر نقطه‌ای از کد یا
-    // پروژه‌ت نیاز به بررسی داشت، بهبود یا اضافه کردن قابلیتی داشت، فقط کافیه
-    // بهم پیام بدی» - اینجا کاربر چیزی نخواسته، فقط دارد پیشنهاد آینده می‌دهد).
-    // چنین جملاتی معمولاً با «اگه»/«اگر» شروع می‌شوند یا فعل ادیت را به شکل
-    // شرطی/آینده («می‌خوای»، «بخوای»، «داشت») می‌آورند، نه به‌صورت امری مستقیم.
-    // برای جلوگیری از فعال‌شدن اشتباهِ کل زنجیره‌ی read_block/write_block/
-    // verify_file، اول این الگوهای «نیت کاذب» را رد می‌کنیم.
-    // متن را بر اساس جداکننده‌های جمله (نقطه/تعجب/سؤال/کاما/«که») به بندهای
-    // کوچک می‌شکنیم و فعل ادیت را فقط در بندهایی که خودشان «شرطی/پیشنهادیِ
-    // آینده» نیستند جستجو می‌کنیم. این جلوی false-positive روی جملاتی مثل
-    // «اگه بخوای بهبود بدی یا قابلیت اضافه کنی، بهم بگو» را می‌گیرد، بدون
-    // این‌که به یک دستور مستقیم واقعی («این فایل رو ویرایش کن») حساسیت از
-    // دست بدهد.
+    // FIX: تشخیص غلط نیت ادیت از روی جملات پیشنهادی/شرطی/تعریف‌وتمجیدی
     const editVerbRe = /ویرایش|ادیت|تغییر بده|تغییرش بده|عوض کن|اضافه کن|اضافه‌|حذف کن|پاک کن|اصلاح کن|درست کن|پیاده کن|پیاده‌|بروزرسانی کن|آپدیت کن|به‌روز کن|جایگزین کن|بازنویسی کن|اضافه کردن|حذف کردن|تغییر دادن|اصلاح کردن|modify|edit|update|delete|remove|add|insert|replace|rewrite|refactor/i;
     const conditionalMarkerRe = /(?:^|\s)(?:اگه|اگر)(?:\s|$)/i;
     // نشانه‌ی این‌که بند شرطی صرفاً یک پیشنهاد/تعارف برای «بعداً» است، نه
@@ -1189,17 +1167,7 @@ function looksLikeFileEditIntent(text) {
     return false;
 }
 
-// FIX (ادعای موفقیت بعد از تغییرِ فقط یک رخداد از چند رخداد پراکنده):
-// درخواست‌هایی مثل "رنگ/تم/پالت رو سبز کن" یا "اسم فلان متغیر/تابع رو
-// عوض کن" تقریباً همیشه در چند جای پراکنده‌ی فایل تکرار شده‌اند (مثلاً هم
-// در CSS/:root و هم در یک تابع جاوااسکریپتی که همان مقادیر را دوباره از
-// localStorage اعمال می‌کند). صرفاً توضیح این نکته در system prompt کافی
-// نبود - مدل با پیدا کردن و عوض کردن فقط یک رخداد (مثلاً یک بلوک :root)
-// ادعای اتمام کار می‌کرد، بدون این‌که find_in_file را حتی یک‌بار امتحان
-// کند. این تابع چنین درخواست‌هایی را از روی کلیدواژه تشخیص می‌دهد تا
-// runAgentLoop بتواند find_in_file را - دقیقاً مثل verify_file - به‌عنوان
-// یک تول‌کال واقعی و اجباری قبل از پاسخ نهایی تزریق کند، نه صرفاً پیشنهاد
-// متنی.
+// FIX: ادعای موفقیت بعد از تغییرِ فقط یک رخداد از چند رخداد پراکنده
 function looksLikeScatteredPatternEdit(text) {
     const t = String(text || '').trim().toLowerCase();
     if (!t) return false;
@@ -1216,14 +1184,7 @@ function looksLikeScatteredPatternEdit(text) {
 | این جلوی اون مشکل "اسم خروجی با اسم ورودی یکیه و معلوم نیست کدوم ویرایش‌شده"
 | رو می‌گیره.
 */
-// FEATURE (سقف ۵ فایل برای نمایش تکی): مدل قرار است خودش show_to_user را
-// فقط وقتی true بگذارد که مجموعش از ۵ فایل بیشتر نشود (طبق توضیح ابزار)،
-// اما نباید کاملاً به رعایت مدل تکیه کرد - این تابع دفاع نهایی سمت سرور
-// است: اگر به هر دلیلی (اشتباه مدل، چند round جدا که هرکدام چندتا فایل
-// show_to_user:true دارند) مجموع از MAX_SHOW_TO_USER_FILES بیشتر شد، پرچم
-// را از همه‌شان پاک می‌کند تا کلاینت به‌جای شلوغی کارت‌های تکی، فقط دکمه‌ی
-// دانلود ZIP را نشان دهد - دقیقاً همان رفتار fallback که مدل باید در متن
-// پاسخ برای کاربر توضیح/عذرخواهی کند.
+// FEATURE: سقف ۵ فایل برای نمایش تکی
 const MAX_SHOW_TO_USER_FILES = 5;
 function capShowToUserFlag(files) {
     const list = Array.isArray(files) ? files : [];
@@ -1603,12 +1564,7 @@ function computeFileBlocks(content, fileName) {
             .forEach(item => { if (item && Number.isFinite(item.line)) preferredBoundaries.add(item.line); });
     }
 
-    // FIX (بلوک وسط <g>/<svg>... قطع می‌شد): برای html/svg/xml، مرز بلوک
-    // هرگز نباید جایی باشد که عمق تگ باز است - یعنی هنوز داخل یک تگ نبسته
-    // هستیم. بدون این چک، preferredBoundaries فقط تگ‌های شناخته‌شده‌ی محدود
-    // (div/section/...) را می‌دید و <g>/<path>/عناصر SVG را اصلاً نمی‌شناخت،
-    // پس یک خط خالیِ تصادفیِ وسط <g> به‌عنوان مرز انتخاب می‌شد و write_block
-    // روی یک تگ نصفه رد می‌شد.
+    // FIX: بلوک وسط <g>/<svg>... قطع می‌شد
     const lowerName = String(fileName || '').toLowerCase();
     const isMarkup = /\.(html?|htm|svg|xml)$/.test(lowerName) || /<svg[\s>]/i.test(content.slice(0, 2000));
     const tagDepths = isMarkup ? computeTagDepthPerLine(content) : null;
@@ -1908,14 +1864,7 @@ const GEMINI_TOOLS = [
                 }
             },
             {
-                // FEATURE (read a link the user gave): distinct from
-                // web_search - the user has already picked a specific
-                // URL and wants its actual page content read/summarized/
-                // used, not a fresh web search. Only call this when the
-                // user's message contains (or clearly refers to) a
-                // specific http(s) link they want read - never invent a
-                // URL, and never call this for a general topic search
-                // (use web_search for that instead).
+                // FEATURE: read a link the user gave
                 name: 'read_url',
                 description:
                     'محتوای متنی یک صفحه‌ی وب را از روی آدرس (URL) که کاربر داده می‌خواند و استخراج می‌کند. ' +
@@ -1940,17 +1889,7 @@ const GEMINI_TOOLS = [
                 }
             },
             {
-                // FEATURE (persistent file memory): the client keeps a
-                // permanent per-chat archive of every text/code file ever
-                // sent (in IndexedDB, well past the single "current message"
-                // lifetime of codeFilesMemory). The archive's file NAMES are
-                // listed for the model every turn (cheap - just strings),
-                // but the actual CONTENT only gets pulled into context if
-                // the model calls this tool, i.e. only when the user is
-                // actually referring back to that file's content, not just
-                // mentioning its name in passing. This keeps large/long
-                // chats cheap by default while still letting the model
-                // "remember" old files when it genuinely needs them.
+                // FEATURE: persistent file memory
                 name: 'get_archived_file',
                 description:
                     'محتوای یکی از فایل‌های قبلاً ارسال‌شده در همین گفتگو را برمی‌گرداند. این ابزار را ' +
@@ -1991,12 +1930,7 @@ const GEMINI_TOOLS = [
                 }
             },
             {
-                // FEATURE (find_in_file): برای تسک‌هایی که یک الگو/رنگ/نام
-                // متغیر در چند جای پراکنده‌ی فایل تکرار شده (مثلاً تغییر کل
-                // پالت رنگ تم)، مدل قبلاً مجبور بود حدس بزند کجاها باید عوض
-                // شود و اغلب بعد از عوض کردن فقط چند مورد، فکر می‌کرد کار
-                // تمام است. این ابزار همه‌ی رخدادها را با شماره خط یکجا
-                // نشان می‌دهد تا قبل از شروع، دامنه‌ی واقعی کار مشخص باشد.
+                // FEATURE: find_in_file
                 name: 'find_in_file',
                 description:
                     'همه‌ی خطوطی از فایل که شامل یک رشته یا الگوی مشخص هستند را با شماره خط برمی‌گرداند - ' +
@@ -2027,14 +1961,7 @@ const GEMINI_TOOLS = [
                 // دیدن دقیق یک بخش خاص داشته باشد (مثلاً برای کپی دقیق
                 // تورفتگی/فاصله‌گذاری)، این ابزار یک بازه‌ی خط مشخص را
                 // برمی‌گرداند.
-                // FIX (کوتای ورودی روی فایل‌های بزرگ): توضیح قبلی این ابزار
-                // می‌گفت «اکثر ویرایش‌ها نیازی ندارند چون محتوای کامل فایل
-                // از قبل داده شده» - این برای فایل‌های بزرگ که الان دیگر
-                // کامل تزریق نمی‌شوند (فقط outline) نادرست و گمراه‌کننده
-                // بود، و باعث می‌شد مدل به‌جای گرفتن بازه‌ی خط دقیق از
-                // find_in_file، بازه را حدس بزند - همان چیزی که باعث خطاهای
-                // "تگ <body> بسته نشده" و apply_edit های ناموفق پشت‌سرهم
-                // می‌شد (هر کدام یک round کامل اضافه با هزینه‌ی توکن).
+                // FIX: کوتای ورودی روی فایل‌های بزرگ
                 name: 'read_file_section',
                 description:
                     'بخشی از محتوای فایل را بین دو شماره خط مشخص برمی‌گرداند. برای فایل‌های بزرگ (که فقط ' +
@@ -2117,19 +2044,7 @@ const GEMINI_TOOLS = [
                 }
             },
             {
-                // FEATURE (ساخت پروژه‌ی چندفایلی از صفر): apply_edit فقط
-                // روی فایل‌هایی کار می‌کند که از قبل در textFiles وجود
-                // دارند (ضمیمه‌شده یا از آرشیو خوانده‌شده) - هیچ ابزاری
-                // برای ساختن یک فایل کاملاً تازه (که کاربر هیچ‌وقت
-                // نفرستاده) وجود نداشت. این ابزار همان الگوی apply_edit را
-                // دنبال می‌کند (اعتبارسنجی سنتکسی، ثبت در textFiles/
-                // editStates تا verify_file هم رویش کار کند) اما به‌جای
-                // جایگزینی یک قطعه از فایل موجود، یک ورودی کاملاً جدید
-                // می‌سازد. مسیر پوشه‌ای (مثل src/utils/helper.js) مستقیماً
-                // بخشی از name است - هیچ ابزار جدای «ساخت پوشه» لازم
-                // نیست، چون در سیستم فایل تخت (نه واقعی) کلاینت، خودِ اسم
-                // مسیر کامل را حمل می‌کند و کلاینت موقع ساخت zip از روی
-                // همین جداکننده‌های / پوشه‌بندی واقعی می‌سازد.
+                // FEATURE: ساخت پروژه‌ی چندفایلی از صفر
                 name: 'write_new_file',
                 description:
                     'یک فایل کاملاً جدید (که قبلاً وجود نداشته - نه توسط کاربر ارسال شده و نه در آرشیو ' +
@@ -2164,13 +2079,7 @@ const GEMINI_TOOLS = [
     }
 ];
 
-// FIX (unnecessary web_search slowing down file-edit requests): when the
-// user is editing an attached file, there is normally no reason for the
-// model to reach for web_search - it just adds an extra round-trip (and
-// extra token/quota usage) to a flow that is already the most
-// quota-sensitive one in this file. Exclude web_search specifically (not
-// the file-editing tools) whenever fileEditIntent is true, while still
-// leaving it available for normal chat.
+// FIX: unnecessary web_search slowing down file-edit requests
 const GEMINI_TOOLS_NO_SEARCH = [
     {
         function_declarations:
@@ -2221,13 +2130,7 @@ function getFileLanguageFromName(fileName) {
     return 'other';
 }
 
-// FIX (structural safety net for the new line-anchored patch mode): a
-// line-anchored replacement never string-matches, so it CAN produce a
-// broken file (unbalanced tag/brace, cut mid-token) if startLine/endLine
-// were off by a line. This is a fast, dependency-free check - no model
-// round, no API call - run synchronously right after building the
-// candidate content and BEFORE it's accepted, so a broken patch is
-// rejected the same way a failed string-match patch always was.
+// FIX: structural safety net for the new line-anchored patch mode
 function validatePatchedContent(content, fileName) {
     const language = getFileLanguageFromName(fileName);
     if (language === 'javascript') {
@@ -2295,20 +2198,7 @@ function validatePatchedContent(content, fileName) {
         // parsing - enough to catch the common breakage (an unclosed or
         // mismatched tag from a bad line range) without a heavy parser.
         const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-        // FIX (validator too tolerant to actually catch broken HTML):
-        // the previous version popped ANY unclosed tags nested deeper
-        // than the matching one on every closing tag - e.g.
-        // "<div><span></div>" was accepted as valid because the </div>
-        // popped both "span" and "div" off the stack, treating the
-        // missing </span> as if it had implicitly closed. That defeats
-        // the whole point of this check for the block-based editor,
-        // which has no other safety net once apply_patch's string-match
-        // mode is gone. Real HTML DOES have a small set of elements that
-        // are genuinely allowed to auto-close when a sibling/parent
-        // starts or closes (li, td, tr, option, p, ...) - only THOSE are
-        // still popped implicitly. Anything else left on the stack when
-        // its ancestor closes is now a real error, matching what a real
-        // browser's parser would actually do.
+        // FIX: validator too tolerant to actually catch broken HTML
         const implicitlyClosableTags = new Set(['li','td','th','tr','option','p','dt','dd']);
         const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
         const stack = [];
@@ -2463,27 +2353,7 @@ async function executeToolCall(name, args, ctx) {
         };
     }
 
-    // FEATURE (find_in_file): پیش از این، مدل فقط می‌توانست حدس بزند کجای
-    // فایل یک متن/الگو تکرار شده - مثلاً برای تغییر کل پالت رنگ (ده‌ها
-    // متغیر CSS پراکنده + یک تابع جاوااسکریپتی که همان رنگ‌ها را دوباره از
-    // localStorage می‌خواند)، مدل یک apply_edit را می‌زد، فکر می‌کرد کار
-    // تمام است، و بقیه‌ی رخدادها (خصوصاً در بخش‌های دیگر فایل مثل تابع
-    // اعمال تم در جاوااسکریپت) دست‌نخورده می‌ماندند - دقیقاً همان الگوی
-    // "یک ثانیه سبز بعد دوباره مشکی" که کاربر گزارش داد. این ابزار همه‌ی
-    // رخدادهای یک رشته/الگو را با شماره خط یکجا برمی‌گرداند تا مدل قبل از
-    // شروع، دامنه‌ی واقعی کار را ببیند - نه این‌که بعد از یک ویرایش موفق
-    // تصور کند همه‌جا عوض شده.
-    //
-    // FIX (کوتای ورودی: مدل‌های کوچک مثل flash-lite بازه‌ی read_file_section
-    // را حدس می‌زدند نه از این ابزار کپی می‌کردند): گفتن "بازه را حدس نزن"
-    // در توضیح ابزار کافی نبود - مدل‌های سبک instruction را همیشه دقیق
-    // دنبال نمی‌کنند. راه‌حل قابل‌اتکاتر: خود این ابزار حالا چند خط context
-    // واقعی اطراف هر match را هم برمی‌گرداند (contextBefore/contextAfter)،
-    // طوری که مدل معمولاً اصلاً نیازی به صدا زدن جداگانه‌ی read_file_section
-    // (و حدس زدن بازه‌اش) ندارد - می‌تواند مستقیم از همین context برای
-    // نوشتن search در apply_edit استفاده کند. هر خطای "تگ بسته نشده" قبلی
-    // دقیقاً از همین حدس زدن بازه می‌آمد و هر بار یک round کامل اضافه با
-    // Gemini (و هزینه‌ی توکن کامل) به همراه داشت.
+    // FEATURE: find_in_file
     if (name === 'find_in_file') {
         const fileName = String((args && args.file) || '').trim();
         const query = String((args && args.query) ?? '');
@@ -2601,11 +2471,7 @@ async function executeToolCall(name, args, ctx) {
                 name: state.name,
                 reason: validation.reason
             });
-            // FIX (ادعای دروغین موفقیت): این رد شدن را ثبت کن تا اگر مدل
-            // بعداً - بدون هیچ apply_edit موفقی روی این فایل - متن نهایی
-            // را طوری بنویسد که انگار ویرایش انجام شده، بتوانیم این
-            // ناسازگاری را در پایان runAgentLoop تشخیص دهیم و جلوی رفتن
-            // پاسخ گمراه‌کننده به کاربر را بگیریم.
+            // FIX: ادعای دروغین موفقیت
             if (ctx && ctx.rejectedWriteBlocksByFile) {
                 const key = state.name;
                 const prev = ctx.rejectedWriteBlocksByFile.get(key) || { count: 0, lastReason: null };
@@ -2629,10 +2495,7 @@ async function executeToolCall(name, args, ctx) {
         found._patched = true;
         found._editedName = found._editedName || nextEditedFileName(found.name || fileName);
         state.editedName = found._editedName;
-        // FEATURE (نمایش تکی به‌درخواست کاربر): پیش‌فرض کلاینت فقط دکمه‌ی
-        // دانلود ZIP را نشان می‌دهد؛ اگر مدل صراحتاً show_to_user:true
-        // بفرستد (چون کاربر خواسته این فایل را جدا ببیند)، این پرچم روی
-        // خودِ فایل ست می‌شود تا در payload نهایی هم برسد به کلاینت.
+        // FEATURE: نمایش تکی به‌درخواست کاربر
         if (args && args.show_to_user === true) found._showToUser = true;
         if (ctx && ctx.rejectedWriteBlocksByFile) {
             ctx.rejectedWriteBlocksByFile.delete(state.name);
@@ -2692,24 +2555,14 @@ async function executeToolCall(name, args, ctx) {
     }
 
     if (name === 'write_new_file') {
-        // FEATURE (ساخت پروژه‌ی چندفایلی از صفر): برخلاف apply_edit که
-        // یک فایل از قبل موجود در ctx.textFiles را پیدا و ویرایش می‌کند،
-        // اینجا فایل اصلاً وجود ندارد - باید یک ورودی جدید در همان
-        // ساختار (textFiles + editStates) ساخته شود تا هم زنجیره‌ی
-        // verify_file رویش کار کند و هم در پایان با همان مکانیزم
-        // editedFiles/​_patched به کلاینت برسد (رجوع کن به collectResults
-        // پایین‌تر که هر دو apply_edit و write_new_file را یکسان جمع
-        // می‌کند).
+        // FEATURE: ساخت پروژه‌ی چندفایلی از صفر
         const rawName = String((args && args.name) || '').trim();
         const content = String((args && args.content) ?? '');
 
         if (!rawName) {
             return { success: false, error: 'نام فایل نمی‌تواند خالی باشد.' };
         }
-        // FIX (path traversal / نام غیرمنطقی): جلوگیری از ../ یا مسیر
-        // مطلق که می‌تواند موقع ساخت zip سمت کلاینت به بیرون از پوشه‌ی
-        // پروژه اشاره کند. اسلش ابتدایی هم حذف می‌شود تا مسیر همیشه
-        // نسبی باقی بماند.
+        // FIX: path traversal / نام غیرمنطقی
         const cleanName = rawName.replace(/^\/+/, '').replace(/\.\.(\/|\\)/g, '');
         if (!cleanName || cleanName !== rawName.replace(/^\/+/, '')) {
             return { success: false, error: 'مسیر فایل نامعتبر است (نباید شامل .. یا مسیر مطلق باشد). یک مسیر نسبی ساده بده، مثلاً src/App.jsx.' };
@@ -2732,12 +2585,7 @@ async function executeToolCall(name, args, ctx) {
             };
         }
 
-        // FIX (اسم فایل تازه‌ساخته‌شده نباید _edited بگیرد): nextEditedFileName
-        // برای فایل *موجودی* که تغییر کرده طراحی شده (تا نسخه‌ی اصلی
-        // کاربر دست‌نخورده بماند) - برای یک فایل کاملاً تازه این منطقی
-        // نیست؛ کاربر همان اسم/مسیری که مدل انتخاب کرده را می‌خواهد
-        // (مثلاً src/App.jsx)، نه src/App_edited.jsx. پس اینجا
-        // برخلاف apply_edit، editedName همان name خودش است.
+        // FIX: اسم فایل تازه‌ساخته‌شده نباید _edited بگیرد
         const newFile = {
             name: cleanName,
             content,
@@ -2878,53 +2726,9 @@ async function executeToolCall(name, args, ctx) {
 // Every tool call along the way is still narrated via onStep(label) before
 // it runs, same as before.
 async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, contents, tavilyKeys, archivedFiles, textFiles, onStep, onChunk, signal, disableTools, hasVideoAttachment, searchCache, searchState, searchIntent, fileEditIntent, scatteredPatternIntent, sharedRequestState, thinkLevel }) {
-    // FIX (تشخیص فایل تازه‌ی ضمیمه‌شده در برابر فایل promote-شده از آرشیو):
-    // textFiles یک آرایه‌ی mutable است که get_archived_file هم به آن
-    // فایل‌های آرشیوی را push می‌کند (ببین «promoted.push» در آن هندلر).
-    // برای این‌که بعداً بتوانیم فرق بگذاریم «کاربر همین پیام واقعاً چیزی
-    // ضمیمه کرده بود» از «این فایل بعداً توسط خودِ get_archived_file به
-    // textFiles اضافه شد»، نام فایل‌های تازه‌ی *واقعی* (قبل از هر promote)
-    // را همین ابتدا، قبل از هر تغییر، اسنپ‌شات می‌گیریم.
+    // FIX: تشخیص فایل تازه‌ی ضمیمه‌شده در برابر فایل promote-شده از آرشیو
     const originalFreshFileNames = new Set((Array.isArray(textFiles) ? textFiles : []).map(f => f && f.name).filter(Boolean));
-    // FIX (فایل‌های ۵۰۰۰+ خطی): با MAX_CHUNK_REQUEST_LINES=900، یک فایل
-    // ۵۰۰۰ خطی حداقل به ۶-۷ بار get_file_chunk نیاز دارد اگر مدل مجبور
-    // شود همه‌ی فایل را پیمایش کند، به‌علاوه‌ی inspect_file و apply_patch و
-    // پاسخ نهایی. سقف قبلی (۷) عملاً همان لحظه که مدل به دومین/سومین
-    // get_file_chunk می‌رسید تمام می‌شد. بالا بردنش برای این پروفایل کاری
-    // ضروری است - نه یک "مقدار امن دلخواه"، بلکه حداقل فضای واقعی لازم.
-    // FIX (worst-case stall math): with the block map given upfront in the
-    // system prompt (no inspect_file round needed anymore), a realistic
-    // file-edit turn is read_block + write_block per target block (rarely
-    // more than 2-3 blocks) + the final answer - well under 10 rounds. 16
-    // was sized for the old chunk-based flow's worse case and, combined
-    // with the fileEditIntent-blanket timeout fix above, produced a
-    // ~45min worst-case stall on a single key before quota even
-    // triggered. Lowered to 10 originally, and now write_block auto-
-    // verifies itself (see write_block above), so a single-block edit no
-    // longer needs a dedicated verify_file round at all.
-    //
-    // FIX (quota burn: fixed 10-round ceiling too generous for small
-    // files, too tight for huge multi-block ones): a fixed cap either
-    // wastes quota headroom letting a trivial 1-block edit theoretically
-    // run 10 rounds if the model dithers, or forces a legitimately large
-    // multi-block edit (e.g. a 5000-line file needing 8 separate blocks
-    // touched) to hit the ceiling and get cut off mid-edit, which then
-    // burns an entire extra key-attempt just to resume. Instead of a
-    // fixed number, size the round budget off how many blocks THIS
-    // file/request actually has to work with - Gemini decides how many
-    // of those rounds it actually needs, this only sets the ceiling so a
-    // genuinely stuck loop still can't run away.
-    //
-    // Budget model: read_block + write_block per block actually touched
-    // (worst case: every block in the file, though a real edit only
-    // touches a handful), plus a small fixed overhead for the initial
-    // "figure out which blocks" rounds and the final answer round, plus
-    // slack for one round of re-read+re-write per block in case a
-    // write_block gets rejected by validation and needs a retry.
-    // Clamped so tiny files don't get an absurdly small ceiling (a model
-    // still needs room to read before it writes) and huge files don't
-    // get an unbounded one (still a hard outer limit against a genuinely
-    // looping model).
+    // FIX: فایل‌های ۵۰۰۰+ خطی
     const MIN_TOOL_ROUNDS = 6;
     const MAX_TOOL_ROUNDS_CEILING = 40;
     const ROUNDS_PER_EDITABLE_FILE = 6; // چند apply_edit + یک احتمال retry به‌ازای هر فایل قابل‌ویرایش
@@ -2981,27 +2785,10 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // sharedRequestState so a key/model retry within the same request
     // reuses the exact same in-progress content instead of rebuilding
     // from the original file.
-    // FIX (نظرخواهی بدون محتوای فایل): این بلوک قبلاً با fileEditIntent
-    // گیت شده بود - یعنی از وقتی fileEditIntent به‌درستی روی نیت واقعی متن
-    // کاربر گیت شد (نه صرفِ وجود فایل)، برای پیام‌های نظرخواهی/سؤالی («نظرت
-    // چیه؟») این‌جا اصلاً اجرا نمی‌شد و محتوای فایل هرگز به system prompt
-    // اضافه نمی‌شد - مدل مجبور بود بدون دیدن فایل نظر بدهد، که خودش یکی از
-    // عوامل تعریف‌های کلیشه‌ای و بی‌مصداق بود. تزریق محتوای فایل باید با
-    // صرفِ وجود فایل (textFiles.length > 0) اتفاق بیفتد؛ ابزارهای ادیت
-    // واقعی (apply_edit/verify_file) جای دیگری (GEMINI_TOOLS) به
-    // fileEditIntent گیت شده‌اند و دست‌نخورده می‌مانند.
+    // FIX: نظرخواهی بدون محتوای فایل
     const editStates = sharedRequestState?.editStates || new Map();
 
-    // FIX (معیار مشترک برای «آیا ابزار ادیت واقعاً در دسترس مدل بوده»):
-    // fileEditIntentِ ثابتِ ابتدای درخواست به‌تنهایی کافی نیست، چون
-    // get_archived_file می‌تواند در وسط درخواست فایلی را به editStates
-    // اضافه کند و از آن لحظه به بعد ابزار ادیت واقعاً در دسترس می‌شود -
-    // ولی fileEditIntent هیچ‌وقت به‌روز نمی‌شود. این پرچم را هر جا لیست
-    // ابزار Gemini واقعاً تعیین می‌شود (پایین‌تر در این تابع) true می‌کنیم؛
-    // برای بررسی «مدل اصلاً فرصت apply_edit زدن داشت یا نه» در پایان
-    // درخواست (رجوع کن به hadEditableFiles) هم همین‌جا استفاده می‌شود -
-    // نه fileEditIntentِ ثابت و نه صرفِ editStates.size>0 (که برای فایل
-    // تازه‌ی نظرخواهی هم غیرصفر می‌شود).
+    // FIX: معیار مشترک برای «آیا ابزار ادیت واقعاً در دسترس مدل بوده»
     let editToolsEverAvailable = false;
 
     if (Array.isArray(textFiles) && textFiles.length > 0) {
@@ -3016,22 +2803,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 }
                 return { file: state.name, totalLines: state.content.split(/\r?\n/).length, content: state.content };
             });
-            // FIX (کوتای ورودی روی فایل‌های بزرگ): تزریق کامل محتوای فایل
-            // توی systemText یعنی هر تک تلاش (attempt) - حتی هر retry روی
-            // کلید بعدی وقتی کلید قبلی به rate-limit خورده - کل فایل را
-            // دوباره به‌عنوان ورودی می‌فرستد. روی فایل ۶ تا ۹ هزار خطی
-            // این به‌تنهایی می‌تواند سقف دقیقه‌ای ورودی توکن را رد کند،
-            // حتی بدون هیچ retry اضافه‌ای. آستانه‌ای گذاشته شده: فایل‌های
-            // زیر آن مثل قبل کامل تزریق می‌شوند (تغییری در تجربه‌ی
-            // فایل‌های کوچک نیست)، اما فایل‌های بزرگ‌تر فقط با یک outline
-            // سبک (خطوط اول + تعداد کل خطوط) معرفی می‌شوند و مدل موظف
-            // می‌شود قبل از apply_edit، با find_in_file/read_file_section
-            // فقط همان بخشی را که واقعاً برای این درخواست لازم دارد
-            // بخواند - نه کل فایل را. find_in_file/read_file_section از
-            // قبل روی state.content (نسخه‌ی کامل در حافظه‌ی سرور، نه چیزی
-            // که به مدل فرستاده می‌شود) کار می‌کنند، پس این تغییر هیچ
-            // قابلیتی را از دست نمی‌دهد - فقط چیزی که در ابتدا به‌عنوان
-            // ورودی فرستاده می‌شود را کوچک‌تر می‌کند.
+            // FIX: کوتای ورودی روی فایل‌های بزرگ
             const LARGE_FILE_LINE_THRESHOLD = 400;
             const OUTLINE_PREVIEW_LINES = 60;
             const largeFileDumps = [];
@@ -3084,61 +2856,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     }
 
 
-    // FIX (root cause of "video reads extremely slowly / times out"):
-    // Gemini has to ingest and effectively transcode/sample the whole video
-    // (extracting frames at ~1fps) before it can emit the first output
-    // token, which routinely takes well past 60s for anything more than a
-    // few seconds of footage - even after client-side compression. The old
-    // fixed 60s per-round timeout aborted these requests before Gemini ever
-    // got a chance to respond, which is exactly the "پاسخ بیش از حد طول
-    // کشید" error being seen. Video attachments now get a longer per-round
-    // budget; everything else (text/image/PDF-only turns, which really do
-    // answer fast) keeps the original tight 60s so a genuinely stuck
-    // request still fails fast instead of hanging the connection.
-    //
-    // FIX (persistent-file-memory follow-up): a round that comes right
-    // after a get_archived_file tool response has up to ~40,000 extra
-    // characters of dense code/HTML freshly added to context - genuinely
-    // more for Gemini to read and reason about than a normal turn, and it
-    // can legitimately take longer than the standard 60s to produce a real
-    // answer. The old fixed timeout aborted that round via AbortError,
-    // which the outer per-attempt catch treated exactly like a real key
-    // failure (markKeyResult(..., false)) and moved to the NEXT key -
-    // repeating the same slow "read this same big file from scratch" work
-    // on every single one of the 12 keys in a row, burning through all of
-    // them on what was never actually a quota problem, and only then
-    // surfacing the generic "quota exhausted" message. Rounds that follow a
-    // get_archived_file call now get the same longer budget as video.
-    // FIX (large-file chunk-edit flow, رفع واقعی برای فایل‌های ۵۰۰۰+ خط):
-    // منطق قبلی فقط به روندِ "بعد از" یک get_file_chunk/get_archived_file
-    // مهلت بیشتر می‌داد - یعنی خودِ روندی که برای اولین بار یک chunk بزرگ
-    // را می‌خواند و پردازش می‌کند (یا روند inspect_file روی یک فایل چند
-    // هزار خطی) همچنان با مهلت استاندارد ۶۰ ثانیه اجرا می‌شد و دقیقاً
-    // همین‌جا (خط ۱۱۰۰ تا ۱۸۹۰ که کاربر تست کرد) timeout می‌خورد. برای
-    // فایل‌های بزرگ، تقریباً هر round این جریان به همان اندازه سنگین است -
-    // پس به‌جای حدس زدن "کدام round سنگین‌تره"، وقتی fileEditIntent فعال
-    // است، همه‌ی round ها مهلت بلند می‌گیرند.
-    // FIX (10+ minute stall before quota error): fileEditIntent alone was
-    // added to this condition to fix one real timeout, but fileEditIntent
-    // is now true for EVERY turn with an attached file (see the fix that
-    // dropped the keyword-regex gate) - not just turns that are actually
-    // mid-edit. That made EVERY round (even a plain question about an
-    // attached file, or round 0 before any tool has even been called) get
-    // the full 170s budget, and with MAX_TOOL_ROUNDS now 16, the worst case
-    // became 16 * 170s = ~45 minutes on a SINGLE key before even reaching
-    // the quota-exhausted error - which then repeats the whole climb on
-    // the next key. Scope the long budget back down to rounds that
-    // genuinely follow a heavy read (archive/block/chunk) or carry video,
-    // same as before fileEditIntent was blanket-added.
-    // FIX (ساخت پروژه‌ی چندفایلی نیاز به مهلت بیشتر از حالت ویرایش دارد):
-    // هر write_new_file یک فایل کامل از صفر تولید می‌کند (نه فقط یک
-    // search/replace کوچک روی متن موجود)، و یک پروژه‌ی واقعی معمولاً چند
-    // فایل پشت‌سرهم در چند round جدا می‌خواهد - هر کدام به‌اندازه‌ی یک
-    // apply_edit سنگین (یا سنگین‌تر، چون کل فایل باید از صفر نوشته و
-    // اعتبارسنجی شود) وقت لازم دارد. طبق درخواست صریح کاربر، این حالت
-    // مهلت ۳۰۰ ثانیه‌ای می‌گیرد (نه فقط ۱۷۰ ثانیه‌ی سایر حالت‌های سنگین)
-    // چون تولید فایل جدید از صفر کار سخت‌تری نسبت به خواندن/ویرایش یک
-    // فایل موجود است.
+    // FIX: root cause of "video reads extremely slowly / times out"
     const ROUND_TIMEOUT_PROJECT_CREATION_MS = 300000;
     const roundNeedsMoreTime = (round) =>
         hasVideoAttachment ||
@@ -3146,11 +2864,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     const roundNeedsProjectCreationTime = (round) =>
         round > 0 && lastToolCallWasNewFileWrite;
     let lastToolCallWasArchiveRead = false;
-    // FIX (dead flag): lastToolCallWasChunkRead tracked get_file_chunk,
-    // which no longer exists in the block-based system - it was declared
-    // and reset every round but never re-armed anywhere, so it was always
-    // false. read_block is this system's equivalent heavy read and gets
-    // the same "give the NEXT round more time" treatment archive reads do.
+    // FIX: dead flag
     let lastToolCallWasSectionRead = false;
     let lastToolCallWasNewFileWrite = false;
 
@@ -3162,22 +2876,12 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // چند کاراکتر متن متوقف شد.
     const roundTrace = [];
     const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
-    // FIX (scattered-pattern gate re-firing on every key/model retry): read
-    // this from sharedRequestState (same object across retries within one
-    // HTTP request) instead of a local `let` that reset to false on every
-    // fresh runAgentLoop call. See the comment on sharedRequestState's
-    // creation at the call site for the full "12 keys, 12 find_in_file
-    // calls" story this caused.
+    // FIX: scattered-pattern gate re-firing on every key/model retry
     if (sharedRequestState && typeof sharedRequestState.scatteredPatternProbed !== 'boolean') {
         sharedRequestState.scatteredPatternProbed = false;
     }
     const agentLoopStartedAt = Date.now();
-    // FIX (ادعای دروغین موفقیت بعد از write_block ردشده): وقتی write_block
-    // به دلیل نامعتبر شدن فایل رد می‌شود (validatePatchedContent) و مدل به
-    // جای اصلاح newContent، سراغ منابع دیگر می‌رود و در متن نهایی وانمود
-    // می‌کند ویرایش انجام شده، هیچ _patched ای روی فایل ثبت نشده - این
-    // Map برای هر فایل، تعداد write_block های ردشده و آخرین دلیل رد شدن را
-    // نگه می‌دارد تا در پایان بتوانیم این ناسازگاری را تشخیص دهیم.
+    // FIX: ادعای دروغین موفقیت بعد از write_block ردشده
     const rejectedWriteBlocksByFile = new Map(); // fileName -> { count, lastReason }
 
     // NOTE (block-based rewrite): inspectedFilesThisRequest and
@@ -3224,48 +2928,14 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     body: JSON.stringify({
                         system_instruction: { parts: [{ text: systemText }] },
                         contents: workingContents,
-                        // FIX (silent empty reply with no SAFETY label): no
-                        // safetySettings were ever sent, so Gemini used its
-                        // own default (often stricter) thresholds. When the
-                        // default filter blocks a response, some Gemini API
-                        // versions return it as a plain empty response
-                        // (finishReason null/NONE, 0 chars) rather than
-                        // explicitly labeling it SAFETY - which is exactly
-                        // what agent.empty_after_tool_call was seeing on
-                        // round 0, no tool calls, ~1s duration. Explicitly
-                        // setting the least-restrictive commonly-supported
-                        // threshold here reduces false-positive blocks
-                        // without disabling safety entirely.
+                        // FIX: silent empty reply with no SAFETY label
                         safetySettings: [
                             { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
                             { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
                             { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
                             { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' }
                         ],
-                        // FIX (کندی محسوس با مدل‌های غیر از flash-lite): تا
-                        // اینجا هیچ generationConfig/thinkingConfig ارسال
-                        // نمی‌شد، پس gemini-3.6-flash و gemini-3.1-pro-preview
-                        // با سطح تفکر پیش‌فرض خودشان (که برای این خانواده از
-                        // مدل‌ها معمولاً medium/high است) اجرا می‌شدند - یعنی
-                        // قبل از شروع استریم پاسخ، مدل مدت قابل‌توجهی صرف
-                        // «فکر کردن» داخلی می‌کرد. flash-lite این مشکل را
-                        // نداشت چون اصلاً از این خانواده‌ی thinking نیست.
-                        // یک سطح تفکر پایین (نه صفر، چون این مدل‌ها اصلاً
-                        // اجازه‌ی خاموش کامل تفکر را نمی‌دهند) تاخیر قبل از
-                        // شروع پاسخ را به‌شدت کم می‌کند بدون این‌که کیفیت
-                        // پاسخ‌های معمولی افت محسوسی داشته باشد.
-                        // FEATURE (Think mode toggle): thinkLevel comes from
-                        // the client's "حالت تفکر" control (off by default -
-                        // see index.html). 'off' keeps the original speed-fix
-                        // behavior (minimal/low per model); when the user
-                        // explicitly turns Think on and picks low/medium/high,
-                        // that overrides the default for every model.
-                        // Model-specific thinking configuration:
-                        // - 3.5 Flash-Lite: omit thinkingConfig entirely.
-                        // - 3.7 Flash / 3.1 Pro: use low as the default when
-                        //   the UI value is 'off' or otherwise invalid.
-                        // This prevents the unsupported MINIMAL value from
-                        // ever reaching models that reject it.
+                        // FIX: کندی محسوس با مدل‌های غیر از flash-lite
                         generationConfig: (() => {
                             if (currentModel === 'gemini-3.5-flash-lite') return {};
 
@@ -3313,16 +2983,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     signal: controller.signal
                 }
             );
-            // FIX (KV telemetry blocking Gemini latency): this was
-            // `await`ed here, which meant every Gemini call waited on
-            // up to 6 KV round-trips (each with a 1.8s timeout) BEFORE
-            // we even started reading the actual Gemini stream. That
-            // contradicts the fire-and-forget design described on
-            // recordGoogleAttempt itself and could add real seconds to
-            // every response. Kept fire-and-forget: still runs and still
-            // completes before the function exits (Node/Vercel keeps
-            // the event loop alive for pending promises within the same
-            // invocation), just no longer blocks the response path.
+            // FIX: KV telemetry blocking Gemini latency
             recordGoogleAttempt(currentKey, upstream.status, keyIndex).catch((error) => {
                 log.warn('usage.record_attempt_failed', { message: error?.message });
             });
@@ -3404,26 +3065,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
         };
 
-        // FIX (duplicated-looking paragraphs on file-edit turns): the
-        // verify_file gate below (search for "agent.verify_gate.forced")
-        // can force an extra round AFTER the model has already written and
-        // streamed what it thought was its final "تمام شد" paragraph for
-        // this round. Gemini then treats the forced verify_file round as a
-        // fresh turn and writes ANOTHER full closing paragraph once it sees
-        // the result - so the user sees two (or more) similar-but-not-
-        // identical paragraphs back to back.
-        //
-        // This buffer is intentionally separate from pendingToolPreamble/
-        // armPreambleHoldTimer above: those exist for the search-preamble
-        // case and have their own PREAMBLE_HOLD_MS(1500ms) forced-flush
-        // timeout, which fires the moment a file-edit closing paragraph
-        // (routinely several seconds of streamed text) runs past 1.5s -
-        // reusing them silently defeated this fix, since preambleTimedOut
-        // then made every later chunk this round bypass the hold entirely.
-        // A file-edit closing paragraph must never be time-boxed like that:
-        // it has to be held for the WHOLE round no matter how long the
-        // model takes, because only the end of the round (zero function
-        // calls vs. a forced verify_file) tells us whether it was real.
+        // FIX: duplicated-looking paragraphs on file-edit turns
         let pendingEditClosingText = '';
 
         const handleStreamText = (text) => {
@@ -3595,15 +3237,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     round
                 });
                 functionCalls.push({ name: 'verify_file', args: { file: unverified.name } });
-                // FIX (duplicated-looking paragraphs): this round's own text
-                // (if any) was a premature "تمام شد" claim written before
-                // verify_file ever ran - it must NOT reach the client, since
-                // the verify_file round below will produce the model's real
-                // (and only) closing paragraph once it actually knows the
-                // edit is valid. That text was held (not streamed) in
-                // pendingEditClosingText by handleStreamText above
-                // specifically so it could be discarded here instead of
-                // showing the user two similar paragraphs back to back.
+                // FIX: duplicated-looking paragraphs
                 pendingEditClosingText = '';
             }
         }
@@ -3660,12 +3294,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 emitStreamText(pendingToolPreamble);
                 pendingToolPreamble = '';
             }
-            // FIX (duplicated-looking paragraphs): this round genuinely
-            // ended with zero function calls AND (since the verify gate
-            // above did not fire / already ran earlier for this file) is
-            // not a premature claim - it's the model's real final answer.
-            // Flush the closing text that was held back in
-            // pendingEditClosingText while we didn't yet know that.
+            // FIX: duplicated-looking paragraphs
             if (pendingEditClosingText) {
                 emitStreamText(pendingEditClosingText);
                 pendingEditClosingText = '';
@@ -3715,16 +3344,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 });
                 const err = new Error('agent_empty_after_tool_call');
                 err.status = 502;
-                // FEATURE (child-safety filter detection): Gemini's
-                // child-safety protections are not adjustable via
-                // safetySettings and, when triggered, return a silent
-                // empty reply with no explicit SAFETY finishReason - so
-                // this can't be detected from the API response itself.
-                // As a heuristic, scan the last couple of user turns for
-                // age/child-related keywords (Persian + a few common
-                // English ones). This is only used to pick a clearer,
-                // more specific error message for the user - it never
-                // blocks or filters anything on our side.
+                // FEATURE: child-safety filter detection
                 const recentUserText = (Array.isArray(workingContents) ? workingContents : [])
                     .filter(c => c && c.role === 'user')
                     .slice(-2)
@@ -3732,26 +3352,14 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     .join(' ');
                 const childSafetyPattern = /(بچه|کودک|کودکان|ساله|سال دارم|ساله‌ام|سالمه|سالمو|سالمه\b|child|kid|minor|years? old|year-old|toddler)/i;
                 const likelyChildSafetyBlock = childSafetyPattern.test(recentUserText);
-                // FEATURE (Continue button): if apply_patch already
-                // succeeded one or more times before the model went silent,
-                // found.content on the matching textFiles entry was mutated
-                // in-place to the partially-edited version (see
-                // apply_patch's "found.content = ..." above). Surface that
-                // partial progress here so the client can offer a "Continue"
-                // action that resumes editing from the already-patched
-                // content instead of starting the whole edit over from the
-                // original file.
+                // FEATURE: Continue button
                 const partialFiles = capShowToUserFlag((Array.isArray(textFiles) ? textFiles : [])
                     .filter(f => f && f._patched)
                     .map(f => ({
                         name: f.name,
                         editedName: f._editedName || f.name,
                         content: f.content || '',
-                        // FIX (فلگ فایل جدید به کلاینت نمی‌رسید): _isNewFile
-                        // روی خودِ آبجکت textFiles ست می‌شد (در write_new_file)
-                        // اما اینجا فراموش شده بود در payload کپی بشه - کلاینت
-                        // همیشه کارت «ویرایش شد» را نشان می‌داد، حتی برای
-                        // فایل‌های تازه‌ساخته‌شده.
+                        // FIX: فلگ فایل جدید به کلاینت نمی‌رسید
                         _isNewFile: f._isNewFile === true,
                         _showToUser: f._showToUser === true
                     })));
@@ -3775,13 +3383,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 };
                 throw err;
             }
-            // FEATURE (Continue button, MAX_TOKENS case): same idea as the
-            // empty_after_tool_call case above, but here the model DID
-            // produce text and finished with MAX_TOKENS (cut off by its own
-            // output limit) instead of going silent. Any apply_patch calls
-            // that already succeeded before the cutoff are still reflected
-            // in-place on the matching textFiles entry, so surface them the
-            // same way.
+            // FEATURE: Continue button, MAX_TOKENS case
             const partialFilesOnCutoff = finishReason === 'MAX_TOKENS'
                 ? capShowToUserFlag((Array.isArray(textFiles) ? textFiles : [])
                     .filter(f => f && f._patched)
@@ -3793,19 +3395,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         _showToUser: f._showToUser === true
                     })))
                 : [];
-            // FIX (verified edit never reached the client): write_block
-            // mirrors its patched content onto the matching textFiles entry
-            // (found.content/_patched/_editedName - see write_block above),
-            // and partialFilesOnCutoff already reads exactly that on the
-            // MAX_TOKENS path. But on a CLEAN success (normal STOP, the
-            // common case after verify_file passes), no equivalent existed -
-            // the block-editing system prompt tells the model not to print
-            // a file-edit JSON block itself, so there was no other path left
-            // for the real patched content to ever reach the client on a
-            // normal, fully-verified success. The edit was correct and
-            // verified server-side but the user could never see or download
-            // it. Send it here under editedFiles whenever any file was
-            // patched, regardless of finishReason.
+            // FIX: verified edit never reached the client
             const editedFiles = capShowToUserFlag((Array.isArray(textFiles) ? textFiles : [])
                 .filter(f => f && f._patched)
                 .map(f => ({
@@ -3816,28 +3406,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     _showToUser: f._showToUser === true
                 })));
 
-            // FIX (ادعای دروغین موفقیت): اگر روی این درخواست حداقل یک
-            // write_block رد شده (فایل هیچ‌وقت واقعاً پچ نشده - نه در
-            // editedFiles و نه در partialFiles) و مدل با این حال دارد
-            // متنی می‌فرستد که به نظر ادعای انجام‌شدن ویرایش را دارد،
-            // این حالت را واقعی و صریح به کاربر/کلاینت اطلاع بده به‌جای
-            // رها کردن متن گمراه‌کننده‌ی مدل بدون هیچ نشانه‌ای. این فقط
-            // یک فلگ اطلاعاتی است - finalText مدل دست‌نخورده می‌ماند،
-            // چون ممکن است متن واقعاً درست باشد (مثلاً مدل صادقانه گفته
-            // "نتونستم ویرایش کنم")؛ اینجا فقط داده‌ی تشخیصی اضافه می‌شود
-            // تا کلاینت بتواند در صورت نیاز هشدار نشان دهد.
-            //
-            // FIX ۲ (حالت بدتر: write_block اصلاً صدا زده نشده): حالت بالا
-            // فقط زمانی فعال می‌شد که write_block حداقل یک بار رد شده
-            // باشد. اما یک حالت بدتر هم وجود دارد - وقتی کاربر واقعاً یک
-            // فایل تازه برای ویرایش ضمیمه کرده (fileEditIntent === true،
-            // یعنی editStates ساخته شده) ولی مدل کلاً هیچ‌وقت apply_edit
-            // را روی هیچ بلوکی صدا نزده (نه موفق، نه رد شده) و مستقیم با
-            // متنی که به نظر ادعای انجام‌شدن تغییر دارد به پایان رسیده. این
-            // را هم با شمارش کل فراخوانی‌های write_block (از toolCallTally)
-            // تشخیص می‌دهیم: اگر بلوک‌استیت‌ای برای ویرایش وجود داشت اما
-            // write_block اصلاً صدا زده نشد و هیچ فایلی patch نشد، این هم
-            // همان کلاس مشکل است.
+            // FIX: ادعای دروغین موفقیت
             const writeBlockCallCount = (toolCallTally['write_block'] || 0) + (toolCallTally['apply_edit'] || 0);
             // FIX (هشدار غلط در حالت نظرخواهی + هشدار ازدست‌رفته در حالت
             // آرشیو): hadEditableFiles قبلاً فقط روی editStates.size>0 بود؛
@@ -3859,18 +3428,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     note: 'مدل حداقل یک بار write_block روی این فایل(ها) را امتحان کرد و رد شد (فایل نامعتبر می‌شد)، و در نهایت بدون هیچ ویرایش موفقی به پایان رسید. اگر متن پاسخ ادعای انجام‌شدن تغییر را دارد، آن ادعا مربوط به این فایل(ها) نیست - هیچ فایل ویرایش‌شده‌ای برای دانلود وجود ندارد.'
                 };
             } else if (hadEditableFiles && writeBlockCallCount === 0 && editedFiles.length === 0 && !partialFilesOnCutoff.length) {
-                // FIX (هشدار غلط وقتی کاربر صریحاً گفته دست نزن): این شرط
-                // قبلاً فقط بر اساس «فایل قابل‌ویرایش بود ولی write_block
-                // صدا زده نشد» تصمیم می‌گرفت، بدون این‌که واقعاً متن پاسخ
-                // نهایی مدل را بخواند. نتیجه: وقتی کاربر صریحاً می‌گفت «این
-                // رو فعلاً کاری نکن»/«دست نزن» و مدل هم صادقانه با همین مضمون
-                // جواب می‌داد («هیچ تغییری ندادم، حواسم هست»)، این هشدار
-                // به‌غلط فعال می‌شد و کلاینت پیام گمراه‌کننده‌ی «ادعای
-                // ذخیره‌سازی دروغین ثبت شد» را نشان می‌داد - درحالی‌که مدل
-                // اصلاً چنین ادعایی نکرده بود. حالا قبل از فعال‌کردن این
-                // فلگ، متن نهایی را با چند الگوی ساده‌ی فارسی/انگلیسیِ
-                // «ادعای انجام‌شدن تغییر» می‌سنجیم؛ اگر متن خودش صریحاً
-                // می‌گوید که تغییری نداده یا کاری نکرده، هشدار فعال نمی‌شود.
+                // FIX: هشدار غلط وقتی کاربر صریحاً گفته دست نزن
                 const finalTextSoFar = textParts.join('');
                 const claimsChangeDone = /(تغییر(ات)?[^.!؟\n]{0,20}(اعمال|انجام)\s*(دادم|شد|کردم)|ویرایش[^.!؟\n]{0,20}(انجام|اعمال)\s*(دادم|شد|کردم)|(changes?|edits?)\s+(applied|made|done)|(i\'ve|i have)\s+(updated|edited|changed|fixed))/i.test(finalTextSoFar);
                 const explicitlyDidNothing = /(هیچ\s*تغییری?\s*(روش|رو|را)?\s*ندادم|کاری\s*(روش|رو|را)?\s*نکردم|دست\s*نزدم|بدون\s*تغییر|didn\'t\s+(change|touch|edit|modify)|no\s+changes?\s+(were\s+)?made)/i.test(finalTextSoFar);
@@ -3935,14 +3493,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             const resultText = searchResult?.result || searchResult?.message || 'نتیجه‌ای از جستجو دریافت نشد.';
-            // FIX (silent empty reply on long chats after web_search): a
-            // Tavily result had no size cap before being pushed into the
-            // model's next-round context. On an already-long conversation
-            // (history can be up to MAX_HISTORY_CHARS on its own), adding an
-            // uncapped search result on top could push the combined payload
-            // past what the model handles cleanly - Gemini would then return
-            // an empty round (finishReason NONE/STOP, 0 chars) instead of a
-            // clean error. Cap it here so this can't happen.
+            // FIX: silent empty reply on long chats after web_search
             const cappedResultText = resultText.length > MAX_SEARCH_RESULT_CHARS
                 ? resultText.slice(0, MAX_SEARCH_RESULT_CHARS) + '\n\n[... \u0646\u062a\u06cc\u062c\u0647 \u0637\u0648\u0644\u0627\u0646\u06cc \u0628\u0648\u062f \u0648 \u06a9\u0648\u062a\u0627\u0647 \u0634\u062f ...]'
                 : resultText;
@@ -3984,13 +3535,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         // (inspectedFilesThisRequest و chunkReadsPerFile بیرون حلقه‌ی round
         // تعریف شده‌اند تا بین round ها پاک نشوند.)
 
-        // FIX (root cause of "searches many sites for one simple question"):
-        // Gemini's function-calling can return SEVERAL functionCall parts in
-        // a single model turn (parallel calling) - e.g. 3-4 different
-        // web_search calls with slightly reworded queries, all at once. That
-        // happened entirely within ONE round, so MAX_TOOL_ROUNDS never even
-        // saw it as more than one step. The runtime therefore enforces both
-        // one search per round and, more importantly, one search per question.
+        // FIX: root cause of "searches many sites for one simple question"
         let webSearchesThisRound = 0;
         const MAX_WEB_SEARCHES_PER_ROUND = 1;
         let searchTriggeredThisRound = false;
@@ -4228,10 +3773,7 @@ async function handler(req, res) {
     const usageGeminiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
         .split(',').map(k => k.trim()).filter(Boolean);
 
-    // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه): کلاینت
-    // با برگشتن به تب (visibilitychange) این را صدا می‌زند تا بپرسد یک
-    // requestId خاص کامل شده یا نه - بدون نیاز به یک route جداگانه که در
-    // Next.js با همین فایل (pages/api/chat.js) تداخل مسیر پیدا می‌کرد.
+    // FEATURE: پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه
     if (req.method === 'GET' && String(req.query?.mode || '') === 'status') {
         const requestId = String(req.query?.requestId || '').trim();
         if (!requestId) {
@@ -4304,53 +3846,18 @@ async function handler(req, res) {
             thinkLevel,
             history: rawHistory,
             model,
-            // FEATURE (recent-chats summary): a short, already-built-on-the-
-            // client summary of the user's last few conversations. Built and
-            // cached in localStorage on the frontend (see summarizeRecentChats
-            // in index.html) so the backend never has to read/summarize old
-            // chat history itself - keeps this request exactly as fast as
-            // before. Just a plain string; ignored if empty/missing.
+            // FEATURE: recent-chats summary
             recentChatsSummary,
-            // FEATURE (dual-response A/B learning - مرحله ۵): خلاصه‌ی
-            // متنی کوتاهی که کلاینت از تحلیل انتخاب‌های قبلی کاربر بین
-            // پاسخ‌های الف/ب ساخته (از api/preferences.js?action=analyze،
-            // کش‌شده در localStorage). به systemText اصلی تزریق می‌شود تا
-            // سبک همه‌ی پاسخ‌های بعدی - نه فقط دفعات dual-response - با
-            // ترجیح کاربر همسو شود.
+            // FEATURE: dual-response A/B learning - مرحله ۵
             responsePreferenceSummary,
-            // FEATURE (حافظه‌ی بلندمدت کاربر): رشته‌ای که کلاینت از
-            // خواندن api/memory.js (GET، کش‌شده در localStorage، شبیه
-            // الگوی responsePreferenceSummary) ساخته و شامل تمام
-            // key/value هایی است که قبلاً از این کاربر ذخیره شده - به
-            // systemText تزریق می‌شود تا مدل از اطلاعات قبلی کاربر آگاه
-            // باشد. برای کاربر مهمان (بدون لاگین) همیشه خالی/نامعتبر است.
+            // FEATURE: حافظه‌ی بلندمدت کاربر
             userMemoryContext,
-            // FEATURE (persistent file memory): archivedFileNames is cheap
-            // (just strings) and always present so the system prompt can
-            // tell the model what's available; archivedFiles carries the
-            // actual content but is only ever read inside executeToolCall
-            // (get_archived_file), never injected into the prompt directly -
-            // that's what keeps this free unless the model actually asks.
-            // The client only ever sends its 3 most-recently-sent files here
-            // (see recentArchivedFiles() in index.html) - older files stay
-            // in the client's IndexedDB but are simply not part of this
-            // request at all, which is what actually bounds per-request
-            // token cost as a chat's file history grows over time.
+            // FEATURE: persistent file memory
             archivedFileNames: rawArchivedFileNames,
             archivedFiles: rawArchivedFiles,
-            // FEATURE (ویجت ساعت/آب‌وهوا): موقعیت تقریبی کاربر که کلاینت
-            // با IP گرفته (primeUserIPLocation در index.html) - شکل آن
-            // { city, region, country, timezone, latitude, longitude } یا
-            // null است. فقط برای متن سیستم استفاده می‌شود، هرگز به کاربر
-            // نمایش داده نمی‌شود.
+            // FEATURE: ویجت ساعت/آب‌وهوا
             userLocation: rawUserLocation,
-            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
-            // شناسه‌ی یکتای این درخواست که کلاینت از activeRequestId خودش
-            // می‌سازد. اختیاری/مشتق‌ناپذیر از هیچ داده‌ی حساسی نیست - فقط
-            // کلید ذخیره‌ی موقت پاسخ نهایی در savePendingResponse/
-            // getPendingResponse زیر است. اگر ارسال نشود (کلاینت قدیمی)،
-            // این قابلیت فقط برای آن یک درخواست غیرفعال می‌ماند، هیچ رفتار
-            // دیگری تغییر نمی‌کند.
+            // FEATURE: پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه
             requestId: rawRequestId
         } = req.body || {};
 
@@ -4469,24 +3976,7 @@ async function handler(req, res) {
                     typeof f.content === 'string'
             );
 
-        // FIX (نسخه‌ی قبلی: صرفِ وجود فایل ضمیمه یعنی نیت ادیت):
-        // نسخه‌ی قبلی این خط `textFiles.length > 0` بود - یعنی همین که کاربر
-        // فقط یک فایل ضمیمه کند (حتی برای «نظرت راجب سایتم چیه؟» یا «این کد
-        // چیکار می‌کنه؟») کل سیستمِ اجباریِ ادیت (ابزارهای محدودشده به
-        // GEMINI_TOOLS_NO_SEARCH، دستورالعمل‌های سیستم‌پرامپتِ «تا verify_file
-        // نگیری اجازه‌ی پاسخ نهایی نداری»، و غیره) فعال می‌شد. توجیه اصلی این
-        // بود که «اگر کاربر واقعاً نخواهد ادیت کند، مدل صرفاً read_block/
-        // write_block را صدا نمی‌زند»، اما در عمل غلط از آب درآمد: فشارِ
-        // خودِ system prompt (که می‌گوید تا ویرایش/تأیید انجام نشود پاسخ نهایی
-        // مجاز نیست) مدل را وادار می‌کرد حتی برای یک سؤالِ نظرخواهی ساده به
-        // زور یک "ادیت" دست‌وپا کند و بعد ادعای انجامش را بکند - دقیقاً همان
-        // رفتاری که کاربر گزارش داد.
-        // راه‌حل: به‌جای «فایل ضمیمه شده = نیت ادیت»، از تشخیص واقعی نیتِ متنِ
-        // کاربر (looksLikeFileEditIntent) استفاده می‌کنیم - همان تابعی که
-        // بالای فایل تعریف شده و جملات شرطی/پیشنهادی/نظرخواهی را از دستورهای
-        // واقعی ادیت جدا می‌کند. اگر کاربر فقط نظر خواسته یا سؤال پرسیده،
-        // fileEditIntent باید false بماند تا مدل بتواند مستقیماً و بدون
-        // فشارِ زنجیره‌ی اجباریِ ادیت پاسخ بدهد.
+        // FIX: نسخه‌ی قبلی: صرفِ وجود فایل ضمیمه یعنی نیت ادیت
         const fileEditIntent = textFiles.length > 0 && looksLikeFileEditIntent(text);
 
         // See looksLikeScatteredPatternEdit above for why this exists:
@@ -4628,20 +4118,7 @@ async function handler(req, res) {
                                 p.text !== undefined
                         );
 
-                // FIX (token/quota exhaustion on large file edits): when the
-                // user is editing a large file, injecting the FULL content
-                // here means it then rides along unchanged in every single
-                // tool round (workingContents is cumulative - see
-                // runAgentLoop), multiplying token usage by MAX_TOOL_ROUNDS
-                // and burning through per-minute quota on every key in a
-                // row for what is really just one oversized request. This
-                // mirrors the cap that get_archived_file already had.
-                // inspect_file/get_file_chunk read directly from
-                // ctx.textFiles (untouched, full content) - not from this
-                // injected block - so skipping/trimming the injected copy
-                // here does not remove the model's ability to read the
-                // file; it just stops the redundant full copy from being
-                // resent on every round.
+                // FIX: token/quota exhaustion on large file edits
                 const fileBlocks =
                     textFiles
                         .map(
@@ -4684,19 +4161,7 @@ async function handler(req, res) {
         // 413'd here. If this number changes, update both places.
         const MAX_BINARY_BASE64_CHARS = 15 * 1024 * 1024; // ~15MB of base64 text
 
-        // FIX (root cause of "video attachments hang forever, no reply"):
-        // Gemini's streamGenerateContent endpoint does not reliably support
-        // function-calling `tools` in the same request as an inline video
-        // part - on several model versions the request either gets stuck
-        // with no chunks ever arriving, or errors in a way that looked to
-        // the user like an endless "typing..." indicator, because nothing
-        // ever reached finishReason to end the SSE stream. This affected
-        // ALL videos, including small ones sent uncompressed, since the
-        // trigger is "a video is attached", not file size. We now detect
-        // that up front and skip attaching `tools` for this request - the
-        // model still fully understands/describes the video, it just can't
-        // ALSO call web_search/ask_user in that same turn (extremely rare
-        // to need both at once, and a working reply matters far more).
+        // FIX: root cause of "video attachments hang forever, no reply"
         let hasVideoAttachment = false;
 
         for (const bf of binaryFiles) {
@@ -4778,13 +4243,7 @@ async function handler(req, res) {
 
         log.info('model.selected', { model: MODEL_NAME });
 
-        // FEATURE (پیشنهاد سؤال بعدی / quick-reply): این قانون را عمداً
-        // همین‌جا، نزدیک به بالای system prompt (نه در انتهای پرامپت‌های
-        // بلند) گذاشته‌ایم؛ چون تست واقعی نشان داد وقتی این دستورالعمل
-        // پایین‌تر (بعد از قسمت‌های طولانی دیگر) بود، مدل روی پاسخ‌های
-        // بلند/فنی آن را نادیده می‌گرفت و به‌جایش سؤال متقابلش را کامل در
-        // متن آزاد می‌نوشت. این‌جا قانون به‌صورت الزام صریح (نه توصیه)
-        // بیان شده است.
+        // FEATURE: پیشنهاد سؤال بعدی / quick-reply
         const quickReplyRule = `
 قانون الزامی درباره‌ی سؤال متقابل در پایان پاسخ (بسیار مهم، همیشه رعایت کن):
 هر بار که پاسخت را با یک سؤال از کاربر تمام می‌کنی تا بفهمی می‌خواهد در چه مسیری ادامه دهد، اول این تشخیص را بده - آیا جواب‌های معقول به این سؤال یک مجموعه‌ی کوچک و از پیش مشخص است (مثلاً بین ۲ یا ۳ گزینه‌ی محدود مثل «آبی یا قرمز؟»، «1080p یا 1440p؟»، «می‌خوای X یا Y؟»)، یا جوابش می‌تواند هر چیزی/هر عدد/هر اسمی باشد که از پیش نمی‌دانی (مثلاً «مدل کارت گرافیکت چیه؟»، «اسمت چیه؟»، «چقدر بودجه داری؟»، «کد خطا رو برام بفرست»)؟
@@ -4830,12 +4289,7 @@ async function handler(req, res) {
 مهم: این «ساعت به وقت تهران» فقط برای دانستن تاریخ/روز هفته است، نه لزوماً ساعت واقعی خودِ کاربر - کاربر ممکن است در منطقه‌ی زمانی کاملاً دیگری باشد (به بخش «موقعیت کاربر» زیر نگاه کن، اگر موجود است).
 `;
 
-        // FEATURE (ویجت ساعت/آب‌وهوا): موقعیت تقریبی کاربر که کلاینت از
-        // روی IP گرفته (بدون اینکه کاربر چیزی گفته باشد). وقتی کاربر شهر
-        // خاصی نمی‌گوید («ساعت چنده؟»/«هوا چطوره؟»)، این تنها منبع درست
-        // برای دانستن کجای دنیاست - نه وقت تهران بالا، نه حدس. اگر کلاینت
-        // هنوز نتوانسته این را بگیرد، رشته خالی می‌ماند و مدل مثل قبل
-        // (city خالی در بلاک ویجت / بدون گفتن عدد ساعت) رفتار می‌کند.
+        // FEATURE: ویجت ساعت/آب‌وهوا
         let userLocationContext = '';
         if (rawUserLocation && typeof rawUserLocation === 'object') {
             const ulCity = typeof rawUserLocation.city === 'string' ? rawUserLocation.city.slice(0, 100) : '';
@@ -4918,9 +4372,7 @@ async function handler(req, res) {
 - تاریخچه‌ی چند-دستگاهی: اگر کاربر وارد حساب کاربری شده باشد، چت‌هایش بین دستگاه‌های مختلفش همگام می‌شود.
 `;
 
-        // FEATURE (recent-chats summary): اگر خلاصه‌ای از چت‌های اخیر کاربر
-        // از سمت کلاینت رسیده، همینجا اضافه‌ش می‌کنیم تا از همون اولین پیام
-        // مدل بدونه کاربر معمولاً چطور صحبت می‌کنه و به چی علاقه داره.
+        // FEATURE: recent-chats summary
         if (typeof recentChatsSummary === 'string' && recentChatsSummary.trim()) {
             systemText += `
 خلاصه‌ای از چند گفتگوی اخیر همین کاربر (فقط برای لحن/زمینه، نه واقعیت مطلق - و مربوط به گفتگوهای دیگر، نه همین یکی؛ اگر آن‌ها حالت ویرایش فایل بوده‌اند به این معنا نیست که همین‌جا هم هستی، مگر فایلی واقعاً در همین پیام ضمیمه شده باشد):
@@ -4928,12 +4380,7 @@ ${recentChatsSummary.trim()}
 `;
         }
 
-        // FEATURE (dual-response A/B learning - مرحله ۵): این تزریق برای
-        // *همه‌ی* پاسخ‌ها اعمال می‌شود (نه فقط دفعات dualResponseMode) تا
-        // سبک کلی مدل با گذر زمان با ترجیح یادگرفته‌شده‌ی کاربر همسو شود.
-        // بلوک dual-response پایین‌تر همین systemText را پایه می‌گیرد، پس
-        // این خط را دوباره اضافه نمی‌کند - فقط دستورالعمل کوتاه‌تر/
-        // مستقیم‌تر بودن مخصوص پاسخ ب را روی همین اضافه می‌کند.
+        // FEATURE: dual-response A/B learning - مرحله ۵
         if (typeof responsePreferenceSummary === 'string' && responsePreferenceSummary.trim()) {
             systemText += `
 ترجیحات یادگرفته‌شده از انتخاب‌های قبلی همین کاربر بین دو پاسخ پیشنهادی (سبک کلی پاسخ را با این همسو کن):
@@ -4941,12 +4388,7 @@ ${responsePreferenceSummary.trim()}
 `;
         }
 
-        // FEATURE (حافظه‌ی بلندمدت کاربر): اطلاعاتی که قبلاً از همین
-        // کاربر (در همین گفتگو یا گفتگوهای قبلی) ذخیره شده - مثل اسم،
-        // مشخصات سیستم، رنگ مورد علاقه. مدل باید از این‌ها به‌طور طبیعی
-        // استفاده کند (مثلاً کاربر را با اسمش صدا بزند اگر مناسب است، یا
-        // توصیه‌هایش را بر اساس مشخصات سیستم بدهد) بدون اینکه با قاطعیت
-        // اعلام کند «این‌ها را یادم مونده» مگر کاربر خودش بپرسد.
+        // FEATURE: حافظه‌ی بلندمدت کاربر
         if (typeof userMemoryContext === 'string' && userMemoryContext.trim()) {
             systemText += `
 اطلاعاتی که قبلاً از همین کاربر ذخیره شده (در گفتگوهای قبلی یا همین گفتگو - واقعی و قابل‌اعتماد است، نه حدس؛ به‌طور طبیعی در پاسخ از آن استفاده کن، ولی مگر کاربر واقعاً بپرسد، لازم نیست با قاطعیت بگویی «این را یادم مونده»):
@@ -4954,10 +4396,7 @@ ${userMemoryContext.trim()}
 `;
         }
 
-        // FEATURE (حافظه‌ی بلندمدت کاربر): وقتی کاربر یک اطلاعات شخصی و
-        // دائمی می‌گوید (نه چیزی موقتی/مربوط به همین لحظه)، مدل یک بلاک
-        // نامرئی می‌سازد تا کلاینت آن را همان لحظه در Supabase ذخیره کند -
-        // بدون فراخوانی جدا یا تأخیر چند پیام (طبق تصمیم صریح کاربر).
+        // FEATURE: حافظه‌ی بلندمدت کاربر
         systemText += `
 حافظه‌ی بلندمدت کاربر (widget-memory-save):
 اگر و فقط اگر کاربر در همین پیام یک اطلاعات شخصی و دائمی درباره‌ی خودش گفت (مثل اسمش، مدل/مشخصات سیستم و سخت‌افزارش، رنگ یا سبک مورد علاقه‌اش، شغلش، زبان برنامه‌نویسی مورد استفاده‌اش، یا هر چیز دیگری که به‌احتمال زیاد در گفتگوهای بعدی هم به‌کارت می‌آید)، بعد از پاسخ متنی عادی‌ات یک بلاک اضافه‌ی نامرئی از این نوع اضافه کن (کاربر این بلاک را نمی‌بیند):
@@ -4992,15 +4431,7 @@ ${userMemoryContext.trim()}
 - ask_user: فقط برای تغییرات اساسی/غیرقابل‌برگشت (مثلاً بازنویسی کامل فایل، حذف بخش بزرگ کد). برای کارهای واضح مستقیم انجام بده.
 `;
 
-        // FEATURE (ویجت ساعت/آب‌وهوا): وقتی کاربر واقعاً می‌پرسد «ساعت
-        // چنده» یا «هوا/دما چطوره» (نه وقتی این کلمات فقط تصادفی توی یک
-        // جمله‌ی دیگر می‌آیند)، به‌جای فقط جواب متنی، یک بلاک ساختاریافته
-        // هم در انتهای پاسخ اضافه کن تا کلاینت بتواند یک ویجت بصری
-        // (کارت ساعت/آب‌وهوا) نشانش دهد. برای ساعت، محاسبه‌ی دقیق زمان
-        // بر عهده‌ی خودِ کلاینت است (با timezone واقعی شهر) - فقط اسم
-        // شهر/کشور را در بلاک بگذار، عدد ساعت حدس نزن. برای آب‌وهوا، اول
-        // حتماً با web_search داده‌ی واقعی/تازه بگیر، بعد بلاک را با همان
-        // داده‌ی واقعی پر کن - هرگز دما را حدس نزن.
+        // FEATURE: ویجت ساعت/آب‌وهوا
         systemText += `
 ویجت ساعت/آب‌وهوا:
 اگر و فقط اگر کاربر واقعاً می‌پرسد ساعت چند است یا هوا/دما چطور است (نه وقتی این کلمات فقط گذرا در جمله‌ای دیگر می‌آیند)، بعد از پاسخ متنی عادی‌ات، دقیقاً یک بلاک از نوع زیر هم اضافه کن (کاربر این بلاک را نمی‌بیند، فقط کلاینت آن را پردازش می‌کند):
@@ -5024,10 +4455,7 @@ ${userMemoryContext.trim()}
 این بلاک‌ها فقط برای همین دو نوع سؤال هستند - برای هیچ درخواست دیگری (حتی اگر به‌طور تصادفی کلمه‌ی «ساعت» یا «هوا» در آن باشد) این بلاک را اضافه نکن.
 `;
 
-        // FEATURE (پیشنهاد سؤال بعدی / quick-reply): قانون اصلی (اجباری
-        // بودن، کِی باید بسازد) بالای system prompt در quickReplyRule
-        // گذاشته شده تا مدل روی پاسخ‌های بلند هم آن را فراموش نکند. اینجا
-        // فقط فرمت دقیق JSON و محدودیت‌های آن تکرار می‌شود.
+        // FEATURE: پیشنهاد سؤال بعدی / quick-reply
         systemText += `
 فرمت دقیق بلاک widget-suggestions (طبق قانونی که بالاتر آمد):
 \`\`\`widget-suggestions
@@ -5044,11 +4472,7 @@ ${userMemoryContext.trim()}
 `;
 
 
-        // FEATURE (persistent file memory): tell the model which files exist
-        // in this chat's permanent archive (names only - the content is
-        // fetched on-demand via get_archived_file, see GEMINI_TOOLS above).
-        // If the archive is empty, say nothing extra so the prompt doesn't
-        // grow for chats that never used this.
+        // FEATURE: persistent file memory
         if (archivedFileNames.length > 0) {
             systemText += `
 فایل‌های آرشیوشده در این گفتگو (فقط نام - محتوا با ابزار get_archived_file قابل دریافت است):
@@ -5063,13 +4487,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
 ۳. حتی بعد از گرفتن فایل، چون «کار نمی‌کنه» به‌تنهایی برای فهمیدن مشکل کافی نیست، حدس نزن و مستقیم سراغ apply_edit نرو - از کاربر بپرس دقیقاً چه چیزی کار نمی‌کند (کدام قابلیت/دکمه/افکت، چه رفتاری در عمل می‌بیند در مقابل چه انتظاری داشته، آیا خطایی در کنسول/صفحه دیده می‌شود). فقط بعد از فهمیدن دقیق مشکل وارد روند ویرایش شو.
 `;
         } else if (textFiles.length === 0) {
-            // FIX (همان مشکل، اما وقتی آرشیوی هم در دسترس نیست): اگر کلاینت
-            // به هر دلیلی archivedFileNames را نفرستاده باشد ولی طبق
-            // تاریخچه‌ی گفتگو قبلاً روی فایلی کار شده، مدل نباید با قاطعیت
-            // ادعا کند فایلی وجود ندارد یا آن را «گم‌شده» فرض کند. به‌جای
-            // ادعای قاطع، از کاربر بخواهد دوباره فایل را ضمیمه کند، در قالب
-            // یک درخواست ساده و بدون سرزنش - و اگر پیام کاربر مبهم است
-            // («کار نمی‌کنه»)، همزمان بپرسد دقیقاً چه چیزی کار نمی‌کند.
+            // FIX: همان مشکل، اما وقتی آرشیوی هم در دسترس نیست
             systemText += `
 هیچ فایلی نه در همین پیام ضمیمه شده و نه در آرشیو این گفتگو موجود است. اگر کاربر با جمله‌ای مبهم مثل «کار نمی‌کنه» یا «باگ داره» ادامه می‌دهد، به‌جای ادعای قاطع درباره‌ی نبودِ فایل، از او بخواه فایل را دوباره ضمیمه کند و همزمان بپرس دقیقاً چه چیزی کار نمی‌کند - این دو را با هم در یک پیام کوتاه بپرس، نه دو پیام جدا.
 `;
@@ -5126,18 +4544,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
 - اگر apply_edit یا verify_file شکست خوردند و نتوانستی با تلاش مجدد درستشان کنی، صادقانه بگو که ویرایش انجام نشد و چرا - هرگز وانمود نکن که انجام شده، و هرگز به‌جای انجام واقعی ویرایش، فقط فایل را در پاسخ متنی بازنویسی نکن.
 `;
             } else {
-                // FIX (تعریف‌های کلیشه‌ای و بی‌ربط در حالت نظرخواهی): وقتی
-                // کاربر فقط فایل را ضمیمه کرده و نظر/توضیح/بررسی خواسته
-                // (نه ادیت)، قبلاً هیچ دستورالعمل جداگانه‌ای برای این حالت
-                // وجود نداشت و سیستم‌پرامپت همیشه چارچوب «حالت ویرایش فایل»
-                // را تزریق می‌کرد. نتیجه: مدل به‌جای این‌که واقعاً محتوای
-                // فایل را بخواند و درباره‌ی همان چیزی که واقعاً هست نظر بدهد،
-                // به کلیشه‌های عمومیِ تعریف از یک پروژه پناه می‌برد (مثل
-                // «فونت‌ها و خوانایی فوق‌العاده‌ست» یا «کدش خیلی درسته» -
-                // جمله‌هایی که معنای مشخصی ندارند و معلوم نیست از کجای
-                // فایل درآمده‌اند). این بخش صریحاً می‌گوید در حالت نظرخواهی
-                // فقط بر اساس چیزی که واقعاً در محتوای فایل دیده می‌شود نظر
-                // بدهد، نه جملات تعریفی عمومی و بی‌مصداق.
+                // FIX: تعریف‌های کلیشه‌ای و بی‌ربط در حالت نظرخواهی
                 systemText += `
 
 حالت بررسی/نظرخواهی (بدون ادیت):
@@ -5291,12 +4698,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                     responseB: resultB.finalText || ''
                 });
             } catch (dualErr) {
-                // FIX (نباید کل درخواست را خراب کند): اگر مسیر dual-response
-                // به هر دلیلی شکست بخورد، به‌جای برگرداندن خطا به کاربر،
-                // بی‌صدا rebrand می‌کنیم و اجازه می‌دهیم مسیر عادی
-                // stream/non-stream زیر همین درخواست را به‌صورت معمولی
-                // (تک‌پاسخی) جواب بدهد - تجربه‌ی کاربر هیچ‌وقت به‌خاطر این
-                // فیچر آزمایشی خراب نمی‌شود.
+                // FIX: نباید کل درخواست را خراب کند
                 log.warn('dual_response.failed', { message: dualErr?.message || String(dualErr) });
             }
         }
@@ -5308,17 +4710,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
         */
 
         if (wantsStream) {
-            // FIX (real streaming on Vercel): setHeader()+flushHeaders() was
-            // relying on Node's default behavior, but Vercel's Node.js
-            // Serverless Function runtime only switches a response into true
-            // chunked/streaming mode once writeHead() is called explicitly
-            // with the headers passed directly to it - without that exact
-            // call, Vercel's platform layer can buffer the whole response
-            // and flush it all at once when the function returns, no matter
-            // how many times res.write()/res.flush() are called afterward.
-            // This was the actual root cause of "the whole reply lands at
-            // once with a delay" even though the SSE writes themselves were
-            // already correct.
+            // FIX: real streaming on Vercel
             res.writeHead(200, {
                 'Content-Type': 'text/event-stream; charset=utf-8',
                 'Cache-Control': 'no-cache, no-transform',
@@ -5340,17 +4732,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
             // that just to finish one stream, and this file already has no
             // per-chunk timeout, so raising the deadline doesn't reduce
             // safety, it just stops penalizing large-but-healthy streams.
-            // FIX (false "all 12 keys exhausted" after just 1-2 tries): this
-            // used to be a flat 180s no matter how many keys/models exist to
-            // try. A single slow attempt (e.g. a round that needs
-            // get_archived_file - up to ~120s across two Gemini rounds) could
-            // eat almost the whole budget, so the loop would then bail out
-            // via the deadline check after only 1-2 attempts and surface
-            // that one attempt's error as if it applied to every key. Scale
-            // the deadline with how many keys actually exist so a real fleet
-            // of keys gets a real chance to be tried, while a fast failure
-            // (quota/429, which fails immediately at the upstream.ok check,
-            // not after a timeout) barely uses any of that budget anyway.
+            // FIX: false "all 12 keys exhausted" after just 1-2 tries
             const overallDeadline =
                 Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
 
@@ -5427,17 +4809,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                     // logging the connect time. Hoisting it removes that
                     // class of bug entirely, regardless of deploy state.
                     let attemptStartedAt = Date.now();
-                    // FIX (deadlineTimer is not defined): same class of bug
-                    // as attemptStartedAt above. deadlineTimer was declared
-                    // with const INSIDE the try block; if anything threw
-                    // before that declaration line executed (e.g. log.info
-                    // itself, or an error early in the try), the catch block
-                    // below referenced a deadlineTimer that was never
-                    // initialized in this iteration - a real ReferenceError,
-                    // not a hypothetical one (this is exactly what the
-                    // screenshot showed). Hoisted above try, defaulting to
-                    // null, so clearTimeout(deadlineTimer) in catch is always
-                    // safe regardless of where inside try the throw happened.
+                    // FIX: deadlineTimer is not defined
                     let deadlineTimer = null;
 
                     try {
@@ -5493,17 +4865,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         let streamedTextSoFar = '';
                         const requestSearchIntent = looksLikeWebSearchIntent(searchQueryBase || text);
 
-                        // FIX (heavy code UX): code blocks now stream live,
-                        // chunk-by-chunk, exactly like normal prose - no more
-                        // buffering the whole fenced block and flushing it in
-                        // one piece, and no more fake "در حال نوشتن کد..."
-                        // step event standing in for it (that event used to
-                        // fire on ANY ``` fence, including ones that weren't
-                        // real code, which made it misleading). We still keep
-                        // a tiny carry buffer so a ``` marker split across two
-                        // raw chunks isn't sent as two separate backticks -
-                        // that's purely a transport-safety detail and has no
-                        // effect on what the user sees typed out.
+                        // FIX: heavy code UX
                         const codeStreamGate = (() => {
                             let carry = ''; // holds a partial ``` at chunk boundary
                             let seenTail = ''; // small rolling window to detect the ```file-edit fence across chunk boundaries
@@ -5535,14 +4897,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                                     chunk = chunk.slice(0, -carry.length);
                                 }
 
-                                // FEATURE (file-edit progress narration): the
-                                // model only emits the ```file-edit fence once
-                                // it has finished "deciding" the diff and is
-                                // about to print the actual old/new JSON -
-                                // narrate that moment specifically (not any
-                                // ``` fence in general, which was already
-                                // tried and reverted above for being
-                                // misleading on non-code fences).
+                                // FEATURE: file-edit progress narration
                                 if (!fileEditStepSent && textFiles.length > 0) {
                                     seenTail = (seenTail + chunk).slice(-32);
                                     if (seenTail.includes('```file-edit')) {
@@ -5829,12 +5184,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                 `data: ${JSON.stringify({ error: finalErrorPayload })}\n\n`
             );
 
-            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
-            // یک شکست واقعی (نه فقط قطع شدن تب کاربر) هم باید زیر همین
-            // requestId ذخیره شود - وگرنه کلاینتی که با ?mode=status
-            // پرس‌وجو می‌کند برای همیشه "هنوز آماده نیست" می‌بیند و منتظر
-            // چیزی می‌ماند که هرگز نمی‌آید، تا اینکه خودِ watchdog او را
-            // بعد از ۲۱۰ ثانیه با یک پیام عمومی (نه این خطای واقعی) ببندد.
+            // FEATURE: پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه
             await savePendingResponse(requestId, {
                 done: true,
                 failed: true,
@@ -5858,8 +5208,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
         // طول کشید" timeout being reported. Matching it to the same 180s
         // (and further via hasVideoAttachment inside runAgentLoop's own
         // per-round timeout) keeps both code paths consistent.
-        // FIX (false "all keys exhausted" after just 1-2 tries): same
-        // reasoning as the streaming path above - scale with key count.
+        // FIX: false "all keys exhausted" after just 1-2 tries
         const overallDeadline =
             Date.now() + Math.min(600000, Math.max(180000, geminiKeys.length * 20000));
 
@@ -5900,10 +5249,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
 
                 attemptsTried++;
 
-                // FIX (same class as deadlineTimer in the streaming loop):
-                // hoisted above try so clearTimeout in the catch block below
-                // is always safe, even if something throws before this
-                // iteration's setTimeout call executes.
+                // FIX: same class as deadlineTimer in the streaming loop
                 let deadlineTimerNonStream = null;
 
                 try {
@@ -6056,19 +5402,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
             message: globalError?.message || String(globalError)
         });
 
-        // FIX (ERR_HTTP_HEADERS_SENT): this catch wraps the WHOLE handler,
-        // including the streaming path below, which already calls
-        // res.write()/res.setHeader() as soon as it starts sending SSE
-        // chunks. If something throws AFTER that point (e.g. a late error
-        // while reading the upstream stream), execution falls through to
-        // here — and calling res.status(...).json(...) on a response whose
-        // headers are already sent crashes with ERR_HTTP_HEADERS_SENT,
-        // which is exactly what killed the reply instead of just failing
-        // gracefully. We now check res.headersSent first: if the response
-        // was never started, send the normal JSON error as before; if it
-        // was already streaming, we can't send a fresh JSON body anymore,
-        // so emit one last SSE error event (if the stream is still open)
-        // and end the response instead of trying to set headers again.
+        // FIX: ERR_HTTP_HEADERS_SENT
         if (res.headersSent) {
             try {
                 if (!res.writableEnded) {
@@ -6088,13 +5422,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
             } catch (_) {
                 // Stream may already be broken/closed — nothing more we can do.
             }
-            // FEATURE (پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه):
-            // یک کرش واقعی وسط استریم هم باید زیر requestId ثبت شود، وگرنه
-            // یک کلاینتی که این لحظه در تب پس‌زمینه است برای ۲۱۰ ثانیه
-            // (تا watchdog خودش) فکر می‌کند هنوز در انتظار پاسخ است.
-            // متن جزئی این مسیر در دسترس نیست (خارج از closure استریم است)
-            // پس فقط شکست را علامت می‌زنیم - کلاینت با آن دقیقاً مثل خطای
-            // نهایی معمولی رفتار می‌کند.
+            // FEATURE: پاسخی دریافت نشد بعد از throttle شدن تب پس‌زمینه
             try {
                 await savePendingResponse(requestId, {
                     done: true,
