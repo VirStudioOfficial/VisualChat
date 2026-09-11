@@ -4712,6 +4712,20 @@
         return false;
     }
 
+    // FEATURE (کارت ساده‌ی zip در نوار پیش‌نمایش): کاربر نمی‌خواهد محتوای
+    // داخل zip را در نوار چت به‌صورت فایل‌های جدا یا حتی یک کارت باز/بسته‌
+    // شونده ببیند - می‌خواهد دقیقاً همان چیزی که drag&drop کرده (خودِ
+    // فایل zip) را به‌صورت یک آیتم ساده، بدون هیچ تعامل خاصی (بدون کلیک
+    // برای باز کردن، بدون نمایش لیست) ببیند. این فقط یک تغییر نمایشی است:
+    // خودِ codeFilesMemory دست‌نخورده می‌ماند (همان فایل‌های تک‌تک اکسترکت‌
+    // شده با sourceArchive ست‌شده - دقیقاً همانی که به مدل فرستاده می‌شود)،
+    // فقط رندر گروه‌بندی می‌شود و به یک چیپ غیرقابل‌کلیک با دکمه‌ی حذف
+    // کل زیپ تبدیل می‌شود.
+    function removeZipGroup(archiveName) {
+        codeFilesMemory = codeFilesMemory.filter(f => f.sourceArchive !== archiveName);
+        renderCodeFilesBar();
+    }
+
     function renderCodeFilesBar() {
         const bar = document.getElementById('codeFilesBar');
         if (!bar) return;
@@ -4721,7 +4735,8 @@
             return;
         }
         bar.classList.add('has-items');
-        bar.innerHTML = codeFilesMemory.map(f => `
+
+        const singleChipHtml = (f) => `
             <span class="file-preview" style="display:inline-flex;position:relative;" onclick="openTextFileEditor('${f.name.replace(/'/g, "\\'")}')">
                 <button class="fp-remove" type="button" onclick="event.stopPropagation(); removeCodeFile('${f.name.replace(/'/g, "\\'")}')"><i class="ph ph-x" data-lucide="x"></i></button>
                 <span class="fp-icon-wrap"><i class="ph ph-file-code fp-type-icon" data-lucide="file-code-2"></i></span>
@@ -4730,7 +4745,41 @@
                     <span class="file-status">${getFileTypeLabel(f.name)}</span>
                 </span>
             </span>
-        `).join('');
+        `;
+
+        const zipChipHtml = (archiveName, count) => `
+            <span class="file-preview" style="display:inline-flex;position:relative;cursor:default;">
+                <button class="fp-remove" type="button" title="حذف zip" onclick="event.stopPropagation(); removeZipGroup('${archiveName.replace(/'/g, "\\'")}')"><i class="ph ph-x" data-lucide="x"></i></button>
+                <span class="fp-icon-wrap"><i class="ph ph-file-zip fp-type-icon" data-lucide="file-archive"></i></span>
+                <span class="fp-text">
+                    <span class="fp-name">${escapeHtml(archiveName)}</span>
+                    <span class="file-status">${count} فایل</span>
+                </span>
+            </span>
+        `;
+
+        // فایل‌ها را به گروه‌های zip و بقیه (تکی) تفکیک کن؛ ترتیب اصلی
+        // codeFilesMemory حفظ می‌شود (اولین باری که یک sourceArchive دیده
+        // می‌شود، جای چیپِ زیپ در همان نقطه قرار می‌گیرد).
+        const zipCounts = new Map(); // archiveName -> count
+        const order = [];
+        codeFilesMemory.forEach(f => {
+            if (f.sourceArchive) {
+                if (!zipCounts.has(f.sourceArchive)) { zipCounts.set(f.sourceArchive, 0); order.push({ type: 'zip', key: f.sourceArchive }); }
+                zipCounts.set(f.sourceArchive, zipCounts.get(f.sourceArchive) + 1);
+            } else {
+                order.push({ type: 'single', key: f.name });
+            }
+        });
+
+        bar.innerHTML = order.map(item => {
+            if (item.type === 'single') {
+                const f = codeFilesMemory.find(x => x.name === item.key && !x.sourceArchive);
+                return f ? singleChipHtml(f) : '';
+            }
+            return zipChipHtml(item.key, zipCounts.get(item.key));
+        }).join('');
+
         if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (_) {} }
     }
 
