@@ -6232,43 +6232,16 @@
                 this._bufferSize = 4096;
                 this._buffer = new Float32Array(this._bufferSize);
                 this._writeIndex = 0;
-                // FIX (keyboard clicks read as speech): voiced speech
-                // carries most of its energy in a low band (roughly
-                // 150-900Hz, where vowel/voicing fundamentals live),
-                // while a keyboard click is a broadband transient with
-                // comparatively much less energy concentrated there. A
-                // cheap one-pole low-pass IIR (no extra Web Audio node
-                // needed) run alongside the raw signal gives a second,
-                // low-band-only RMS per frame; the main thread compares
-                // it against the full-band RMS to tell "this frame is
-                // shaped like a voiced sound" from "this frame is just a
-                // loud broadband thump" - something a single RMS
-                // threshold alone can never distinguish, since a loud
-                // click's raw amplitude can be just as high as speech.
-                this._lpState = 0;
-                // Cutoff of ~900Hz at typical 16kHz sample rate: alpha
-                // derived from RC one-pole formula, recomputed properly
-                // for the actual sampleRate available to worklets.
-                const cutoffHz = 900;
-                const dt = 1 / sampleRate;
-                const rc = 1 / (2 * Math.PI * cutoffHz);
-                this._alpha = dt / (rc + dt);
-                this._lowBandSumSquares = 0;
             }
             process(inputs) {
                 const input = inputs[0];
                 const channel = input && input[0];
                 if (!channel) return true;
                 for (let i = 0; i < channel.length; i++) {
-                    const sample = channel[i];
-                    this._lpState += this._alpha * (sample - this._lpState);
-                    this._lowBandSumSquares += this._lpState * this._lpState;
-                    this._buffer[this._writeIndex++] = sample;
+                    this._buffer[this._writeIndex++] = channel[i];
                     if (this._writeIndex >= this._bufferSize) {
                         // Transfer ownership to the main thread - zero-copy.
-                        const lowBandRms = Math.sqrt(this._lowBandSumSquares / this._bufferSize);
-                        this._lowBandSumSquares = 0;
-                        this.port.postMessage({ buffer: this._buffer, lowBandRms }, [this._buffer.buffer]);
+                        this.port.postMessage(this._buffer, [this._buffer.buffer]);
                         this._buffer = new Float32Array(this._bufferSize);
                         this._writeIndex = 0;
                     }
@@ -6415,10 +6388,29 @@
         // while still barging in almost instantly on real speech.
         let consecutiveVoicedFramesWhileModelSpeaking = 0;
 
+        // FIX (typing picked up as speech): audio-only approaches (RMS
+        // threshold, spectral shape) can't reliably separate this
+        // mic/keyboard combo's typing sound from real speech - measured
+        // low-band energy ratios came back nearly identical for both on
+        // this setup (a boom mic close to the mouth also sits close to
+        // the keyboard). A keydown listener sidesteps audio analysis
+        // entirely: we know FOR CERTAIN a key was just pressed, so
+        // frames captured in a short window around each keystroke are
+        // ignored for voice detection, regardless of how they'd
+        // otherwise score. This never affects a turn already in
+        // progress - only whether a NEW turn is allowed to open - so an
+        // ongoing sentence typed mid-utterance won't get chopped, and
+        // a genuinely simultaneous "types while starting to talk" case
+        // just waits out this short window rather than being lost.
+        const TYPING_SUPPRESS_MS = 600; // ignore new-turn voice detection for this long after each keystroke
+        let lastKeydownTs = 0;
+        const onLiveKeydown = () => { lastKeydownTs = performance.now(); };
+        document.addEventListener('keydown', onLiveKeydown, true);
+        liveState.removeKeydownListener = () => document.removeEventListener('keydown', onLiveKeydown, true);
+
         liveState.micProcessorNode.port.onmessage = (e) => {
             if (!liveState || liveState.muted || !liveState.ws || liveState.ws.readyState !== WebSocket.OPEN) return;
-            const input = e.data.buffer; // Float32Array, 4096 samples
-            const lowBandRms = e.data.lowBandRms; // RMS of the same frame after a ~900Hz one-pole low-pass, for voice-shape detection
+            const input = e.data; // Float32Array, 4096 samples
 
             // Sends a realtimeInput message to the conversational
             // connection (always) and, if open, mirrors the exact same
@@ -6439,39 +6431,7 @@
             const now = performance.now();
 
             const voiceThreshold = Math.max(noiseFloor * VOICE_MARGIN, MIN_VOICE_RMS);
-            // FIX (fast typing read as speech): loudness alone (rms)
-            // can't tell a keyboard click from a voiced sound - both can
-            // be equally loud. What differs is spectral shape: voiced
-            // speech concentrates energy in a low band (~900Hz and
-            // under, from lowBandRms above), while a click's energy is
-            // spread much more broadband. Requiring the low band to
-            // carry a meaningful share of the frame's total energy
-            // (not just any energy) rejects click-shaped loudness while
-            // barely affecting real speech, which is naturally low-band
-            // heavy. 0.35 was chosen conservatively (real voiced speech
-            // typically sits well above this) so quiet/soft speech
-            // onsets still pass.
-            const LOW_BAND_RATIO_MIN = 0.35;
-            const soundsLikeVoice = rms > 0 && (lowBandRms / rms) >= LOW_BAND_RATIO_MIN;
-            const isVoice = rms >= voiceThreshold && soundsLikeVoice;
-
-            // ===== DEBUG (TEMPORARY - remove after diagnosing) =====
-            // Logs one line per frame that crosses the RMS threshold,
-            // whether or not it also passed the spectral-shape check, so
-            // real numbers (not guesses) show what a keyboard click vs
-            // real speech actually looks like on this specific mic/room.
-            if (rms >= voiceThreshold) {
-                console.log('[live-vad-debug]', JSON.stringify({
-                    rms: +rms.toFixed(4),
-                    voiceThreshold: +voiceThreshold.toFixed(4),
-                    lowBandRms: +lowBandRms.toFixed(4),
-                    lowBandRatio: +(lowBandRms / rms).toFixed(3),
-                    soundsLikeVoice,
-                    isVoice,
-                    noiseFloor: +noiseFloor.toFixed(4)
-                }));
-            }
-            // ===== END DEBUG =====
+            const isVoice = rms >= voiceThreshold;
 
             // Only counts frames while the model's own audio is actually
             // playing (orbWrap has 'speaking') - this is purely for the
@@ -6509,8 +6469,13 @@
             }
 
             const turnTooLong = liveState.speaking && (now - liveState.speechStartTs) >= MAX_TURN_MS;
+            // Only blocks STARTING a new turn - if liveState.speaking is
+            // already true (an utterance is mid-flight), typing doesn't
+            // touch it, so a sentence isn't chopped just because the
+            // user typed something while still talking.
+            const typingSuppressesNewTurn = !liveState.speaking && (now - lastKeydownTs) < TYPING_SUPPRESS_MS;
 
-            if (isVoice && !turnTooLong) {
+            if (isVoice && !turnTooLong && !typingSuppressesNewTurn) {
                 liveState.lastVoiceTs = now;
                 if (!liveState.speaking) {
                     liveState.speaking = true;
@@ -6827,6 +6792,7 @@
         // finalizeLiveUserTranscript's comment), so both need calling here.
         try { finalizeLiveUserTranscript(); } catch (_) {}
         try { finalizeLiveTranscriptTurn(); } catch (_) {}
+        try { liveState.removeKeydownListener && liveState.removeKeydownListener(); } catch (_) {}
         liveState.closing = true;
 
         try { liveState.ws && liveState.ws.close(); } catch (_) {}
