@@ -72,6 +72,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/bold/style.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css">
     <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <link rel="manifest" href="/manifest.json">
     <!-- FIX (رفع نیاز به لاگین دستی مکرر): اسکریپت GSI دیگر لازم نیست -
          لاگین حالا با ریدایرکت به api/auth-start.js انجام می‌شود. -->
@@ -5352,7 +5354,10 @@
     // what we saw in the proxy logs: audio kept streaming in, nothing ever
     // came back. gemini-3.1-flash-live-preview is the newer Live model and
     // does not have this specific issue reported against it.
-    const LIVE_MODEL_NAME = 'gemini-3.1-flash-live-preview';
+    // Updated 2026-09-16: switched to Gemini 3.8 Live Extended Thinking,
+    // Google's high-reasoning Live API model (released 2026-09-15,
+    // https://ai.google.dev/gemini-api/docs/models/gemini-3.8-live-extended-thinking).
+    const LIVE_MODEL_NAME = 'gemini-3.8-live-extended-thinking';
     const LIVE_SEND_SAMPLE_RATE = 16000;   // what we must send the model
     const LIVE_RECEIVE_SAMPLE_RATE = 24000; // what the model sends back
 
@@ -10051,8 +10056,41 @@
     }
 
     // More reliable formatter: paragraphs stay paragraphs; headings/lists/quotes are explicit.
+    // FEATURE: رندر فرمول‌های ریاضی با KaTeX.
+    // فرمول‌ها ($$...$$ برای بلاک، $...$ برای درون‌خطی) قبل از پردازش
+    // مارک‌داون معمولی جدا می‌شوند و با یک placeholder جایگزین می‌شوند تا
+    // بقیه‌ی formatReply (کد، جدول، لیست و...) با محتوای داخل فرمول کاری
+    // نداشته باشد؛ در انتها placeholder ها با HTML رندرشده جایگزین می‌شوند.
+    function renderMathToHtml(expr, displayMode){
+        try{
+            if(typeof katex === 'undefined') return escapeHtml(expr);
+            return katex.renderToString(expr, { displayMode, throwOnError: false, output: 'html' });
+        }catch(e){ return escapeHtml(expr); }
+    }
+    function extractMathPlaceholders(text){
+        const store=[];
+        // ابتدا بلاک‌ها ($$...$$)، سپس درون‌خطی‌ها ($...$) - تا $$ به اشتباه
+        // به‌عنوان دو تا $ درون‌خطی جدا خرد نشود.
+        let out=String(text ?? '').replace(/\$\$([\s\S]+?)\$\$/g, (m, expr)=>{
+            const html=renderMathToHtml(expr.trim(), true);
+            const idx=store.push(html)-1;
+            return `\u0000MATH${idx}\u0000`;
+        });
+        out=out.replace(/(^|[^\$\\])\$([^\n\$]+?)\$(?!\$)/g, (m, pre, expr)=>{
+            const html=renderMathToHtml(expr.trim(), false);
+            const idx=store.push(html)-1;
+            return `${pre}\u0000MATH${idx}\u0000`;
+        });
+        return { text: out, store };
+    }
+    function restoreMathPlaceholders(html, store){
+        return html.replace(/\u0000MATH(\d+)\u0000/g, (m, idx) => store[Number(idx)] ?? '');
+    }
+
     formatReply = function(text){
-        const rawParts=String(text ?? '').split(/```/);
+        const mathExtracted = extractMathPlaceholders(text);
+        const mathStore = mathExtracted.store;
+        const rawParts=String(mathExtracted.text ?? '').split(/```/);
         const rendered=rawParts.map((rawPart,index)=>{
             if(index%2===1){
                 // نسخه‌ی خام کد (بدون escape) برای کپی/دانلود نگه
@@ -10143,7 +10181,9 @@
                 else if(ordered){flushP();list='ol';items.push({type:'ol',depth:Math.floor(indent/2),text:ordered[1]})}
                 else {flushL();para.push(line)}
             } flushP();flushL();flushTable();return out.join('');
-        }).join('');return rendered||'<p>پاسخی دریافت نشد.</p>';
+        }).join('');
+        const finalHtml = restoreMathPlaceholders(rendered, mathStore);
+        return finalHtml||'<p>پاسخی دریافت نشد.</p>';
     };
 
     // Decorate restored and newly generated messages without breaking saved chat HTML.
