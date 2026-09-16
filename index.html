@@ -10071,12 +10071,19 @@
         const store=[];
         // ابتدا بلاک‌ها ($$...$$)، سپس درون‌خطی‌ها ($...$) - تا $$ به اشتباه
         // به‌عنوان دو تا $ درون‌خطی جدا خرد نشود.
-        let out=String(text ?? '').replace(/\$\$([\s\S]+?)\$\$/g, (m, expr)=>{
+        // نکته‌ی مقاوم‌سازی: مدل گاهی $ پایانی فرمول را به‌اشتباه با
+        // بک‌اسلش می‌نویسد (مثلاً dx\$ یا ...+C\$$ به‌جای dx$ یا ...+C$$)؛
+        // چون این بک‌اسلش نیت واقعی مدل (بستن فرمول) را نقض می‌کند نه
+        // یک دستور LaTeX معتبر، این حالت را هم به‌عنوان بسته‌شدن فرمول
+        // قبول می‌کنیم و بک‌اسلش اضافه را از داخل عبارت کنار می‌گذاریم -
+        // وگرنه KaTeX (حتی با throwOnError:false) آن را به‌رنگ خطا/نامفهوم
+        // رندر می‌کند.
+        let out=String(text ?? '').replace(/\$\$([\s\S]+?)\\?\$\$/g, (m, expr)=>{
             const html=renderMathToHtml(expr.trim(), true);
             const idx=store.push(html)-1;
             return `\u0000MATH${idx}\u0000`;
         });
-        out=out.replace(/(^|[^\$\\])\$([^\n\$]+?)\$(?!\$)/g, (m, pre, expr)=>{
+        out=out.replace(/(^|[^\$\\])\$([^\n\$]+?)\\?\$(?!\$)/g, (m, pre, expr)=>{
             const html=renderMathToHtml(expr.trim(), false);
             const idx=store.push(html)-1;
             return `${pre}\u0000MATH${idx}\u0000`;
