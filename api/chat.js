@@ -3231,6 +3231,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
+        // TEMP DEBUG: برای پیدا کردن ریشه‌ی مشکل change_app_setting -
+        // این خط را بعد از رفع مشکل حذف کن. نشان می‌دهد آیا Gemini
+        // واقعاً یک functionCall برگردانده یا مدل فقط متن نوشته.
+        log.info('debug.round_result', {
+            round,
+            functionCallNames: functionCalls.map(fc => fc.name),
+            textPreview: textParts.join('').slice(0, 120)
+        });
+
         // DIAGNOSTICS: ثبت وضعیت پایانی این round، صرف‌نظر از این‌که در
         // نهایت پاسخ نهایی باشد یا برود سراغ round بعدی برای اجرای ابزار.
         roundEntry.durationMs = Date.now() - roundStartedAt;
