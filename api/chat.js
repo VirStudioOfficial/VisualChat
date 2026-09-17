@@ -2916,6 +2916,12 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // FIX: ادعای دروغین موفقیت بعد از write_block ردشده
     const rejectedWriteBlocksByFile = new Map(); // fileName -> { count, lastReason }
 
+    // FEATURE: کنترل تنظیمات توسط مدل - وقتی change_app_setting در یک
+    // round صدا زده می‌شود، این‌جا نگه داشته می‌شود تا وقتی مدل در یک
+    // round بعدی جواب نهایی طبیعی‌اش را نوشت، appAction هنوز به نتیجه‌ی
+    // برگشتی این تابع اضافه شود (نه یک متن ثابت جدا از پاسخ مدل).
+    let pendingAppAction = null;
+
     // NOTE (block-based rewrite): inspectedFilesThisRequest and
     // chunkReadsPerFile (repeat-guards for the old inspect_file/
     // get_file_chunk tools) were removed - those tools no longer exist.
@@ -3231,15 +3237,6 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
 
-        // TEMP DEBUG: برای پیدا کردن ریشه‌ی مشکل change_app_setting -
-        // این خط را بعد از رفع مشکل حذف کن. نشان می‌دهد آیا Gemini
-        // واقعاً یک functionCall برگردانده یا مدل فقط متن نوشته.
-        log.info('debug.round_result', {
-            round,
-            functionCallNames: functionCalls.map(fc => fc.name),
-            textPreview: textParts.join('').slice(0, 120)
-        });
-
         // DIAGNOSTICS: ثبت وضعیت پایانی این round، صرف‌نظر از این‌که در
         // نهایت پاسخ نهایی باشد یا برود سراغ round بعدی برای اجرای ابزار.
         roundEntry.durationMs = Date.now() - roundStartedAt;
@@ -3497,7 +3494,13 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 askUser: null,
                 ...(partialFilesOnCutoff.length ? { partialFiles: partialFilesOnCutoff } : {}),
                 ...(editedFiles.length ? { editedFiles } : {}),
-                ...(unresolvedEditFailure ? { unresolvedEditFailure } : {})
+                ...(unresolvedEditFailure ? { unresolvedEditFailure } : {}),
+                // FEATURE: کنترل تنظیمات توسط مدل - اگر در یکی از round های
+                // قبلی change_app_setting صدا زده شده بود، همین‌جا (که مدل
+                // خودش با لحن طبیعی‌اش پاسخ نهایی/تاییدیه را نوشته) appAction
+                // را هم اضافه می‌کنیم تا کلاینت هم متن طبیعی مدل را ببیند، هم
+                // تغییر واقعی تنظیم را اعمال کند.
+                ...(pendingAppAction ? { appAction: pendingAppAction } : {})
             };
         }
 
@@ -3594,41 +3597,38 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // read_block/write_block/verify_file and the block-map
             // injection near the top of runAgentLoop for the new approach.
 
-            // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو با ask_user
-            // (پایین‌تر در همین حلقه): این tool سمت سرور قابل اجرا نیست،
-            // پس بلافاصله حلقه را با یک appAction قطع می‌کنیم تا استریم
-            // SSE این رویداد را به کلاینت (که واقعاً تنظیمات را عوض
-            // می‌کند) برساند. برخلاف ask_user، نیازی نیست منتظر جواب
-            // کاربر بمانیم - همین‌جا با یک finalText کوتاه (که کلاینت هم
-            // اگر خواست می‌تواند نادیده بگیرد چون appAction را مستقیم
-            // پردازش می‌کند) پاسخ می‌دهیم.
+            // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو با بقیه‌ی
+            // ابزارها (نه دیگر یک return زودهنگام با متن ثابت): این tool
+            // سمت سرور قابل اجرا نیست، پس این‌جا فقط یک نتیجه‌ی موفق برای
+            // آن می‌سازیم و به مدل برمی‌گردانیم تا خودِ مدل، با لحن و
+            // شخصیت طبیعی‌اش (طبق systemText)، یک جمله‌ی تاییدیه بنویسد -
+            // نه یک متن ثابت یکسان برای همه‌ی کاربران/لحن‌ها. appAction
+            // را همین‌جا (بیرون از حلقه‌ی functionCalls) نگه می‌داریم تا
+            // بعداً، هر وقت مدل پاسخ نهایی‌اش را نوشت، همراه همان متن
+            // واقعی به کلاینت فرستاده شود.
             if (call.name === 'change_app_setting') {
-                // FIX: قبلاً اینجا یک متن مبهم و پیش از اجرا («در حال
-                // تغییر است...») فرستاده می‌شد - چون سرور خودش نمی‌داند
-                // آیا اعمال واقعی سمت کلاینت موفق می‌شود یا نه (آن بخش
-                // کاملاً سمت اندروید/وب اتفاق می‌افتد)، این متن هیچ‌وقت
-                // به‌روزرسانی نمی‌شد و کاربر با یک جمله‌ی ناقص/در حال
-                // انجام برای همیشه مواجه می‌ماند، حتی وقتی تغییر واقعاً
-                // فوری و موفق انجام شده بود. حالا یک جمله‌ی قطعی و کامل
-                // (نه "در حال" بلکه انجام‌شده) فرستاده می‌شود - چون خود
-                // اعمال تغییر سمت کلاینت عملاً آنی است (کمتر از چند
-                // میلی‌ثانیه برای تم؛ برای فونت غیرپیش‌فرض ممکن است چند
-                // ثانیه دانلود طول بکشد، اما تجربه‌ی کاربر با دیدن
-                // تغییر ظاهری آنی UI همخوانی بهتری دارد تا با یک پیام
-                // «در حال انجام» که هیچ‌وقت کامل نمی‌شود).
-                const doneText = call.args?.setting === 'font'
-                    ? 'فونت برنامه رو عوض کردم.'
-                    : 'تم برنامه رو عوض کردم.';
-                return {
-                    finalText: doneText,
-                    finishReason: 'APP_ACTION',
-                    usage: lastUsage,
-                    appAction: {
-                        setting: call.args?.setting || '',
-                        value: call.args?.value || ''
-                    }
+                pendingAppAction = {
+                    setting: call.args?.setting || '',
+                    value: call.args?.value || ''
                 };
+                responseParts.push({
+                    functionResponse: {
+                        name: call.name,
+                        response: {
+                            success: true,
+                            // FEATURE: به مدل می‌گوییم این تغییر واقعاً و
+                            // بلافاصله سمت کاربر اعمال شده (نه در حال
+                            // انجام) - چون اجرای واقعی‌اش سمت کلاینت است و
+                            // عملاً آنی رخ می‌دهد؛ مدل با اطمینان کامل
+                            // تاییدش کند، نه با تردید یا زمان آینده.
+                            agentInstruction:
+                                'تنظیم مورد نظر (تم یا فونت) همین الان با موفقیت روی اپ کاربر اعمال شد - این یک واقعیت قطعی است، نه یک اقدام در حال انجام. حالا با لحن طبیعی خودت (طبق شخصیتی که در دستورالعمل سیستم داری) این موفقیت را در یک جمله‌ی کوتاه به کاربر تایید کن. دوباره این ابزار را صدا نزن.'
+                        }
+                    }
+                });
+                continue;
             }
+
 
             if (call.name === 'web_search') {
                 webSearchesThisRound++;
@@ -5051,20 +5051,21 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                             if (typeof res.flush === 'function') res.flush();
                         }
 
-                        // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو
-                        // با بلوک askUser بالا: متن finalText (که هرگز از
-                        // onChunk رد نشده) یک‌بار فرستاده می‌شود، و خودِ
-                        // appAction هم به‌عنوان یک فیلد جدا در همان event
-                        // SSE قرار می‌گیرد تا کلاینت (اندروید/وب) بتواند
-                        // بدون پارس‌کردن متن، مستقیم setting/value را
-                        // بخواند و تغییر واقعی را اعمال کند.
+                        // FEATURE: کنترل تنظیمات توسط مدل - چون change_app_setting
+                        // دیگر زودهنگام return نمی‌کند (بلافاصله بعد از اجرا
+                        // به مدل یک functionResponse برمی‌گردد و مدل در یک
+                        // round عادی بعدی، خودش جمله‌ی تاییدیه‌ی طبیعی را
+                        // می‌نویسد)، آن متن قبلاً از طریق onChunk به‌صورت
+                        // استریم به کلاینت رسیده - نباید اینجا دوباره در
+                        // فیلد "text" تکرار شود (که باعث تکرار کل پاسخ در
+                        // چت می‌شد). فقط appAction (که در finalText جایی
+                        // ظاهر نمی‌شود) اینجا به‌عنوان یک فیلد جدا اضافه
+                        // می‌شود تا کلاینت (اندروید/وب) بدون پارس‌کردن متن،
+                        // مستقیم setting/value را بخواند و تغییر واقعی را
+                        // اعمال کند.
                         if (agentResult.appAction) {
-                            if (agentResult.finalText) {
-                                streamedTextSoFar += agentResult.finalText;
-                            }
                             res.write(
                                 `data: ${JSON.stringify({
-                                    text: agentResult.finalText || '',
                                     appAction: agentResult.appAction
                                 })}\n\n`
                             );
