@@ -2916,12 +2916,6 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // FIX: ادعای دروغین موفقیت بعد از write_block ردشده
     const rejectedWriteBlocksByFile = new Map(); // fileName -> { count, lastReason }
 
-    // FEATURE: کنترل تنظیمات توسط مدل - وقتی change_app_setting در یک
-    // round صدا زده می‌شود، این‌جا نگه داشته می‌شود تا وقتی مدل در یک
-    // round بعدی جواب نهایی طبیعی‌اش را نوشت، appAction هنوز به نتیجه‌ی
-    // برگشتی این تابع اضافه شود (نه یک متن ثابت جدا از پاسخ مدل).
-    let pendingAppAction = null;
-
     // NOTE (block-based rewrite): inspectedFilesThisRequest and
     // chunkReadsPerFile (repeat-guards for the old inspect_file/
     // get_file_chunk tools) were removed - those tools no longer exist.
@@ -3494,13 +3488,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 askUser: null,
                 ...(partialFilesOnCutoff.length ? { partialFiles: partialFilesOnCutoff } : {}),
                 ...(editedFiles.length ? { editedFiles } : {}),
-                ...(unresolvedEditFailure ? { unresolvedEditFailure } : {}),
-                // FEATURE: کنترل تنظیمات توسط مدل - اگر در یکی از round های
-                // قبلی change_app_setting صدا زده شده بود، همین‌جا (که مدل
-                // خودش با لحن طبیعی‌اش پاسخ نهایی/تاییدیه را نوشته) appAction
-                // را هم اضافه می‌کنیم تا کلاینت هم متن طبیعی مدل را ببیند، هم
-                // تغییر واقعی تنظیم را اعمال کند.
-                ...(pendingAppAction ? { appAction: pendingAppAction } : {})
+                ...(unresolvedEditFailure ? { unresolvedEditFailure } : {})
             };
         }
 
@@ -3597,38 +3585,41 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // read_block/write_block/verify_file and the block-map
             // injection near the top of runAgentLoop for the new approach.
 
-            // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو با بقیه‌ی
-            // ابزارها (نه دیگر یک return زودهنگام با متن ثابت): این tool
-            // سمت سرور قابل اجرا نیست، پس این‌جا فقط یک نتیجه‌ی موفق برای
-            // آن می‌سازیم و به مدل برمی‌گردانیم تا خودِ مدل، با لحن و
-            // شخصیت طبیعی‌اش (طبق systemText)، یک جمله‌ی تاییدیه بنویسد -
-            // نه یک متن ثابت یکسان برای همه‌ی کاربران/لحن‌ها. appAction
-            // را همین‌جا (بیرون از حلقه‌ی functionCalls) نگه می‌داریم تا
-            // بعداً، هر وقت مدل پاسخ نهایی‌اش را نوشت، همراه همان متن
-            // واقعی به کلاینت فرستاده شود.
+            // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو با ask_user
+            // (پایین‌تر در همین حلقه): این tool سمت سرور قابل اجرا نیست،
+            // پس بلافاصله حلقه را با یک appAction قطع می‌کنیم تا استریم
+            // SSE این رویداد را به کلاینت (که واقعاً تنظیمات را عوض
+            // می‌کند) برساند. برخلاف ask_user، نیازی نیست منتظر جواب
+            // کاربر بمانیم - همین‌جا با یک finalText کوتاه (که کلاینت هم
+            // اگر خواست می‌تواند نادیده بگیرد چون appAction را مستقیم
+            // پردازش می‌کند) پاسخ می‌دهیم.
             if (call.name === 'change_app_setting') {
-                pendingAppAction = {
-                    setting: call.args?.setting || '',
-                    value: call.args?.value || ''
-                };
-                responseParts.push({
-                    functionResponse: {
-                        name: call.name,
-                        response: {
-                            success: true,
-                            // FEATURE: به مدل می‌گوییم این تغییر واقعاً و
-                            // بلافاصله سمت کاربر اعمال شده (نه در حال
-                            // انجام) - چون اجرای واقعی‌اش سمت کلاینت است و
-                            // عملاً آنی رخ می‌دهد؛ مدل با اطمینان کامل
-                            // تاییدش کند، نه با تردید یا زمان آینده.
-                            agentInstruction:
-                                'تنظیم مورد نظر (تم یا فونت) همین الان با موفقیت روی اپ کاربر اعمال شد - این یک واقعیت قطعی است، نه یک اقدام در حال انجام. حالا با لحن طبیعی خودت (طبق شخصیتی که در دستورالعمل سیستم داری) این موفقیت را در یک جمله‌ی کوتاه به کاربر تایید کن. دوباره این ابزار را صدا نزن.'
-                        }
+                // FIX: قبلاً اینجا یک متن مبهم و پیش از اجرا («در حال
+                // تغییر است...») فرستاده می‌شد - چون سرور خودش نمی‌داند
+                // آیا اعمال واقعی سمت کلاینت موفق می‌شود یا نه (آن بخش
+                // کاملاً سمت اندروید/وب اتفاق می‌افتد)، این متن هیچ‌وقت
+                // به‌روزرسانی نمی‌شد و کاربر با یک جمله‌ی ناقص/در حال
+                // انجام برای همیشه مواجه می‌ماند، حتی وقتی تغییر واقعاً
+                // فوری و موفق انجام شده بود. حالا یک جمله‌ی قطعی و کامل
+                // (نه "در حال" بلکه انجام‌شده) فرستاده می‌شود - چون خود
+                // اعمال تغییر سمت کلاینت عملاً آنی است (کمتر از چند
+                // میلی‌ثانیه برای تم؛ برای فونت غیرپیش‌فرض ممکن است چند
+                // ثانیه دانلود طول بکشد، اما تجربه‌ی کاربر با دیدن
+                // تغییر ظاهری آنی UI همخوانی بهتری دارد تا با یک پیام
+                // «در حال انجام» که هیچ‌وقت کامل نمی‌شود).
+                const doneText = call.args?.setting === 'font'
+                    ? 'فونت برنامه رو عوض کردم.'
+                    : 'تم برنامه رو عوض کردم.';
+                return {
+                    finalText: doneText,
+                    finishReason: 'APP_ACTION',
+                    usage: lastUsage,
+                    appAction: {
+                        setting: call.args?.setting || '',
+                        value: call.args?.value || ''
                     }
-                });
-                continue;
+                };
             }
-
 
             if (call.name === 'web_search') {
                 webSearchesThisRound++;
@@ -4507,7 +4498,6 @@ ${userMemoryContext.trim()}
 - web_search: فقط برای اطلاعات به‌روز/زنده (قیمت، اخبار، رویدادها) - نه برای مفاهیم/تعاریف ثابت. یک‌بار کافیست؛ فقط اگر نتیجه ناقص بود یا سؤال چند بخش جدا داشت دوباره صدا بزن.
 - هنگام تصمیم به صدا زدن هر ابزار (مخصوصاً web_search)، Function Call باید اولین خروجی باشد، بدون مقدمه‌ی متنی. بعد از نتیجه، پاسخ نهایی را عادی و streaming بده.
 - ask_user: فقط برای تغییرات اساسی/غیرقابل‌برگشت (مثلاً بازنویسی کامل فایل، حذف بخش بزرگ کد). برای کارهای واضح مستقیم انجام بده.
-- change_app_setting: وقتی کاربر صریحاً خواست تم یا فونت خودِ این اپلیکیشن عوض شود (مثلاً «تم رو سفید/تاریک کن»، «فونت رو عوض کن»)، **همیشه و بدون استثنا** این تابع را با یک Function Call واقعی صدا بزن - هرگز صرفاً در متن پاسخ نگو «تم/فونت رو عوض کردم» بدون اینکه واقعاً این تابع را صدا زده باشی، چون تغییر واقعی فقط از طریق همین Function Call به اپ می‌رسد و بدون آن، حرف تو دروغ می‌شود و هیچ‌چیز در اپ کاربر عوض نمی‌شود.
 `;
 
         // FEATURE: ویجت ساعت/آب‌وهوا
@@ -4696,14 +4686,34 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                     systemText +
                     `\n\nدستورالعمل ویژه این پاسخ: نسخه‌ی کوتاه‌تر، مستقیم‌تر و منطقی‌تر از همان سبک بالا بنویس - جملات کوتاه‌تر، مقدمه‌چینی کمتر، مستقیم برو سراغ جواب. همان لحن/شخصیت را حفظ کن، فقط طولانی‌نویسی و توضیح اضافه را حذف کن.\n`;
 
-                const dualDeadline = Date.now() + 60000; // ۶۰ ثانیه سقف کل، هر دو پاسخ باید در همین بازه کامل شوند
+                // FIX (dual-response silently never firing): این بلوک قبلاً
+                // همیشه از geminiKeys[0] ثابت برای هر دو پاسخ A و B استفاده
+                // می‌کرد - برخلاف مسیر عادی stream که با rotateKeysByHealth
+                // کلید سالم را انتخاب و در صورت خطا به کلید بعدی می‌رود. اگر
+                // همان یک کلید ثابت در آن لحظه rate-limit/خطا داشت، هر دو
+                // فراخوانی fail می‌خوردند و کل بلوک بی‌سروصدا (فقط log.warn)
+                // به تک-پاسخ سقوط می‌کرد - از دید کاربر انگار dual-response
+                // اصلاً فعال نشده بود. حالا کلیدهای سالم را با
+                // rotateKeysByHealth مرتب می‌کنیم و تا حد امکان برای A و B دو
+                // کلید متفاوت انتخاب می‌کنیم تا اگر یکی rate-limit بود،
+                // دیگری بتواند جدا موفق شود.
+                const orderedDualKeys = rotateKeysByHealth(geminiKeys);
+                const keyForA = orderedDualKeys[0];
+                const keyForB = orderedDualKeys.length > 1 ? orderedDualKeys[1] : orderedDualKeys[0];
+
+                // FIX: سقف ۶۰ ثانیه‌ی ثابت برای مدل‌های سنگین‌تر (مثل
+                // gemini-3.1-pro-preview) با thinkLevel بالا معمولاً کافی
+                // نبود و باعث abort/timeout زودهنگام هر دو پاسخ می‌شد. مشابه
+                // overallDeadline در مسیر stream، سقف را متناسب با تعداد
+                // کلید در دسترس (و حداقل ۹۰ ثانیه) بزرگ‌تر می‌کنیم.
+                const dualDeadline = Date.now() + Math.min(150000, Math.max(90000, geminiKeys.length * 15000));
                 const dualAbortController = new AbortController();
                 const dualDeadlineTimer = setTimeout(() => dualAbortController.abort(), Math.max(0, dualDeadline - Date.now()));
 
-                const runOne = (variantSystemText) =>
+                const runOne = (variantSystemText, variantKey) =>
                     runAgentLoop({
                         currentModel: MODEL_NAME,
-                        currentKey: geminiKeys[0],
+                        currentKey: variantKey,
                         keyIndex: 1,
                         systemText: variantSystemText,
                         contents,
@@ -4735,8 +4745,8 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                     });
 
                 const [resultA, resultB] = await Promise.all([
-                    runOne(systemTextA),
-                    runOne(systemTextB)
+                    runOne(systemTextA, keyForA),
+                    runOne(systemTextB, keyForB)
                 ]);
 
                 clearTimeout(dualDeadlineTimer);
@@ -4777,8 +4787,15 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                     responseB: resultB.finalText || ''
                 });
             } catch (dualErr) {
-                // FIX: نباید کل درخواست را خراب کند
-                log.warn('dual_response.failed', { message: dualErr?.message || String(dualErr) });
+                // FIX: نباید کل درخواست را خراب کند - اما قبلاً این لاگ فقط
+                // پیام خطا را نشان می‌داد، نه اینکه به خاطر abort/timeout بود
+                // یا خطای واقعی مدل/کلید؛ این باعث می‌شد دیباگ «چرا dual-response
+                // هیچ‌وقت فایر نمی‌شود» عملاً غیرممکن باشد.
+                log.warn('dual_response.failed', {
+                    message: dualErr?.message || String(dualErr),
+                    aborted: dualAbortController?.signal?.aborted || false,
+                    model: MODEL_NAME
+                });
             }
         }
 
@@ -5051,21 +5068,20 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                             if (typeof res.flush === 'function') res.flush();
                         }
 
-                        // FEATURE: کنترل تنظیمات توسط مدل - چون change_app_setting
-                        // دیگر زودهنگام return نمی‌کند (بلافاصله بعد از اجرا
-                        // به مدل یک functionResponse برمی‌گردد و مدل در یک
-                        // round عادی بعدی، خودش جمله‌ی تاییدیه‌ی طبیعی را
-                        // می‌نویسد)، آن متن قبلاً از طریق onChunk به‌صورت
-                        // استریم به کلاینت رسیده - نباید اینجا دوباره در
-                        // فیلد "text" تکرار شود (که باعث تکرار کل پاسخ در
-                        // چت می‌شد). فقط appAction (که در finalText جایی
-                        // ظاهر نمی‌شود) اینجا به‌عنوان یک فیلد جدا اضافه
-                        // می‌شود تا کلاینت (اندروید/وب) بدون پارس‌کردن متن،
-                        // مستقیم setting/value را بخواند و تغییر واقعی را
-                        // اعمال کند.
+                        // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو
+                        // با بلوک askUser بالا: متن finalText (که هرگز از
+                        // onChunk رد نشده) یک‌بار فرستاده می‌شود، و خودِ
+                        // appAction هم به‌عنوان یک فیلد جدا در همان event
+                        // SSE قرار می‌گیرد تا کلاینت (اندروید/وب) بتواند
+                        // بدون پارس‌کردن متن، مستقیم setting/value را
+                        // بخواند و تغییر واقعی را اعمال کند.
                         if (agentResult.appAction) {
+                            if (agentResult.finalText) {
+                                streamedTextSoFar += agentResult.finalText;
+                            }
                             res.write(
                                 `data: ${JSON.stringify({
+                                    text: agentResult.finalText || '',
                                     appAction: agentResult.appAction
                                 })}\n\n`
                             );
@@ -5423,14 +5439,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         // معمولی چیزی اضافه نمی‌کند.
                         ...(agentResult.diagnostics ? { diagnostics: agentResult.diagnostics } : {}),
                         ...(agentResult.editedFiles?.length ? { editedFiles: agentResult.editedFiles } : {}),
-                        ...(agentResult.unresolvedEditFailure ? { unresolvedEditFailure: agentResult.unresolvedEditFailure } : {}),
-                        // FIX: appAction قبلاً اینجا فراموش شده بود - وقتی
-                        // درخواست از مسیر non-stream رد می‌شد (مثلاً همراه
-                        // با ضمیمه‌ی ویدیو)، متن «تم/فونت رو عوض کردم»
-                        // برمی‌گشت ولی appAction هیچ‌وقت به کلاینت نمی‌رسید،
-                        // پس تغییر واقعی هیچ‌وقت اعمال نمی‌شد. حالا دقیقاً
-                        // مثل مسیر stream، appAction را هم برمی‌گردانیم.
-                        ...(agentResult.appAction ? { appAction: agentResult.appAction } : {})
+                        ...(agentResult.unresolvedEditFailure ? { unresolvedEditFailure: agentResult.unresolvedEditFailure } : {})
                     });
 
                 } catch (error) {
