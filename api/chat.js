@@ -2075,6 +2075,38 @@ const GEMINI_TOOLS = [
                     required: ['name', 'content']
                 }
             }
+            {
+                // FEATURE: کنترل تنظیمات برنامه توسط مدل - این tool سمت
+                // سرور اجرا نمی‌شود (سرور دسترسی به تنظیمات گوشی کاربر
+                // ندارد)؛ دقیقاً مثل ask_user، در runAgentLoop زودتر از
+                // بقیه‌ی توابع شناسایی و به‌عنوان یک رویداد appAction در
+                // استریم SSE به کلاینت (اندروید/وب) فرستاده می‌شود تا
+                // خودِ کلاینت تغییر واقعی را اعمال کند.
+                name: 'change_app_setting',
+                description:
+                    'تم (پوسته‌ی رنگی) یا فونت برنامه را طبق درخواست صریح کاربر تغییر می‌دهد. ' +
+                    'فقط زمانی صدا بزن که کاربر واقعاً و صریحاً خواسته تم یا فونت برنامه عوض شود ' +
+                    '(مثلاً «تم رو سفید کن»، «حالت تاریک رو فعال کن»، «فونت رو عوض کن»). برای ' +
+                    'سؤالات عمومی درباره‌ی تنظیمات یا وقتی کاربر فقط دارد کنجکاوی می‌کند، این ابزار را ' +
+                    'صدا نزن - فقط برای یک درخواست تغییر واقعی و مشخص.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        setting: {
+                            type: 'string',
+                            enum: ['theme', 'font'],
+                            description: 'کدام تنظیم باید تغییر کند: theme (تم/پوسته‌ی رنگی) یا font (فونت برنامه).'
+                        },
+                        value: {
+                            type: 'string',
+                            description:
+                                'برای setting=theme یکی از: light (روشن/سفید)، dark (تاریک/مشکی)، auto (خودکار/هماهنگ با سیستم). ' +
+                                'برای setting=font نام فونت که کاربر گفته (مثلاً «وزیرمتن»، «امیری»، «Cairo»).'
+                        }
+                    },
+                    required: ['setting', 'value']
+                }
+            }
         ]
     }
 ];
@@ -3553,6 +3585,27 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // read_block/write_block/verify_file and the block-map
             // injection near the top of runAgentLoop for the new approach.
 
+            // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو با ask_user
+            // (پایین‌تر در همین حلقه): این tool سمت سرور قابل اجرا نیست،
+            // پس بلافاصله حلقه را با یک appAction قطع می‌کنیم تا استریم
+            // SSE این رویداد را به کلاینت (که واقعاً تنظیمات را عوض
+            // می‌کند) برساند. برخلاف ask_user، نیازی نیست منتظر جواب
+            // کاربر بمانیم - همین‌جا با یک finalText کوتاه (که کلاینت هم
+            // اگر خواست می‌تواند نادیده بگیرد چون appAction را مستقیم
+            // پردازش می‌کند) پاسخ می‌دهیم.
+            if (call.name === 'change_app_setting') {
+                const settingLabel = call.args?.setting === 'font' ? 'فونت' : 'تم';
+                return {
+                    finalText: `${settingLabel} برنامه در حال تغییر است...`,
+                    finishReason: 'APP_ACTION',
+                    usage: lastUsage,
+                    appAction: {
+                        setting: call.args?.setting || '',
+                        value: call.args?.value || ''
+                    }
+                };
+            }
+
             if (call.name === 'web_search') {
                 webSearchesThisRound++;
                 if (webSearchesThisRound > MAX_WEB_SEARCHES_PER_ROUND || scopedSearchState.used) {
@@ -4973,6 +5026,26 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                             if (typeof res.flush === 'function') res.flush();
                         }
 
+                        // FEATURE: کنترل تنظیمات توسط مدل - دقیقاً هم‌الگو
+                        // با بلوک askUser بالا: متن finalText (که هرگز از
+                        // onChunk رد نشده) یک‌بار فرستاده می‌شود، و خودِ
+                        // appAction هم به‌عنوان یک فیلد جدا در همان event
+                        // SSE قرار می‌گیرد تا کلاینت (اندروید/وب) بتواند
+                        // بدون پارس‌کردن متن، مستقیم setting/value را
+                        // بخواند و تغییر واقعی را اعمال کند.
+                        if (agentResult.appAction) {
+                            if (agentResult.finalText) {
+                                streamedTextSoFar += agentResult.finalText;
+                            }
+                            res.write(
+                                `data: ${JSON.stringify({
+                                    text: agentResult.finalText || '',
+                                    appAction: agentResult.appAction
+                                })}\n\n`
+                            );
+                            if (typeof res.flush === 'function') res.flush();
+                        }
+
                         // truncated=true tells the client the model was cut
                         // off by its own output-token limit (not an error,
                         // not the user pressing Stop) so it can offer to
@@ -5000,6 +5073,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                                 finishReason: agentResult.finishReason,
                                 truncated,
                                 askUser: !!agentResult.askUser,
+                                ...(agentResult.appAction ? { appAction: agentResult.appAction } : {}),
                                 ...(agentResult.finishReason === 'TOOL_LOOP_LIMIT' && agentResult.diagnostics
                                     ? { diagnostics: agentResult.diagnostics }
                                     : {}),
@@ -5048,6 +5122,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                             finishReason: agentResult.finishReason,
                             truncated,
                             askUser: !!agentResult.askUser,
+                            ...(agentResult.appAction ? { appAction: agentResult.appAction } : {}),
                             ...(agentResult.finishReason === 'TOOL_LOOP_LIMIT' && agentResult.diagnostics
                                 ? { diagnostics: agentResult.diagnostics }
                                 : {}),
