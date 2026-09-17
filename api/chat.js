@@ -4498,6 +4498,7 @@ ${userMemoryContext.trim()}
 - web_search: فقط برای اطلاعات به‌روز/زنده (قیمت، اخبار، رویدادها) - نه برای مفاهیم/تعاریف ثابت. یک‌بار کافیست؛ فقط اگر نتیجه ناقص بود یا سؤال چند بخش جدا داشت دوباره صدا بزن.
 - هنگام تصمیم به صدا زدن هر ابزار (مخصوصاً web_search)، Function Call باید اولین خروجی باشد، بدون مقدمه‌ی متنی. بعد از نتیجه، پاسخ نهایی را عادی و streaming بده.
 - ask_user: فقط برای تغییرات اساسی/غیرقابل‌برگشت (مثلاً بازنویسی کامل فایل، حذف بخش بزرگ کد). برای کارهای واضح مستقیم انجام بده.
+- change_app_setting: وقتی کاربر صریحاً خواست تم یا فونت خودِ این اپلیکیشن عوض شود (مثلاً «تم رو سفید/تاریک کن»، «فونت رو عوض کن»)، **همیشه و بدون استثنا** این تابع را با یک Function Call واقعی صدا بزن - هرگز صرفاً در متن پاسخ نگو «تم/فونت رو عوض کردم» بدون اینکه واقعاً این تابع را صدا زده باشی، چون تغییر واقعی فقط از طریق همین Function Call به اپ می‌رسد و بدون آن، حرف تو دروغ می‌شود و هیچ‌چیز در اپ کاربر عوض نمی‌شود.
 `;
 
         // FEATURE: ویجت ساعت/آب‌وهوا
@@ -5412,7 +5413,14 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         // معمولی چیزی اضافه نمی‌کند.
                         ...(agentResult.diagnostics ? { diagnostics: agentResult.diagnostics } : {}),
                         ...(agentResult.editedFiles?.length ? { editedFiles: agentResult.editedFiles } : {}),
-                        ...(agentResult.unresolvedEditFailure ? { unresolvedEditFailure: agentResult.unresolvedEditFailure } : {})
+                        ...(agentResult.unresolvedEditFailure ? { unresolvedEditFailure: agentResult.unresolvedEditFailure } : {}),
+                        // FIX: appAction قبلاً اینجا فراموش شده بود - وقتی
+                        // درخواست از مسیر non-stream رد می‌شد (مثلاً همراه
+                        // با ضمیمه‌ی ویدیو)، متن «تم/فونت رو عوض کردم»
+                        // برمی‌گشت ولی appAction هیچ‌وقت به کلاینت نمی‌رسید،
+                        // پس تغییر واقعی هیچ‌وقت اعمال نمی‌شد. حالا دقیقاً
+                        // مثل مسیر stream، appAction را هم برمی‌گردانیم.
+                        ...(agentResult.appAction ? { appAction: agentResult.appAction } : {})
                     });
 
                 } catch (error) {
