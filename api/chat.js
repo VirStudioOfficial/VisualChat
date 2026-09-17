@@ -5293,6 +5293,11 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                 stage: 'stream_generation',
                 detail: detailText,
                 ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {}),
+                // FIX (هشدار فیلتر ایمنی کودکان گم می‌شد): این فلگ در throw
+                // اولیه (خط ~۳۴۰۶) روی err.body ست می‌شد و از آنجا وارد
+                // lastError می‌شود، اما قبلاً اینجا صراحتاً استخراج نمی‌شد -
+                // یعنی هیچ‌وقت به کلاینت نمی‌رسید و فقط در لاگ سرور می‌ماند.
+                ...(lastError?.likelyChildSafetyBlock ? { likelyChildSafetyBlock: true } : {}),
                 ...(Array.isArray(lastError?.partialFiles) && lastError.partialFiles.length
                     ? { partialFiles: lastError.partialFiles, canContinue: true }
                     : {})
@@ -5511,7 +5516,11 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                 retryAfterSeconds: classification.retryAfterSeconds ?? null,
                 stage: 'non_stream_generation',
                 detail: detailTextNonStream,
-                ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {})
+                ...(lastError?.diagnostics ? { diagnostics: lastError.diagnostics } : {}),
+                ...(lastError?.likelyChildSafetyBlock ? { likelyChildSafetyBlock: true } : {}),
+                ...(Array.isArray(lastError?.partialFiles) && lastError.partialFiles.length
+                    ? { partialFiles: lastError.partialFiles, canContinue: true }
+                    : {})
             }
         });
 
