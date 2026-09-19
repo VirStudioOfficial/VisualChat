@@ -922,7 +922,7 @@ async function fetchAndExtractUrl(urlString) {
 |--------------------------------------------------------------------------
 */
 
-async function fetchTavilyResults(query, tavilyKeys, searchCache) {
+async function fetchTavilyResults(query, tavilyKeys, searchCache, wantImages = false) {
     if (!tavilyKeys || tavilyKeys.length === 0) {
         return {
             ok: false,
@@ -935,7 +935,9 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
     // The previous implementation looped over every Tavily key after a
     // failure. That looked like one search in the UI, but could actually
     // generate many provider requests for the same user question.
-    const cacheKey = String(query).trim().toLowerCase();
+    // FEATURE (image search): نتیجه‌ی «با تصویر» و «بدون تصویر» برای یک query
+    // یکی نیستند؛ کلید کش جدا می‌شود تا سرچ متنیِ قبلی جلوی سرچ تصویری را نگیرد.
+    const cacheKey = (wantImages ? 'img:' : 'txt:') + String(query).trim().toLowerCase();
 
     if (searchCache && searchCache.has(cacheKey)) {
         log.info('search.cache_hit', { queryPreview: String(query).slice(0, 100) });
@@ -979,7 +981,9 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
                         api_key: currentKey,
                         query,
                         search_depth: 'basic',
-                        max_results: 2
+                        max_results: 2,
+                        // FEATURE (image search): فقط وقتی مدل صراحتاً تصویر خواسته.
+                        ...(wantImages ? { include_images: true, include_image_descriptions: true } : {})
                     }),
                     signal: controller.signal
                 }
@@ -1050,7 +1054,7 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
 
         markKeyResult(currentKey, true);
 
-        const formatted = data.results
+        let formatted = data.results
             .map(
                 r =>
                     `عنوان: ${r.title || 'بدون عنوان'}\n` +
@@ -1058,6 +1062,22 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache) {
                     `محتوا: ${String(r.content || '').slice(0, 1800)}`
             )
             .join('\n\n---\n\n');
+
+        // FEATURE (image search): تصاویر پیداشده به انتهای نتیجه اضافه می‌شوند.
+        // Tavily هر عکس را یا رشته‌ی URL یا {url, description} برمی‌گرداند. فقط
+        // URL های https و حداکثر ۴ تا (موبایل: بیشتر از این شلوغ است).
+        if (wantImages && Array.isArray(data.images)) {
+            const imgs = data.images
+                .map(im => (typeof im === 'string'
+                    ? { url: im, description: '' }
+                    : { url: im && im.url, description: (im && im.description) || '' }))
+                .filter(im => typeof im.url === 'string' && /^https:\/\//i.test(im.url))
+                .slice(0, 4);
+            if (imgs.length > 0) {
+                formatted += '\n\n=== تصاویر پیداشده (فقط همین URL ها معتبرند؛ URL جدید نساز) ===\n' +
+                    imgs.map((im, i) => `${i + 1}) ${im.url}${im.description ? ' — ' + String(im.description).slice(0, 160) : ''}`).join('\n');
+            }
+        }
 
         const success = {
             ok: true,
@@ -1864,6 +1884,10 @@ const GEMINI_TOOLS = [
                         reason: {
                             type: 'string',
                             description: 'یک جمله‌ی کوتاه فارسی که به کاربر نشان داده می‌شود و توضیح می‌دهد چرا داری این را سرچ می‌کنی (مثلاً "دارم آخرین قیمت طلا رو بررسی می‌کنم").'
+                        },
+                        find_images: {
+                            type: 'boolean',
+                            description: 'فقط وقتی true بگذار که کاربر صراحتاً عکس/تصویر خواسته یا می‌خواهد ببیند چیزی چه شکلی است (مثلاً «عکس X رو پیدا کن»، «X چه شکلیه»)، یا عکسی فرستاده و می‌خواهد نمونه‌ی مشابه یا منبع آن پیدا شود. برای سؤال‌های معمولی false (پیش‌فرض) بماند.'
                         }
                     },
                     required: ['query', 'reason']
@@ -2686,7 +2710,8 @@ async function executeToolCall(name, args, ctx) {
         const search = await fetchTavilyResults(
             query,
             ctx.tavilyKeys,
-            ctx.searchCache
+            ctx.searchCache,
+            !!(args && args.find_images === true)
         );
 
         if (!search?.ok) {
@@ -4540,6 +4565,21 @@ ${userMemoryContext.trim()}
 - web_search: فقط برای اطلاعات به‌روز/زنده (قیمت، اخبار، رویدادها) - نه برای مفاهیم/تعاریف ثابت. یک‌بار کافیست؛ فقط اگر نتیجه ناقص بود یا سؤال چند بخش جدا داشت دوباره صدا بزن.
 - هنگام تصمیم به صدا زدن هر ابزار (مخصوصاً web_search)، Function Call باید اولین خروجی باشد، بدون مقدمه‌ی متنی. بعد از نتیجه، پاسخ نهایی را عادی و streaming بده.
 - ask_user: فقط برای تغییرات اساسی/غیرقابل‌برگشت (مثلاً بازنویسی کامل فایل، حذف بخش بزرگ کد). برای کارهای واضح مستقیم انجام بده.
+`;
+
+        // FEATURE: جستجوی تصویر (پیدا کردن عکس + جستجو با عکسِ کاربر).
+        // نکته‌ی فنی مهم: سرویس جستجو (Tavily) فقط query متنی می‌گیرد و
+        // «reverse image search» واقعی ندارد. پس برای عکسِ کاربر، خودِ مدل
+        // (که عکس را می‌بیند) باید اول آن را توصیف کند و با همان توصیف
+        // متنی سرچ کند. این دستورالعمل همین رفتار را صریح می‌کند و
+        // استثنای لازم برای قانون «web_search فقط برای اطلاعات زنده» را می‌دهد.
+        systemText += `
+جستجوی تصویر:
+- اگر کاربر صراحتاً عکس/تصویر خواست («عکس X رو پیدا کن»، «X چه شکلیه»، «یه عکس از X نشونم بده»)، این یکی از موارد مجاز web_search است حتی اگر موضوع ثابت باشد. web_search را با find_images=true صدا بزن.
+- اگر کاربر خودش یک عکس فرستاده و می‌خواهد بداند چیست / منبعش کجاست / نمونه‌ی مشابهش را پیدا کنی: تو سرویس «جستجوی معکوس عکس» (مثل Google Lens) نداری و نباید وانمود کنی داری. اول با نگاه‌کردن به خودِ عکس مشخص کن دقیقاً چه چیزی در آن است (موضوع، رنگ‌ها، متن‌های داخل عکس، سبک، برند یا نام اگر خودِ عکس نوشته)، بعد با یک query متنی و دقیق بر پایه‌ی همان توصیف web_search را با find_images=true صدا بزن.
+- در جواب به کاربر صادقانه بگو نتیجه بر اساس «توصیف من از عکس» پیدا شده، نه تطبیق پیکسلی؛ پس ممکن است دقیقاً همان عکس/منبع اصلی نباشد. اگر از روی خودِ عکس نمی‌شود چیز مشخصی را تشخیص داد، حدس نزن و از کاربر بپرس دقیقاً دنبال چه چیزی است.
+- درباره‌ی هویت آدم‌ها: هرگز فقط از روی چهره‌ی یک شخص در عکس اسم او را حدس نزن یا با جستجو دنبال «این آدم کیست» نرو. اگر اسم یا متن مشخصی داخل خودِ عکس نوشته شده می‌توانی از آن استفاده کنی؛ وگرنه فقط آنچه در عکس دیده می‌شود را توصیف کن (نه هویت).
+- نمایش عکس‌های پیداشده: فقط از URL هایی استفاده کن که در نتیجه‌ی ابزار آمده (هرگز URL نساز). هر عکس را با مارک‌داون استاندارد بنویس: ![توضیح کوتاه](URL) - هر عکس در یک خط جدا، حداکثر ۴ عکس. بعدش یک یا دو جمله‌ی توضیح بده. اگر نتیجه هیچ عکسی نداشت، همین را صادقانه بگو و URL جعلی نگذار.
 `;
 
         // FEATURE: ویجت ساعت/آب‌وهوا
