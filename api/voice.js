@@ -140,11 +140,14 @@ export default async function handler(req) {
       };
 
       try {
+        // FIX (تأخیر ~4s تا اولین توکن): thinkingConfig حتی با سطح "low" یه
+        // مرحله‌ی پردازش پنهان قبل از شروع استریم به مدل تحمیل می‌کرد که در
+        // نتیجه‌ی نهایی دیده نمی‌شد ولی شروع پاسخ رو کند می‌کرد. برای تماس
+        // صوتی زنده (جواب‌های کوتاه محاوره‌ای) تفکر پس‌زمینه لازم نیست.
         const { r, key: usedKey } = await fetchWithKeys(keys, `${API}/${TEXT_MODEL}:streamGenerateContent?alt=sse`, {
           systemInstruction: { parts: [{ text: sys }] },
           contents,
           tools: TOOLS,
-          generationConfig: { thinkingConfig: { thinkingLevel: "low" } },
         });
         goodKey = usedKey;
         if (!r.ok || !r.body) {
@@ -171,14 +174,17 @@ export default async function handler(req) {
           if (!userSent) return;
           const start = Math.max(acc.indexOf("]]") + 2, spoken);
           let text = acc.slice(start);
-          const minLen = chunkNo === 0 ? 12 : 40;
+          // FIX (تأخیر اولین صدا): 12 حرف قبلی هم مکث محسوسی قبل از رسیدن
+          // اولین TTS اضافه می‌کرد؛ با 6 حرف زودتر می‌فرستیم (جمله‌های خیلی
+          // کوتاه فارسی مثل «سلام!» با 6 حرف هم قابل تشخیصن).
+          const minLen = chunkNo === 0 ? 6 : 40;
           const re = /[^.!?؟۔،,\n]+[.!?؟۔،,\n]+/g;
           let m, consumed = 0, pieceStart = 0;
           let piece = "";
           while ((m = re.exec(text)) !== null) {
             piece += m[0];
             consumed = re.lastIndex;
-            if (piece.trim().length >= (chunkNo === 0 ? 12 : 40)) {
+            if (piece.trim().length >= minLen) {
               speak(piece);
               chunkNo++;
               piece = "";
