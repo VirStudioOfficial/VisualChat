@@ -24,7 +24,11 @@
 export const config = { runtime: "edge" };
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
-const TEXT_MODEL = "gemini-3.6-flash";
+// FIX (تست سرعت): gemini-3.6-flash حدود 3 ثانیه فقط تا هدر جواب طول می‌کشید.
+// gemini-3.5-flash-lite ذاتاً سریع‌تره (thinkingConfig هم نمی‌گیره - طبق
+// chat.js: THINKING_MODEL_DEFAULTS['gemini-3.5-flash-lite'] = null).
+// اگه بعد از تست کیفیتش برای مکالمه‌ی صوتی کافی نبود، برگردون به gemini-3.6-flash.
+const TEXT_MODEL = "gemini-3.5-flash-lite";
 const TTS_MODEL = "gemini-3.1-flash-tts-preview";
 const MAX_AUDIO_B64 = 6_000_000; // ~4.5MB خام؛ سقف بدنه‌ی Edge
 
