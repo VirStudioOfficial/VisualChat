@@ -54,6 +54,10 @@ const enc = new TextEncoder();
 const line = (obj) => enc.encode(JSON.stringify(obj) + "\n");
 
 export default async function handler(req) {
+  const t0 = Date.now();
+  const rid = Math.random().toString(36).slice(2, 8);
+  const tlog = (label, extra = "") => console.log(`[voice ${rid}] +${Date.now() - t0}ms ${label} ${extra}`);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: cors() });
   }
@@ -76,6 +80,7 @@ export default async function handler(req) {
 
   let body;
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
+  tlog("body parsed");
 
   const {
     audio,                       // base64 خام، بدون پیشوند data:
@@ -89,6 +94,7 @@ export default async function handler(req) {
 
   if (!audio || typeof audio !== "string") return json({ error: "audio missing" }, 400);
   if (audio.length > MAX_AUDIO_B64) return json({ error: "audio too long" }, 413);
+  tlog("audio validated", `b64len=${audio.length}`);
 
   const sys =
     `${systemInstruction}\n\n` +
@@ -120,10 +126,18 @@ export default async function handler(req) {
       let goodKey = keys[0]; // بعد از موفقیت متن، با کلیدِ سالم جایگزین می‌شود
       const ttsJobs = [];
       let sendChain = Promise.resolve();
+      let ttsCallNo = 0;
       const speak = (sentence) => {
         const t = sentence.trim();
         if (!t) return;
-        const job = tts(keys, goodKey, t, voiceName).catch((e) => {
+        const callNo = ++ttsCallNo;
+        const ttsT0 = Date.now();
+        tlog(`tts#${callNo}: start`, `chars=${t.length}`);
+        const job = tts(keys, goodKey, t, voiceName).then((pcm) => {
+          tlog(`tts#${callNo}: done`, `${Date.now() - ttsT0}ms`);
+          return pcm;
+        }).catch((e) => {
+          tlog(`tts#${callNo}: FAILED`, `${Date.now() - ttsT0}ms ${e?.message || e}`);
           send({ type: "error", message: "tts: " + (e?.message || e) });
           return null;
         });
@@ -134,7 +148,7 @@ export default async function handler(req) {
           // «داخل همان پیام صدا» می‌رود تا اپ بتواند دقیقاً وقتی پخش آن
           // تکه شروع می‌شود، متنش را هم نشان بدهد. اگر TTS شکست خورد،
           // متن را جداگانه می‌فرستیم تا کاربر لااقل آن را بخواند.
-          if (pcm) send({ type: "audio", data: pcm, text: t });
+          if (pcm) { tlog(`tts#${callNo}: sending audio to client`); send({ type: "audio", data: pcm, text: t }); }
           else send({ type: "text", text: t });
         });
       };
@@ -144,11 +158,13 @@ export default async function handler(req) {
         // مرحله‌ی پردازش پنهان قبل از شروع استریم به مدل تحمیل می‌کرد که در
         // نتیجه‌ی نهایی دیده نمی‌شد ولی شروع پاسخ رو کند می‌کرد. برای تماس
         // صوتی زنده (جواب‌های کوتاه محاوره‌ای) تفکر پس‌زمینه لازم نیست.
+        tlog("text fetch: start");
         const { r, key: usedKey } = await fetchWithKeys(keys, `${API}/${TEXT_MODEL}:streamGenerateContent?alt=sse`, {
           systemInstruction: { parts: [{ text: sys }] },
           contents,
           tools: TOOLS,
         });
+        tlog("text fetch: got response headers", `status=${r?.status}`);
         goodKey = usedKey;
         if (!r.ok || !r.body) {
           const t = await r.text().catch(() => "");
@@ -200,9 +216,11 @@ export default async function handler(req) {
           }
         };
 
+        let firstChunkLogged = false;
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (!firstChunkLogged) { firstChunkLogged = true; tlog("text stream: first chunk received"); }
           buf += dec.decode(value, { stream: true });
           let idx;
           while ((idx = buf.indexOf("\n")) >= 0) {
@@ -222,6 +240,7 @@ export default async function handler(req) {
                   const m = acc.match(/\[\[U:\s*([\s\S]*?)\]\]/);
                   if (m) {
                     userSent = true;
+                    tlog("user_text extracted, sending + starting flushSentences");
                     send({ type: "user_text", text: m[1].trim() });
                   }
                 }
@@ -256,6 +275,7 @@ export default async function handler(req) {
 }
 
 async function tts(keys, goodKey, text, voiceName) {
+  const t0 = Date.now();
   // اول کلیدی که برای متن جواب داد؛ اگر نشد بقیه
   const ordered = [goodKey, ...keys.filter((k) => k !== goodKey)];
   const { r } = await fetchWithKeys(ordered, `${API}/${TTS_MODEL}:generateContent`, {
@@ -265,8 +285,10 @@ async function tts(keys, goodKey, text, voiceName) {
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
     },
   });
+  console.log(`[voice tts] fetch done after ${Date.now() - t0}ms status=${r?.status}`);
   if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
   const j = await r.json();
+  console.log(`[voice tts] json parsed, total ${Date.now() - t0}ms`);
   return j?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
 }
 
