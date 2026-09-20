@@ -92,7 +92,8 @@ export default async function handler(req) {
 
   const sys =
     `${systemInstruction}\n\n` +
-    `این یک گفتگوی صوتیِ زنده است: کوتاه، محاوره‌ای و مستقیم جواب بده. ` +
+    `این یک گفتگوی صوتیِ زنده است: حداکثر ۲ تا ۳ جمله‌ی کوتاه، محاوره‌ای و مستقیم. ` +
+    `بدون مقدمه، بدون تکرار سؤال کاربر، بدون «حتماً»/«البته» و فهرست. ` +
     `فقط به ${lang} صحبت کن مگر کاربر صراحتاً زبان دیگری بخواهد. ` +
     (firstTurn
       ? `این اولین نوبت تماس است؛ می‌توانی سلام کنی.`
@@ -111,19 +112,25 @@ export default async function handler(req) {
     async start(controller) {
       const send = (o) => { try { controller.enqueue(line(o)); } catch {} };
 
-      // TTS جمله‌ها به‌ترتیب؛ صف سریالی تا ترتیب پخش بهم نخوره
+      // FIX (تأخیر بین جمله‌ها): قبلاً TTS هر جمله بعد از تمام‌شدن جمله‌ی
+      // قبلی شروع می‌شد (صف سریالی) و بین هر دو جمله ۱ تا ۲ ثانیه مکث
+      // می‌افتاد. حالا همه‌ی جمله‌ها «همزمان» به TTS می‌روند و فقط
+      // «فرستادن به اپ» به ترتیب انجام می‌شود؛ تا جمله‌ی ۱ پخش می‌شود،
+      // جمله‌ی ۲ و ۳ از قبل آماده‌اند.
       let goodKey = keys[0]; // بعد از موفقیت متن، با کلیدِ سالم جایگزین می‌شود
-      let ttsChain = Promise.resolve();
+      const ttsJobs = [];
+      let sendChain = Promise.resolve();
       const speak = (sentence) => {
         const t = sentence.trim();
         if (!t) return;
-        ttsChain = ttsChain.then(async () => {
-          try {
-            const pcm = await tts(keys, goodKey, t, voiceName);
-            if (pcm) send({ type: "audio", data: pcm });
-          } catch (e) {
-            send({ type: "error", message: "tts: " + (e?.message || e) });
-          }
+        const job = tts(keys, goodKey, t, voiceName).catch((e) => {
+          send({ type: "error", message: "tts: " + (e?.message || e) });
+          return null;
+        });
+        ttsJobs.push(job);
+        sendChain = sendChain.then(async () => {
+          const pcm = await job;
+          if (pcm) send({ type: "audio", data: pcm });
         });
       };
 
@@ -150,23 +157,36 @@ export default async function handler(req) {
         let userSent = false;  // [[U: ... ]] استخراج شد؟
         let spoken = 0;        // تا کدوم اندیس متن رو به TTS دادیم
 
+        // FIX (تأخیر اولین صدا): منتظر «نقطه» نمی‌مانیم. اولین تکه را
+        // به‌محض رسیدن به یک مرز طبیعی (ویرگول/نقطه/؟/!) و حداقل ~۱۲
+        // حرف می‌فرستیم تا TTS زودتر شروع شود؛ تکه‌های بعدی را کمی
+        // بلندتر می‌بریم تا تعداد درخواست‌ها (و مکث بینشان) کم بماند.
+        let chunkNo = 0;
         const flushSentences = (final) => {
-          // فقط بعد از تگ کاربر
-          let text = acc;
           if (!userSent) return;
-          const start = text.indexOf("]]") + 2;
-          text = text.slice(Math.max(start, spoken));
-          const re = /[^.!?؟۔\n]+[.!?؟۔\n]+/g;
-          let m, last = 0;
+          const start = Math.max(acc.indexOf("]]") + 2, spoken);
+          let text = acc.slice(start);
+          const minLen = chunkNo === 0 ? 12 : 40;
+          const re = /[^.!?؟۔،,\n]+[.!?؟۔،,\n]+/g;
+          let m, consumed = 0, pieceStart = 0;
+          let piece = "";
           while ((m = re.exec(text)) !== null) {
-            speak(m[0]);
-            send({ type: "text", text: m[0] });
-            last = re.lastIndex;
+            piece += m[0];
+            consumed = re.lastIndex;
+            if (piece.trim().length >= (chunkNo === 0 ? 12 : 40)) {
+              speak(piece);
+              send({ type: "text", text: piece });
+              chunkNo++;
+              piece = "";
+              pieceStart = consumed;
+            }
           }
-          spoken = Math.max(start, spoken) + last;
+          // آنچه هنوز به حد کافی نرسیده برای فلاش بعدی نگه داشته می‌شود
+          spoken = start + pieceStart;
           if (final) {
-            const rest = text.slice(last).trim();
+            const rest = text.slice(pieceStart).trim();
             if (rest) { speak(rest); send({ type: "text", text: rest }); }
+            spoken = acc.length;
           }
         };
 
@@ -206,7 +226,7 @@ export default async function handler(req) {
           acc = "[[U:]]" + acc;
         }
         flushSentences(true);
-        await ttsChain;
+        await sendChain;
       } catch (e) {
         send({ type: "error", message: String(e?.message || e) });
       }
