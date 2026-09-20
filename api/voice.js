@@ -130,7 +130,12 @@ export default async function handler(req) {
         ttsJobs.push(job);
         sendChain = sendChain.then(async () => {
           const pcm = await job;
-          if (pcm) send({ type: "audio", data: pcm });
+          // FIX (متن ۵-۶ ثانیه زودتر از صدا نمایش داده می‌شد): متن هر تکه
+          // «داخل همان پیام صدا» می‌رود تا اپ بتواند دقیقاً وقتی پخش آن
+          // تکه شروع می‌شود، متنش را هم نشان بدهد. اگر TTS شکست خورد،
+          // متن را جداگانه می‌فرستیم تا کاربر لااقل آن را بخواند.
+          if (pcm) send({ type: "audio", data: pcm, text: t });
+          else send({ type: "text", text: t });
         });
       };
 
@@ -175,7 +180,6 @@ export default async function handler(req) {
             consumed = re.lastIndex;
             if (piece.trim().length >= (chunkNo === 0 ? 12 : 40)) {
               speak(piece);
-              send({ type: "text", text: piece });
               chunkNo++;
               piece = "";
               pieceStart = consumed;
@@ -185,7 +189,7 @@ export default async function handler(req) {
           spoken = start + pieceStart;
           if (final) {
             const rest = text.slice(pieceStart).trim();
-            if (rest) { speak(rest); send({ type: "text", text: rest }); }
+            if (rest) speak(rest);
             spoken = acc.length;
           }
         };
