@@ -3886,8 +3886,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
                     workingContents.push({
                         role: 'model',
-                        parts
-                            : accumulatedParts
+                        parts: accumulatedParts
                     });
                     workingContents.push({
                         role: 'user',
@@ -3900,6 +3899,15 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         try { onStep('استریم قطع شد؛ در حال ادامهٔ پاسخ...', 'stream_recovery'); } catch (_) {}
                     }
 
+                    // FIX: an in-place recovery is a continuation of the SAME
+                    // answer, not a new tool-call round - it must not consume
+                    // budget from MAX_TOOL_ROUNDS. Without this, 1-2 recoveries
+                    // on a conversation that already needs close to the round
+                    // ceiling (e.g. several sequential file edits) could push
+                    // it over the limit and cut real tool-call work short.
+                    // round++ runs unconditionally in the for-loop header, so
+                    // decrementing here cancels it out net-zero.
+                    round--;
                     continue;
                 }
 
