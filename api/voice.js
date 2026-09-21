@@ -224,7 +224,8 @@ export default async function handler(req) {
           // acc.indexOf("]]") برابر -1 می‌شود و +2 آن صفر - یعنی از همان
           // ابتدای acc شروع کن، که دقیقاً درست است چون کل acc همان پاسخ
           // است، نه پاسخ به‌علاوه‌ی یک تگ اضافه.
-          const start = Math.max(acc.indexOf("]]") + 2, spoken);
+          const markerEnd = acc.indexOf("]]" );
+          const start = Math.max(markerEnd >= 0 ? markerEnd + 2 : 0, spoken);
           let text = acc.slice(start);
           // FIX (تأخیر اولین صدا): 12 حرف قبلی هم مکث محسوسی قبل از رسیدن
           // اولین TTS اضافه می‌کرد؛ با 6 حرف زودتر می‌فرستیم (جمله‌های خیلی
@@ -233,6 +234,7 @@ export default async function handler(req) {
           const re = /[^.!?؟۔،,\n]+[.!?؟۔،,\n]+/g;
           let m, consumed = 0, pieceStart = 0;
           let piece = "";
+          let sentChars = 0;
           while ((m = re.exec(text)) !== null) {
             piece += m[0];
             consumed = re.lastIndex;
@@ -241,10 +243,13 @@ export default async function handler(req) {
               chunkNo++;
               piece = "";
               pieceStart = consumed;
+              sentChars = consumed;
             }
           }
-          // آنچه هنوز به حد کافی نرسیده برای فلاش بعدی نگه داشته می‌شود
-          spoken = start + pieceStart;
+          // فقط بخشی را consumed علامت بزن که واقعاً به TTS فرستاده‌ایم.
+          // اگر تکه‌ی اول کوتاه‌تر از minLen باشد، نباید آن را مصرف‌شده بدانیم؛
+          // وگرنه کاراکترهای اول پاسخ در flush بعدی برای همیشه جا می‌افتند.
+          spoken = start + sentChars;
           if (final) {
             const rest = text.slice(pieceStart).trim();
             if (rest) speak(rest);
