@@ -109,6 +109,18 @@ function classifyGeminiError(error) {
         };
     }
 
+    if (error?.body?.type === 'incomplete_stream' || error?.type === 'incomplete_stream') {
+        return {
+            category: 'incomplete_stream',
+            retryable: false,
+            keySpecific: false,
+            message: String(error?.body?.message || error?.message || 'استریم پاسخ قبل از پایان رسمی Gemini قطع شد.'),
+            status: status || 502,
+            providerCode,
+            rawMessage
+        };
+    }
+
     if (error?.name === 'AbortError' || /timeout|timed out|deadline exceeded/.test(normalized)) {
         return {
             category: 'timeout',
@@ -3410,6 +3422,16 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // FIX: ادعای دروغین موفقیت بعد از write_block ردشده
     const rejectedWriteBlocksByFile = new Map(); // fileName -> { count, lastReason }
 
+    // FIX: Gemini streaming can end at HTTP/SSE level before a terminal
+    // candidate.finishReason arrives. Google documents finishReason as optional
+    // and explicitly says that when it is empty, the model has not stopped.
+    // In that situation we must not treat EOF as a successful final answer.
+    // Instead, resume the same answer from the exact partial model turn that
+    // was already streamed to the client. This keeps the live-stream UX while
+    // avoiding duplicate text that a full outer key/model retry would create.
+    const MAX_INCOMPLETE_STREAM_RECOVERIES = 2;
+    let incompleteStreamRecoveries = 0;
+
     // NOTE (block-based rewrite): inspectedFilesThisRequest and
     // chunkReadsPerFile (repeat-guards for the old inspect_file/
     // get_file_chunk tools) were removed - those tools no longer exist.
@@ -3807,7 +3829,17 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // idle-timing-out the connection and closing it cleanly (which
             // looks identical to a normal end from here). Logged as its own
             // warn event so it's easy to grep separately from agent.round.done.
-            if (!finishReason) {
+            const incompleteTextChars = accumulatedParts
+                .filter(p => typeof p.text === 'string')
+                .reduce((sum, p) => sum + p.text.length, 0);
+            const incompleteFunctionCalls = accumulatedParts.filter(p => p.functionCall).length;
+
+            if (!finishReason && incompleteFunctionCalls === 0) {
+                const canRecoverInPlace =
+                    incompleteTextChars > 0 &&
+                    incompleteFunctionCalls === 0 &&
+                    incompleteStreamRecoveries < MAX_INCOMPLETE_STREAM_RECOVERIES;
+
                 try {
                     log.warn('agent.round.done_without_finish_reason', {
                         round: round + 1,
@@ -3817,14 +3849,88 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                         gotFirstChunk: rt.firstChunkAt != null,
                         gotText: rt.firstTextAt != null,
                         gotFunctionCall: rt.firstFunctionCallAt != null,
-                        textCharsSoFar: accumulatedParts
-                            .filter(p => typeof p.text === 'string')
-                            .reduce((sum, p) => sum + p.text.length, 0),
+                        textCharsSoFar: incompleteTextChars,
+                        functionCallCount: incompleteFunctionCalls,
+                        recoveryAttempt: incompleteStreamRecoveries + 1,
+                        maxRecoveries: MAX_INCOMPLETE_STREAM_RECOVERIES,
+                        willRecoverInPlace: canRecoverInPlace,
                         msSinceLastChunk: rt.lastChunkAt != null ? (Date.now() - rt.lastChunkAt) : null,
                         msSinceHeaders: rt.headersAt != null ? (Date.now() - rt.headersAt) : null,
                         roundTimeoutMs: rt.roundTimeoutMs
                     });
                 } catch (_) {}
+
+                // Google documents an empty finishReason as "the model has not
+                // stopped generating tokens". If the transport nevertheless
+                // closes, the answer is incomplete. Because text chunks may
+                // already have been sent to the user, do NOT throw to the outer
+                // key/model retry loop here: that would resend the already-shown
+                // prefix and produce duplicated replies. Instead, turn the
+                // partial response into a model turn and ask Gemini to continue
+                // exactly where it stopped.
+                if (canRecoverInPlace) {
+                    incompleteStreamRecoveries += 1;
+                    rt.streamEndAt = Date.now();
+                    roundEntry.durationMs = Date.now() - roundStartedAt;
+                    roundEntry.finishReason = 'INCOMPLETE_STREAM_RECOVERY';
+                    roundEntry.textChars = incompleteTextChars;
+                    clearPreambleHoldTimer();
+                    if (pendingToolPreamble) {
+                        emitStreamText(pendingToolPreamble);
+                        pendingToolPreamble = '';
+                    }
+                    if (pendingEditClosingText) {
+                        emitStreamText(pendingEditClosingText);
+                        pendingEditClosingText = '';
+                    }
+
+                    workingContents.push({
+                        role: 'model',
+                        parts
+                            : accumulatedParts
+                    });
+                    workingContents.push({
+                        role: 'user',
+                        parts: [{
+                            text: '[ادامهٔ پاسخ پس از قطع ناقص استریم — داخلی] پاسخ قبلی در میانهٔ تولید به‌دلیل بسته‌شدن زودهنگام اتصال متوقف شد. دقیقاً از همان نقطه‌ای که متن قبلی تمام شده ادامه بده؛ هیچ بخشی از متن قبلی را تکرار نکن و فقط ادامهٔ طبیعی همان پاسخ را بنویس. اگر لازم است ساختار/کد نیمه‌کاره را کامل کنی، از همان نقطه ادامه بده.'
+                        }]
+                    });
+
+                    if (onStep) {
+                        try { onStep('استریم قطع شد؛ در حال ادامهٔ پاسخ...', 'stream_recovery'); } catch (_) {}
+                    }
+
+                    continue;
+                }
+
+                // No useful text to resume, or the in-place recovery budget is
+                // exhausted. Surface a dedicated error instead of pretending
+                // the truncated output was a successful final response. The
+                // outer streaming handler treats this error as non-retryable
+                // after partial output, preventing duplicate prefixes.
+                rt.streamEndAt = Date.now();
+                roundEntry.durationMs = Date.now() - roundStartedAt;
+                roundEntry.finishReason = 'INCOMPLETE_STREAM';
+                roundEntry.textChars = incompleteTextChars;
+                const incompleteErr = new Error('agent_incomplete_stream');
+                incompleteErr.status = 502;
+                incompleteErr.body = {
+                    message: incompleteTextChars > 0
+                        ? 'استریم پاسخ قبل از پایان رسمی Gemini قطع شد و ادامهٔ خودکار هم موفق نشد.'
+                        : 'استریم پاسخ قبل از ارسال پایان رسمی Gemini قطع شد.',
+                    type: 'incomplete_stream',
+                    model: currentModel,
+                    round: round + 1,
+                    textChars: incompleteTextChars,
+                    functionCallCount: incompleteFunctionCalls,
+                    recoveryAttempts: incompleteStreamRecoveries,
+                    maxRecoveries: MAX_INCOMPLETE_STREAM_RECOVERIES,
+                    diagnostics: summarizeAgentTrace(roundTrace, toolCallTally, {
+                        stoppedReason: 'incomplete_stream',
+                        round
+                    })
+                };
+                throw incompleteErr;
             }
         } catch (streamErr) {
             clearPreambleHoldTimer();
@@ -6182,6 +6288,17 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         // remaining key/model and only then showing the
                         // generic "server busy" message.
                         if (error?.body?.type === 'empty_after_tool_call') {
+                            break outerLoop;
+                        }
+
+                        // FIX: once a streamed response was partially delivered,
+                        // retrying the whole model/key attempt would duplicate the
+                        // already-visible prefix. The runAgentLoop already tries
+                        // bounded in-place recovery for this condition. If that
+                        // budget is exhausted (or there was no text to resume),
+                        // stop here and surface the dedicated error instead of
+                        // sending a second full response into the same SSE stream.
+                        if (error?.body?.type === 'incomplete_stream') {
                             break outerLoop;
                         }
 
