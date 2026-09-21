@@ -87,7 +87,11 @@ export default async function handler(req) {
   tlog("body parsed");
 
   const {
-    audio,                       // base64 خام، بدون پیشوند data:
+    audio,                       // base64 خام، بدون پیشوند data: (نوبت صوتی)
+    text: typedText,             // FEATURE: نوبت متنی - کاربر به‌جای صحبت،
+                                  // پیام را تایپ کرده (دکمه‌ی تایپ در
+                                  // VoiceCallScreen). دقیقاً یکی از audio یا
+                                  // typedText باید بیاید، نه هر دو خالی.
     mimeType = "audio/wav",      // اپ WAV (16k mono) می‌فرسته
     systemInstruction = "",
     history = [],                // [{role:"user"|"model", text}]
@@ -96,9 +100,13 @@ export default async function handler(req) {
     firstTurn = false,
   } = body || {};
 
-  if (!audio || typeof audio !== "string") return json({ error: "audio missing" }, 400);
-  if (audio.length > MAX_AUDIO_B64) return json({ error: "audio too long" }, 413);
-  tlog("audio validated", `b64len=${audio.length}`);
+  const isTextTurn = typeof typedText === "string" && typedText.trim().length > 0;
+
+  if (!isTextTurn) {
+    if (!audio || typeof audio !== "string") return json({ error: "audio یا text لازم است" }, 400);
+    if (audio.length > MAX_AUDIO_B64) return json({ error: "audio too long" }, 413);
+  }
+  tlog(isTextTurn ? "text turn validated" : "audio validated", isTextTurn ? `chars=${typedText.length}` : `b64len=${audio.length}`);
 
   const sys =
     `${systemInstruction}\n\n` +
@@ -108,14 +116,23 @@ export default async function handler(req) {
     (firstTurn
       ? `این اولین نوبت تماس است؛ می‌توانی سلام کنی.`
       : `سلام/احوالپرسی مجدد نکن.`) +
-    `\nاول دقیقاً حرف کاربر را بین [[U: و ]] بنویس، بعد پاسخت را بنویس. مثال: [[U: سلام حالت چطوره]] سلام، خوبم!`;
+    (isTextTurn
+      // FIX (نوبت متنی نباید [[U: ]] بخواهد): تگ [[U: ]] فقط برای این بود
+      // که متنِ فهمیده‌شده از صدا را از مدل پس بگیریم (چون ورودی صوتی
+      // بود و خودمان متن کاربر را نداشتیم). وقتی کاربر مستقیم تایپ کرده،
+      // متنش را از قبل داریم؛ خواستن [[U: ]] از مدل هم غیرلازم است هم
+      // یک تأخیر/توکن اضافه به هر نوبت متنی تحمیل می‌کند.
+      ? `\nمستقیماً و فقط پاسخت را بنویس؛ نیازی به تکرار یا بازنویسی حرف کاربر نیست.`
+      : `\nاول دقیقاً حرف کاربر را بین [[U: و ]] بنویس، بعد پاسخت را بنویس. مثال: [[U: سلام حالت چطوره]] سلام، خوبم!`);
 
   const contents = [
     ...history.slice(-20).map((h) => ({
       role: h.role === "model" ? "model" : "user",
       parts: [{ text: String(h.text || "").slice(0, 2000) }],
     })),
-    { role: "user", parts: [{ inlineData: { mimeType, data: audio } }] },
+    isTextTurn
+      ? { role: "user", parts: [{ text: typedText.trim().slice(0, 2000) }] }
+      : { role: "user", parts: [{ inlineData: { mimeType, data: audio } }] },
   ];
 
   const stream = new ReadableStream({
@@ -182,8 +199,17 @@ export default async function handler(req) {
         const dec = new TextDecoder();
         let buf = "";
         let acc = "";          // کل متن تا الان
-        let userSent = false;  // [[U: ... ]] استخراج شد؟
+        // FIX (نوبت متنی نباید منتظر [[U: ]] بماند): در نوبت صوتی، userSent
+        // یعنی «مدل تگ [[U: ]] را فرستاد و متن فهمیده‌شده از صدا را
+        // داریم» - چون تا آن لحظه خودِ ما نمی‌دانستیم کاربر چه گفته. در
+        // نوبت متنی این متن از اول (همان چیزی که کاربر تایپ کرده) موجود
+        // است، پس نیازی به صبر کردن برای تگ نیست: همان ابتدا user_text را
+        // می‌فرستیم و userSent=true می‌گذاریم تا flushSentences بلافاصله
+        // از همان کاراکتر اول متنِ پاسخ کار کند، نه اینکه منتظر تگی بماند
+        // که اصلاً درخواستش نکرده‌ایم.
+        let userSent = isTextTurn;
         let spoken = 0;        // تا کدوم اندیس متن رو به TTS دادیم
+        if (isTextTurn) send({ type: "user_text", text: typedText.trim() });
 
         // FIX (تأخیر اولین صدا): منتظر «نقطه» نمی‌مانیم. اولین تکه را
         // به‌محض رسیدن به یک مرز طبیعی (ویرگول/نقطه/؟/!) و حداقل ~۱۲
@@ -192,6 +218,12 @@ export default async function handler(req) {
         let chunkNo = 0;
         const flushSentences = (final) => {
           if (!userSent) return;
+          // FIX: در نوبت صوتی، متن پاسخ همیشه بعد از تگ "]]" شروع می‌شود
+          // (چون acc شامل خودِ تگ [[U:...]] است). در نوبت متنی چنین تگی
+          // اصلاً در acc وجود ندارد (از مدل نخواستیم آن را بنویسد)، پس
+          // acc.indexOf("]]") برابر -1 می‌شود و +2 آن صفر - یعنی از همان
+          // ابتدای acc شروع کن، که دقیقاً درست است چون کل acc همان پاسخ
+          // است، نه پاسخ به‌علاوه‌ی یک تگ اضافه.
           const start = Math.max(acc.indexOf("]]") + 2, spoken);
           let text = acc.slice(start);
           // FIX (تأخیر اولین صدا): 12 حرف قبلی هم مکث محسوسی قبل از رسیدن
