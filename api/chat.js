@@ -3444,7 +3444,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             firstFunctionCallAt: null,
             streamEndAt: null,
             chunkCount: 0,
-            textChunkCount: 0
+            textChunkCount: 0,
+            lastChunkAt: null
         };
         roundEntry.rt = rt;
         const _sinceRound = (t) => (t == null ? null : t - roundStartedAt);
@@ -3458,10 +3459,14 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             };
         } catch (_) {}
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), ROUND_TIMEOUT_MS);
+        // LATENCY DIAG: مشخص می‌کنیم abort از کجا آمد - سقف همین round یا سیگنال بیرونی
+        // (قطع اتصال کلاینت / overallDeadline). این دو معنی کاملاً متفاوت دارند.
+        rt.abortedBy = null;
+        const timeoutId = setTimeout(() => { if (!rt.abortedBy) rt.abortedBy = 'round_timeout'; controller.abort(); }, ROUND_TIMEOUT_MS);
+        rt.roundTimeoutMs = ROUND_TIMEOUT_MS;
         // Also abort this round if the caller's own signal (client disconnect
         // / overall deadline) fires.
-        const onAbort = () => controller.abort();
+        const onAbort = () => { if (!rt.abortedBy) rt.abortedBy = 'outer_signal(overallDeadline_or_client)'; controller.abort(); };
         if (signal) signal.addEventListener('abort', onAbort);
 
         let upstream;
@@ -3538,14 +3543,68 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             recordGoogleAttempt(currentKey, upstream.status, keyIndex).catch((error) => {
                 log.warn('usage.record_attempt_failed', { message: error?.message });
             });
+        } catch (fetchErr) {
+            // LATENCY DIAG: شکست «قبل از رسیدن هدر» - یعنی Google اصلاً پاسخی (حتی هدر) نداد.
+            // waitedMs ≈ ROUND_TIMEOUT_MS یعنی درخواست تا سقف بی‌پاسخ ماند (صف/ازدحام سمت Google یا شبکه).
+            try {
+                log.warn('agent.round.failed_before_headers', {
+                    round: round + 1,
+                    model: currentModel,
+                    keyIndex,
+                    errorName: fetchErr?.name || null,
+                    errorMessage: String(fetchErr?.message || fetchErr).slice(0, 200),
+                    errorCause: fetchErr?.cause ? String(fetchErr.cause.code || fetchErr.cause.message || fetchErr.cause).slice(0, 120) : null,
+                    abortedBy: rt.abortedBy,
+                    roundTimeoutMs: rt.roundTimeoutMs,
+                    waitedMs: rt.requestSentAt != null ? (Date.now() - rt.requestSentAt) : null,
+                    systemChars: roundEntry.inputChars ? roundEntry.inputChars.system : null,
+                    contentsChars: roundEntry.inputChars ? roundEntry.inputChars.contents : null,
+                    toolsExposed: roundEntry.inputChars ? roundEntry.inputChars.toolsExposed : null
+                });
+            } catch (_) {}
+            throw fetchErr;
         } finally {
             clearTimeout(timeoutId);
             if (signal) signal.removeEventListener('abort', onAbort);
         }
 
+        // LATENCY DIAG + SAFETY: بعد از رسیدن هدر، تایمر round پاک می‌شد و «خواندن بدنه‌ی استریم» دیگر
+        // هیچ سقفی نداشت (فقط overallDeadline، تا ۴ دقیقه). یک «نگهبان بی‌فعالیتی» می‌گذاریم:
+        // اگر STREAM_IDLE_MS هیچ بایت جدیدی نرسید، همین round را قطع می‌کنیم. با هر chunk ریست می‌شود،
+        // پس پاسخ طولانی ولی در حال جریان هیچ‌وقت قطع نمی‌شود.
+        const STREAM_IDLE_MS = 45000;
+        let idleTimer = null;
+        const armIdleTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                if (!rt.abortedBy) rt.abortedBy = 'stream_idle_' + STREAM_IDLE_MS + 'ms';
+                try { controller.abort(); } catch (_) {}
+            }, STREAM_IDLE_MS);
+        };
+        const disarmIdleTimer = () => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } };
+        if (upstream.ok) armIdleTimer();
+
         if (!upstream.ok) {
             let errorBody = null;
             try { errorBody = await upstream.json(); } catch (_) {}
+            // LATENCY DIAG: چقدر طول کشید تا Google «نه» بگوید + هدرهای مفید برای عیب‌یابی
+            try {
+                log.warn('agent.round.upstream_not_ok', {
+                    round: round + 1,
+                    model: currentModel,
+                    keyIndex,
+                    status: upstream.status,
+                    ttfbMs: (rt.headersAt != null && rt.requestSentAt != null) ? (rt.headersAt - rt.requestSentAt) : null,
+                    retryAfter: upstream.headers.get('retry-after'),
+                    googleRequestId: upstream.headers.get('x-goog-request-id') || upstream.headers.get('x-request-id') || null,
+                    serverTiming: upstream.headers.get('server-timing') || null,
+                    googleStatus: errorBody?.error?.status || null,
+                    googleMessage: String(errorBody?.error?.message || '').slice(0, 200),
+                    systemChars: roundEntry.inputChars ? roundEntry.inputChars.system : null,
+                    contentsChars: roundEntry.inputChars ? roundEntry.inputChars.contents : null
+                });
+            } catch (_) {}
+            disarmIdleTimer();
             const err = new Error('agent_upstream_failed');
             err.status = upstream.status;
             err.body = errorBody;
@@ -3649,6 +3708,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             try { evt = JSON.parse(jsonStr); } catch (_) { return; }
             // LATENCY DIAG: شمارش چانک‌ها و ثبت اولین چانک (حتی اگر candidate نداشته باشد)
             rt.chunkCount++;
+            rt.lastChunkAt = Date.now();
+            armIdleTimer();
             if (rt.firstChunkAt == null) rt.firstChunkAt = Date.now();
             const candidate = evt?.candidates?.[0];
             if (evt.usageMetadata) lastUsage = evt.usageMetadata;
@@ -3735,9 +3796,30 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 handleEventPayload(sseBuffer.trim().slice(5).trim());
             }
             clearPreambleHoldTimer();
+            disarmIdleTimer();
         } catch (streamErr) {
             clearPreambleHoldTimer();
+            disarmIdleTimer();
             roundEntry.durationMs = Date.now() - roundStartedAt;
+            // LATENCY DIAG: شکست «بعد از رسیدن هدر، وسط استریم» - Google شروع کرد ولی گیر کرد.
+            try {
+                log.warn('agent.round.failed_mid_stream', {
+                    round: round + 1,
+                    model: currentModel,
+                    keyIndex,
+                    errorName: streamErr?.name || null,
+                    errorMessage: String(streamErr?.message || streamErr).slice(0, 200),
+                    abortedBy: rt.abortedBy,
+                    roundTimeoutMs: rt.roundTimeoutMs,
+                    headersAfterMs: (rt.headersAt != null && rt.requestSentAt != null) ? (rt.headersAt - rt.requestSentAt) : null,
+                    msSinceHeaders: rt.headersAt != null ? (Date.now() - rt.headersAt) : null,
+                    msSinceLastChunk: rt.lastChunkAt != null ? (Date.now() - rt.lastChunkAt) : null,
+                    chunkCount: rt.chunkCount,
+                    gotFirstChunk: rt.firstChunkAt != null,
+                    gotText: rt.firstTextAt != null,
+                    gotFunctionCall: rt.firstFunctionCallAt != null
+                });
+            } catch (_) {}
             if (streamErr?.name === 'AbortError') {
                 roundEntry.timedOut = true;
                 roundEntry.finishReason = 'CLIENT_TIMEOUT';
@@ -6183,6 +6265,20 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
             scatteredPatternProbed: false
         };
         let attemptsTried = 0;
+        // LATENCY DIAG: تاریخچه‌ی فشرده‌ی همه‌ی تلاش‌ها - در یک خط چاپ می‌شود
+        const attemptHistoryNonStream = [];
+        const requestKind = (() => {
+            try {
+                return {
+                    stream: false,
+                    historyTurns: Array.isArray(history) ? history.length : null,
+                    hasFile: !!file || (Array.isArray(req.body?.files) && req.body.files.length > 0),
+                    inputChars: String(text || '').length,
+                    // کار پس‌زمینه‌ای (خلاصه‌ی چت‌ها و ...)؟ بدون تاریخچه + غیر-استریم + بدون فایل
+                    looksLikeBackgroundJob: (!history || history.length === 0) && !file && !(Array.isArray(req.body?.files) && req.body.files.length > 0)
+                };
+            } catch (_) { return null; }
+        })();
 
         outerLoopNonStream:
         for (
@@ -6208,6 +6304,7 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                     orderedKeysNonStream[k];
 
                 attemptsTried++;
+                const _attemptStartedAt = Date.now();
 
                 // FIX: same class as deadlineTimer in the streaming loop
                 let deadlineTimerNonStream = null;
@@ -6298,6 +6395,18 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                         keySpecific: classified.keySpecific
                     });
 
+                    attemptHistoryNonStream.push({
+                        n: attemptsTried,
+                        model: currentModel,
+                        keyIndex: geminiKeys.indexOf(currentKey) + 1,
+                        ms: Date.now() - _attemptStartedAt,
+                        cat: classified.category,
+                        status: classified.status || null,
+                        keySpecific: !!classified.keySpecific,
+                        // چند ms مانده تا سقف کل درخواست (اگر کم باشد، خودِ deadline تلاش را کشته)
+                        deadlineLeftMs: overallDeadline - Date.now()
+                    });
+
                     lastError = {
                         ...(error?.body && typeof error.body === 'object' ? error.body : {}),
                         _classification: classified
@@ -6316,6 +6425,23 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                 }
             }
         }
+
+        try {
+            const byCat = {};
+            for (const a of attemptHistoryNonStream) byCat[a.cat] = (byCat[a.cat] || 0) + 1;
+            log.error('request.failure_summary', {
+                mode: 'non-stream',
+                requestKind,
+                totalMs: Date.now() - requestStartedAt,
+                overallDeadlineMs: Math.min(600000, Math.max(180000, geminiKeys.length * 20000)),
+                keysConfigured: geminiKeys.length,
+                attempts: attemptHistoryNonStream.length,
+                byCategory: byCat,
+                // آیا تلاش‌ها روی کلیدهای مختلف بودند؟ اگر همه‌ی کلیدها همین الگو را دارند => مشکل کل مدل/پروژه، نه یک کلید
+                distinctKeysTried: new Set(attemptHistoryNonStream.map(a => a.keyIndex)).size,
+                history: attemptHistoryNonStream
+            });
+        } catch (_) {}
 
         const classification = lastError?._classification || classifyGeminiError(lastError);
         log.error('request.all_models_failed', {
