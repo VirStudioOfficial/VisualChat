@@ -3399,6 +3399,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
     // تکرار شد، چند apply_patch موفق شد، و در نهایت با چه finishReason و
     // چند کاراکتر متن متوقف شد.
     const roundTrace = [];
+    const toolTimings = []; // LATENCY DIAG: [{round, tool, toolMs}]
     const toolCallTally = {}; // name -> شمارنده‌ی کل در این درخواست
     // FIX: scattered-pattern gate re-firing on every key/model retry
     if (sharedRequestState && typeof sharedRequestState.scatteredPatternProbed !== 'boolean') {
@@ -3432,6 +3433,30 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             timedOut: false
         };
         roundTrace.push(roundEntry);
+        // LATENCY DIAG: ثبت دقیق‌ترین لحظه‌های داخل این round (نسبت به شروع round)
+        const rt = {
+            t0: roundStartedAt,
+            requestSentAt: null,   // درست قبل از fetch
+            headersAt: null,       // رسیدن هدر پاسخ Google (TTFB)
+            firstChunkAt: null,    // اولین بایت SSE
+            firstThoughtAt: null,  // اولین part با thought:true (اگر includeThoughts نباشد ثبت نمی‌شود)
+            firstTextAt: null,     // اولین متن واقعی برای کاربر
+            firstFunctionCallAt: null,
+            streamEndAt: null,
+            chunkCount: 0,
+            textChunkCount: 0
+        };
+        roundEntry.rt = rt;
+        const _sinceRound = (t) => (t == null ? null : t - roundStartedAt);
+        // اندازه‌ی ورودی این round (کاراکتر) - تا مشخص شود ورودی سنگین است یا نه
+        try {
+            const _toolsNow = (disableTools || scopedSearchState.used) ? null : true;
+            roundEntry.inputChars = {
+                system: (systemText || '').length,
+                contents: JSON.stringify(workingContents || []).length,
+                toolsExposed: !!_toolsNow
+            };
+        } catch (_) {}
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), ROUND_TIMEOUT_MS);
         // Also abort this round if the caller's own signal (client disconnect
@@ -3441,6 +3466,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 
         let upstream;
         try {
+            rt.requestSentAt = Date.now();
             upstream = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse`,
                 {
@@ -3507,6 +3533,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                     signal: controller.signal
                 }
             );
+            rt.headersAt = Date.now();
             // FIX: KV telemetry blocking Gemini latency
             recordGoogleAttempt(currentKey, upstream.status, keyIndex).catch((error) => {
                 log.warn('usage.record_attempt_failed', { message: error?.message });
@@ -3620,13 +3647,21 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
         const handleEventPayload = (jsonStr) => {
             let evt;
             try { evt = JSON.parse(jsonStr); } catch (_) { return; }
+            // LATENCY DIAG: شمارش چانک‌ها و ثبت اولین چانک (حتی اگر candidate نداشته باشد)
+            rt.chunkCount++;
+            if (rt.firstChunkAt == null) rt.firstChunkAt = Date.now();
             const candidate = evt?.candidates?.[0];
-            if (!candidate) return;
             if (evt.usageMetadata) lastUsage = evt.usageMetadata;
+            if (!candidate) return;
             if (candidate.finishReason) finishReason = candidate.finishReason;
 
             const parts = candidate?.content?.parts || [];
             const eventHasFunctionCall = parts.some(part => !!part?.functionCall);
+            // LATENCY DIAG
+            if (eventHasFunctionCall && rt.firstFunctionCallAt == null) rt.firstFunctionCallAt = Date.now();
+            if (rt.firstThoughtAt == null && parts.some(part => part && part.thought === true)) rt.firstThoughtAt = Date.now();
+            if (rt.firstTextAt == null && parts.some(part => part && typeof part.text === 'string' && part.text.length > 0 && part.thought !== true)) rt.firstTextAt = Date.now();
+            if (parts.some(part => part && typeof part.text === 'string' && part.text.length > 0 && part.thought !== true)) rt.textChunkCount++;
             if (eventHasFunctionCall) {
                 sawFunctionCall = true;
                 clearPreambleHoldTimer();
@@ -3719,6 +3754,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             throw err;
         }
 
+        rt.streamEndAt = Date.now();
         const parts = accumulatedParts;
         const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
         const textParts = parts.filter(p => typeof p.text === 'string').map(p => p.text);
@@ -3738,8 +3774,48 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             // just exposes how many prompt tokens actually hit that cache,
             // so real savings can be measured before touching anything
             // structural like system_instruction/tool-definition placement.
-            cachedContentTokens: lastUsage.cachedContentTokenCount ?? null
+            cachedContentTokens: lastUsage.cachedContentTokenCount ?? null,
+            // LATENCY DIAG: توکن‌های «فکر کردن» داخلی - همان چیزی که زمان را می‌خورد
+            thoughtTokens: lastUsage.thoughtsTokenCount ?? null,
+            toolUsePromptTokens: lastUsage.toolUsePromptTokenCount ?? null
         } : null;
+
+        // LATENCY DIAG: یک خط لاگ ساختاریافته برای هر round - «کجا گیر می‌کند» از همین‌جا معلوم می‌شود.
+        // همه‌ی زمان‌ها میلی‌ثانیه نسبت به شروع همین round هستند.
+        try {
+            const _thoughtTok = lastUsage?.thoughtsTokenCount ?? 0;
+            const _outTok = lastUsage?.candidatesTokenCount ?? 0;
+            const _genMs = (rt.streamEndAt != null && rt.headersAt != null) ? (rt.streamEndAt - rt.headersAt) : null;
+            log.info('agent.round.done', {
+                round: round + 1,
+                model: currentModel,
+                thinkingConfig: (currentModel === 'gemini-3.5-flash-lite') ? 'none' : (THINK_LEVEL_MAP[thinkLevel] || THINKING_MODEL_DEFAULTS[currentModel] || 'low'),
+                thinkLevelReceived: thinkLevel || null,
+                toolsExposed: !!(roundEntry.inputChars && roundEntry.inputChars.toolsExposed),
+                systemChars: roundEntry.inputChars ? roundEntry.inputChars.system : null,
+                contentsChars: roundEntry.inputChars ? roundEntry.inputChars.contents : null,
+                // --- زمان‌ها (ms از شروع round) ---
+                ttfbMs: _sinceRound(rt.headersAt) != null && rt.requestSentAt != null ? (rt.headersAt - rt.requestSentAt) : null, // شبکه + پردازش ورودی + شروع فکر تا رسیدن هدر
+                firstChunkMs: _sinceRound(rt.firstChunkAt),
+                firstThoughtMs: _sinceRound(rt.firstThoughtAt),
+                firstTextMs: _sinceRound(rt.firstTextAt),
+                firstFunctionCallMs: _sinceRound(rt.firstFunctionCallAt),
+                streamEndMs: _sinceRound(rt.streamEndAt),
+                generationMs: _genMs,
+                // --- توکن‌ها ---
+                promptTokens: lastUsage?.promptTokenCount ?? null,
+                cachedTokens: lastUsage?.cachedContentTokenCount ?? null,
+                thoughtTokens: lastUsage?.thoughtsTokenCount ?? null,
+                outputTokens: lastUsage?.candidatesTokenCount ?? null,
+                totalTokens: lastUsage?.totalTokenCount ?? null,
+                // --- سرعت تولید (توکن بر ثانیه) - اگر thought+output بالا ولی این عدد نرمال است، یعنی حجم فکر زیاد است ---
+                tokensPerSec: (_genMs && _genMs > 0) ? Math.round(((_thoughtTok + _outTok) / _genMs) * 1000) : null,
+                chunkCount: rt.chunkCount,
+                textChunkCount: rt.textChunkCount,
+                functionCalls: functionCalls.map(c => c && c.name),
+                finishReason: finishReason || 'NONE'
+            });
+        } catch (_) {}
 
         // ENFORCEMENT (must verify before final answer): if any file has
         // edited blocks but was not (re-)verified since the last
@@ -3973,6 +4049,40 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
                 });
             }
 
+            // LATENCY DIAG: خلاصه‌ی «کجا زمان رفت» برای کل این درخواست در یک خط.
+            // breakdown هر round را به سه بخش تقسیم می‌کند:
+            //   waitBeforeFirstOutputMs = از ارسال درخواست تا اولین خروجی (متن یا functionCall) = ورودی + thinking
+            //   generationMs            = از اولین خروجی تا پایان استریم = تولید واقعی
+            try {
+                const rounds = roundTrace.map(r => {
+                    const t = r.rt || {};
+                    const firstOut = [t.firstTextAt, t.firstFunctionCallAt].filter(x => x != null);
+                    const firstOutAt = firstOut.length ? Math.min(...firstOut) : null;
+                    return {
+                        round: r.round,
+                        totalMs: r.durationMs,
+                        waitBeforeFirstOutputMs: (firstOutAt != null && t.requestSentAt != null) ? (firstOutAt - t.requestSentAt) : null,
+                        generationMs: (firstOutAt != null && t.streamEndAt != null) ? (t.streamEndAt - firstOutAt) : null,
+                        promptTokens: r.usage ? r.usage.promptTokens : null,
+                        thoughtTokens: r.usage ? r.usage.thoughtTokens : null,
+                        outputTokens: r.usage ? r.usage.candidateTokens : null,
+                        toolsExposed: r.inputChars ? r.inputChars.toolsExposed : null,
+                        calls: r.functionCallCount || 0
+                    };
+                });
+                const sumModelMs = rounds.reduce((a, r) => a + (r.totalMs || 0), 0);
+                const sumToolMs = toolTimings.reduce((a, t) => a + (t.toolMs || 0), 0);
+                log.info('agent.timeline', {
+                    model: currentModel,
+                    agentTotalMs: Date.now() - agentLoopStartedAt,
+                    modelMs: sumModelMs,
+                    toolMs: sumToolMs,
+                    modelSharePct: (Date.now() - agentLoopStartedAt) > 0 ? Math.round((sumModelMs / (Date.now() - agentLoopStartedAt)) * 100) : null,
+                    rounds,
+                    tools: toolTimings
+                });
+            } catch (_) {}
+
             return {
                 finalText: textParts.join(''),
                 finishReason: finishReason,
@@ -4009,7 +4119,17 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
 
             scopedSearchState.used = true;
+            const _toolT0 = Date.now();
             const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache, editStates, userImages });
+            // LATENCY DIAG: زمان خالص اجرای ابزار سرچ (Tavily + پردازش نتیجه)
+            toolTimings.push({ round: round + 1, tool: webSearchCall.name, toolMs: Date.now() - _toolT0 });
+            log.info('agent.tool.timing', {
+                round: round + 1,
+                tool: webSearchCall.name,
+                toolMs: Date.now() - _toolT0,
+                resultChars: (result?.result || '').length,
+                sinceAgentStartMs: Date.now() - agentLoopStartedAt
+            });
             scopedSearchState.result = result;
             collectToolSources(scopedSearchState, result); // FEATURE (منبع جستجو)
             searchResult = result;
@@ -4515,6 +4635,113 @@ async function handler(req, res) {
         | touches history trimming, file handling, web search, or the main
         | streaming path — just a fast title guess.
         */
+        /*
+        |--------------------------------------------------------------------------
+        | LATENCY PROBE (فقط برای عیب‌یابی - پشت env flag)
+        |--------------------------------------------------------------------------
+        | با LATENCY_PROBE=1 در Vercel فعال می‌شود. درخواست:
+        |   POST /api/chat   { "mode": "latency_probe", "model": "gemini-3.6-flash" }
+        | همان مدل را با چند پیکربندی «کوچک» صدا می‌زند و زمان هر کدام را برمی‌گرداند
+        | تا مشخص شود کندی از خودِ مدل است یا از system prompt / تعریف ابزارها / thinking.
+        | هیچ تغییری در مسیر عادی ایجاد نمی‌کند.
+        |
+        |   A_bare            : بدون system prompt، بدون tools، بدون thinkingConfig
+        |   B_low             : بدون system prompt، بدون tools، thinkingLevel=low
+        |   C_minimal         : بدون system prompt، بدون tools، thinkingLevel=minimal (اگر مدل پشتیبانی نکند خطا را برمی‌گرداند)
+        |   D_system_only     : system prompt واقعی (۲۹ هزار کاراکتر)، بدون tools، thinkingLevel=low
+        |   E_tools_only      : بدون system prompt، با GEMINI_TOOLS کامل (۱۱ ابزار)، thinkingLevel=low
+        |   F_search_tools    : بدون system prompt، فقط ۳ ابزار (web_search/read_url/ask_user)، thinkingLevel=low
+        |   G_full            : system prompt واقعی + ۱۱ ابزار + low (شبیه‌ترین به درخواست واقعی)
+        */
+        if (req.body?.mode === 'latency_probe') {
+            if (process.env.LATENCY_PROBE !== '1') {
+                return res.status(404).json({ error: 'disabled' });
+            }
+            const probeModel = req.body?.model || 'gemini-3.6-flash';
+            const probePrompt = String(req.body?.prompt || 'قیمت دلار امروز چنده؟');
+            const probeKey = (geminiKeys && geminiKeys[0]) || null;
+            if (!probeKey) return res.status(500).json({ error: 'no_gemini_key' });
+
+            const realSystem = String(req.body?.systemSample || '').slice(0, 60000) || 'تو یک دستیار فارسی‌زبان هستی. ' .repeat(1);
+            const threeTools = [{
+                function_declarations: GEMINI_TOOLS[0].function_declarations.filter(
+                    fn => ['web_search', 'read_url', 'ask_user'].includes(fn.name)
+                )
+            }];
+
+            const scenarios = [
+                { id: 'A_bare',         system: null,       tools: null,        think: null },
+                { id: 'B_low',          system: null,       tools: null,        think: 'low' },
+                { id: 'C_minimal',      system: null,       tools: null,        think: 'minimal' },
+                { id: 'D_system_only',  system: realSystem, tools: null,        think: 'low' },
+                { id: 'E_tools_only',   system: null,       tools: GEMINI_TOOLS, think: 'low' },
+                { id: 'F_search_tools', system: null,       tools: threeTools,  think: 'low' },
+                { id: 'G_full',         system: realSystem, tools: GEMINI_TOOLS, think: 'low' }
+            ];
+
+            const results = [];
+            for (const sc of scenarios) {
+                const t0 = Date.now();
+                let firstByteMs = null, firstOutMs = null, endMs = null, usage = null, finish = null, callNames = [], err = null, textChars = 0;
+                try {
+                    const body = {
+                        contents: [{ role: 'user', parts: [{ text: probePrompt }] }],
+                        ...(sc.system ? { system_instruction: { parts: [{ text: sc.system }] } } : {}),
+                        ...(sc.tools ? { tools: sc.tools } : {}),
+                        generationConfig: sc.think ? { thinkingConfig: { thinkingLevel: sc.think } } : {}
+                    };
+                    const up = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${probeModel}:streamGenerateContent?alt=sse`,
+                        { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': probeKey }, body: JSON.stringify(body) }
+                    );
+                    firstByteMs = Date.now() - t0;
+                    if (!up.ok) {
+                        let eb = null; try { eb = await up.json(); } catch (_) {}
+                        err = { status: up.status, message: eb?.error?.message || null };
+                    } else {
+                        const reader = up.body.getReader();
+                        const dec = new TextDecoder();
+                        let buf = '';
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            buf += dec.decode(value, { stream: true });
+                            const lines = buf.split('\n'); buf = lines.pop();
+                            for (const line of lines) {
+                                if (!line.startsWith('data:')) continue;
+                                let evt; try { evt = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
+                                if (evt.usageMetadata) usage = evt.usageMetadata;
+                                const cand = evt?.candidates?.[0];
+                                if (cand?.finishReason) finish = cand.finishReason;
+                                for (const part of (cand?.content?.parts || [])) {
+                                    if (part.functionCall) { callNames.push(part.functionCall.name); if (firstOutMs == null) firstOutMs = Date.now() - t0; }
+                                    else if (typeof part.text === 'string' && part.text && part.thought !== true) { textChars += part.text.length; if (firstOutMs == null) firstOutMs = Date.now() - t0; }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { err = { message: String(e?.message || e) }; }
+                endMs = Date.now() - t0;
+                const row = {
+                    scenario: sc.id,
+                    ok: !err,
+                    error: err,
+                    firstByteMs,
+                    firstOutputMs: firstOutMs,   // = ورودی + thinking تا اولین خروجی
+                    totalMs: endMs,
+                    promptTokens: usage?.promptTokenCount ?? null,
+                    thoughtTokens: usage?.thoughtsTokenCount ?? null,
+                    outputTokens: usage?.candidatesTokenCount ?? null,
+                    functionCalls: callNames,
+                    textChars,
+                    finishReason: finish
+                };
+                results.push(row);
+                log.info('latency_probe.result', { model: probeModel, ...row });
+            }
+            return res.status(200).json({ model: probeModel, prompt: probePrompt, results });
+        }
+
         if (req.body?.mode === 'title') {
             const title = await generateChatTitle(
                 req.body?.userText,
