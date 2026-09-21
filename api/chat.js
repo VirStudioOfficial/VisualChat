@@ -20,6 +20,7 @@ const THINK_LEVEL_MAP = {
 const THINKING_MODEL_DEFAULTS = {
     'gemini-3.5-flash-lite': null,
     'gemini-3.6-flash': 'low',
+    'gemini-3.8-flash': 'low',
     'gemini-3.1-pro-preview': 'low'
 };
 
@@ -5231,6 +5232,7 @@ async function handler(req, res) {
         const modelDisplayName =
             MODEL_NAME === 'gemini-3.5-flash-lite' ? 'Virtual Bot 1.1' :
             MODEL_NAME === 'gemini-3.6-flash' ? 'Virtual Bot 1.6' :
+            MODEL_NAME === 'gemini-3.8-flash' ? 'Virtual Bot 1.8' :
             MODEL_NAME === 'gemini-3.1-pro-preview' ? 'Virtual Bot 1.3' :
             'Virtual Bot';
 
@@ -5565,6 +5567,20 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
             MODEL_NAME ===
             'gemini-3.6-flash'
         ) {
+            modelsToTry.push(
+                'gemini-3.5-flash-lite'
+            );
+        }
+
+        // 3.8 Flash: اگر ناموجود/شلوغ بود اول 3.6 (همان کیفیت نزدیک)، بعد lite.
+        if (
+            MODEL_NAME ===
+            'gemini-3.8-flash'
+        ) {
+            modelsToTry.push(
+                'gemini-3.6-flash'
+            );
+
             modelsToTry.push(
                 'gemini-3.5-flash-lite'
             );
