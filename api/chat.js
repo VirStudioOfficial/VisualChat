@@ -1079,11 +1079,28 @@ async function fetchTavilyResults(query, tavilyKeys, searchCache, wantImages = f
             }
         }
 
+        // FEATURE (منبع جستجو): نسخه‌ی ساختاریافته‌ی منابع - فقط title/url،
+        // بدون محتوا (محتوا فقط برای مدل است، نه برای UI). فقط URL های
+        // http(s) معتبر؛ تکراری‌ها حذف می‌شوند. این لیست همراه done به
+        // کلاینت می‌رود تا باکس «منابع» زیر پاسخ نشان داده شود.
+        const structuredSources = [];
+        const seenSourceUrls = new Set();
+        for (const r of data.results) {
+            const u = typeof r?.url === 'string' ? r.url.trim() : '';
+            if (!/^https?:\/\//i.test(u) || u.length > 2000 || seenSourceUrls.has(u)) continue;
+            seenSourceUrls.add(u);
+            structuredSources.push({
+                title: String(r.title || '').trim().slice(0, 200),
+                url: u
+            });
+        }
+
         const success = {
             ok: true,
             code: 'search_success',
             status: 200,
-            result: formatted
+            result: formatted,
+            sources: structuredSources
         };
 
         if (searchCache) searchCache.set(cacheKey, success);
@@ -2537,6 +2554,21 @@ const GEMINI_TOOLS_NO_SEARCH = [
     }
 ];
 
+// FEATURE (منبع جستجو): منابع یک نتیجه‌ی ابزار (web_search / read_url) را
+// به لیست تجمعیِ همین درخواست اضافه می‌کند - بدون تکرار، حداکثر ۶ تا.
+// state همان searchState مشترک درخواست است (بین retry ها هم می‌ماند).
+const MAX_SOURCES_PER_REPLY = 6;
+function collectToolSources(state, toolResult) {
+    if (!state || !toolResult || !Array.isArray(toolResult.sources)) return;
+    if (!Array.isArray(state.sources)) state.sources = [];
+    for (const src of toolResult.sources) {
+        if (state.sources.length >= MAX_SOURCES_PER_REPLY) break;
+        if (!src || typeof src.url !== 'string') continue;
+        if (state.sources.some(x => x.url === src.url)) continue;
+        state.sources.push({ title: src.title || '', url: src.url });
+    }
+}
+
 // Human-readable Persian step labels the client shows while a tool runs.
 // Falls back to a generic label if the model didn't provide its own
 // "reason" text (only web_search asks for one).
@@ -3125,7 +3157,9 @@ async function executeToolCall(name, args, ctx) {
 
         return {
             result: search.result,
-            searchError: null
+            searchError: null,
+            // FEATURE (منبع جستجو): برای جمع‌آوری در runAgentLoop
+            sources: Array.isArray(search.sources) ? search.sources : []
         };
     }
 
@@ -3168,7 +3202,12 @@ async function executeToolCall(name, args, ctx) {
             truncated: extracted.truncated,
             note: extracted.truncated
                 ? 'متن این صفحه طولانی بود؛ فقط بخش ابتدایی آن در بالا آمده است.'
-                : undefined
+                : undefined,
+            // FEATURE (منبع جستجو): صفحه‌ای که مدل مستقیم خوانده هم یک
+            // منبع است. (title/url بالا برای خودِ مدل است؛ این فقط برای UI.)
+            sources: /^https?:\/\//i.test(String(extracted.finalUrl || ''))
+                ? [{ title: String(extracted.title || '').trim().slice(0, 200), url: String(extracted.finalUrl) }]
+                : []
         };
     }
 
@@ -3972,6 +4011,7 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             scopedSearchState.used = true;
             const result = await executeToolCall(webSearchCall.name, webSearchCall.args, { tavilyKeys, archivedFiles, textFiles, searchCache, editStates, userImages });
             scopedSearchState.result = result;
+            collectToolSources(scopedSearchState, result); // FEATURE (منبع جستجو)
             searchResult = result;
             if (result.askUser) earlySearchAskUser = result.askUser;
 
@@ -4145,6 +4185,8 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             const toolCallDurationMs = Date.now() - toolCallStartedAt;
 
             if (call.name === 'web_search') scopedSearchState.result = result;
+            // FEATURE (منبع جستجو): فقط web_search/read_url منبع دارند
+            if (call.name === 'web_search' || call.name === 'read_url') collectToolSources(scopedSearchState, result);
             if (call.name === 'get_archived_file') lastToolCallWasArchiveRead = true;
             if (call.name === 'read_file_section') lastToolCallWasSectionRead = true;
             if (call.name === 'write_new_file') lastToolCallWasNewFileWrite = true;
@@ -4174,6 +4216,12 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
 // After reading a block, explicitly tell the model that context is
 // already loaded. This prevents restarting file inspection from zero.
 let responseForModel = result;
+// FEATURE (منبع جستجو): لیست sources فقط برای UI است؛ توکن اضافه
+// خرج مدل نکن (URL ها قبلاً داخل متن نتیجه هم هستند).
+if (result && Array.isArray(result.sources)) {
+    const { sources: _omitSources, ...resultWithoutSources } = result;
+    responseForModel = resultWithoutSources;
+}
 if (call.name === 'read_file_section' && result && !result.error) {
     responseForModel = {
         ...result,
@@ -5679,6 +5727,12 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                                     : {}),
                                 ...(agentResult.unresolvedEditFailure
                                     ? { unresolvedEditFailure: agentResult.unresolvedEditFailure }
+                                    : {}),
+                                // FEATURE (منبع جستجو): منابعی که این پاسخ
+                                // واقعاً از آن‌ها استفاده کرده (web_search /
+                                // read_url). فقط وقتی حداقل یکی باشد.
+                                ...(searchState.sources?.length
+                                    ? { sources: searchState.sources }
                                     : {})
                             })}\n\n`
                         );
@@ -5728,6 +5782,10 @@ FIX (ادعای نبودِ فایل بعد از یک پیام کوتاه/مبه�
                                 : {}),
                             ...(agentResult.unresolvedEditFailure
                                 ? { unresolvedEditFailure: agentResult.unresolvedEditFailure }
+                                : {}),
+                            // FEATURE (منبع جستجو): هم‌راستا با event زنده‌ی بالا
+                            ...(searchState.sources?.length
+                                ? { sources: searchState.sources }
                                 : {})
                         });
 
