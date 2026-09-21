@@ -261,6 +261,7 @@ export default async function handler(req) {
         };
 
         let firstChunkLogged = false;
+        let toolCalled = false;
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -276,6 +277,7 @@ export default async function handler(req) {
             const parts = j?.candidates?.[0]?.content?.parts || [];
             for (const p of parts) {
               if (p.functionCall) {
+                if (p.functionCall.name === "end_call") toolCalled = true;
                 send({ type: "tool", name: p.functionCall.name, args: p.functionCall.args || {} });
               }
               if (typeof p.text === "string" && !p.thought) {
@@ -300,6 +302,28 @@ export default async function handler(req) {
         }
         flushSentences(true);
         await sendChain;
+
+        // FIX (مدل گاهی end_call را صدا نمی‌زند حتی وقتی کاربر صریحاً
+        // خواسته تماس قطع شود - مثلاً فقط می‌گوید «خداحافظ، روز خوبی
+        // داشته باشی» بدون function call). Fallback: اگر مدل خودش تابع
+        // را صدا نزد، حرف *کاربر* (نه پاسخ مدل) را با چند الگوی رایج
+        // فارسیِ قطع‌تماس/خداحافظی چک می‌کنیم؛ اگر یکی از آن‌ها را داشت،
+        // خودمان یک tool end_call مصنوعی می‌فرستیم تا اپ تماس را ببندد.
+        if (!toolCalled) {
+          const userSaid = isTextTurn
+            ? typedText.trim()
+            : (acc.match(/\[\[U:\s*([\s\S]*?)\]\]/)?.[1] || "");
+          const endPatterns = [
+            /خداحافظ/, /خدافظ/, /بای بای/, /بای‌بای/, /قطع کن/, /قطعش کن/,
+            /تماس رو قطع/, /تماس را قطع/, /تموم کن/, /تمومش کن/,
+            /دیگه (حرفی|چیزی) ندارم/, /دیگه ادامه ندیم/, /دیگه ادامه نده/,
+            /ادامه نمی‌?خوام/, /نمی‌?خوام ادامه/, /کافیه دیگه/, /همین کافیه/,
+          ];
+          if (userSaid && endPatterns.some((re) => re.test(userSaid))) {
+            tlog("fallback: end_call intent detected from user text, forcing tool call");
+            send({ type: "tool", name: "end_call", args: {} });
+          }
+        }
       } catch (e) {
         send({ type: "error", message: String(e?.message || e) });
       }
