@@ -3798,6 +3798,34 @@ async function runAgentLoop({ currentModel, currentKey, keyIndex, systemText, co
             }
             clearPreambleHoldTimer();
             disarmIdleTimer();
+            // DIAGNOSTICS (root-cause hunt for silent mid-stream cutoffs):
+            // reader.read() returned done:true (a clean HTTP stream close)
+            // but no event ever carried a real candidate.finishReason
+            // (e.g. STOP/MAX_TOKENS/SAFETY). This means Google's connection
+            // closed without a proper terminal event - either a genuine
+            // upstream drop, or a proxy/load-balancer between us and Google
+            // idle-timing-out the connection and closing it cleanly (which
+            // looks identical to a normal end from here). Logged as its own
+            // warn event so it's easy to grep separately from agent.round.done.
+            if (!finishReason) {
+                try {
+                    log.warn('agent.round.done_without_finish_reason', {
+                        round: round + 1,
+                        model: currentModel,
+                        keyIndex,
+                        chunkCount: rt.chunkCount,
+                        gotFirstChunk: rt.firstChunkAt != null,
+                        gotText: rt.firstTextAt != null,
+                        gotFunctionCall: rt.firstFunctionCallAt != null,
+                        textCharsSoFar: accumulatedParts
+                            .filter(p => typeof p.text === 'string')
+                            .reduce((sum, p) => sum + p.text.length, 0),
+                        msSinceLastChunk: rt.lastChunkAt != null ? (Date.now() - rt.lastChunkAt) : null,
+                        msSinceHeaders: rt.headersAt != null ? (Date.now() - rt.headersAt) : null,
+                        roundTimeoutMs: rt.roundTimeoutMs
+                    });
+                } catch (_) {}
+            }
         } catch (streamErr) {
             clearPreambleHoldTimer();
             disarmIdleTimer();
