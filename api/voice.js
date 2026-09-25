@@ -29,7 +29,32 @@ const API = "https://generativelanguage.googleapis.com/v1beta/models";
 // chat.js: THINKING_MODEL_DEFAULTS['gemini-3.5-flash-lite'] = null).
 // اگه بعد از تست کیفیتش برای مکالمه‌ی صوتی کافی نبود، برگردون به gemini-3.6-flash.
 const TEXT_MODEL = "gemini-3.5-flash-lite";
-const TTS_MODEL = "gemini-3.1-flash-tts-preview";
+
+// FIX (۲۶ شهریور ۱۴۰۵ / ۲۳ سپتامبر ۲۰۲۶): گوگل gemini-3.1-flash-tts-preview
+// را با دو مدل جدید جایگزین کرد: gemini-3.8-flash-tts (کیفیت بالا) و
+// gemini-3.8-flash-lite-tts (سریع/ارزان، جایگزین رسمی همون preview قدیمی
+// برای بار زیاد - دقیقاً کاربرد این پروژه). قیمتش هم پایین‌تره
+// ($6 به‌جای $20 به‌ازای هر میلیون توکن صوتی).
+//
+// نکته‌ی مهم که باعث شکستن پخش صدا می‌شد اگر فقط اسم مدل عوض می‌شد: مدل‌های
+// 3.8 TTS برخلاف preview قدیمی (که PCM خام بدون هدر می‌داد)، به‌صورت
+// پیش‌فرض WAV با هدر RIFF ۴۴ بایتی برمی‌گردانند. کلاینت اندروید
+// (LiveVoiceClient.playPcmBase64 → AudioTrack با MODE_STREAM) صدا را
+// به‌عنوان PCM خام و بدون هدر می‌نویسد؛ اگر هدر WAV حذف نشود، آن ۴۴ بایت
+// اول به‌عنوان نویز/تیک عجیب پخش می‌شود. راه‌حل: هدر WAV همین‌جا (سرور)
+// حذف می‌شود تا کلاینت اصلاً لازم نباشد عوض شود.
+const TTS_MODEL = "gemini-3.8-flash-lite-tts";
+
+// هدر استاندارد RIFF/WAVE همیشه ۴۴ بایت است (چون هیچ chunk اضافه‌ای غیر از
+// fmt/data نداریم - خروجی Gemini TTS ساده است). اگر هدر WAV نبود (مثلاً اگر
+// در آینده دوباره روی مدلی رفتیم که PCM خام می‌دهد)، بدون تغییر برمی‌گردد.
+function stripWavHeaderIfPresent(base64Pcm) {
+  if (!base64Pcm) return base64Pcm;
+  const buf = Buffer.from(base64Pcm, "base64");
+  const isWav = buf.length > 44 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WAVE";
+  if (!isWav) return base64Pcm;
+  return buf.subarray(44).toString("base64");
+}
 const MAX_AUDIO_B64 = 6_000_000; // ~4.5MB خام؛ سقف بدنه‌ی Edge
 
 const TOOLS = [{
@@ -351,13 +376,22 @@ async function tts(keys, goodKey, text, voiceName) {
     generationConfig: {
       responseModalities: ["AUDIO"],
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+      // FIX: gemini-3.8-flash-lite-tts پیش‌فرضش WAV با هدر RIFF است (برخلاف
+      // preview قدیمی که PCM خام می‌داد)، ولی طبق مستندات مهاجرت گوگل با
+      // ست‌کردن صریح response_format می‌شود همون فرمت PCM خام قدیمی (بدون
+      // هدر) رو گرفت - دقیقاً همونی که کلاینت اندروید (AudioTrack) انتظارش
+      // را دارد. این تمیزتر از پارس‌کردن/حذف دستی هدر WAV است.
+      response_format: "AUDIO_L16",
     },
   });
   console.log(`[voice tts] fetch done after ${Date.now() - t0}ms status=${r?.status}`);
   if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
   const j = await r.json();
   console.log(`[voice tts] json parsed, total ${Date.now() - t0}ms`);
-  return j?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+  const rawB64 = j?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+  // احتیاط اضافه: اگر به هر دلیل (نسخه‌ی API، تغییر آینده) response_format
+  // نادیده گرفته شد و باز WAV برگشت، همینجا هدرش حذف می‌شود.
+  return stripWavHeaderIfPresent(rawB64);
 }
 
 // کلیدها را به‌ترتیب امتحان می‌کند؛ روی خطای احراز هویت/سهمیه/سرور می‌رود
