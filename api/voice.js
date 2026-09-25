@@ -45,15 +45,28 @@ const TEXT_MODEL = "gemini-3.5-flash-lite";
 // حذف می‌شود تا کلاینت اصلاً لازم نباشد عوض شود.
 const TTS_MODEL = "gemini-3.8-flash-lite-tts";
 
-// هدر استاندارد RIFF/WAVE همیشه ۴۴ بایت است (چون هیچ chunk اضافه‌ای غیر از
-// fmt/data نداریم - خروجی Gemini TTS ساده است). اگر هدر WAV نبود (مثلاً اگر
-// در آینده دوباره روی مدلی رفتیم که PCM خام می‌دهد)، بدون تغییر برمی‌گردد.
+// هدر استاندارد RIFF/WAVE معمولاً ۴۴ بایت است، ولی به‌جای فرض ثابت این عدد،
+// واقعاً دنبال chunk به اسم "data" می‌گردیم و فقط بایت‌های بعد از آن را
+// برمی‌داریم - این طوری اگر گوگل یک chunk اضافه (مثلاً metadata) قبل از
+// data بگذارد هم درست کار می‌کند. اگر اصلاً WAV نبود (PCM خام)، بدون تغییر
+// برمی‌گردد.
 function stripWavHeaderIfPresent(base64Pcm) {
   if (!base64Pcm) return base64Pcm;
   const buf = Buffer.from(base64Pcm, "base64");
-  const isWav = buf.length > 44 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WAVE";
+  const isWav = buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WAVE";
   if (!isWav) return base64Pcm;
-  return buf.subarray(44).toString("base64");
+  // از بایت ۱۲ به بعد chunk هاست: هر کدام ۴ بایت شناسه + ۴ بایت طول (little-endian) + خودِ داده.
+  let offset = 12;
+  while (offset + 8 <= buf.length) {
+    const chunkId = buf.toString("ascii", offset, offset + 4);
+    const chunkSize = buf.readUInt32LE(offset + 4);
+    const dataStart = offset + 8;
+    if (chunkId === "data") return buf.subarray(dataStart, dataStart + chunkSize).toString("base64");
+    offset = dataStart + chunkSize + (chunkSize % 2); // chunk ها به زوج padding می‌شوند
+  }
+  // چیزی به اسم "data" پیدا نشد (نامنتظره) - برای احتیاط همون ۴۴ بایت اول
+  // (اندازه‌ی معمول هدر ساده) را حذف می‌کنیم تا حداقل چیزی پخش شود.
+  return buf.length > 44 ? buf.subarray(44).toString("base64") : base64Pcm;
 }
 const MAX_AUDIO_B64 = 6_000_000; // ~4.5MB خام؛ سقف بدنه‌ی Edge
 
@@ -376,12 +389,14 @@ async function tts(keys, goodKey, text, voiceName) {
     generationConfig: {
       responseModalities: ["AUDIO"],
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
-      // FIX: gemini-3.8-flash-lite-tts پیش‌فرضش WAV با هدر RIFF است (برخلاف
-      // preview قدیمی که PCM خام می‌داد)، ولی طبق مستندات مهاجرت گوگل با
-      // ست‌کردن صریح response_format می‌شود همون فرمت PCM خام قدیمی (بدون
-      // هدر) رو گرفت - دقیقاً همونی که کلاینت اندروید (AudioTrack) انتظارش
-      // را دارد. این تمیزتر از پارس‌کردن/حذف دستی هدر WAV است.
-      response_format: "AUDIO_L16",
+      // FIX: اولین تلاش این بود که با ست‌کردن response_format:"AUDIO_L16"
+      // مستقیماً PCM خام (بدون WAV) بگیریم، ولی این اندپوینت الان اصلاً این
+      // فیلد را نمی‌شناسد (خطای 400: "Invalid value at
+      // generation_config.response_format ... ResponseFormatConfig") - یعنی
+      // یا اسم/جای درست فیلد فرق داره یا هنوز روی این نسخه از API باز نشده.
+      // پس همون فیلد اضافه شده بود حذف شد و به‌جاش، مثل قبل، هدر WAV بعد از
+      // گرفتن جواب توسط stripWavHeaderIfPresent (پایین همین تابع) حذف می‌شود
+      // - راه‌حلی که همیشه کار می‌کند چون به فیلد نامطمئن API وابسته نیست.
     },
   });
   console.log(`[voice tts] fetch done after ${Date.now() - t0}ms status=${r?.status}`);
@@ -389,8 +404,9 @@ async function tts(keys, goodKey, text, voiceName) {
   const j = await r.json();
   console.log(`[voice tts] json parsed, total ${Date.now() - t0}ms`);
   const rawB64 = j?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-  // احتیاط اضافه: اگر به هر دلیل (نسخه‌ی API، تغییر آینده) response_format
-  // نادیده گرفته شد و باز WAV برگشت، همینجا هدرش حذف می‌شود.
+  // مدل gemini-3.8-flash-lite-tts به‌صورت پیش‌فرض WAV با هدر ۴۴ بایتی
+  // برمی‌گرداند؛ کلاینت اندروید PCM خام بدون هدر می‌خواهد - این تابع دقیقاً
+  // همان هدر را حذف می‌کند.
   return stripWavHeaderIfPresent(rawB64);
 }
 
