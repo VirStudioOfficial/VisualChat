@@ -20,8 +20,7 @@ const THINK_LEVEL_MAP = {
 const THINKING_MODEL_DEFAULTS = {
     'gemini-3.5-flash-lite': null,
     'gemini-3.6-flash': 'low',
-    'gemini-3.8-flash': 'low',
-    'gemini-3.1-pro-preview': 'low'
+    'gemini-3.8-flash': 'low'
 };
 
 /*
@@ -5290,7 +5289,8 @@ async function handler(req, res) {
         */
 
         const MODEL_NAME =
-            model ||
+            // gemini-3.1-pro-preview removed (paid-only); old clients are redirected
+            (model === 'gemini-3.1-pro-preview' ? 'gemini-3.6-flash' : model) ||
             'gemini-3.5-flash-lite';
 
         log.info('model.selected', { model: MODEL_NAME });
@@ -5358,7 +5358,6 @@ async function handler(req, res) {
             MODEL_NAME === 'gemini-3.5-flash-lite' ? 'Virtual Bot 1.1' :
             MODEL_NAME === 'gemini-3.6-flash' ? 'Virtual Bot 1.6' :
             MODEL_NAME === 'gemini-3.8-flash' ? 'Virtual Bot 1.8' :
-            MODEL_NAME === 'gemini-3.1-pro-preview' ? 'Virtual Bot 1.3' :
             'Virtual Bot';
 
         systemText = `
@@ -5577,19 +5576,6 @@ ${archivedFileNames.map(n => `- ${n}`).join('\n')}
         */
 
         const modelsToTry = [MODEL_NAME];
-
-        if (
-            MODEL_NAME ===
-            'gemini-3.1-pro-preview'
-        ) {
-            modelsToTry.push(
-                'gemini-3.6-flash'
-            );
-
-            modelsToTry.push(
-                'gemini-3.5-flash-lite'
-            );
-        }
 
         if (
             MODEL_NAME ===
